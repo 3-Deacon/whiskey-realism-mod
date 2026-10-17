@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
@@ -46,8 +45,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static readonly List<int> _parents = new List<int>(16);
         private static readonly List<TacticalDivisionPlaySubordinate> _subordinates = new List<TacticalDivisionPlaySubordinate>(16);
         private static int _poolUsed;
-        // BC15: per own index, a command parent with at least one child that is due this tick (grow-only).
-        private static bool[] _parentHasDueChild = new bool[BattleSnapshot.InitialCapacity];
 
         public void Produce(BattleSnapshot s, IIntentSink sink)
         {
@@ -77,8 +74,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         if (!play.HasOrder) continue;
                         Child child = Find(children, play.NodeId);
                         if (child == null) continue;
-                        // BC15: a child that is not due keeps the claims it published; the play re-decides for the parent when any child is due.
-                        if (!BattleLodRuntime.IsDue(s, child.Index)) continue;
                         // BC14W: a group the works hold guard holds is the posture producer's: the play must not turn it back into an attack.
                         if (WorksHoldGuard.Holds(child.State.Task, child.State.Reason)) continue;
                         CommandNodeOperationalState state = child.State.WithRoleAndTask(child.State.Role, play.Task);
@@ -99,22 +94,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             _parents.Clear();
             _poolUsed = 0;
             UnitRecord[] own = s.Own;
-            // BC15: a parent whose children are all Distant and not due is skipped whole (its play would repeat last tick's); one due child
-            // brings every sibling into the decision, because the play compares them.
-            if (_parentHasDueChild.Length < s.OwnCount) _parentHasDueChild = new bool[Math.Max(s.OwnCount, _parentHasDueChild.Length * 2)];
-            Array.Clear(_parentHasDueChild, 0, s.OwnCount);
-            for (int i = 0; i < s.OwnCount; i++)
-            {
-                if (!PostureIntentProducer.IsCommandGroup(own[i])) continue;
-                int dueParent = TacticalDivisionPlayInputs.ParentIndex(s, i);
-                if (dueParent >= 0 && BattleLodRuntime.IsDue(s, i)) _parentHasDueChild[dueParent] = true;
-            }
             for (int i = 0; i < s.OwnCount; i++)
             {
                 if (!PostureIntentProducer.IsCommandGroup(own[i])) continue;
                 if (!ArmyPostureInputsRuntime.InAiPool(s.Alliance, own[i].InstanceId)) continue;
                 int parent = TacticalDivisionPlayInputs.ParentIndex(s, i);
-                if (parent < 0 || !_parentHasDueChild[parent]) continue;
+                if (parent < 0) continue;
                 if (!PostureLedger.TryResolveState(own[i].InstanceId, side, out CommandNodeOperationalState state)) continue;
 
                 Child child = Next();

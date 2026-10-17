@@ -100,27 +100,19 @@ internal static partial class BattleLodTests
 
     private static void OnlyTheTieredProducersGate()
     {
+        // BC15 decision 5 as amended (integrator ruling, verify round 1): tier a producer only where every input it reads is a trigger or a Distant
+        // condition. The posture producer and the facing pulse carry the NavMesh cost; the group stance reads two more inputs, both signature fields.
         const string gate = "BattleLodRuntime.IsDue(";
-        string posture = Source(PostureFile);
         AssertTrue(ClassText(PostureFile, "PostureIntentProducer").Contains(gate), "the posture producer gates");
         AssertTrue(ClassText(PostureFile, "FacingPulseIntentProducer").Contains(gate), "the facing pulse gates");
         AssertFalse(ClassText(PostureFile, "FireControlIntentProducer").Contains(gate),
             "fire control is not tiered: it reads the posture record, which a carried group keeps");
         AssertTrue(Source("src/WhiskeyRealism/Tactical/Battle/Producers/GroupStanceIntentProducer.cs").Contains(gate), "the group stance gates");
-        string play = Source("src/WhiskeyRealism/Tactical/Battle/Producers/PlayIntentProducer.cs");
-        AssertTrue(play.Contains(gate), "the division play gates");
-        AssertTrue(play.Contains("if (!BattleLodRuntime.IsDue(s, child.Index)) continue;"), "a child that is not due is not decided again");
-        AssertTrue(play.Contains("if (dueParent >= 0 && BattleLodRuntime.IsDue(s, i)) _parentHasDueChild[dueParent] = true;"), "a due child marks its parent");
-        AssertTrue(play.Contains("if (parent < 0 || !_parentHasDueChild[parent]) continue;"), "and a parent with no due child is skipped whole");
-        string artillery = Source("src/WhiskeyRealism/Tactical/Battle/Producers/ArtilleryIntentProducer.cs");
-        int watchdog = At(artillery, "if (_pointBlank)");
-        int watchdogEnd = At(artillery, "continue;", watchdog);
-        int batteryGate = At(artillery, "if (!BattleLodRuntime.IsDue(snapshot, i)) continue;");
-        AssertTrue(watchdog < watchdogEnd && watchdogEnd < batteryGate,
-            "the doctrine battery gates; the point-blank watchdog continues before it and is never tiered");
-        foreach (string untiered in new[] { "WithdrawalIntentProducer.cs", "WithdrawalIntentProducer.Plan.cs", "ChargeIntentProducer.cs", "ChargeIntentProducer.Plan.cs",
-            "ChargeDemotionIntentProducer.cs", "ReconIntentProducer.cs", "ReserveReleaseIntentProducer.cs", "OpportunityIntentProducer.cs" })
-            AssertFalse(Source("src/WhiskeyRealism/Tactical/Battle/Producers/" + untiered).Contains("BattleLodRuntime"), untiered + " is not tiered (it acts in contact, on scouts or side-wide)");
+        foreach (string untiered in new[] { "PlayIntentProducer.cs", "ArtilleryIntentProducer.cs", "WithdrawalIntentProducer.cs", "WithdrawalIntentProducer.Plan.cs",
+            "ChargeIntentProducer.cs", "ChargeIntentProducer.Plan.cs", "ChargeDemotionIntentProducer.cs", "ReconIntentProducer.cs", "ReserveReleaseIntentProducer.cs",
+            "OpportunityIntentProducer.cs" })
+            AssertFalse(Source("src/WhiskeyRealism/Tactical/Battle/Producers/" + untiered).Contains("BattleLodRuntime"),
+                untiered + " is not tiered (it reads inputs that are neither a trigger nor a Distant condition, acts in contact, on scouts or side-wide)");
     }
 
     private static void PostureProducerWiring()
@@ -128,14 +120,12 @@ internal static partial class BattleLodTests
         string posture = ClassText(PostureFile, "PostureIntentProducer");
         AssertTrue(posture.Contains("int start = t.Nav.StartIndex(t.GroupIds, t.GroupCount);"), "the walk starts after the last planned id");
         AssertTrue(posture.Contains("t.GroupOrder[(start + k) % t.GroupCount]"), "and goes by ascending instance id");
-        AssertTrue(Regex.IsMatch(posture, @"if \(!BattleLodRuntime\.IsDue\(s, i\)\)\s*\{\s*t\.Carry\(i, rec\.InstanceId\);\s*continue;\s*\}"),
+        AssertTrue(Regex.IsMatch(posture, @"if \(!BattleLodRuntime\.IsDue\(s, i\)\)\s*\{\s*t\.Records\.Carry\(t\.Groups, i, rec\.InstanceId\);\s*continue;\s*\}"),
             "a group that is not due keeps its recorded posture (recon and fire control read it) and submits nothing");
-        AssertTrue(posture.Contains("t.Remember(i, rec.InstanceId);"), "an evaluated group's record is kept for the ticks it is carried");
+        AssertTrue(posture.Contains("t.Records.Remember(t.Groups, i, rec.InstanceId);"), "an evaluated group's record is kept for the ticks it is carried");
         string tick = ClassText(PostureFile, "PostureTick");
-        AssertTrue(tick.Contains("internal void Carry(int ownIndex, int groupId)") && tick.Contains("internal void Remember(int ownIndex, int groupId)"),
-            "the record cache lives with the per-side scratch");
-        AssertTrue(Regex.IsMatch(tick, @"Submitted = false;\s*\w*\.?FacingSubmitted = false;|FacingSubmitted = false;"), "a carried record claims no submission this tick");
-        AssertTrue(tick.Contains("Last.Clear()"), "the cache is reset with the battle");
+        AssertTrue(tick.Contains("public readonly PostureRecordCache Records = new PostureRecordCache();"), "the record cache lives with the per-side scratch");
+        AssertEqual(2, Regex.Matches(tick, @"Records\.Clear\(\)").Count, "and is reset with the battle and on a stand-down");
     }
 
     private static void NavReportsAreWired()
@@ -167,6 +157,13 @@ internal static partial class BattleLodTests
             "PostureIntentProducer.UnderArrivalHold(", ".ManeuverHold", ".HasVia", "WorksHeld",
         })
             AssertTrue(runtime.Contains(needle), "HasLatchOrManeuver reads " + needle);
+        // The stance producer's own inputs (decision 5 as amended): the #45 cached decision, hashed over everything the producer reads of it.
+        int stance = At(runtime, "public int StanceDecision(int ownIndex)");
+        string stanceBody = runtime.Substring(stance, At(runtime, "public bool TrySlot(", stance) - stance);
+        AssertTrue(stanceBody.Contains("GroupStanceIntentProducer.TryResolvedDecision(_s, ownIndex, out TacticalResolvedGroupDecision r)") && stanceBody.Contains("return -1;"),
+            "the lookup asks the producer's own resolver and says -1 for no decision");
+        AssertTrue(stanceBody.Contains("(int)r.Kind") && stanceBody.Contains("r.FinalStance") && stanceBody.Contains("r.FromDoctrine") && stanceBody.Contains("r.FromLedger"),
+            "and hashes the kind, the final stance and where it came from");
         AssertTrue(runtime.Contains("LeafSlotTarget.TryResolve("), "a leaf brigade's layout slot");
         AssertTrue(runtime.Contains("CorridorSignature("), "the friendly corridor");
         AssertFalse(runtime.Contains("TryNavPlan") || runtime.Contains("RouteBudget") || runtime.Contains("TryConsume"), "the lookup spends no nav budget");
@@ -200,7 +197,7 @@ internal static partial class BattleLodTests
         AssertTrue(runtime.Contains("\"TacticalLod\""), "the row");
         foreach (string field in new[] { "\"full\"", "\"distant\"", "\"due\"", "\"carried\"", "\"navDeferred\"", "\"promotions\"" })
             AssertTrue(runtime.Contains(".WithField(" + field), "row field " + field);
-        foreach (string reason in new[] { "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain" })
+        foreach (string reason in new[] { "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain", "stance" })
             AssertTrue(runtime.Contains("\"" + reason + "\""), "promotion reason " + reason);
         AssertTrue(runtime.Contains("0.1"), "one row per 0.1 doctrine hours");
         AssertTrue(Regex.IsMatch(runtime, @"EnableTacticalObserver\.Value\)\s*EmitRow\(a, state\);"), "the row is emitted under Enable Tactical Observer");

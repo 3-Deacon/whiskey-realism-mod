@@ -73,9 +73,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         continue;
                     }
 
-                    // BC15: a battery answers with the tier of its command group. The point-blank watchdog above never reaches this line.
-                    if (!BattleLodRuntime.IsDue(snapshot, i)) continue;
-
                     Regiment unit = BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
                     if ((UnityEngine.Object)unit == null) continue;
                     BattleArtilleryState state = ReadState(snapshot, i, unit, rules);

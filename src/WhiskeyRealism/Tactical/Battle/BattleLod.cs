@@ -40,6 +40,8 @@ namespace WhiskeyRealism.Tactical.Battle
         Pending = 512,
         /// <summary>The W&amp;L player's command or one of its command ancestors.</summary>
         PlayerChain = 1024,
+        /// <summary>The #45 cached stance decision for the group changed, or the stance ordered on it did (the group stance producer's inputs).</summary>
+        Stance = 2048,
     }
 
     /// <summary>The task and target the posture pipeline resolves for a group (the runtime adapter reads the ledger, the leaf map and the exploit table).</summary>
@@ -60,6 +62,12 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>A leaf brigade's layout slot in its command parent's formation (LeafSlotTarget); false for any other group.</summary>
         bool TrySlot(int ownIndex, out float x, out float z, out float heading);
+
+        /// <summary>
+        /// The coordinator's cached #45 decision for the group as one value (its kind, final stance and origin), or -1 when it has none: the
+        /// input of the group stance producer that is neither a task nor a target. A change of it promotes the group.
+        /// </summary>
+        int StanceDecision(int ownIndex);
     }
 
     /// <summary>The friendly units (standing own units up to brigade level) along a path corridor, as a count and an id hash.</summary>
@@ -146,9 +154,10 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// The claims a Distant group that is not due keeps are the ones the tiered producers published: the posture producer (and the fire
-        /// control and facing pulse that read its record), the division play, the #45 group stance scorer and the artillery doctrine. Every other
-        /// source comes from a producer that runs on every tick and resubmits.
+        /// The claims a Distant group that is not due keeps are the ones the tiered producers published: the posture producer and the facing
+        /// pulse that follows its record, and the #45 group stance scorer. Every other source comes from a producer that runs on every tick and
+        /// resubmits (the division play, the artillery doctrine and the fire control are among them: BC15 decision 5 tiers only where a producer's
+        /// inputs are all triggers or Distant conditions), so a carried copy of theirs could outlive the intent that a full-rate tick no longer makes.
         /// </summary>
         public static bool IsCarriedSource(IntentSource source)
         {
@@ -156,10 +165,7 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 case IntentSource.PostureExecutor:
                 case IntentSource.FacingPulse:
-                case IntentSource.FireControl:
-                case IntentSource.DivisionPlay:
                 case IntentSource.GroupStanceScorer:
-                case IntentSource.ArtilleryDoctrine:
                     return true;
                 default:
                     return false;
@@ -183,6 +189,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (configured)
             {
                 FoldEnemyProximity(s, state);
+                FoldUnsettled(s, state, side.Executor);
                 int remembered = CollectRemembered(s, state);
                 if (remembered > 0) FoldSubtreeRadius(s, state);
                 int changed = CollectChanges(s, state, out bool everythingChanged);
@@ -235,6 +242,24 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if (near) state.Near[a] = true;
                     if (hot) state.Hot[a] = true;
+                    a = own[a].ParentIndex;
+                }
+            }
+        }
+
+        // Unsettled: the unit, or a unit under it, has an order the executor has not finished with (a pending move, a retry ticket, a refused
+        // winner). Found by walking the executor's list once and marking each unit's ancestors through the snapshot's parent map.
+        private static void FoldUnsettled(BattleSnapshot s, BattleLodState state, OrderExecutor executor)
+        {
+            int n = s.OwnCount;
+            UnitRecord[] own = s.Own;
+            int count = executor.UnsettledCount;
+            for (int k = 0; k < count; k++)
+            {
+                int a = s.IndexOfOwn(executor.UnsettledId(k));
+                for (int steps = 0; a >= 0 && a < n && steps <= n; steps++)
+                {
+                    state.Unsettled[a] = true;
                     a = own[a].ParentIndex;
                 }
             }
@@ -318,7 +343,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (st.Near[i] || RememberedNear(rec.X, rec.Z, st, i, remembered)) why |= LodPromotion.Distance;
             if (st.Hot[i]) why |= LodPromotion.Fire;
             if (IsMoving(in rec, side.MovingDescendants, i)) why |= LodPromotion.Moving;
-            if (PostureSense.PendingOrder(rec, false, false) || side.Executor.IsUnsettled(id) || g.NavDeferred) why |= LodPromotion.Pending;
+            if (PostureSense.PendingOrder(rec, false, false) || st.Unsettled[i] || g.NavDeferred) why |= LodPromotion.Pending;
             if (why == LodPromotion.None && !producesNothing &&
                 (!IsStaticTask(side.Tasks.TaskFor(id)) || side.Tasks.HasLatchOrManeuver(id)))
                 why |= LodPromotion.Target;
@@ -447,6 +472,8 @@ namespace WhiskeyRealism.Tactical.Battle
             sig.Task = side.Tasks.TaskFor(rec.InstanceId);
             sig.HasTarget = side.Tasks.TryTarget(rec.InstanceId, out sig.TargetX, out sig.TargetZ, out sig.ManeuverHeading, out sig.OrderFormation);
             sig.HasSlot = side.Tasks.TrySlot(i, out sig.SlotX, out sig.SlotZ, out sig.SlotHeading);
+            sig.StanceDecision = side.Tasks.StanceDecision(i);
+            sig.StanceOrdered = rec.AiStanceOrdered;
             int enemy = s.ClosestVisibleEnemy(i, out float distance);
             if (enemy >= 0)
             {
@@ -461,7 +488,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 sig.CorridorHash = side.Friendly.Signature(rec.InstanceId, rec.X, rec.Z, sig.SlotX, sig.SlotZ, CorridorWidthMeters, out sig.CorridorCount);
         }
 
-        // Triggers (b) slot, (c), (d), (e): this tick's inputs against the last evaluation's.
+        // Triggers (b) slot, (c), (d), (e) and the stance inputs: this tick's inputs against the last evaluation's.
         private static LodPromotion Compare(in BattleLodState.LodSignature old, in BattleLodState.LodSignature now)
         {
             LodPromotion fired = LodPromotion.None;
@@ -479,6 +506,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 fired |= LodPromotion.Bearing;
 
             if (old.CorridorCount != now.CorridorCount || old.CorridorHash != now.CorridorHash) fired |= LodPromotion.Corridor;
+
+            if (old.StanceDecision != now.StanceDecision || old.StanceOrdered != now.StanceOrdered) fired |= LodPromotion.Stance;
             return fired;
         }
 

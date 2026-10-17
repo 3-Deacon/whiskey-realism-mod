@@ -497,7 +497,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly Dictionary<int, LastMove> _lastMove = new Dictionary<int, LastMove>(128);
         // BC15: groups whose winner the planner refused last tick for any reason but Duplicate (a recent-order window, the failed-write
         // backoff, a water or off-map target, a missing crossing). A refusal is not a settled group: it is retried when its window ends.
-        private readonly HashSet<int> _refusedLastTick = new HashSet<int>();
+        private readonly List<int> _refusedLastTick = new List<int>(32);
         private PendingMove[] _pending = new PendingMove[32];
         // Parallel to _pending, pooled per slot: the units each pending move went
         // to, and the units whose waypoint was already on their target before it.
@@ -952,9 +952,9 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// BC15 decision 1: the group has an order the executor has not finished with: a move issued and not yet judged, a retry ticket,
-        /// or a winner the planner refused last tick for a reason other than Duplicate (<see cref="NoteRefusal"/>). The battle AI tier pass
-        /// never makes such a group Distant: its producers' next evaluation is not a repeat of the last one.
+        /// BC15 decision 1: the unit has an order the executor has not finished with: a move issued and not yet judged, a retry ticket,
+        /// or a winner the planner refused last tick for a reason other than Duplicate (<see cref="NoteRefusal"/>). This is the unit's own
+        /// order; the tier pass asks the same of every unit through <see cref="UnsettledCount"/> and gives it to every group above the unit.
         /// </summary>
         public bool IsUnsettled(int groupId)
         {
@@ -971,7 +971,23 @@ namespace WhiskeyRealism.Tactical.Battle
         public void NoteRefusal(int groupId, SkipReason reason)
         {
             if (reason == SkipReason.None || reason == SkipReason.Duplicate) return;
-            _refusedLastTick.Add(groupId);
+            if (!_refusedLastTick.Contains(groupId)) _refusedLastTick.Add(groupId);
+        }
+
+        /// <summary>
+        /// BC15 decision 1: how many units carry an order the executor has not finished with (pending move, retry ticket, last tick's refusal;
+        /// a unit may count twice). <see cref="UnsettledId"/> lists them, so the tier pass folds them up the command tree in one pass over this
+        /// list instead of asking every unit.
+        /// </summary>
+        public int UnsettledCount => _pendingCount + _ticketCount + _refusedLastTick.Count;
+
+        /// <summary>The instance id of the <paramref name="k"/>th unsettled order, 0 &lt;= k &lt; <see cref="UnsettledCount"/>.</summary>
+        public int UnsettledId(int k)
+        {
+            if (k < _pendingCount) return _pending[k].Intent.GroupId;
+            k -= _pendingCount;
+            if (k < _ticketCount) return _tickets[k].Intent.GroupId;
+            return _refusedLastTick[k - _ticketCount];
         }
 
         /// <summary>BC15: the tier pass has read last tick's refusals.</summary>

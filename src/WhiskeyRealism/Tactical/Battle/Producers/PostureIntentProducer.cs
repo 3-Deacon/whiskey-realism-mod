@@ -50,18 +50,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // order ledger, duplicate-waypoint and safe-waypoint checks, the write gate
     // and the groupsubordinatesmoving stamp.
 
-    // What the posture producer decided for one group this tick; the facing
-    // pulse and fire control read it (they ran only on a group #61 left alone).
-    internal struct GroupPosture
-    {
-        public bool Has;
-        public CommandNodeOperationalState State;
-        public bool CloseEngaged;
-        public bool FlankRisk;
-        public bool Submitted;
-        public bool FacingSubmitted;
-    }
-
     // Per-side scratch built once per snapshot (TickId): subtree aggregates, the
     // enemy record index, the friendly grid and the shared NavMesh budget.
     internal static class PostureTick
@@ -86,25 +74,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public int[] GroupIds = new int[64];
             public int[] GroupOrder = new int[64];
             public int GroupCount;
-            // BC15: the posture each group's last evaluation recorded, kept for the ticks the group is carried (Carry): recon and fire control
-            // read Groups[i], which is cleared every tick, and a Distant group's producers do not run to fill it.
-            public readonly Dictionary<int, GroupPosture> Last = new Dictionary<int, GroupPosture>(128);
-
-            /// <summary>A group that is not due this tick keeps its last recorded posture and claims no submission.</summary>
-            internal void Carry(int ownIndex, int groupId)
-            {
-                if (!Last.TryGetValue(groupId, out GroupPosture posture)) return;
-                posture.Submitted = false;
-                posture.FacingSubmitted = false;
-                Groups[ownIndex] = posture;
-            }
-
-            /// <summary>The posture an evaluation of the group recorded (none when it recorded none).</summary>
-            internal void Remember(int ownIndex, int groupId)
-            {
-                if (Groups[ownIndex].Has) Last[groupId] = Groups[ownIndex];
-                else Last.Remove(groupId);
-            }
+            // BC15: the posture each group's last evaluation recorded, kept for the ticks the group is carried (PostureRecordCache).
+            public readonly PostureRecordCache Records = new PostureRecordCache();
             // BC10 decision 4: the NavMesh query filter of the path probe, built once per
             // snapshot from the live area costs plus AddPath's battle costs.
             public NavMeshQueryFilter NavFilter;
@@ -193,7 +164,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         /// <summary>BC15: a stand-down or a new battle day: no carried posture survives it.</summary>
         internal static void ForgetLast(int alliance)
         {
-            if (alliance >= 0 && alliance < _states.Length) _states[alliance].Last.Clear();
+            if (alliance >= 0 && alliance < _states.Length) _states[alliance].Records.Clear();
         }
 
         /// <summary>The scratch only when the posture producer already ran on this snapshot.</summary>
@@ -211,7 +182,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 _states[a].TickId = -1;
                 _states[a].Friendly.Clear();
                 _states[a].EnemyIndexById.Clear();
-                _states[a].Last.Clear();
+                _states[a].Records.Clear();
             }
         }
     }
@@ -256,15 +227,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     int i = t.GroupOrder[(start + k) % t.GroupCount];
                     ref UnitRecord rec = ref own[i];
 
-                    // BC15: a Distant group that is not due submits nothing; its last posture stays on record for recon and fire control.
+                    // BC15: a Distant group that is not due submits nothing; its last posture stays on record, flags included, for fire control and recon.
                     if (!BattleLodRuntime.IsDue(s, i))
                     {
-                        t.Carry(i, rec.InstanceId);
+                        t.Records.Carry(t.Groups, i, rec.InstanceId);
                         continue;
                     }
 
                     ProduceGroup(s, t, i, side, army, leafMap, exploits, sink);
-                    t.Remember(i, rec.InstanceId);
+                    t.Records.Remember(t.Groups, i, rec.InstanceId);
                 }
             }
         }
@@ -1921,6 +1892,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     }
                     g.FacingSubmitted = submitted || pulses > 0;
                 }
+
+                // BC15: the record a carried tick restores is complete only now (FacingSubmitted is set above), so it is taken here.
+                for (int i = 0; i < s.OwnCount; i++)
+                    if (t.Groups[i].Has && BattleLodRuntime.IsDue(s, i)) t.Records.Remember(t.Groups, i, s.Own[i].InstanceId);
             }
         }
 

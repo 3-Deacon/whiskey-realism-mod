@@ -186,9 +186,6 @@ namespace WhiskeyRealism.Tactical.Operations
             _perApply = Math.Max(1, perApply);
         }
 
-        /// <summary>The instance id of the last group that got a plan; meaningful once one has (see <see cref="StartIndex"/>).</summary>
-        public int LastPlannedId => _lastPlannedId;
-
         /// <summary>A plan for no particular group (the road-route budget): spends the budget, moves no cursor.</summary>
         public bool TryConsume()
         {

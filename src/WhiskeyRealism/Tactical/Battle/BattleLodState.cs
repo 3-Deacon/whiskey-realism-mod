@@ -59,6 +59,8 @@ namespace WhiskeyRealism.Tactical.Battle
             public bool HasEnemy;
             public float EnemyBearing, EnemyDistance;
             public int CorridorCount, CorridorHash;
+            /// <summary>The #45 cached stance decision (ITaskLookup.StanceDecision) and the stance last ordered on the group.</summary>
+            public int StanceDecision, StanceOrdered;
         }
 
         private GroupLod[] _groups = new GroupLod[64];
@@ -73,6 +75,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // Classify's scratch (grow-only): the folds over the command tree, the latched and remembered observations.
         internal bool[] Near = new bool[BattleSnapshot.InitialCapacity];
         internal bool[] Hot = new bool[BattleSnapshot.InitialCapacity];
+        internal bool[] Unsettled = new bool[BattleSnapshot.InitialCapacity];
         internal float[] SubtreeRadius = new float[BattleSnapshot.InitialCapacity];
         internal float[] ChangedX = new float[64];
         internal float[] ChangedZ = new float[64];
@@ -226,11 +229,13 @@ namespace WhiskeyRealism.Tactical.Battle
                 _last = new LodPromotion[size];
                 Near = new bool[size];
                 Hot = new bool[size];
+                Unsettled = new bool[size];
                 SubtreeRadius = new float[size];
             }
             Array.Clear(_tier, 0, n);
             Array.Clear(Near, 0, n);
             Array.Clear(Hot, 0, n);
+            Array.Clear(Unsettled, 0, n);
             Array.Clear(_last, 0, n);
             for (int i = 0; i < n; i++) _due[i] = true;
             SnapshotTickId = s.TickId;

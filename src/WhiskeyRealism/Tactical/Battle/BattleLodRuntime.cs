@@ -21,15 +21,22 @@ namespace WhiskeyRealism.Tactical.Battle
     // and nothing else. Off (Enable Battle AI Level Of Detail): the pass never runs, no snapshot is covered, every unit is due and nothing is
     // carried, which is the behaviour before BC15.
     //
-    // Which producers are tiered (decision 1 and the BC14O/BC14W/BC13 rows added since the plan was written):
-    //   Tiered:    Posture (and the leaf-brigade path inside it), FacingPulse, GroupStance, DivisionPlay, ArtilleryDoctrine (the non-point-blank instance).
-    //   Inherits:  FireControl is not tiered, but it reads the posture record of a group, which a carried group keeps (PostureTick.Carry).
-    //   Full-only: Withdrawal, ArtilleryPointBlank, ChargeDemotion, Opportunity, Recon, ReserveRelease (this is where LeafReserveRelease's moves and the
-    //              Defender's reserve slots are issued, every tick, side-wide), Charge: they act in contact, on scouts or side-wide. Their effect on a
-    //              tiered group reaches it as a trigger: a released reserve changes its leaf task (trigger c) and a move makes it unsettled.
+    // Which producers are tiered (decision 5 as amended by the verify round 1 ruling: tier a producer only where every input it reads is a promotion
+    // trigger or a Distant condition):
+    //   Tiered:    Posture (and the leaf-brigade path inside it) and FacingPulse, which carry the NavMesh cost; GroupStance, whose two inputs beyond the
+    //              posture's (the coordinator's cached #45 decision, the stance ordered on the group) are signature fields (LodPromotion.Stance).
+    //   Inherits:  FireControl is not tiered, but it reads the posture record of a group, which a carried group keeps whole (PostureRecordCache:
+    //              Submitted and FacingSubmitted included, so fire control and recon see what the last full-rate tick showed them).
+    //   Full-only: DivisionPlay (decides across siblings), ArtilleryDoctrine (reads the battery's combat behavior, ammo, morale, hold state and the
+    //              enemy guns in range; batteries are few), Withdrawal, ArtilleryPointBlank, ChargeDemotion, Opportunity, Recon, ReserveRelease
+    //              (this is where LeafReserveRelease's moves and the Defender's reserve slots are issued, every tick, side-wide) and Charge: they
+    //              act in contact, on scouts, across siblings or side-wide. Their effect on a tiered group reaches it as a trigger: a released
+    //              reserve changes its leaf task (trigger c) and a move makes it unsettled.
     //   Full-only groups (HasLatchOrManeuver): a live exploit (asset, descendants, ancestors), a works hold or pin, a recon probe or hold or the
     //              scout, a main-arrival hold, an envelopment maneuver (heading, hold, via). The BC14W contest turns and the BC14O chain contest need a
     //              path to act on, and a group with a path is never settled, so a vanilla move onto a Distant group promotes it on the tick it shows.
+    //   Unsettled below: an order of any unit under a group that the executor has not finished with (a pending move, a retry ticket, a refusal other
+    //              than Duplicate) keeps the group Full (BattleLod.FoldUnsettled).
     internal static class BattleLodRuntime
     {
         private const double RowIntervalHours = 0.1;
@@ -37,7 +44,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // Index = bit of LodPromotion (the order of the enum's single flags).
         private static readonly string[] ReasonNames =
         {
-            "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain",
+            "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain", "stance",
         };
 
         private static readonly PostureLodLookup[] Lookups = { new PostureLodLookup(), new PostureLodLookup() };
@@ -133,8 +140,8 @@ namespace WhiskeyRealism.Tactical.Battle
             catch { return ReinforcementOpportunity.NoOpportunity; }
         }
 
-        // Every unit under a Distant group that is not due keeps the claims it published last tick (the group's own, its regiments' facing and
-        // combat-behavior cells, a battery's).
+        // Every unit under a Distant group that is not due keeps the claims of the tiered sources it published last tick (the group's own Move,
+        // Stance and Formation cells, its regiments' facing cells); a source that runs every tick resubmits and is not carried.
         private static void CarryClaims(BattleSnapshot s, BattleLodState state, OrderArbiter arbiter)
         {
             UnitRecord[] own = s.Own;
@@ -368,6 +375,18 @@ namespace WhiskeyRealism.Tactical.Battle
                     (WorksHoldGuard.Holds(order.Task, order.Reason) || order.ManeuverHeading >= 0f || order.ManeuverHold || order.HasVia))
                     return true;
                 return _leaves != null && _leaves.TryGetValue(groupId, out TacticalLeafBrigadeMap.LeafAssignment leaf) && leaf.WorksHeld;
+            }
+
+            public int StanceDecision(int ownIndex)
+            {
+                if (!GroupStanceIntentProducer.TryResolvedDecision(_s, ownIndex, out TacticalResolvedGroupDecision r)) return -1;
+                unchecked
+                {
+                    int h = (int)r.Kind + 1;
+                    h = h * 31 + r.FinalStance;
+                    h = h * 31 + (r.FromDoctrine ? 1 : r.FromLedger ? 2 : 0);
+                    return h;
+                }
             }
 
             public bool TrySlot(int ownIndex, out float x, out float z, out float heading)
