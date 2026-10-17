@@ -36,10 +36,17 @@ internal static class ReconNeverTasksTests
             ("OneStandingScoutPerMainEffortAcrossReviews", OneStandingScoutPerMainEffortAcrossReviews),
             ("AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw", AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw),
             ("AScoutOutForAnotherTaskDoesNotBlockTheDraw", AScoutOutForAnotherTaskDoesNotBlockTheDraw),
+            ("AClearedMissionDoesNotBlockTheDraw", AClearedMissionDoesNotBlockTheDraw),
             ("AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord", AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord),
             ("ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest", ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest),
             ("AnUnreadyHolderCountsTowardTheSectorsCoverBeforeADraw", AnUnreadyHolderCountsTowardTheSectorsCoverBeforeADraw),
             ("ACapitalGuardCountsTowardTheSectorsCoverBeforeADraw", ACapitalGuardCountsTowardTheSectorsCoverBeforeADraw),
+            ("AnUnreadyHolderTakenAsDepotBuilderIsNoLongerCounted", AnUnreadyHolderTakenAsDepotBuilderIsNoLongerCounted),
+            ("AnUnreadyHolderPledgedToAGarrisonOutsideItsStateIsNoLongerCounted", AnUnreadyHolderPledgedToAGarrisonOutsideItsStateIsNoLongerCounted),
+            ("AnOrdinaryGarrisonPostTakesNoUnreadyHolder", AnOrdinaryGarrisonPostTakesNoUnreadyHolder),
+            ("AReservedFormationPinnedAsABuilderIsNoLongerCounted", AReservedFormationPinnedAsABuilderIsNoLongerCounted),
+            ("ACapitalGuardBoundForAnotherSectorCoversNothingWhereItStands", ACapitalGuardBoundForAnotherSectorCoversNothingWhereItStands),
+            ("ABelievedTermNearTheNeedButUnderItIsStillPresumptionBacked", ABelievedTermNearTheNeedButUnderItIsStillPresumptionBacked),
             ("TheCarrierIsTheNearestImmobileHolder", TheCarrierIsTheNearestImmobileHolder),
             ("ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked", ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked),
             ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
@@ -113,15 +120,17 @@ internal static class ReconNeverTasksTests
         public CampaignSnapshot S;
     }
 
-    private static Day Review(CampaignSnapshot s, PlannerState state = null, ReconMissionLedger ledger = null)
+    private static Day Review(CampaignSnapshot s, PlannerState state = null, ReconMissionLedger ledger = null, Action<TheaterPlan> amend = null,
+                              IReadOnlyList<HeldBuilder> pinned = null)
     {
         ledger = ledger ?? new ReconMissionLedger();
         var sectors = ExecutorFixtures.Sectors(s);
         var day = new Day { Ledger = ledger, Tasks = new List<ReconTask>(), S = s };
         ledger.OnReview(s, null);
         day.Plan = TheaterPlanner.Plan(s, sectors, null, state ?? new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        amend?.Invoke(day.Plan);
         ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, day.Tasks);
-        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger);
+        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, null, pinned);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
     }
@@ -710,6 +719,46 @@ internal static class ReconNeverTasksTests
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 30).Role, "that one");
     }
 
+    // A mission that has finished (Cleared, or Recalled) is not a scout out: it does not stand in for the push's eyes. The free 30 is not ready,
+    // so the regular pick cannot take it; the standing count decides whether the East reserve may be drawn.
+    private static void AClearedMissionDoesNotBlockTheDraw()
+    {
+        foreach (ReconState finished in new[] { ReconState.Cleared, ReconState.Recalled })
+        {
+            var s = SmokeUnion();
+            var free = Corps(30, 365f, 3000f, 1);
+            s.Own.Add(free);
+            var ledger = new ReconMissionLedger();
+            ledger.Restore(new[]
+            {
+                new ReconMission
+                {
+                    MissionId = 1, Kind = ReconKind.AdvanceGuard, InstanceId = 30, UnitKey = free.UnitKey, HoldX = 350f, HoldZ = 0f, SectorId = 0,
+                    State = finished, IssuedDay = s.DaySerial - 2, Reason = "advance-guard", ObservedEnemyStrength = -1f, ObservedObjectiveId = -1,
+                    ClearedDay = finished == ReconState.Cleared ? s.DaySerial - 1 : -1
+                }
+            });
+            var day = Review(s, new PlannerState(), ledger);
+            AssertTrue(day.Plan.MainStaged, finished + ": staged");
+            AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, finished + ": the reserve is drawn for the push's eyes");
+        }
+        // Control: the same fixture with the mission still active blocks it (AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw).
+        var c = SmokeUnion();
+        var held = Corps(30, 365f, 3000f, 1);
+        c.Own.Add(held);
+        var activeLedger = new ReconMissionLedger();
+        activeLedger.Restore(new[]
+        {
+            new ReconMission
+            {
+                MissionId = 1, Kind = ReconKind.AdvanceGuard, InstanceId = 30, UnitKey = held.UnitKey, HoldX = 350f, HoldZ = 0f, SectorId = 0,
+                State = ReconState.Moving, IssuedDay = c.DaySerial - 1, Reason = "advance-guard", ObservedEnemyStrength = -1f, ObservedObjectiveId = -1, ClearedDay = -1
+            }
+        });
+        var blocked = Review(c, new PlannerState(), activeLedger);
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(blocked.Allocation, 2).Reason, "control: an active mission leaves the reserve alone");
+    }
+
     // The approach screens watch other ground; they are not the push's eyes, so one standing does not stand in for them.
     private static void AScoutOutForAnotherTaskDoesNotBlockTheDraw()
     {
@@ -840,6 +889,82 @@ internal static class ReconNeverTasksTests
         AssertTrue(HeldAtEnd(day, east, false) >= need, "and the East still holds " + HeldAtEnd(day, east, false) + " against " + need);
     }
 
+    // What the held sum counts must still hold the sector when the draw is tested. The unready 30 is counted (ReserveRules.Hold), and it is
+    // also the smallest free formation of the East, so a depot task there makes it the builder before the recon pick: it leaves the hold.
+    // Without it the East keeps 8000 against 7200 and the 3000 cannot go.
+    private static void AnUnreadyHolderTakenAsDepotBuilderIsNoLongerCounted()
+    {
+        var s = EastWithAnUnreadyHolder();
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        var day = Review(s, null, null, plan => plan.DepotTasks.Add(new DepotTask { X = 770f, Z = 0f, SectorId = east, Priority = 1f }));
+        AssertEqual(FormationRole.DepotBuilder, Of(day.Allocation, 30).Role, "the unready formation builds the depot");
+        float need = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
+        AssertNear(7200f, need, 1f, "the East need (belief-driven)");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "the 3000 is not drawn: the East holds 8000 without the builder");
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(HeldAtEnd(day, east, false) >= need, "the East holds " + HeldAtEnd(day, east, false) + " against " + need);
+    }
+
+    // A secession garrison on the march (a pledged formation outside the state) leaves its sector the same way.
+    private static void AnUnreadyHolderPledgedToAGarrisonOutsideItsStateIsNoLongerCounted()
+    {
+        var s = EastWithAnUnreadyHolder();
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        var day = Review(s, null, null, plan => plan.Garrisons.Add(new GarrisonPost
+        {
+            Kind = GarrisonPostKind.Secession, StateId = 99, X = 300f, Z = 0f, Need = 3000f, InstanceIds = new List<int> { 30 }
+        }));
+        AssertEqual(FormationRole.Garrison, Of(day.Allocation, 30).Role, "the pledged formation marches to the post");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "the 3000 is not drawn: the East holds 8000 without it");
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(HeldAtEnd(day, east, false) >= 7200f, "the East holds " + HeldAtEnd(day, east, false));
+    }
+
+    // An ordinary garrison post cannot take it: GarrisonPlanner seats only a massable formation (Seatable), so the unready holder stays in the
+    // East whatever a post near it asks, and the draw is tested on the held sum as it is.
+    private static void AnOrdinaryGarrisonPostTakesNoUnreadyHolder()
+    {
+        var s = EastWithAnUnreadyHolder();
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        var day = Review(s, null, null, plan => plan.Garrisons.Add(new GarrisonPost
+        {
+            Kind = GarrisonPostKind.Fort, X = 700f, Z = 0f, Need = 3000f
+        }));
+        AssertEqual(FormationRole.Hold, Of(day.Allocation, 30).Role, "the unready formation is not seated at the post");
+        AssertEqual(0, day.Allocation.Seats.Count, "the post is unmanned");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 3000 is drawn: the East still holds 9000");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertTrue(HeldAtEnd(day, east, false) >= 7200f, "the East holds " + HeldAtEnd(day, east, false));
+    }
+
+    // A reserved formation that a Wished depot task pins as its builder is counted in the reserve (ReserveRules.Hold does not know the pin)
+    // and leaves it before the draw: the share it put into the sum goes with it. The East faces 14000 (need 8400); the unready 3000 and the
+    // reserve 2 (pinned, 1000), 3 (1000) and 5 (5000) make 10000. Drawing the 1000 would leave 9000 on the counted sum but 8000 in fact.
+    private static void AReservedFormationPinnedAsABuilderIsNoLongerCounted()
+    {
+        var s = Base();
+        s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
+        s.Own.Add(Corps(9, 200f, 4000f, 1));
+        s.Own.Add(Corps(10, 220f, 4000f, 1));
+        s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(30, 750f, 3000f, 1));
+        s.Own.Add(Corps(2, 820f, 1000f));
+        s.Own.Add(Corps(3, 810f, 1000f));
+        s.Own.Add(Corps(5, 770f, 5000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 14000f));
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        var pinned = new List<HeldBuilder> { new HeldBuilder { InstanceId = 2, Wished = true, SectorId = east, TargetX = 830f, TargetZ = 0f, SiteX = 830f, SiteZ = 0f } };
+        var day = Review(s, null, null, null, pinned);
+        float need = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
+        AssertNear(8400f, need, 1f, "the East need (belief-driven)");
+        AssertEqual(FormationRole.DepotBuilder, Of(day.Allocation, 2).Role, "2 builds the pinned depot");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 3).Reason, "3 is in the reserve");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "the 1000 is not drawn: the East would hold 8000 against 8400");
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+    }
+
     // The capital reserve (the formations nearest the capital until its floor) holds the sector when the capital stands in it; ReserveRules.Hold
     // counts it, so the draw does too.
     private static void ACapitalGuardCountsTowardTheSectorsCoverBeforeADraw()
@@ -865,6 +990,43 @@ internal static class ReconNeverTasksTests
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 1000 is drawn: the guard's 6000 and the 5000 still hold the East");
         AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
         AssertTrue(HeldAtEnd(day, east, true) >= need, "the East holds " + HeldAtEnd(day, east, true) + " with its guard, against " + need);
+    }
+
+    // A capital guard standing in the East while the capital lies in another sector marches there: it holds nothing in the East, so neither
+    // the reserve's size nor the draw's cover counts it (verify r3 probe: it was counted, the East held 6500 against 7200 after the draw).
+    private static CampaignSnapshot EastWithAGuardBoundElsewhere()
+    {
+        var s = Base();
+        s.CapitalX = 560f;
+        s.CapitalZ = 0f;
+        s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
+        s.Own.Add(Corps(9, 200f, 4000f, 1));
+        s.Own.Add(Corps(10, 220f, 4000f, 1));
+        s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(31, 760f, 4000f));             // the capital reserve: nearest the capital that has anything, standing in the East
+        s.Own.Add(Corps(2, 820f, 1000f));
+        s.Own.Add(Corps(3, 830f, 6500f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, 12000f));
+        return s;
+    }
+
+    private static void ACapitalGuardBoundForAnotherSectorCoversNothingWhereItStands()
+    {
+        var s = EastWithAGuardBoundElsewhere();
+        var day = Review(s);
+        var sectors = ExecutorFixtures.Sectors(s);
+        int east = sectors.SectorAt(820f, 0f);
+        AssertTrue(sectors.SectorAt(560f, 0f) != east, "the capital lies in another sector than the East");
+        AssertEqual(FormationRole.CapitalGuard, Of(day.Allocation, 31).Role, "31 is the capital guard");
+        float need = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
+        AssertNear(7200f, need, 1f, "the East need (belief-driven)");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "the reserve is sized without the guard: 2 is in it");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 3).Reason, "and 3");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "no scout is drawn: the East holds 7500 and would hold 6500 without the 1000");
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(HeldAtEnd(day, east, false) >= need, "the East holds " + HeldAtEnd(day, east, false) + " against " + need);
+        AssertEqual(0, day.Allocation.Shortfalls.Count, "no shortfall against the believed army");
     }
 
     // A stale belief (confidence 0.3) leaves a presumption: the East need is 20000, set by the remembered army, not by the believed term
@@ -899,6 +1061,28 @@ internal static class ReconNeverTasksTests
         AssertTrue(believed2 > ForceAllocator.MinGarrisonStrength && believed2 < need2 - 0.01f, "a believed term above the floor but under the need: " + believed2);
         AssertEqual(FormationRole.Recon, Of(fresher.Allocation, 2).Role, "and the East still gives its scout");
         AssertTrue(fresher.Allocation.ReconUnfilledReason == null, "nothing refused");
+    }
+
+    // The threshold between the two causes of a need: the believed term close to the presumption (three remembered armies of 20000 at confidence
+    // 0.49: the believed term is 0.6 x 29400 = 17640 against a presumption of 20000, 0.88 of it) is still not what sets the need, so the
+    // scout still goes. Only a believed term that reaches the need makes the sector belief-driven.
+    private static void ABelievedTermNearTheNeedButUnderItIsStillPresumptionBacked()
+    {
+        var s = SmokeUnion();
+        foreach (float x in new[] { 1000f, 1004f, 1008f })
+        {
+            var stale = ExecutorFixtures.Belief(x, 0f, 20000f);
+            stale.Confidence01 = 0.49f;
+            s.Beliefs.Add(stale);
+        }
+        var day = Review(s);
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        float need = 0f, believed = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) { need = sp.HoldNeed; believed = sp.BelievedHold; }
+        AssertNear(20000f, need, 1f, "the remembered army sets the need");
+        AssertTrue(believed > 0.85f * need && believed < need - 0.01f, "the believed term is near the need and under it: " + believed + " / " + need);
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the East still gives its scout");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
     }
 
     // The carrier of a short sector is its nearest immobile holder to the army it faces: 14 (x 800) beside the belief at 1000, and 13 when

@@ -257,7 +257,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
             private readonly float[] _believed;              // per sector: the believed term of the hold need (SectorPlan.BelievedHold)
-            private readonly float[] _held;                  // per sector: the hold ReserveRules.Hold sized the reserve on (unready, busy, capital guard, reserve)
+            private readonly ReserveRules.HoldTally _held;   // what ReserveRules.Hold sized each sector's reserve on (unready, busy, capital guard, reserve)
             private bool _scoutRefusedForThreat;
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
@@ -287,7 +287,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 _nearX = new float[_sectorCount];
                 _nearZ = new float[_sectorCount];
                 _believed = new float[_sectorCount];
-                _held = new float[_sectorCount];
+                _held = new ReserveRules.HoldTally(_sectorCount, _n);
 
                 for (int i = 0; i < _n; i++)
                 {
@@ -745,15 +745,33 @@ namespace WhiskeyRealism.Strategic.Planner
 
             // The draw never opens a shortfall against a believed enemy force. A sector gives a scout when (a) its hold need is set by the
             // floor or by the presumption of an unscouted front (no believed army drives it), or (b) its hold, less this formation, still
-            // meets its target. The hold is the sum ReserveRules.Hold sized the reserve on (_held: what holds there anyway, the unready and
-            // the busy and the capital guard included, plus the reserved formations), not the Hold roles assigned so far: the remainder
-            // that stands in the sector is assigned after this pick. Otherwise the formation stays and the refusal is recorded (Allocation.ReconUnfilledReason).
+            // meets its target. The hold is the sum ReserveRules.Hold sized the reserve on (what holds there anyway, the unready, the busy and
+            // the capital guard of the capital's own sector included, plus the reserved formations), less every formation of it that has
+            // since been given a role that does not hold the sector (HoldLeaves): a depot builder, a secession garrison on the march, an
+            // earlier scout. The remainder that stands in the sector is assigned after this pick. The ordinary garrison posts that come
+            // later take no counted formation out of its sector: GarrisonPlanner seats only a massable formation (Seatable), and the
+            // hold reserve's own incumbents it takes back stay in their sector. Otherwise the formation stays and the refusal is recorded
+            // (Allocation.ReconUnfilledReason).
             private bool SectorMayGiveScout(int i)
             {
                 int k = _roleSector[i];
                 if (k < 0 || k >= _sectorCount) return true;
                 bool beliefDriven = _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
-                return !beliefDriven || _held[k] - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
+                return !beliefDriven || _held.Sector[k] - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
+            }
+
+            // The share of the sector's counted hold that no longer holds it: a counted formation already given a role other than holding
+            // the sector (Hold or CapitalGuard in it). A formation not yet placed stays: AssignRemainder holds it.
+            private float HoldLeaving(int sector)
+            {
+                float leaving = 0f;
+                for (int j = 0; j < _n; j++)
+                {
+                    if (_held.ShareSector[j] != sector || !_done[j]) continue;
+                    bool holds = (_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector;
+                    if (!holds) leaving += _held.Share[j];
+                }
+                return leaving;
             }
 
             // ReconPlanner.PickFormation over the hold reserve alone (everything else stays taken), so its own ranking (cavalry, then the

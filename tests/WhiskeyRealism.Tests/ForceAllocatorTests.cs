@@ -1314,9 +1314,12 @@ internal static class ForceAllocatorTests
     // another sector the held 3000 is short again. A capital-reserved corps (4000, counts) meets the need too.
     private static void ReserveRulesHoldCountsTheMapGroupPlayerNotHisCommand()
     {
-        int[] Run(float morale, float waypointX, bool capitalReservedCorps, out int sector)
+        int[] Run(float morale, float waypointX, bool capitalReservedCorps, out int sector, float capitalX = 550f)
         {
             var s = Wide();
+            s.HasCapital = true;
+            s.CapitalX = capitalX;
+            s.CapitalZ = 0f;
             s.Own.Add(WithFlags(Corps(1, 530f, 3000f), FormationFlags.InBattle));
             var group = Corps(2, 520f, 5000f);
             group.Chain = WlChainClass.PlayerMapGroup;
@@ -1354,7 +1357,12 @@ internal static class ForceAllocatorTests
         AssertEqual(-1, away[1], "and he is never reserved himself");
 
         var guarded = Run(0.5f, 520f, true, out _);
-        AssertEqual(-1, guarded[3], "a capital-reserved corps holds anyway (3000 + 2500 + 4000): nothing more is reserved");
+        AssertEqual(-1, guarded[3], "a capital-reserved corps in the capital's sector holds anyway (3000 + 2500 + 4000): nothing more is reserved");
+
+        // The capital reserve counts in the capital's own sector only: a guard standing in another sector marches to the capital and holds
+        // nothing here, so the reserve is sized as if it were absent (it counted here before, verify r3).
+        var marching = Run(0.5f, 520f, true, out _, capitalX: 100f);
+        AssertEqual(k, marching[3], "a capital-reserved corps bound for a capital in another sector holds nothing here: the nearest corps is reserved");
     }
 
     private static void NonComplianceCounterCountsConsecutiveUnreliableDays()
