@@ -75,6 +75,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaReserveSupportPickFix;
         internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
         internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
+        internal static ConfigEntry<bool> EnableManeuverFeasibility;
 
         /// <summary>Tactical / Enable Battle Terrain Picture (BC12 decisions 3-6, the strong-ground rule of 7, the crest playbooks of 8).</summary>
         internal static bool TerrainPictureEnabled()
@@ -108,6 +109,13 @@ namespace WhiskeyRealism
         internal static bool StaggeredReserveReleaseEnabled()
         {
             try { return EnableStaggeredReserveRelease != null && EnableStaggeredReserveRelease.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Maneuver Feasibility (BC14 core: the feasibility evaluation, the selection term, the synchronized release, the monitor, the crossing look and the Defender's crossing guard).</summary>
+        internal static bool ManeuverFeasibilityEnabled()
+        {
+            try { return EnableManeuverFeasibility != null && EnableManeuverFeasibility.Value; }
             catch { return false; }
         }
 
@@ -701,6 +709,16 @@ namespace WhiskeyRealism
                 "it means to upgrade a macro attack to a full assault, but it writes the upgrade where the method's own decision never " +
                 "stores it, so the upgrade only lands when the pending value already was attack. With this on the assault upgrade reaches " +
                 "the stored decision. A live rollback: turning it off restores vanilla's behaviour without a restart.");
+            EnableManeuverFeasibility = Config.Bind(
+                "Tactical",
+                "Enable Maneuver Feasibility",
+                true,
+                "Default ON. BC14: before the army picks a battle plan, every candidate play is timed over the map's rivers and crossings as " +
+                "the side perceives them (held, watched, clear or unknown), and the risk that a divided army is beaten in detail is priced " +
+                "from the march, courier and enemy shift times. Plays that cannot work are skipped, risky ones penalized; flanking wings " +
+                "march on a synchronized release, inside a time budget, through a chosen crossing; a broken assumption replans; a Defender " +
+                "sends a reserve to guard a crossing the enemy can reach first. Off: plans are picked and executed as before, and Enable " +
+                "Enemy Works Doctrine and Enable Objective Doctrine act as off.");
             EnableVanillaArtilleryChainSideFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Artillery Chain Side Fix",
@@ -722,13 +740,12 @@ namespace WhiskeyRealism
                 "W&L",
                 "Enable Campaign Chain Dispatches",
                 true,
-                "Default ON. #69: when vanilla moves the campaign-map group that carries a subordinate W&L player (a brigade or division " +
-                "inside a corps, which vanilla never sends campaign orders), the player gets the career-panel order vanilla would give a " +
-                "top-level player for that move (Redeploy, Offensive, Offensive Operation, Engage Enemy, Defend Capital), naming the " +
-                "commander of the moving formation, with vanilla's order zone and arrival prestige. Whiskey's own strategic orders to a " +
-                "top-level player's group use the same dispatcher. At most one order per target per game day (the last four targets " +
-                "are remembered). Whiskey never " +
-                "moves the player's command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
+                "Default ON. Whiskey's own strategic orders to a W&L player whose command is itself a campaign-map group (a corps or a " +
+                "top-level division) reach his career panel as the order vanilla would give him (Redeploy, Offensive, Offensive Operation, " +
+                "Engage Enemy, Defend Capital), with vanilla's order zone and arrival prestige and at most one order per target per game " +
+                "day. A player who is not his own map group (a brigade or division carried by an AI corps) never receives a campaign " +
+                "order, as in the base game: the corps that carries him marches without a word. Whiskey never moves the player's " +
+                "command. Off: no Whiskey campaign orders; vanilla's own are unchanged.");
             EnablePlayerComplianceLedger = Config.Bind(
                 "W&L",
                 "Enable Player Compliance Ledger",

@@ -11,14 +11,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     // B-61state (2026-10-14): orchestrator inputs the posture producers
     // (Tactical/Battle/Producers, plan BC5a) read, refreshed on the coordinator
     // tick (CheckGlobalAIStrategy, 5866) before the same UpdateAITasks reaches the
-    // arbiter (AdjustGroupFormations, 5870). Call Refresh once per side per
-    // coordinator tick:
-    //   - leaf brigade map: ArmyOrchestrator.UpdateLeafBrigadeMap(tree) from the
-    //     alliance's extended probe tree, cached per snapshot roster signature,
-    //     without the snapshot's PlayerOwned units (PostureProbeFilter);
-    //   - the AI pool: the side's AIBattle.unitsused (85227-85262, the groups
-    //     vanilla's own AI orders), which splits #61's group pass from its
-    //     leaf-brigade pass;
+    // arbiter (AdjustGroupFormations, 5870). Two calls per side per coordinator
+    // tick (BC14): RefreshPickInputs first, and before the initial plan pick;
+    // RefreshPostureCaches after the direct-child cycle, where the old single
+    // Refresh ran.
+    //   RefreshPickInputs (everything a plan pick reads):
     //   - the battle stance: ArmyEvidenceBuilder.ReadBattleStance (GetBattleType
     //     86095, objective points held) into ArmyOrchestrator.UpdateBattleStance,
     //     ungated: the side's one stance reader (BC9; the readiness tie-break the
@@ -27,6 +24,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     //   - reinforcement opportunity: UpdateReinforcementOpportunity from
     //     ArmyEvidenceBuilder.BuildForceBalance (gated by
     //     Enable Tactical Reinforcement Opportunity Doctrine).
+    //   RefreshPostureCaches (they read this tick's intents):
+    //   - leaf brigade map: ArmyOrchestrator.UpdateLeafBrigadeMap(tree) from the
+    //     alliance's extended probe tree, cached per snapshot roster signature,
+    //     without the snapshot's PlayerOwned units (PostureProbeFilter);
+    //   - the AI pool: the side's AIBattle.unitsused (85227-85262, the groups
+    //     vanilla's own AI orders), which splits #61's group pass from its
+    //     leaf-brigade pass.
     public static class ArmyPostureInputsRuntime
     {
         static ArmyPostureInputsRuntime()
@@ -50,7 +54,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public IReadOnlyList<TacticalCommandTreeProbe.ExtendedProbe> Probes { get; }
         }
 
-        public static void Refresh(AIBattle battle, BattleUnits bunits, int side, ArmyOrchestrator army)
+        // The pick inputs: everything a plan pick reads, refreshed before every pick (BC14 requirement-stance-before-pick:
+        // the first pick used to run at the default Meeting stance). Runs first in the tick and before the initial pick.
+        public static void RefreshPickInputs(AIBattle battle, BattleUnits bunits, int side, ArmyOrchestrator army)
         {
             try
             {
@@ -59,15 +65,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int allianceId = bunits.alliance[side];
                 if (allianceId < 0 || allianceId >= 2) return;
 
-                RefreshAiPool(battle, allianceId);
                 // BC9: the side's one battle stance (the director, node and doctrine
                 // assignment, the posture guard, the probe gate, the division play and
                 // #45's ledger cap read it), whatever the opportunity doctrine flag below.
                 army.UpdateBattleStance(ArmyEvidenceBuilder.ReadBattleStance(bunits, allianceId));
-
-                var probes = ExtendedProbes(bunits, allianceId);
-                if (probes != null && probes.Count > 0)
-                    army.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, 0));
 
                 if (Plugin.EnableTacticalReinforcementOpportunityDoctrine == null ||
                     !Plugin.EnableTacticalReinforcementOpportunityDoctrine.Value)
@@ -94,7 +95,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             catch (Exception ex)
             {
                 OnceLog.Warning("army-posture-inputs:refresh-failed",
-                    "ArmyPostureInputsRuntime.Refresh failed: " + ex.GetType().Name + " " + ex.Message);
+                    "ArmyPostureInputsRuntime.RefreshPickInputs failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // The posture caches, which read this tick's intents: the AI pool and the leaf brigade map. Stays where Refresh ran, after
+        // the direct-child cycle.
+        public static void RefreshPostureCaches(AIBattle battle, BattleUnits bunits, int side, ArmyOrchestrator army)
+        {
+            try
+            {
+                if (battle == null || bunits == null || army == null || bunits.alliance == null) return;
+                if (side < 0 || side >= bunits.alliance.Length) return;
+                int allianceId = bunits.alliance[side];
+                if (allianceId < 0 || allianceId >= 2) return;
+
+                RefreshAiPool(battle, allianceId);
+                var probes = ExtendedProbes(bunits, allianceId);
+                if (probes != null && probes.Count > 0)
+                    army.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, 0));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("army-posture-inputs:caches-failed",
+                    "ArmyPostureInputsRuntime.RefreshPostureCaches failed: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 

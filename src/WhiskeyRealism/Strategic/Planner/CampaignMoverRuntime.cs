@@ -19,13 +19,11 @@ namespace WhiskeyRealism.Strategic.Planner
     // state that is neither own, allied nor at war, 14486); BattlefieldSetup.IsTerrainPositionRestricted 25755 (the final
     // waypoint test SetWaypoint applies through CheckIfFinalWaypointIsPassable, 130768); AIFaction.unitsinoffensiveoperations
     // (the list vanilla's job 6 keeps retargeting, 14003-14061); the tempo roll 14316-14350; the W&L order path 14381-14456 and
-    // stage F's WlStrategicOrderBridge.TryIssue / #69 dispatcher for the map-group player.
+    // stage F's WlStrategicOrderBridge.TryIssue / dispatcher for the map-group player.
     //
-    // Stage F's typing of the march (#69) needs no call from here: the planner moves inside the daily review, outside
-    // UpdateUnitAI, where F's move source is WlMoveSource.Other; F's MoveUnitTo Postfix records a CarryingGroup move and its next
-    // UpdateUnitAI flush types it by list membership (WlCampaignDispatchPolicy.ClassifyType), exactly as it types vanilla's own
-    // moves of that group, so MainEffort / Support units are listed right after MoveUnitTo returns true and F's move-source
-    // hook is not entered (it names the vanilla callers list membership cannot classify). The defensive operation list is vanilla's alone (13782-13848): nothing here names it.
+    // A group that carries a W&L player below map level (CarryingGroup) is moved here like any AI formation, with no order to the
+    // player it carries (vanilla sends him none, 8366; Whiskey stopped dispatching its marches to him on 2026-10-16). The defensive
+    // operation list is vanilla's alone (13782-13848): nothing here names it.
     internal static class CampaignMoverRuntime
     {
         private static readonly VanillaMoverHost Host = new VanillaMoverHost();

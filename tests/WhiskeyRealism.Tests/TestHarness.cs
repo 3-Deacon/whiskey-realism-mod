@@ -2,6 +2,23 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
+/// Optional run filter set by <c>--only &lt;class&gt; [&lt;test prefix&gt;]</c>, so a red-first run executes one class or one test.
+/// Both fields are null in the default run, which then runs everything.
+/// </summary>
+internal static class TestFilter
+{
+    internal static string Class;   // null: every class (the default run)
+    internal static string Name;    // null: every test
+
+    internal static bool RunsClass(string className) => Class == null || className == Class;
+
+    // A name filter matches the whole test name or a prefix that ends at a space,
+    // so "bc14 FEAS-SCN-1" selects "bc14 FEAS-SCN-1 ..." and not "bc14 FEAS-SCN-10 ...".
+    internal static bool RunsTest(string testName) =>
+        Name == null || testName == Name || testName.StartsWith(Name + " ", StringComparison.Ordinal);
+}
+
+/// <summary>
 /// Shared assertions and the per-class test runner. Test classes are discovered
 /// by Program.Main; see AGENTS.md in this directory.
 /// </summary>
@@ -13,6 +30,7 @@ internal static class TestHarness
     {
         foreach (var test in tests)
         {
+            if (!TestFilter.RunsTest(test.name)) continue;
             test.run();
             Console.WriteLine("PASS " + test.name);
         }

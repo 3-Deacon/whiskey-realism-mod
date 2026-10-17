@@ -801,7 +801,7 @@ internal static class ReconPlannerTests
         AssertFalse(ReconOrders.MayAct(WlChainClass.PlayerCommand), "the player's own command");
         AssertFalse(ReconOrders.MayAct(WlChainClass.CicSide), "the CIC player's side");
         AssertTrue(ReconOrders.MayAct(WlChainClass.None), "AI group");
-        AssertTrue(ReconOrders.MayAct(WlChainClass.CarryingGroup), "carrying group (moved; F's MoveUnitTo Postfix dispatches)");
+        AssertTrue(ReconOrders.MayAct(WlChainClass.CarryingGroup), "carrying group (moved like any AI group; the player it carries is sent no order)");
         AssertTrue(ReconOrders.MayAct(WlChainClass.PlayerMapGroup), "map-group player (order-only)");
     }
 

@@ -44,7 +44,7 @@ internal static partial class FlankResponseTests
 
     // A FlankMarch child 1,000 m from its rect at (1000, 500), 900 battle-s after the Center child's contact, enemy line end at
     // (800, 1500); nothing wrong on either leg.
-    private static ManeuverInput Maneuver(double now = 10.0)
+    internal static ManeuverInput Maneuver(double now = 10.0)
     {
         return new ManeuverInput
         {
@@ -58,14 +58,14 @@ internal static partial class FlankResponseTests
         };
     }
 
-    private static ManeuverInput After(ManeuverInput input, double now)
+    internal static ManeuverInput After(ManeuverInput input, double now)
     {
         input.NowHours = now;
         return input;
     }
 
     // Plays the FlankMarch input to the March phase (contact at 10.5, +0.25 h).
-    private static ManeuverState Marching(out ManeuverInput input)
+    internal static ManeuverState Marching(out ManeuverInput input)
     {
         input = Maneuver();
         input.CenterContactHours = 10.5;
@@ -199,7 +199,7 @@ internal static partial class FlankResponseTests
     }
 
     // The child node (id == source) sits at depth 1; its sub-nodes one level deeper each.
-    private static CommandNodeIntent NodeIntent(string nodeId, string source, int depth = -1) =>
+    internal static CommandNodeIntent NodeIntent(string nodeId, string source, int depth = -1) =>
         new CommandNodeIntent(nodeId, source, DirectChildRole.Main, DirectChildAxis.SectorAxis, 0, 50,
             depth >= 0 ? depth : (nodeId == source ? 1 : 2));
 
@@ -503,7 +503,7 @@ internal static partial class FlankResponseTests
         AssertEqual(CommandTaskType.AttackObjective, DoctrineOrders(nodes, BattleStance.Meeting, attackTable)[0].Task, "and attacks");
     }
 
-    private static CommandDoctrineOrder[] DoctrineOrders(CommandNodeOperationalState[] nodes, BattleStance stance, ManeuverNodeTable table)
+    internal static CommandDoctrineOrder[] DoctrineOrders(CommandNodeOperationalState[] nodes, BattleStance stance, ManeuverNodeTable table)
     {
         var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "obj-1", 0f);
         var objective = new BattlefieldObjectiveEstimate("obj-1", TacticalObjectiveType.VictoryPoint, 500f, 0.8f, true, 0.8f, 0f, 1000f, 0f, 0f);
@@ -689,17 +689,17 @@ internal static partial class FlankResponseTests
     private static void ManeuverPlumbingIsWired()
     {
         string coordinator = SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
-        AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds);", "the direct children reach CollectOwn");
+        AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored);", "the direct children reach CollectOwn");
         AssertPinned(coordinator, "PlayExecutorRuntime.StepManeuvers(", "the coordinator steps the maneuvers each direct-child cycle");
         AssertPinned(coordinator, "side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance", "from the side's evidence and stance");
         AssertPinned(coordinator, "unchecked(CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash)", "a phase change ticks the ledger gate");
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
         AssertPinned(runtime, "if (!Plugin.FlankResponseEnabled() || planId == BattlePlanId.Unknown", "the maneuver is behind Enable Flank Response And Envelopment");
-        AssertPinned(runtime, "EnvelopmentManeuver.InwardLegClear(_riverSamples, n)", "the river checks read the terrain grid");
+        AssertPinned(runtime, "EnvelopmentManeuver.InwardLegHitsRiver(grid, anchorX, anchorZ,", "the river checks read the terrain grid");
+        AssertPinned(SourceText("Tactical", "Orchestrator", "Plays", "EnvelopmentManeuver.cs"), "g.SampleLine(ax, az, ex, ez, InwardStepMeters, scratch)", "2 m samples on the inward leg");
         AssertPinned(runtime, "EnvelopmentManeuver.CorridorEnemies(snapshot, anchorX, anchorZ, inwardX, inwardZ, TerrainHeightAt, out float maxHeight)", "the height check reads terrain heights and perceived enemies");
-        AssertPinned(runtime, "grid.SampleLine(anchorX, anchorZ, inwardX, inwardZ, EnvelopmentManeuver.InwardStepMeters, _riverSamples)", "2 m samples on the inward leg");
         string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
-        AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents)", "the army expands the orders to nodes");
+        AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents)", "the army expands the orders to nodes");
         string ledger = SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
         AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers, reverseSlope);", "the ledger hands the table to the doctrine build");
         string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");

@@ -15,12 +15,14 @@ namespace WhiskeyRealism.Strategic
     // GivenOrders.firstunitreached set by Regiment.CheckDLCWLTopics (123517) before it
     // clears campaign types 5/6/7/16 (123533); GivenOrders.IsBattleOrder (41772).
     //
-    // Writers: the #69 UpdateUnitAI Postfix on the campaign map (ObserveCampaign) and
+    // Writers: the #69 campaign order pass (UpdateUnitAI Postfix, ObserveCampaign) and
     // the battle coordinator tick (ObserveBattle). The ledger is keyed by career
     // (ComplianceCareerKey: commander id + SceneManagement.currentcampaignscenario,
     // which a campaign battle leaves alone) and deliberately not CampaignScope-reset:
     // a return from battle reloads the campaign, and the ledger measures the human
-    // player, not the save. Battle end drops the pending battle order (BattleScope).
+    // player, not the save. Battle end drops the pending battle order (BattleScope). A campaign order is
+    // a sample only where the player decides the movement (his command is its own map group): vanilla
+    // sends a carried player none, and Whiskey no longer does.
     // Vanilla's re-issue of the same order is one sample (ComplianceOrderStream).
     internal static class PlayerComplianceRuntime
     {

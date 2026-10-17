@@ -126,9 +126,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool delayingDefensePressure = false,
             bool defensivePressure = false,
             BattleStance stance = BattleStance.Meeting,
-            bool hasCrestLine = false)
+            bool hasCrestLine = false,
+            Plays.IFeasibilityLookup feasibility = null,
+            BattlePlanId hysteresisPlan = BattlePlanId.Unknown,
+            float hysteresisMargin = 0f)
         {
+            HysteresisPlan = hysteresisPlan;
+            HysteresisMargin = hysteresisMargin;
             HasCrestLine = hasCrestLine;
+            Feasibility = feasibility;
             CommanderPersonality = commanderPersonality;
             Terrain = terrain;
             CurrentOdds = currentOdds;
@@ -196,6 +202,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <see cref="TacticalPlaybook.RequiresCrest"/> is only eligible when this is set.
         /// </summary>
         public bool HasCrestLine { get; }
+
+        /// <summary>
+        /// BC14: the side's published feasibility ledger (null with Enable Maneuver Feasibility off, or before the first evaluation). The catalog
+        /// skips an Impossible candidate and subtracts <see cref="Plays.ManeuverFeasibility.FeasibilityWeight"/> times the penalty of the rest.
+        /// </summary>
+        public Plays.IFeasibilityLookup Feasibility { get; }
+
+        /// <summary>
+        /// BC14: the plan a broken maneuver assumption is re-picking (Unknown for an ordinary pick). <c>Select</c> scores it in the same pass and
+        /// keeps it unless it is absent or Impossible, or the best candidate beats it by <see cref="HysteresisMargin"/>.
+        /// </summary>
+        public BattlePlanId HysteresisPlan { get; }
+        public float HysteresisMargin { get; }
 
         /// <summary>
         /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry

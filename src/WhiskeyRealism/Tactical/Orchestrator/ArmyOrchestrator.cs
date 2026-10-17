@@ -87,6 +87,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private float _planAgeSeconds;
         private float _historyGlobalOdds;
         private TacticalIntentModel _currentIntentModel;
+        private Plays.IFeasibilityLookup _feasibility;
+        private readonly SelectionReport _selection = new SelectionReport();
 
         public ArmyOrchestrator(int allianceId, TacticalPlaybookCatalog catalog, PersonalityVector commanderPersonality)
             : base(EchelonKind.Army, allianceId)
@@ -107,6 +109,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float HistoryGlobalOdds => _historyGlobalOdds;
         public TacticalIntentModel CurrentIntentModel => _currentIntentModel;
 
+        /// <summary>BC14: the side's feasibility ledger (null with the flag off), read by the pick and by BC11's maneuvers.</summary>
+        public Plays.IFeasibilityLookup Feasibility => _feasibility;
+
+        /// <summary>BC14: the side's feasibility ledger the next pick reads (null: the shipped selection, unchanged).</summary>
+        public void SetFeasibility(Plays.IFeasibilityLookup lookup) => _feasibility = lookup;
+
+
         private ReplanBaseline _replanBaseline = ReplanBaseline.Initial;
         public ReplanBaseline LastReplanBaseline => _replanBaseline;
 
@@ -115,10 +124,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public void PickInitialPlan(ArmyEvidence evidence)
         {
-            if (TryPickPlan(evidence, opposingCommanderHint: 0f, out var nextPlan))
+            if (TryPickPlan(evidence, opposingCommanderHint: 0f, hysteresis: false, "initial", out var nextPlan))
             {
                 _plan = nextPlan;
                 HasPlan = true;
+                _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
             }
             else
             {
@@ -142,7 +152,60 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _phaseAgeSeconds += deltaSeconds;
         }
 
-        private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, out TacticalBattlePlan nextPlan)
+        /// <summary>
+        /// The playbooks that reach scoring for this evidence and the side's current effective stance (precondition, stance and crest gates):
+        /// the candidates BC14's feasibility evaluation times before a pick. Returns how many were written.
+        /// </summary>
+        public int EligiblePlans(ArmyEvidence evidence, BattlePlanId[] into)
+        {
+            if (_catalog == null) return 0;
+            // Best catalog score first, without the feasibility term: the order the confirm queue and the look requests read.
+            PlaybookContext ctx = BuildPickContext(evidence, 0f, false, withFeasibility: false);
+            _catalog.Select(ctx, _rankScratch);
+            int n = 0;
+            for (int i = 0; i < _rankScratch.Count && n < into.Length; i++)
+                if (!_rankScratch[i].Skipped) into[n++] = _rankScratch[i].Plan;
+            return n;
+        }
+
+        private readonly SelectionReport _rankScratch = new SelectionReport();
+
+        /// <summary>The battle stance the catalog filters by: vanilla's battle type, demoted to Defender when the force-aware doctrine wants no offence.</summary>
+        public BattleStance EffectiveStance
+            => TacticalStanceReconciler.ResolveEffectiveStance(_currentForceBalanceStance, _currentReinforcementOpportunity.Opportunity);
+
+        private bool TryPickPlan(ArmyEvidence evidence, float opposingCommanderHint, bool hysteresis, string trigger, out TacticalBattlePlan nextPlan)
+        {
+            PlaybookContext ctx = BuildPickContext(evidence, opposingCommanderHint, hysteresis);
+            bool envelopmentPressure = ctx.EnvelopmentPressure;
+            var pb = _catalog?.Select(ctx, _selection);
+            if (pb == null)
+            {
+                nextPlan = default;
+                return false;
+            }
+            nextPlan = pb.Instantiate(ctx);
+            // The side the feasibility evaluation scored the winner on goes out with the plan (requirement-selected-side).
+            if (_feasibility != null && _feasibility.TryGet(pb.Id, out Plays.CandidateResult scored)) nextPlan = nextPlan.WithMirrored(scored.Mirrored);
+            double now = TacticalDoctrineTime.NowBattleHours;
+            double ledgerAge = _feasibility != null && _feasibility.HasEvaluation ? now - _feasibility.EvaluatedHours : double.PositiveInfinity;
+            bool kept = hysteresis && HasPlan && pb.Id == _plan.PlanId;
+            Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now);
+
+            // Envelopment-active tightening: commit reserves sooner when the
+            // doctrine signaled AttackNow + clear advantage. Caps to the
+            // EnvelopmentReserveCommitOddsCap floor so a playbook that already
+            // commits earlier than the cap (e.g., GenericDesperate=0.9) is not
+            // worsened. Sympathetic to SoW's "all engaged" posture under clear
+            // advantage (offai.cpp:947) without going to full commit.
+            if (envelopmentPressure && nextPlan.ReserveCommitTriggerOdds > EnvelopmentReserveCommitOddsCap)
+            {
+                nextPlan = nextPlan.WithReserveCommitTriggerOdds(EnvelopmentReserveCommitOddsCap);
+            }
+            return true;
+        }
+
+        private PlaybookContext BuildPickContext(ArmyEvidence evidence, float opposingCommanderHint, bool hysteresis, bool withFeasibility = true)
         {
             // Envelopment pressure: replan-time read of the latest reinforcement
             // opportunity decision. AttackNow + personality-aware ratio threshold
@@ -234,8 +297,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // doctrine wants a non-offensive posture, demote Attacker/Meeting →
             // Defender so the outnumbered side delays/defends instead of
             // launching a doomed assault. See TacticalStanceReconciler.
-            BattleStance stance = TacticalStanceReconciler.ResolveEffectiveStance(
-                _currentForceBalanceStance, _currentReinforcementOpportunity.Opportunity);
+            BattleStance stance = EffectiveStance;
 
             var ctx = new PlaybookContext(
                 _commanderPersonality,
@@ -252,26 +314,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 delayingDefensePressure: delayingDefensePressure,
                 defensivePressure: defensivePressure,
                 stance: stance,
-                hasCrestLine: evidence.CrestLine.Has);
-            var pb = _catalog?.Select(ctx);
-            if (pb == null)
-            {
-                nextPlan = default;
-                return false;
-            }
-            nextPlan = pb.Instantiate(ctx);
-
-            // Envelopment-active tightening: commit reserves sooner when the
-            // doctrine signaled AttackNow + clear advantage. Caps to the
-            // EnvelopmentReserveCommitOddsCap floor so a playbook that already
-            // commits earlier than the cap (e.g., GenericDesperate=0.9) is not
-            // worsened. Sympathetic to SoW's "all engaged" posture under clear
-            // advantage (offai.cpp:947) without going to full commit.
-            if (envelopmentPressure && nextPlan.ReserveCommitTriggerOdds > EnvelopmentReserveCommitOddsCap)
-            {
-                nextPlan = nextPlan.WithReserveCommitTriggerOdds(EnvelopmentReserveCommitOddsCap);
-            }
-            return true;
+                hasCrestLine: evidence.CrestLine.Has,
+                feasibility: withFeasibility ? _feasibility : null,
+                hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,
+                hysteresisMargin: Plays.ManeuverFeasibility.ReplanScoreMargin);
+            return ctx;
         }
 
         /// <summary>
@@ -411,11 +458,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             Replan(evidence, UnknownIntentModel());
         }
 
-        public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent)
+        public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent) => Replan(evidence, enemyIntent, hysteresis: false);
+
+        public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, string trigger) => Replan(evidence, enemyIntent, hysteresis: false, trigger);
+
+        /// <summary>
+        /// Re-picks the plan. With <paramref name="hysteresis"/> (BC14's broken maneuver assumption) the catalog keeps the current plan unless
+        /// it is gone, impossible or beaten by <see cref="Plays.ManeuverFeasibility.ReplanScoreMargin"/>; a kept plan keeps its side, phase and
+        /// age and only refreshes the baselines the edge triggers compare with. Returns true when the plan was kept.
+        /// </summary>
+        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null)
         {
-            if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), out var nextPlan))
+            if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), hysteresis, trigger ?? "replan", out var nextPlan))
             {
-                return;
+                return false;
+            }
+
+            if (hysteresis && HasPlan && nextPlan.PlanId == _plan.PlanId)
+            {
+                _currentIntentModel = enemyIntent;
+                _historyGlobalOdds = evidence.CurrentOdds;
+                _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
+                _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
+                return true;
             }
 
             // A replan re-picks the playbook; it does not throw away where the
@@ -431,7 +496,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _plan = nextPlan;
             HasPlan = true;
             // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
-            _reserveRelease.Clear();
+            ReserveRelease.Clear();
             _currentIntentModel = enemyIntent;
             _historyGlobalOdds = evidence.CurrentOdds;
             _planAgeSeconds = 0f;
@@ -444,6 +509,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // fires and ArmyTickCycle invokes Replan again (this snapshot is
             // updated, breaking the loop).
             _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
+            _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
+            return false;
         }
 
         // Opportunity-change trigger state (2026-05-21). Snapshotted in Replan()
@@ -617,17 +684,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         // ---- BC13 staggered reserve release ----
 
-        private readonly ReserveReleaseState _reserveRelease = new ReserveReleaseState();
-
-        /// <summary>The side's reserve-release memory: the crisis releases (the exploit lifecycle reads them) and the stagger state.</summary>
-        internal ReserveReleaseState ReserveRelease => _reserveRelease;
+        /// <summary>The alliance's reserve-release memory: the crisis releases (the exploit lifecycle reads them), the stagger state and the crossing bindings. One instance per alliance, reset with the battle.</summary>
+        internal ReserveReleaseState ReserveRelease => ReserveReleaseState.ForAlliance(AllianceId);
 
         // The allocator's release context: the flank release flag as before, and with Enable Staggered Reserve Release the state, the
         // children with a live exploit (never released) and the army commander's temperament (the interval and the floor share).
+        //
+        // BC14: with Enable Maneuver Feasibility the context carries the state, the exploit flags and the commander's temperament whether or not
+        // the stagger is on (the crossing release needs the state's bindings and the floor share), and the Defender's crossing threats from the
+        // ledger. The threat buffers are pooled here: grow-only, filled in place each allocation.
+        private readonly Plays.CrossingThreat[] _threatBuffer = new Plays.CrossingThreat[Plays.ManeuverFeasibility.MaxThreatCrossings];
+        private float[] _threatShiftBuffer = new float[Plays.ManeuverFeasibility.MaxThreatCrossings * Plays.ManeuverFeasibility.MaxChildren];
+        private readonly float[] _threatRow = new float[Plays.ManeuverFeasibility.MaxChildren];
+        // The threats the last allocation was handed: the release row names the one a guard answers.
+        private int _lastThreatCount;
+
         private ReserveReleaseContext BuildReserveReleaseContext()
         {
             bool flank = Plugin.FlankResponseEnabled();
-            if (!Plugin.StaggeredReserveReleaseEnabled()) return new ReserveReleaseContext(_lastGlobalOdds, flank);
+            bool staggered = Plugin.StaggeredReserveReleaseEnabled();
+            bool feasible = Plugin.ManeuverFeasibilityEnabled();
+            if (!staggered && !feasible) return new ReserveReleaseContext(_lastGlobalOdds, flank);
             var exploits = WhiskeyRealism.Tactical.Battle.ExploitTable.ForAlliance(AllianceId);
             var exploiting = new bool[_directChildSnapshots.Length];
             for (int i = 0; i < exploiting.Length; i++)
@@ -635,11 +712,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int instanceId = ChildInstanceId(_directChildSnapshots[i].ChildId);
                 exploiting[i] = instanceId != 0 && exploits.IsExploiting(instanceId);
             }
+            int threats = 0, threatChildren = 0;
+            _lastThreatCount = 0;
+            if (feasible && _feasibility != null)
+                threats = FillThreatMatrix(_feasibility, _directChildSnapshots, _threatBuffer, _threatShiftBuffer, _threatRow, out threatChildren);
+            _lastThreatCount = threats;
             return new ReserveReleaseContext(
-                _lastGlobalOdds, flank, _reserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
+                _lastGlobalOdds, flank, ReserveRelease, exploiting, TacticalDoctrineTime.NowBattleHours,
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Aggression),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
-                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance));
+                WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
+                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren);
+        }
+
+        /// <summary>
+        /// The Defender's threats and the time matrix (threat-major, one column per allocation child) from the ledger into the pooled buffers.
+        /// The ledger's matrix is keyed by child id: each of the allocation's children takes the column of its own id, and a child the ledger did
+        /// not time (another child list, a child that arrived since) gets NaN, which the allocator reads as never releasable or bound. Returns the
+        /// threat count (0 when the allocation has more children than the ledger's cap).
+        /// </summary>
+        internal static int FillThreatMatrix(Plays.IFeasibilityLookup ledger, IReadOnlyList<DirectChildSnapshot> snapshots, Plays.CrossingThreat[] threatBuffer,
+            float[] shiftBuffer, float[] row, out int allocationChildren)
+        {
+            allocationChildren = snapshots.Count;
+            if (allocationChildren > Plays.ManeuverFeasibility.MaxChildren) { allocationChildren = 0; return 0; }
+            int threats = 0;
+            int count = Math.Min(ledger.ThreatCount, threatBuffer.Length);
+            for (int t = 0; t < count; t++)
+            {
+                if (!ledger.TryThreat(t, out threatBuffer[threats], row, out int children)) continue;
+                for (int c = 0; c < allocationChildren; c++)
+                {
+                    int column = -1;
+                    for (int k = 0; k < children; k++)
+                        if (string.Equals(ledger.ThreatChildId(k), snapshots[c].ChildId, StringComparison.Ordinal)) { column = k; break; }
+                    shiftBuffer[threats * allocationChildren + c] = column >= 0 ? row[column] : float.NaN;
+                }
+                threats++;
+            }
+            return threats;
         }
 
         // Child ids read "child-" + the instance id.
@@ -650,8 +761,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             try
             {
-                var outcomes = _reserveRelease.Outcomes;
-                int released = _reserveRelease.ReleasedCount;
+                var outcomes = ReserveRelease.Outcomes;
+                int released = ReserveRelease.ReleasedCount;
                 for (int i = 0; i < outcomes.Count; i++)
                 {
                     ReserveReleaseState.Outcome o = outcomes[i];
@@ -694,18 +805,61 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int before = IndexOfChild(previous, current[i].ChildId);
                     if (before < 0 || previous[before].Role != DirectChildRole.Reserve) continue;
                     DirectChildIntent released = current[i];
+                    // A reserve sent to guard a crossing carries a guard point; BC11's wing guard does not.
+                    string reason = released.HasGuardPoint ? "crossing-threat" : "flank-threat";
+                    // The crossing release names the crossing, the guard's place and the two times it was decided on (requirement-telemetry).
+                    int crossing = -1;
+                    double ownShift = 0.0, enemyArrival = 0.0;
+                    int held = 0, floor = 0;
+                    if (released.HasGuardPoint && ReserveRelease.TryCrossingOf(released.ChildId, out CrossingBinding binding))
+                    {
+                        crossing = binding.Link;
+                        ownShift = binding.OwnShiftAtRelease;
+                        held = binding.Held;
+                        floor = binding.Floor;
+                        for (int t = 0; t < _lastThreatCount; t++)
+                            if (_threatBuffer[t].Link == binding.Link) enemyArrival = _threatBuffer[t].EnemyAcross ? 0.0 : _threatBuffer[t].EnemyAtCrossing;
+                    }
+                    float guardX = released.Guard.X, guardZ = released.Guard.Z, guardHeading = released.Guard.Heading;
                     WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
                         WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
                         WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
                         "TacticalReserveRelease",
                         WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
                         ev => ev
-                            .WithDecision("TacticalReserveRelease", "flank-threat", "side=" + AllianceId + "|child=" + released.ChildId + "|role=" + released.Role)
+                            .WithDecision("TacticalReserveRelease", reason, "side=" + AllianceId + "|child=" + released.ChildId + "|role=" + released.Role)
                             .WithField("side", AllianceId)
                             .WithField("child", released.ChildId)
                             .WithField("role", released.Role.ToString())
                             .WithField("wingSector", released.AxisSector)
-                            .WithField("reason", "flank-threat"));
+                            .WithField("reason", reason)
+                            .WithField("crossing", crossing)
+                            .WithField("guardX", guardX)
+                            .WithField("guardZ", guardZ)
+                            .WithField("guardHeading", guardHeading)
+                            .WithField("ownShiftHours", ownShift)
+                            .WithField("enemyArrivalHours", enemyArrival)
+                            .WithField("held", held)
+                            .WithField("floor", floor)
+                            .WithField("reverted", false));
+                }
+                // A guard that stood last allocation and does not now: the threat stopped (or the binding ended), the child is a reserve again.
+                for (int i = 0; i < current.Count; i++)
+                {
+                    int before = IndexOfChild(previous, current[i].ChildId);
+                    if (before < 0 || !previous[before].HasGuardPoint || current[i].HasGuardPoint) continue;
+                    string childId = current[i].ChildId;
+                    WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                        WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                        WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                        "TacticalReserveRelease",
+                        WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                        ev => ev
+                            .WithDecision("TacticalReserveRelease", "crossing-threat", "side=" + AllianceId + "|child=" + childId + "|reverted")
+                            .WithField("side", AllianceId)
+                            .WithField("child", childId)
+                            .WithField("reason", "crossing-threat")
+                            .WithField("reverted", true));
                 }
             }
             catch (System.Exception ex)
@@ -1106,7 +1260,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public BattleStance CurrentBattleStance => _currentForceBalanceStance;
 
         /// <summary>
-        /// BC9: refreshed on every coordinator tick by ArmyPostureInputsRuntime.Refresh,
+        /// BC9: refreshed on every coordinator tick by ArmyPostureInputsRuntime.RefreshPickInputs (BC14: before every plan pick),
         /// independent of the reinforcement-opportunity doctrine flag, so the director,
         /// the doctrine assignment and the posture guard see a Defender as one.
         /// </summary>
@@ -1220,7 +1374,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
-                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents),
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents),
                 HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = ledger.CurrentDoctrineOrders;

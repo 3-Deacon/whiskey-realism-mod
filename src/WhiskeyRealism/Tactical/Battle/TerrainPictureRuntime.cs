@@ -50,7 +50,13 @@ namespace WhiskeyRealism.Tactical.Battle
 
         internal static void Step()
         {
-            if (_disabled || (_builder != null && _builder.Picture.Ready)) return;
+            if (_disabled) return;
+            // BC14: once the picture is Ready the same per-frame step builds the river regions behind it.
+            if (_builder != null && _builder.Picture.Ready)
+            {
+                RiverRegionsRuntime.Step(_builder.Picture);
+                return;
+            }
             int frame = UnityEngine.Time.frameCount;
             if (frame == _lastFrame) return;
             using (TelemetryPerf.Scope("tactical.terrain-picture.build", TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))

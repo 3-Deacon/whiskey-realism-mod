@@ -264,6 +264,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CommanderPersonality.cs" Link="Battle\CommanderPersonality.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningContracts.cs" Link="Battle\OpeningContracts.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningDetector.cs" Link="Battle\OpeningDetector.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\EnemySamples.cs" Link="Battle\EnemySamples.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\RiverRegions.cs" Link="Battle\RiverRegions.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CrossingWatch.cs" Link="Battle\CrossingWatch.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SingleLinkClusters.cs" Link="Battle\SingleLinkClusters.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningTerrain.cs" Link="Battle\OpeningTerrain.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PerceivedGroundLattice.cs" Link="Battle\PerceivedGroundLattice.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ExploitLifecycle.cs" Link="Battle\ExploitLifecycle.cs" />
@@ -293,6 +297,21 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SlicePressureBuilder.cs" Link="Battle\SlicePressureBuilder.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleRecon.cs" Link="Battle\BattleRecon.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\EnvelopmentManeuver.cs" Link="Orchestrator\Plays\EnvelopmentManeuver.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\LegCostCache.cs" Link="Orchestrator\Plays\LegCostCache.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.cs" Link="Orchestrator\Plays\ManeuverFeasibility.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Types.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Types.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Job.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Job.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Candidates.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Candidates.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Screen.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Screen.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Risk.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Risk.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.cs" Link="Orchestrator\Plays\FeasibilityLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.Monitor.cs" Link="Orchestrator\Plays\FeasibilityLedger.Monitor.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityLedger.Look.cs" Link="Orchestrator\Plays\FeasibilityLedger.Look.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ConfirmedLegs.cs" Link="Orchestrator\Plays\ConfirmedLegs.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityTick.cs" Link="Orchestrator\Plays\FeasibilityTick.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityTelemetry.cs" Link="Orchestrator\Plays\FeasibilityTelemetry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Monitor.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Monitor.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Defender.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Defender.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\FlankFacing.cs" Link="Battle\FlankFacing.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\DeployedReserveMemory.cs" Link="Orchestrator\DeployedReserveMemory.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\AvenueAnchors.cs" Link="Battle\AvenueAnchors.cs" />
@@ -419,6 +438,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyTickCycle.cs" Link="Orchestrator\ArmyTickCycle.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPlaybook.cs" Link="Orchestrator\TacticalPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalPlaybookCatalog.cs" Link="Orchestrator\TacticalPlaybookCatalog.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\SelectionReport.cs" Link="Orchestrator\SelectionReport.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericAggressivePlaybook.cs" Link="Orchestrator\Playbooks\GenericAggressivePlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericCautiousPlaybook.cs" Link="Orchestrator\Playbooks\GenericCautiousPlaybook.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Playbooks\GenericMethodicalPlaybook.cs" Link="Orchestrator\Playbooks\GenericMethodicalPlaybook.cs" />

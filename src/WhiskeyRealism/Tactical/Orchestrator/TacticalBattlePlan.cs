@@ -67,8 +67,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             int[] screeningSectors,
             float reserveCommitTriggerOdds,
             float ageSeconds,
-            int jitterSeed)
+            int jitterSeed,
+            bool mirrored = false)
         {
+            Mirrored = mirrored;
             PlanId = planId;
             Phase = phase;
             MainEffortSector = mainEffortSector;
@@ -101,14 +103,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float AgeSeconds { get; }
         public int JitterSeed { get; }
 
+        /// <summary>
+        /// BC14 requirement-selected-side: the feasibility evaluation scored this plan on its mirrored side (every rect's lateral offset
+        /// negated), so the play executor projects the template mirrored from activation. False for every plan picked without a ledger.
+        /// </summary>
+        public bool Mirrored { get; }
+
         public TacticalBattlePlan WithPhase(BattlePhase phase) =>
-            new TacticalBattlePlan(PlanId, phase, MainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, 0f, JitterSeed);
+            new TacticalBattlePlan(PlanId, phase, MainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, 0f, JitterSeed, Mirrored);
 
         public TacticalBattlePlan WithReserveCommitTriggerOdds(float reserveCommitTriggerOdds) =>
-            new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, reserveCommitTriggerOdds, AgeSeconds, JitterSeed);
+            new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, reserveCommitTriggerOdds, AgeSeconds, JitterSeed, Mirrored);
 
         public TacticalBattlePlan WithMainEffortSector(int mainEffortSector) =>
-            new TacticalBattlePlan(PlanId, Phase, mainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, AgeSeconds, JitterSeed);
+            new TacticalBattlePlan(PlanId, Phase, mainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, AgeSeconds, JitterSeed, Mirrored);
+
+        public TacticalBattlePlan WithMirrored(bool mirrored) =>
+            new TacticalBattlePlan(PlanId, Phase, MainEffortSector, FixingSectors, ScreeningSectors, ReserveCommitTriggerOdds, AgeSeconds, JitterSeed, mirrored);
 
         private static float Sanitize(float v)
         {

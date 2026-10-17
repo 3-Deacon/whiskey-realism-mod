@@ -97,7 +97,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // The W&L player: the player's own command, a CIC side and the map-group player's group are never moved or ordered (the
     // allocator gives the map-group player's group no role the mover sends: it is never mass, and outside the mass a formation holds,
     // smoke amendments 2026-10-16 D3); the AI group above a player below map level is moved as any AI formation (stage F's
-    // MoveUnitTo Postfix dispatches the march).
+    // MoveUnitTo Postfix dispatches the march; the player it carries is sent no order).
     internal static class CampaignMover
     {
         // Within this of the target, or a final waypoint this close to it, the formation is there or already underway.

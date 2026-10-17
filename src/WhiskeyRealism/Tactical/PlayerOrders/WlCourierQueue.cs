@@ -26,11 +26,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // What the order is for, for the condition lines under vanilla's text (Whiskey origins).
         public OrderIntentKind Kind;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
-        // instance id does not survive a save), the commander shown as issuer, and whether the zone shows.
+        // instance id does not survive a save), and the commander shown as issuer.
         public string UnitName;
         public int UnitCommanderId;
         public int IssuerCommanderId;
-        public bool ShowZone;
         // Campaign entries: the player's command the order was queued for, as a key that survives a reload (the
         // command unit's GameObject name and the chosen commander id); null = not known (an old sidecar). An
         // order never rides on to a different command.

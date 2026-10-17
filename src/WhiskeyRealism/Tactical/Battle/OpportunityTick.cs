@@ -292,7 +292,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (e.TargetObservation >= 0 && FindObservation(s, e.TargetObservation, out EnemyObservation target))
             {
                 input.HasTarget = true;
-                input.TargetPerceived = target.State == ObservationState.Visible || target.Confidence01 >= OpeningDetector.RememberedMinConfidence;
+                input.TargetPerceived = target.State == ObservationState.Visible || target.Confidence01 >= EnemySamples.RememberedMinConfidence;
                 input.TargetX = target.X;
                 input.TargetZ = target.Z;
                 if (target.State == ObservationState.Visible && _detector.TryTargetRouted(target.InstanceId, out bool routed)) input.TargetRouted = routed;
@@ -335,8 +335,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int k = 0; k < s.ObservationCount; k++)
             {
                 ref EnemyObservation o = ref s.Observations[k];
-                if (o.IsReinforcement || o.UnitTyp < 0 || o.UnitTyp > 2) continue;
-                if (o.State != ObservationState.Visible && o.Confidence01 < OpeningDetector.RememberedMinConfidence) continue;
+                if (!EnemySamples.Accepts(in o)) continue;
                 float dx = o.X - x, dz = o.Z - z;
                 float d2 = dx * dx + dz * dz;
                 if (d2 < best2) best2 = d2;
@@ -353,8 +352,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int k = 0; k < s.ObservationCount; k++)
             {
                 ref EnemyObservation o = ref s.Observations[k];
-                if (o.IsReinforcement || o.UnitTyp < 0 || o.UnitTyp > 2) continue;
-                if (o.State != ObservationState.Visible && o.Confidence01 < OpeningDetector.RememberedMinConfidence) continue;
+                if (!EnemySamples.Accepts(in o)) continue;
                 float dx = o.X - x, dz = o.Z - z;
                 if (dx * dx + dz * dz > r2) continue;
                 enemy += o.State == ObservationState.Visible ? o.Strength * o.Morale : o.Strength * o.Confidence01 * o.Morale;

@@ -433,6 +433,10 @@ The Whiskey play-template ↔ Scourge play translation:
 
 The 18 Whiskey templates correspond one-to-one with the 18 BattlePlanId archetypes (after the 2026-05-23 generic rename — `LeeEnvelopment → DoubleEnvelopment` etc.). Offensive templates only fire when stance allows attack; defensive templates only on Defender stance.
 
+### Plays are screened before they are chosen (BC14, 2026-10-16)
+
+Scourge's `PLAYFTime` timing is a fixed offset a play's rect waits before it moves, and a play is picked by the commander's fit and the battle type without asking whether the ground lets its wings arrive. Whiskey's BC14 puts the question first: `ManeuverFeasibility` times every candidate over the map's rivers and crossings as the side perceives them, and `Select` skips a play it finds impossible and subtracts a penalty from the risky ones (an army that divides beside a river it cannot cross in time is beaten in detail: the Snavely's Ford and Burnside's bridge lessons). The fixed `PLAYFTime`-style offset becomes an arrival-synchronized release: each wing's release is computed so that the wings and the fix strike together (`PlanReleases`), BC11's maneuver holds until the ledger's planned release and marches through the crossing the ledger chose. A Defender gets the interior-lines answer instead of a maneuver: the evaluation runs from the enemy's side against the Defender's flank and a reserve is released to guard the crossing the enemy reaches first.
+
 ### Division think loop: local opportunities now exist (BC13, 2026-10-15)
 
 Scourge of War's division AI re-thinks locally every cycle and takes an opening (a gap, a shaken unit, an unanchored flank) when the commander's temperament allows it. Whiskey's tactical stack had only the army-level plan until BC13: nothing at division level reacted to what the line saw. `OpportunityTick` adds that think loop, fog-honest (Visible/Remembered rows and a perceived-ground lattice only), per deciding commander, with a personality-weighted odds/reach/risk decision, a bounded exploit and an abort chain. See [`tactical-orchestrator.md`](tactical-orchestrator.md) § Battle Core (Commander opportunity).

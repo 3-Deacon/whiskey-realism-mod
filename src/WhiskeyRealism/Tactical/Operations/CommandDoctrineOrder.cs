@@ -32,9 +32,15 @@ namespace WhiskeyRealism.Tactical.Operations
             string reason,
             float maneuverHeading = -1f,
             bool maneuverHold = false,
-            int exploitId = -1)
+            int exploitId = -1,
+            bool hasVia = false,
+            float viaX = 0f,
+            float viaZ = 0f)
         {
             ExploitId = exploitId;
+            HasVia = hasVia && IsFinite(viaX) && IsFinite(viaZ);
+            _viaX = HasVia ? viaX : 0f;
+            _viaZ = HasVia ? viaZ : 0f;
             ManeuverHeading = maneuverHeading >= 0f && IsFinite(maneuverHeading) ? maneuverHeading % 360f : -1f;
             ManeuverHold = maneuverHold;
             NodeId = SanitizeText(nodeId, "node-unknown");
@@ -85,6 +91,21 @@ namespace WhiskeyRealism.Tactical.Operations
         /// follow orders); -1 for every ordinary doctrine order.
         /// </summary>
         public int ExploitId { get; }
+
+        private readonly float _viaX;
+        private readonly float _viaZ;
+
+        /// <summary>
+        /// BC14, additive: the order carries a crossing via (the first crossing of the maneuver leg's chosen route). False is none,
+        /// so default(CommandDoctrineOrder), the "no order" value, carries none.
+        /// </summary>
+        public bool HasVia { get; }
+
+        /// <summary>The via's world x; NaN when there is no via.</summary>
+        public float ViaX => HasVia ? _viaX : float.NaN;
+
+        /// <summary>The via's world z; NaN when there is no via.</summary>
+        public float ViaZ => HasVia ? _viaZ : float.NaN;
 
         /// <summary>BC11: the order is an EnvelopmentManeuver hold (stand where you are, no target to plan a route to).</summary>
         public bool ManeuverHold { get; }
@@ -146,7 +167,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 Reason,
                 ManeuverHeading,
                 ManeuverHold,
-                ExploitId);
+                ExploitId,
+                HasVia, _viaX, _viaZ);
         }
 
         public CommandDoctrineOrder WithTask(CommandTaskType task, string reason)
@@ -170,7 +192,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 reason,
                 ManeuverHeading,
                 ManeuverHold,
-                ExploitId);
+                ExploitId,
+                HasVia, _viaX, _viaZ);
         }
 
         /// <summary>
@@ -199,7 +222,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 reason,
                 maneuverHeading,
                 maneuverHold,
-                ExploitId);
+                ExploitId,
+                HasVia, _viaX, _viaZ);
         }
 
         /// <summary>BC13: the same order marked as exploit <paramref name="exploitId"/>'s (see <see cref="ExploitId"/>).</summary>
@@ -224,7 +248,37 @@ namespace WhiskeyRealism.Tactical.Operations
                 Reason,
                 ManeuverHeading,
                 ManeuverHold,
-                exploitId);
+                exploitId,
+                HasVia, _viaX, _viaZ);
+        }
+
+        /// <summary>
+        /// BC14 requirement-crossing-via: the same order with a crossing via. A March or an Attack carrying a via is issued as the
+        /// two-leg move (BC10's via0). Every other field is forwarded.
+        /// </summary>
+        public CommandDoctrineOrder WithVia(float x, float z)
+        {
+            return new CommandDoctrineOrder(
+                NodeId,
+                Role,
+                Task,
+                ObjectiveId,
+                PrimaryTarget,
+                SupportTarget,
+                FallbackTarget,
+                AllowedIdle,
+                MinCommitUntilSeconds,
+                IssuedAtSeconds,
+                Confidence01,
+                Sop,
+                Delivery,
+                ParentNodeId,
+                CourierIntervalSeconds,
+                Reason,
+                ManeuverHeading,
+                ManeuverHold,
+                ExploitId,
+                true, x, z);
         }
 
         private static string SanitizeText(string value, string fallback)
@@ -259,8 +313,13 @@ namespace WhiskeyRealism.Tactical.Operations
     public readonly struct ManeuverNodeEntry
     {
         public ManeuverNodeEntry(string nodeId, WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase, CommandTaskType task,
-            bool hasTarget, float targetX, float targetZ, float heading, string reason)
+            bool hasTarget, float targetX, float targetZ, float heading, string reason, bool hasVia = false, float viaX = 0f, float viaZ = 0f,
+            bool isGuard = false)
         {
+            IsGuard = isGuard;
+            HasVia = hasVia;
+            ViaX = viaX;
+            ViaZ = viaZ;
             NodeId = nodeId ?? string.Empty;
             Phase = phase;
             Task = task;
@@ -279,6 +338,17 @@ namespace WhiskeyRealism.Tactical.Operations
         public float TargetZ { get; }
         public float Heading { get; }
         public string Reason { get; }
+
+        /// <summary>BC14: the crossing the node's move is routed through (requirement-crossing-via); HasVia false is none.</summary>
+        public bool HasVia { get; }
+        public float ViaX { get; }
+        public float ViaZ { get; }
+
+        /// <summary>
+        /// BC14: the entry is a reserve's crossing guard (requirement-defender-crossing-release), not a BC11 maneuver: the doctrine build applies it
+        /// to a Defender's node too (a guard holds ground; it attacks no one).
+        /// </summary>
+        public bool IsGuard { get; }
         public bool Holds => Phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Hold;
     }
 

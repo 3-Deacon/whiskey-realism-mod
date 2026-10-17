@@ -300,7 +300,7 @@ internal static partial class CommanderOpportunityTests
         AssertContains(src, "_army.ReserveRelease.CrisisReleased", "the runtime world reads the allocator's published crisis releases");
         string army = ReadSrc("Tactical/Orchestrator/ArmyOrchestrator.cs");
         AssertContains(army, "exploiting[i] = instanceId != 0 && exploits.IsExploiting(instanceId);", "the allocator is told which children have a live exploit");
-        AssertContains(army, "_reserveRelease.Clear();", "a plan change clears the release state");
+        AssertContains(army, "ReserveRelease.Clear();", "a plan change clears the release state");
         BattleScope.ResetAll();
     }
 

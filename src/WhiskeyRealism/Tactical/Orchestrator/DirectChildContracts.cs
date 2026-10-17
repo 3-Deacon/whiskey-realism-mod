@@ -118,6 +118,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
+    /// BC14 requirement-defender-crossing-release: where a reserve released to guard a crossing stands and which way it faces
+    /// (the posture producer reads it as the GuardFlank target and heading). HasValue false is none.
+    /// </summary>
+    public readonly struct GuardPoint
+    {
+        public GuardPoint(float x, float z, float heading)
+        {
+            HasValue = true;
+            X = x;
+            Z = z;
+            Heading = heading;
+        }
+
+        public bool HasValue { get; }
+        public float X { get; }
+        public float Z { get; }
+        public float Heading { get; }
+    }
+
+    /// <summary>
     /// Per-direct-child intent produced by DirectChildAllocator (ArmyOrchestrator.CurrentDirectChildIntents).
     /// Cascaded to consumers (#42 gate, future O4 division attach).
     /// </summary>
@@ -135,8 +155,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float supportPriority01,
             TacticalIntentModel enemyIntent,
             WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec maneuver = default(WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec),
-            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown)
+            WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown,
+            GuardPoint guardPoint = default(GuardPoint))
         {
+            Guard = guardPoint;
             Maneuver = maneuver;
             ZoneRectKind = zoneRectKind;
             ChildId = childId ?? string.Empty;
@@ -173,6 +195,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// BC10's deployed-reserve rule). The envelopment wings wait only on a Center child whose role really is its zone's.
         /// </summary>
         public WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind ZoneRectKind { get; }
+
+        /// <summary>BC14: the guard point of a reserve released to a threatened crossing (none for every other child).</summary>
+        public GuardPoint Guard { get; }
+
+        public bool HasGuardPoint => Guard.HasValue;
+        public float GuardX => Guard.X;
+        public float GuardZ => Guard.Z;
+        public float GuardHeading => Guard.Heading;
 
         private static float Clamp01(float v)
         {

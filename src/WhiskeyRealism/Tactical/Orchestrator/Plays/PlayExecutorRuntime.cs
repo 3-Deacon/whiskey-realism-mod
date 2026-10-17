@@ -45,6 +45,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private static readonly IReadOnlyList<CorpsAssignment>[] _lastResult = new IReadOnlyList<CorpsAssignment>[SideCount];
         private static readonly double[] _lastComputeHours = { -1.0, -1.0 };
         private static readonly BattlePlanId[] _lastComputePlan = { BattlePlanId.Unknown, BattlePlanId.Unknown };
+        private static readonly bool[] _lastComputeMirrored = new bool[SideCount];
 
         // ---- Pooled scratch buffers (per-side; cleared per call) ----
         private static readonly List<float>[] _ownXsScratch = { new List<float>(64), new List<float>(64) };
@@ -69,18 +70,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <param name="frontAxis">The side's front axis, the play's heading when
         /// the side sees no enemy (PlayAnchor.EnemyAnchor).</param>
         /// <param name="directChildIds">The side's direct children ("child-&lt;id&gt;"): only they are offered a rect (BC11).</param>
+        /// <param name="mirrored">BC14 requirement-selected-side: the plan's published side. The template is projected mirrored, in the frame the
+        /// feasibility evaluation used, so each rect goes to the child the evaluation timed.</param>
         public static IReadOnlyList<CorpsAssignment> ComputeZoneAssignments(
             int allianceId,
             BattlePlanId planId,
             int commandHierarchyShift,
             int childCount,
             TacticalFrontAxis frontAxis,
-            IReadOnlyList<string> directChildIds)
+            IReadOnlyList<string> directChildIds,
+            bool mirrored)
         {
             using (TelemetryPerf.Scope("tactical.play-executor.zone-assignments",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds);
+                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds, mirrored);
             }
         }
 
@@ -90,7 +94,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int commandHierarchyShift,
             int childCount,
             TacticalFrontAxis frontAxis,
-            IReadOnlyList<string> directChildIds)
+            IReadOnlyList<string> directChildIds,
+            bool mirrored)
         {
             try
             {
@@ -103,7 +108,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // same plan, reuse the cache without reading the snapshot.
                 double now = TacticalDoctrineTime.NowBattleHours;
                 var cachedEarly = _lastResult[allianceId];
-                if (!PlayAnchor.RecomputeDue(cachedEarly != null, _lastComputePlan[allianceId] == planId,
+                if (!PlayAnchor.RecomputeDue(cachedEarly != null, _lastComputePlan[allianceId] == planId && _lastComputeMirrored[allianceId] == mirrored,
                         _lastComputeHours[allianceId], now))
                     return cachedEarly;
 
@@ -131,7 +136,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // Build a per-side signature from plan + bucketed centroids +
                 // bucketed corps positions. If unchanged since last call, return
                 // the cached result without recomputing projection/assignment.
-                string sig = BuildSignature(planId, armyX, armyZ, enemyX, enemyZ, corpsPositions);
+                string sig = BuildSignature(planId, mirrored, armyX, armyZ, enemyX, enemyZ, corpsPositions);
                 string lastSig = _lastSignature[allianceId];
                 var cached = _lastResult[allianceId];
                 if (cached != null && string.Equals(sig, lastSig, StringComparison.Ordinal))
@@ -151,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 TerrainLine crest = planId == BattlePlanId.ReverseSlopeDefense
                     ? ArmyEvidenceBuilder.CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), frontAxis)
                     : default(TerrainLine);
-                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest);
+                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest, mirrored);
 
                 // Objectives are not currently surfaced to this layer; pass
                 // empty so PlayCorpsAssignment falls back to closest-corps.
@@ -164,6 +169,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _lastResult[allianceId] = assignments;
                 _lastComputeHours[allianceId] = now;
                 _lastComputePlan[allianceId] = planId;
+                _lastComputeMirrored[allianceId] = mirrored;
                 EmitPlayExecutionTelemetry(allianceId, planId, template, assignments, armyX, armyZ, enemyX, enemyZ, frontage);
                 return assignments;
             }
@@ -178,6 +184,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static string BuildSignature(
             BattlePlanId planId,
+            bool mirrored,
             float armyX, float armyZ,
             float enemyX, float enemyZ,
             List<CorpsPosition> corpsPositions)
@@ -185,7 +192,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             // Bucket positions to PositionBucketMeters so jitter doesn't
             // invalidate the cache. Stable ordering: sort corps by ChildId.
             var sb = new System.Text.StringBuilder();
-            sb.Append((int)planId).Append('|');
+            sb.Append((int)planId).Append(mirrored ? 'M' : 'A').Append('|');
             sb.Append((int)(armyX / PositionBucketMeters)).Append(',').Append((int)(armyZ / PositionBucketMeters)).Append('|');
             sb.Append((int)(enemyX / PositionBucketMeters)).Append(',').Append((int)(enemyZ / PositionBucketMeters)).Append('|');
             // Sort corps for stable ordering.
@@ -265,6 +272,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 _lastResult[i] = null;
                 _lastComputeHours[i] = -1.0;
                 _lastComputePlan[i] = BattlePlanId.Unknown;
+                _lastComputeMirrored[i] = false;
             }
             _lastPlayExecutionTelemetryAt.Clear();
             for (int i = 0; i < SideCount; i++) _maneuvers[i].Clear();
@@ -284,10 +292,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public readonly Dictionary<string, EnvelopmentManeuver.MarchRouteCheck> MarchChecks =
                 new Dictionary<string, EnvelopmentManeuver.MarchRouteCheck>(StringComparer.Ordinal);
             public string PlanChildId;
+            // BC14 requirement-wing-abandon-replan: the enveloping children BC11 abandoned under this plan, in the order it did. The ledger
+            // keeps one writer (the coordinator's heavy path), so BC11 only queues them here and the heavy path drains the queue into the
+            // monitor's facts on its next run.
+            public readonly List<string> Abandoned = new List<string>(4);
+            // The ledger's predicted arrival and march hours of each enveloping child, latched when its March began (the Turn row compares with them).
+            public readonly Dictionary<string, (double arrival, double march)> Predicted = new Dictionary<string, (double, double)>(StringComparer.Ordinal);
 
             public void Clear()
             {
                 Plan = BattlePlanId.Unknown;
+                Abandoned.Clear();
+                Predicted.Clear();
                 ActivatedHours = -1.0;
                 CenterContactHours = -1.0;
                 States.Clear();
@@ -324,7 +340,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             IReadOnlyList<DirectChildIntent> intents,
             IReadOnlyList<DirectChildEvidence> evidence,
             TacticalFrontAxis axis,
-            BattleStance stance)
+            BattleStance stance,
+            IFeasibilityLookup feasibility = null)
         {
             using (TelemetryPerf.Scope("tactical.envelopment", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1.0))
             {
@@ -371,7 +388,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     side.Orders.Clear();
                     ExploitTable exploits = ExploitTable.ForAlliance(allianceId);
                     // One route plan per side and step, served fairly (see PickRoutePlanChild).
-                    side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now);
+                    side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now, planId, feasibility);
                     for (int i = 0; i < intents.Count; i++)
                     {
                         ManeuverSpec spec = intents[i].Maneuver;
@@ -386,10 +403,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         bool wasMirrored = state.Mirrored;
 
                         ManeuverInput input = BuildInput(snapshot, grid, axis, spec, intents[i].ChildId, index, i < evidence.Count ? evidence[i].OwnStrengthBucket : 1,
-                            state.Mirrored, state.OutflankReached, templateHasCenter, envelopRects == 1, side, enemyX, enemyZ, stance, now);
+                            state.Mirrored, state.OutflankReached, templateHasCenter, envelopRects == 1, side, enemyX, enemyZ, stance, now,
+                            planId, feasibility, in state);
                         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
                         side.States[intents[i].ChildId] = state;
                         side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ));
+                        if (state.Phase == ManeuverPhase.Abandoned && before != ManeuverPhase.Abandoned && spec.Envelops) side.Abandoned.Add(intents[i].ChildId);
+                        if (state.Phase == ManeuverPhase.March && before != ManeuverPhase.March)
+                        {
+                            if (feasibility != null && feasibility.TryPredictedArrival(intents[i].ChildId, out double arrival, out double predictedMarch))
+                                side.Predicted[intents[i].ChildId] = (arrival, predictedMarch);
+                            if (state.HasVia) FeasibilityTelemetry.FirstVia(FeasibilityRuntime.StateAt(allianceId, state.ViaX, state.ViaZ));
+                        }
                         if (state.Phase != before || state.Mirrored != wasMirrored) EmitEnvelopment(allianceId, planId, intents[i].ChildId, order, state, input);
                     }
                     return side.Orders;
@@ -422,6 +447,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return n;
         }
 
+        /// <summary>BC14: BC11's phase for the side's direct child (None before its maneuver starts), the monitor's read of how far each wing has got.</summary>
+        internal static ManeuverPhase PhaseOf(int allianceId, string childId)
+        {
+            if (allianceId < 0 || allianceId >= SideCount || childId == null) return ManeuverPhase.None;
+            return _maneuvers[allianceId].States.TryGetValue(childId, out ManeuverState state) ? state.Phase : ManeuverPhase.None;
+        }
+
+        /// <summary>BC14: the child is past its Hold (marching, turning or attacking): its order delay was paid when it was released.</summary>
+        internal static bool IsMoving(int allianceId, string childId)
+        {
+            ManeuverPhase phase = PhaseOf(allianceId, childId);
+            return phase == ManeuverPhase.March || phase == ManeuverPhase.Turn || phase == ManeuverPhase.Attack;
+        }
+
+        /// <summary>
+        /// BC14 requirement-wing-abandon-replan: moves the enveloping children BC11 abandoned since the last call into <paramref name="into"/> (after
+        /// <paramref name="count"/> entries, as many as fit) and returns the new count. The ledger's heavy path is the one caller.
+        /// </summary>
+        internal static int DrainAbandoned(int allianceId, string[] into, int count)
+        {
+            if (allianceId < 0 || allianceId >= SideCount) return count;
+            List<string> queue = _maneuvers[allianceId].Abandoned;
+            int taken = 0;
+            while (taken < queue.Count && count < into.Length) into[count++] = queue[taken++];
+            queue.RemoveRange(0, taken);
+            return count;
+        }
+
         // Children still maneuvering when their plan changed: one Abandoned row each (smoke item 2.28, reason plan-changed).
         private static void EmitPlanChanged(int allianceId, SideManeuvers side)
         {
@@ -449,7 +502,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static ManeuverInput BuildInput(BattleSnapshot snapshot, BattleTerrainGrid grid, TacticalFrontAxis axis, ManeuverSpec spec, string childId, int index,
             int strengthBucket, bool mirrored, bool outflankReached, bool templateHasCenter, bool canMirror, SideManeuvers side,
-            float enemyX, float enemyZ, BattleStance stance, double now)
+            float enemyX, float enemyZ, BattleStance stance, double now, BattlePlanId planId, IFeasibilityLookup feasibility, in ManeuverState state)
         {
             ref UnitRecord child = ref snapshot.Own[index];
             RectAnchor(in axis, spec, mirrored, out float anchorX, out float anchorZ);
@@ -462,6 +515,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ChildX = child.X, ChildZ = child.Z, ChildStrengthBucket = strengthBucket,
                 EnemyAnchorX = enemyX, EnemyAnchorZ = enemyZ, CanMirror = canMirror,
                 HeightDifferenceAnchored = GamePrefs.heightdifferencetoenemyunitanchored, Stance = stance, NowHours = now,
+                HoldsForRelease = spec.HoldsForRelease,
             };
             input.ChildInContact = snapshot.ClosestVisibleEnemy(index, out float contactDistance) >= 0 && contactDistance <= EnvelopmentManeuver.ContactMeters;
             // SetGroupFormation paths the HQ groupdepth + groupunitdistancetoback behind the waypoint (92044, 92058).
@@ -487,6 +541,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
             }
 
+            // BC14: the ledger's release, time budget and vias, for a child of the plan the ledger selected and still on the ledger's side
+            // (BC11's own mirrored try, or a plan the ledger does not know, leaves BC11's rule as it is).
+            LedgerPlan(feasibility, planId, childId, mirrored, in state, in input, out PlannedLeg planned);
+            if (planned.HasRelease)
+            {
+                input.HasPlannedRelease = true;
+                input.PlannedReleaseHours = planned.ReleaseHours;
+                input.HasTimeBudget = planned.HasBudget;
+                input.TimeBudgetHours = planned.TimeBudgetHours;
+                input.HasVia = planned.HasVia;
+                input.ViaX = planned.ViaX;
+                input.ViaZ = planned.ViaZ;
+                input.HasAttackVia = planned.HasAttackVia;
+                input.AttackViaX = planned.AttackViaX;
+                input.AttackViaZ = planned.AttackViaZ;
+            }
+            input.ViaPassed = planned.ViaPassed;
+            input.AttackViaPassed = planned.AttackViaPassed;
+
             // FlankMove's checks (116929-117108) on the inward leg (anchor to the line end) and the march leg.
             float inwardX = input.HasEnemyExtent ? endX : enemyX, inwardZ = input.HasEnemyExtent ? endZ : enemyZ;
             input.AnchorHeight = HeightAt(anchorX, anchorZ);
@@ -494,29 +567,93 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             input.MaxCorridorEnemyHeight = maxHeight;
             if (grid != null)
             {
-                int n = grid.SampleLine(anchorX, anchorZ, inwardX, inwardZ, EnvelopmentManeuver.InwardStepMeters, _riverSamples);
-                input.InwardLegHitsRiver = !EnvelopmentManeuver.InwardLegClear(_riverSamples, n);
+                // With an attack via the inward leg is two sub-legs through it; the via's own footprint is not a river (requirement-crossing-via).
+                input.InwardLegHitsRiver = EnvelopmentManeuver.InwardLegHitsRiver(grid, anchorX, anchorZ, planned.CheckAttackVia, planned.CheckAttackViaX,
+                    planned.CheckAttackViaZ, inwardX, inwardZ, RiverRegions.CrossingLinkMeters, _riverSamples);
                 // A frozen river carries units: nothing to judge. Otherwise the route result (or its absence) decides, see MarchRouteStatus.
                 if (grid.Frozen) input.MarchRouteKnown = true;
-                else MarchRouteStatus(side, childId, grid, in child, anchorX, anchorZ, now, snapshot.TickId, ref input);
+                else MarchRouteStatus(side, childId, grid, in child, anchorX, anchorZ, planned.CheckVia, planned.CheckViaX, planned.CheckViaZ, now, snapshot.TickId, ref input);
             }
             else input.MarchRouteKnown = true;   // no terrain grid: no march-leg verdict to wait for
             return input;
         }
 
-        private static void RectAnchor(in TacticalFrontAxis axis, ManeuverSpec spec, bool mirrored, out float x, out float z)
+        // What the ledger says of one child this step (requirement-synchronized-release, requirement-crossing-via): the release, the budget and the
+        // vias that start the March, and the vias the checks use now (the latched ones once the March began).
+        private struct PlannedLeg
         {
-            x = spec.AnchorX;
-            z = spec.AnchorZ;
-            if (mirrored) EnvelopmentManeuver.MirrorAcrossAxis(in axis, spec.AnchorX, spec.AnchorZ, out x, out z);
+            public bool HasRelease, HasBudget, HasVia, HasAttackVia, ViaPassed, AttackViaPassed;
+            public double ReleaseHours, TimeBudgetHours;
+            public float ViaX, ViaZ, AttackViaX, AttackViaZ;
+            public bool CheckVia, CheckAttackVia;
+            public float CheckViaX, CheckViaZ, CheckAttackViaX, CheckAttackViaZ;
         }
+
+        private static void LedgerPlan(IFeasibilityLookup feasibility, BattlePlanId planId, string childId, bool mirrored, in ManeuverState state,
+            in ManeuverInput input, out PlannedLeg planned)
+        {
+            planned = default(PlannedLeg);
+            // Once the March began the latched vias are the child's; the ledger's recomputed ones no longer apply.
+            bool latched = state.Phase == ManeuverPhase.March || state.Phase == ManeuverPhase.Turn || state.Phase == ManeuverPhase.Attack;
+            if (latched)
+            {
+                planned.CheckVia = state.HasVia;
+                planned.CheckViaX = state.ViaX;
+                planned.CheckViaZ = state.ViaZ;
+                planned.CheckAttackVia = state.HasAttackVia;
+                planned.CheckAttackViaX = state.AttackViaX;
+                planned.CheckAttackViaZ = state.AttackViaZ;
+            }
+            if (feasibility != null && !mirrored && feasibility.SelectedPlan == planId
+                && feasibility.TryPlannedRelease(childId, out double release, out double budget, out float vx, out float vz, out float avx, out float avz))
+            {
+                // A fix in contact is never held: it has no planned release (a fix that is engaged is released at once).
+                bool fixInContact = input.HoldsForRelease && input.ChildInContact;
+                bool beforeMarch = state.Phase == ManeuverPhase.None || state.Phase == ManeuverPhase.Hold;
+                planned.HasRelease = !fixInContact && beforeMarch;
+                planned.ReleaseHours = release;
+                planned.HasBudget = budget > 0.0;
+                planned.TimeBudgetHours = budget;
+                planned.HasVia = !float.IsNaN(vx) && !float.IsNaN(vz);
+                planned.ViaX = vx;
+                planned.ViaZ = vz;
+                planned.HasAttackVia = !float.IsNaN(avx) && !float.IsNaN(avz);
+                planned.AttackViaX = avx;
+                planned.AttackViaZ = avz;
+                if (!latched)
+                {
+                    planned.CheckVia = planned.HasVia;
+                    planned.CheckViaX = vx;
+                    planned.CheckViaZ = vz;
+                    planned.CheckAttackVia = planned.HasAttackVia;
+                    planned.CheckAttackViaX = avx;
+                    planned.CheckAttackViaZ = avz;
+                }
+            }
+
+            // The child already stands in the far region of a via: the order carries it no more and the checks skip it.
+            RiverRegions regions = RiverRegionsRuntime.Ready();
+            if (regions != null && feasibility != null && feasibility.TryViaRegions(childId, out int farRegion, out int attackFarRegion))
+            {
+                int here = regions.RegionAt(input.ChildX, input.ChildZ);
+                planned.ViaPassed = farRegion >= 0 && here == farRegion;
+                planned.AttackViaPassed = attackFarRegion >= 0 && here == attackFarRegion;
+                if (planned.ViaPassed) planned.CheckVia = false;
+                if (planned.AttackViaPassed) planned.CheckAttackVia = false;
+            }
+        }
+
+        // The rect anchor on the side the child is on (EnvelopmentManeuver.AnchorFor: the authored anchor after the one mirrored try of a plan
+        // the ledger projected mirrored).
+        private static void RectAnchor(in TacticalFrontAxis axis, ManeuverSpec spec, bool mirrored, out float x, out float z)
+            => EnvelopmentManeuver.AnchorFor(in axis, in spec, mirrored, out x, out z);
 
         // Which enveloping child gets this step's single route plan, in the fair order EnvelopmentManeuver.PickRoutePlan defines: a
         // child with no route result for its current anchor goes before any re-check. N enveloping children therefore each have
         // their first route within N steps (DoubleEnvelopment's two wings: by the second step). Children that are done (Attack,
         // Abandoned, Released), a Defender's, and a frozen map's need none.
         private static string PickRoutePlanChild(SideManeuvers side, BattleSnapshot snapshot, BattleTerrainGrid grid, IReadOnlyList<DirectChildIntent> intents,
-            TacticalFrontAxis axis, BattleStance stance, double now)
+            TacticalFrontAxis axis, BattleStance stance, double now, BattlePlanId planId, IFeasibilityLookup feasibility)
         {
             if (grid == null || grid.Frozen || stance == BattleStance.Defender) return null;
             int n = 0;
@@ -528,8 +665,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 side.States.TryGetValue(intents[i].ChildId, out ManeuverState state);
                 if (state.Phase == ManeuverPhase.Attack || state.Phase == ManeuverPhase.Abandoned || state.Phase == ManeuverPhase.Released) continue;
                 RectAnchor(in axis, spec, state.Mirrored, out float anchorX, out float anchorZ);
+                MarchVia(feasibility, planId, intents[i].ChildId, in state, snapshot, out bool hasVia, out float viaX, out float viaZ);
                 side.MarchChecks.TryGetValue(intents[i].ChildId, out EnvelopmentManeuver.MarchRouteCheck last);
-                last = EnvelopmentManeuver.CheckForAnchor(in last, anchorX, anchorZ);
+                last = EnvelopmentManeuver.CheckForLeg(in last, anchorX, anchorZ, hasVia, viaX, viaZ);
                 if (n == _planChecks.Length)
                 {
                     Array.Resize(ref _planChecks, n * 2);
@@ -537,7 +675,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     Array.Resize(ref _planIds, n * 2);
                 }
                 _planChecks[n] = last;
-                _planNeeds[n] = EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ);
+                _planNeeds[n] = EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ, hasVia, viaX, viaZ);
                 _planIds[n] = intents[i].ChildId;
                 n++;
             }
@@ -545,17 +683,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return pick < 0 ? null : _planIds[pick];
         }
 
-        // The march leg's route result for this child: the stored one while it holds for this anchor, re-planned when the fair pick
-        // named this child. No result for the anchor means MarchRouteKnown stays false and the state machine keeps the child where it
-        // is (a Hold waits); a straight line is never sampled in its place.
+        // The via the march leg's route check runs through this step: the latched one once the March began, else the ledger's, and none once the
+        // child stands in its far region.
+        private static void MarchVia(IFeasibilityLookup feasibility, BattlePlanId planId, string childId, in ManeuverState state, BattleSnapshot snapshot,
+            out bool hasVia, out float viaX, out float viaZ)
+        {
+            var probe = default(ManeuverInput);
+            int index = snapshot.IndexOfOwn(ParseChildInstanceId(childId));
+            if (index >= 0)
+            {
+                probe.ChildX = snapshot.Own[index].X;
+                probe.ChildZ = snapshot.Own[index].Z;
+            }
+            LedgerPlan(feasibility, planId, childId, state.Mirrored, in state, in probe, out PlannedLeg planned);
+            hasVia = planned.CheckVia;
+            viaX = planned.CheckViaX;
+            viaZ = planned.CheckViaZ;
+        }
+
+        // The march leg's route result for this child: the stored one while it holds for this anchor and via, re-planned when the fair pick
+        // named this child. No result for the leg means MarchRouteKnown stays false and the state machine keeps the child where it
+        // is (a Hold waits); a straight line is never sampled in its place. A leg through a crossing via is two queries (child to via, via to
+        // anchor), one per step on the same one-per-step budget; the leg has a result when both halves have one.
         private static void MarchRouteStatus(SideManeuvers side, string childId, BattleTerrainGrid grid, in UnitRecord child,
-            float anchorX, float anchorZ, double now, long tickId, ref ManeuverInput input)
+            float anchorX, float anchorZ, bool hasVia, float viaX, float viaZ, double now, long tickId, ref ManeuverInput input)
         {
             side.MarchChecks.TryGetValue(childId, out EnvelopmentManeuver.MarchRouteCheck last);
-            last = EnvelopmentManeuver.CheckForAnchor(in last, anchorX, anchorZ);
-            if (EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ) && string.Equals(side.PlanChildId, childId, StringComparison.Ordinal))
+            last = EnvelopmentManeuver.CheckForLeg(in last, anchorX, anchorZ, hasVia, viaX, viaZ);
+            if (EnvelopmentManeuver.NeedsRouteRecheck(in last, now, anchorX, anchorZ, hasVia, viaX, viaZ) && string.Equals(side.PlanChildId, childId, StringComparison.Ordinal))
             {
-                last = PlanRoute(grid, in child, anchorX, anchorZ, now, tickId);
+                int half = EnvelopmentManeuver.HalfToPlan(in last, hasVia, viaX, viaZ);
+                float fromX = half == 2 ? viaX : child.X, fromZ = half == 2 ? viaZ : child.Z;
+                float toX = half == 1 ? viaX : anchorX, toZ = half == 1 ? viaZ : anchorZ;
+                PlanRoute(grid, fromX, child.Y, fromZ, toX, toZ, tickId, out bool hitsRiver, out bool noPath);
+                last = EnvelopmentManeuver.ApplyHalf(in last, half, hitsRiver, noPath, now, anchorX, anchorZ, hasVia, viaX, viaZ);
                 side.MarchChecks[childId] = last;
                 side.PlanChildId = null;
             }
@@ -564,13 +725,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             input.MarchRouteMissing = last.NoPath;
         }
 
-        // The march leg judged on the route the child will walk: a NavMesh path from its position to the anchor, priced like the
-        // posture probe, each segment sampled on the BC10 grid (a river crossed by a bridge or ford is not a river). No complete path
-        // (or a failed query) is a result too: NoPath.
-        private static EnvelopmentManeuver.MarchRouteCheck PlanRoute(BattleTerrainGrid grid, in UnitRecord child, float anchorX, float anchorZ,
-            double now, long tickId)
+        // One half of the march leg judged on the route the child will walk: a NavMesh path, priced like the posture probe, each segment
+        // sampled on the BC10 grid (a river crossed by a bridge or ford is not a river). No complete path (or a failed query) is a result
+        // too: NoPath.
+        private static void PlanRoute(BattleTerrainGrid grid, float fromX, float fromY, float fromZ, float toX, float toZ, long tickId,
+            out bool hitsRiver, out bool noPath)
         {
-            var check = new EnvelopmentManeuver.MarchRouteCheck { Valid = true, CheckedHours = now, AnchorX = anchorX, AnchorZ = anchorZ, NoPath = true };
+            hitsRiver = false;
+            noPath = true;
             try
             {
                 if (_routeFilterTick != tickId)
@@ -579,7 +741,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     _routeFilterTick = tickId;
                 }
                 NavMeshPath path = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.SharedPath();
-                if (NavMesh.CalculatePath(new Vector3(child.X, child.Y, child.Z), new Vector3(anchorX, HeightAt(anchorX, anchorZ), anchorZ), _routeFilter, path)
+                if (NavMesh.CalculatePath(new Vector3(fromX, fromY, fromZ), new Vector3(toX, HeightAt(toX, toZ), toZ), _routeFilter, path)
                     && path.status == NavMeshPathStatus.PathComplete)
                 {
                     int count = WhiskeyRealism.Tactical.Battle.Producers.PostureTargets.ReadCorners(path, out Vector3[] corners);
@@ -595,8 +757,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     }
                     if (count > 0)
                     {
-                        check.NoPath = false;
-                        check.HitsRiver = EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
+                        noPath = false;
+                        hitsRiver = EnvelopmentManeuver.RouteHitsRiver(grid, _routeX, _routeZ, count, EnvelopmentManeuver.MarchStepMeters, _riverSamples);
                     }
                 }
             }
@@ -605,7 +767,6 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 OnceLog.Warning("play-executor-runtime:march-route-exception",
                     "PlayExecutorRuntime march route plan failed, the leg counts as unwalkable: " + e.GetType().Name + " " + e.Message);
             }
-            return check;
         }
 
         private static float HeightAt(float x, float z)
@@ -633,6 +794,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 bool mirrored = state.Mirrored;
                 string proceed = state.ProceedReason ?? string.Empty;
                 float targetX = order.TargetX, targetZ = order.TargetZ, anchorX = input.AnchorX, anchorZ = input.AnchorZ;
+                // BC14: the doctrine clock at the transition, the ledger's release and budget the maneuver latched, its vias, and on the Turn the
+                // arrival against the prediction latched at the March (criterion-arrival-prediction).
+                double now = TacticalDoctrineTime.NowBattleHours;
+                double plannedRelease = state.HasFirstPlannedRelease ? state.FirstPlannedReleaseHours : -1.0;
+                double budget = state.HasBudget ? state.BudgetHours : -1.0;
+                bool hasVia = state.HasVia, hasAttackVia = state.HasAttackVia;
+                float viaX = hasVia ? state.ViaX : 0f, viaZ = hasVia ? state.ViaZ : 0f;
+                float attackViaX = hasAttackVia ? state.AttackViaX : 0f, attackViaZ = hasAttackVia ? state.AttackViaZ : 0f;
+                bool turn = state.Phase == ManeuverPhase.Turn;
+                double predictedArrival = -1.0, predictedMarch = -1.0;
+                if (turn && allianceId >= 0 && allianceId < SideCount && _maneuvers[allianceId].Predicted.TryGetValue(childId, out var predicted))
+                {
+                    predictedArrival = predicted.arrival;
+                    predictedMarch = predicted.march;
+                }
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalEnvelopment", TelemetrySeverity.Info,
                     ev => ev
                         .WithSide(allianceId)
@@ -647,7 +823,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("anchorX", anchorX)
                         .WithField("anchorZ", anchorZ)
                         .WithField("targetX", targetX)
-                        .WithField("targetZ", targetZ));
+                        .WithField("targetZ", targetZ)
+                        .WithField("doctrineHours", now)
+                        .WithField("plannedReleaseHours", plannedRelease)
+                        .WithField("timeBudgetHours", budget)
+                        .WithField("via", hasVia)
+                        .WithField("viaX", viaX)
+                        .WithField("viaZ", viaZ)
+                        .WithField("attackVia", hasAttackVia)
+                        .WithField("attackViaX", attackViaX)
+                        .WithField("attackViaZ", attackViaZ)
+                        .WithField("arrivedHours", turn ? now : -1.0)
+                        .WithField("predictedArrivalHours", predictedArrival)
+                        .WithField("predictedMarchHours", predictedMarch));
             }
             catch { }
         }

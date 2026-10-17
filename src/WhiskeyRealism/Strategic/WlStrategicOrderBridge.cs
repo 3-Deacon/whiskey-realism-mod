@@ -78,8 +78,8 @@ namespace WhiskeyRealism.Strategic
     //                  or given a must-hold role, yet counted toward the coverage of the
     //                  area where its last waypoint lies (CountsTowardCoverage).
     //   CarryingGroup  the AI map group above a player whose command is below map-group
-    //                  level: a movable AI asset, as vanilla moves it (8366 sends that
-    //                  player no campaign order); #69 dispatches its march to him.
+    //                  level: a movable AI asset, as vanilla moves it. Vanilla (8366) sends that
+    //                  player no campaign order and Whiskey sends him none: he is carried along.
     internal enum WlChainClass
     {
         None,
@@ -335,8 +335,8 @@ namespace WhiskeyRealism.Strategic
                 case WlChainClass.PlayerCommand:
                     return Blocked(WlStrategicOrderResult.WlCurrentOrderIneligible, orderType, "part-of-player-unit");
                 case WlChainClass.CarryingGroup:
-                    // Vanilla moves this AI group (AICampaign.MoveUnitTo); #69's MoveUnitTo
-                    // Postfix turns the march into the player's dispatch.
+                    // Vanilla moves this AI group (AICampaign.MoveUnitTo); the player it carries is
+                    // told nothing (8366).
                     return Allowed(WlStrategicOrderResult.DirectMovementAllowed, orderType, "carrying-group");
             }
 
