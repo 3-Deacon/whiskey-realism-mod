@@ -261,6 +261,19 @@ internal static class DefenderGroundTests
 
     private static void ANonEnemyLineObjectiveKeepsTheShippedGeometry()
     {
+        var ridge = new BattlefieldObjectiveEstimate("ridge", TacticalObjectiveType.Ridge, 3000f, 0.7f, true, 0.4f, EnemyX, EnemyZ, 0.2f, 0.2f);
+        var own = EvidenceNodes();
+        TacticalBattlefrontSnapshot front = TacticalBattlefrontGeometry.Build(own, ridge);
+        AssertFalse(TacticalDefensiveLineAnchorPlanner.PlanOwnFront(ridge, own, front).HasAnchor, "a ridge is not an enemy line to turn away from");
+        var line = new BattlefieldObjectiveEstimate("enemy-line-1", TacticalObjectiveType.EnemyLine, 3000f, 0.7f, true, 0.4f, EnemyX, EnemyZ, 0f, 0f);
+        TacticalDefensiveLineAnchor anchor = TacticalDefensiveLineAnchorPlanner.PlanOwnFront(line, own, front);
+        AssertTrue(anchor.HasAnchor && anchor.OnOwnFront, "an enemy line gives the own front: " + anchor.Reason);
+        AssertFalse(TacticalDefensiveLineAnchorPlanner.PlanOwnFront(line, EvidenceNodes(placed: false), default(TacticalBattlefrontSnapshot)).HasAnchor, "no placed node, no front");
+        float meanX = 0f, meanZ = 0f;
+        foreach (var n in own) { meanX += n.X / own.Length; meanZ += n.Z / own.Length; }
+        var onTop = new BattlefieldObjectiveEstimate("enemy-line-1", TacticalObjectiveType.EnemyLine, 3000f, 0.7f, true, 0.4f, meanX, meanZ, 0f, 0f);
+        AssertFalse(TacticalDefensiveLineAnchorPlanner.PlanOwnFront(onTop, own, front).HasAnchor, "an enemy line on top of the front gives no axis");
+
         // A Ridge the Defender holds (not an enemy line) takes no own-front: the shipped reason has no own-front.
         CommandNodeOperationalState[] nodes = EvidenceNodes();
         var picture = new BattlefieldPictureSnapshot(new[]
@@ -341,6 +354,11 @@ internal static class DefenderGroundTests
         DoctrineTargetPoint pulled = OwnBank.Keep(picture, node, across);
         AssertEqual(2, picture.RegionAt(pulled.X, pulled.Z), "a target across is pulled to the bank");
         AssertTrue(pulled.X >= 1000f && pulled.X < 1200f, "along the line to the node, on its bank (x " + pulled.X + ")");
+        // Every eighth of the way lies on another bank or the river: the node's own position is the last post on its bank.
+        var nearEdge = CommandNodeOperationalState.Create("e", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.ReserveWait, 1010f, -100f, 0f);
+        DoctrineTargetPoint far = OwnBank.Keep(picture, nearEdge, DoctrineTargetPoint.From(60f, -100f));
+        AssertNear(1010f, far.X, 0.001f, "no point of the line on the bank: the node's own x");
+        AssertNear(-100f, far.Z, 0.001f, "and its own z");
         AssertEqual(across.X, OwnBank.Keep(new RiverCrossingTests.Picture { Ready = false }, node, across).X, "an unready picture judges nothing");
         AssertEqual(across.X, OwnBank.Keep(null, node, across).X, "no picture judges nothing");
         var unplaced = new CommandNodeOperationalState("u", CommandEchelonKind.BrigadeLike, CommandNodeRole.Reserve, CommandTaskType.ReserveWait, CommandTaskState.Planning);
@@ -371,31 +389,54 @@ internal static class DefenderGroundTests
 
     private static void TheLedgerPlansFromItsGround()
     {
+        // The evidence front: the Defender stands on its own front, nothing ahead of it.
         CommandNodeOperationalState[] nodes = EvidenceNodes();
-        var ledger = new TacticalOperationsLedgerRuntime();
-        ledger.SetRuntimeClock(0f);
-        ledger.Replace(TacticalCommanderMode.Active,
-            new[] { EnemyLineRecord() },
-            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"), new ForceAvailabilitySnapshot(3000f, 0.30f), new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
-        var picture = new RiverCrossingTests.Picture();
-        var ground = new Ground { Crossings = picture };
-        ledger.SetGround(ground);
-        AssertTrue(ReferenceEquals(ground, ledger.Ground), "the ledger holds the ground it was given");
+        TacticalOperationsLedgerRuntime ledger = LedgerWith(EnemyX, EnemyZ, new Ground());
         ledger.StoreDoctrineForCommandStates(nodes, BattleStance.Defender);
         AssertEqual(nodes.Length, ledger.CurrentDoctrineOrders.Count, "an order per node");
         bool ownFront = false;
-        foreach (CommandDoctrineOrder o in ledger.CurrentDoctrineOrders) ownFront |= o.Reason.Contains("own-front");
-        AssertTrue(ownFront, "the Defender stood on its own front, so the enemy-line objective reached the doctrine build");
         foreach (CommandDoctrineOrder o in ledger.CurrentDoctrineOrders)
+        {
+            ownFront |= o.Reason.Contains("own-front");
+            foreach (DoctrineTargetPoint t in Targets(o))
+                if (t.HasValue) AssertTrue(AheadOfFront(nodes, t.X, t.Z) <= 1f, o.NodeId + " " + o.Task + " is ahead of the front");
+        }
+
+        AssertTrue(ownFront, "the Defender stood on its own front, so the enemy-line objective reached the doctrine build");
+
+        // The ground's crossing picture reaches the build: nodes on the bank x 1000..1500 with the enemy to the west put the own front's reserve
+        // post (425 m behind it) on the far bank to the east; the ledger pulls it back.
+        var picture = new RiverCrossingTests.Picture();
+        var bankRoles = new[] { CommandNodeRole.Reserve, CommandNodeRole.ScreeningForce, CommandNodeRole.Reserve };
+        CommandNodeOperationalState[] bank = RiverNodes();
+        for (int i = 0; i < bank.Length; i++)
+            bank[i] = CommandNodeOperationalState.Create(bank[i].NodeId, CommandEchelonKind.BrigadeLike, bankRoles[i], CommandTaskType.FormUp, bank[i].X, bank[i].Z, 90f);
+        TacticalOperationsLedgerRuntime onBank = LedgerWith(700f, -1000f, new Ground { Crossings = picture });
+        onBank.StoreDoctrineForCommandStates(bank, BattleStance.Defender);
+        int posts = 0;
+        foreach (CommandDoctrineOrder o in onBank.CurrentDoctrineOrders)
         {
             foreach (DoctrineTargetPoint t in Targets(o))
             {
                 if (!t.HasValue) continue;
-                AssertTrue(AheadOfFront(nodes, t.X, t.Z) <= 1f, o.NodeId + " " + o.Task + " is ahead of the front");
-                // Region 2 is the nodes' bank (x 1000..1500); the crossings picture reached the build when no target left it.
-                AssertTrue(t.X < 1500f || picture.RegionAt(t.X, t.Z) == picture.RegionAt(nodes[0].X, nodes[0].Z), o.NodeId + " crossed the bank");
+                posts++;
+                AssertEqual(2, picture.RegionAt(t.X, t.Z), o.NodeId + " " + o.Task + " stays on the bank through the ledger (x " + t.X + ")");
             }
         }
+
+        AssertTrue(posts >= 3, "the ledger planned posts to keep (" + posts + ")");
+    }
+
+    private static TacticalOperationsLedgerRuntime LedgerWith(float enemyX, float enemyZ, ICommandGround ground)
+    {
+        var ledger = new TacticalOperationsLedgerRuntime();
+        ledger.SetRuntimeClock(0f);
+        ledger.Replace(TacticalCommanderMode.Active,
+            new[] { EnemyLineRecord(enemyX, enemyZ) },
+            new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"), new ForceAvailabilitySnapshot(3000f, 0.30f), new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+        ledger.SetGround(ground);
+        AssertTrue(ReferenceEquals(ground, ledger.Ground), "the ledger holds the ground it was given");
+        return ledger;
     }
 
     private static void TheCoordinatorWiresTheGround()
@@ -409,10 +450,10 @@ internal static class DefenderGroundTests
         FlankResponseTests.AssertPinned(ground, "public ICrossingPicture Crossings => FeasibilityRuntime.CrossingPicture(_alliance);", "the same picture the crossing gate asks");
     }
 
-    private static ObjectiveRecord EnemyLineRecord()
+    private static ObjectiveRecord EnemyLineRecord(float x, float z)
         => new ObjectiveRecord(
             new ObjectiveObservationInput("enemy-line-1", TacticalObjectiveType.EnemyLine, TacticalObjectiveSource.VisibleEnemyLine,
-                new TacticalMapPoint(EnemyX, EnemyZ), 0.7f, 0.4f, typeAnchorVerified: true),
+                new TacticalMapPoint(x, z), 0.7f, 0.4f, typeAnchorVerified: true),
             TacticalObjectiveStatus.Contested, 3000f, 20000f);
 
     private static float Dist(float ax, float az, float bx, float bz)
