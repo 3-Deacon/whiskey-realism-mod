@@ -114,6 +114,13 @@ internal static partial class WlOrderFlowTests
 
     private static void DispatchRuntimeAppliesTheMemory()
     {
+        string flowCode = Code(FlowRuntime);
+        AssertTrue(Regex.IsMatch(BodyOf(flowCode, "private static CaptureVerdict Route("), @"entry\.DispatchTask = call\.DispatchTask;"), "the capture puts the dispatch's task on the entry");
+        AssertTrue(Regex.IsMatch(BodyOf(flowCode, "internal static bool EnqueueWhiskey("), @"Carrier = carrier, DispatchTask = dispatchTask,"), "and Whiskey's emitter hands it to the capture");
+        string rowBody = BodyOf(flowCode, "public void Row(in CourierEntry e, string action, string reason)");
+        AssertTrue(Regex.IsMatch(rowBody, @"if \(action == ""discard"" && e\.Origin == OrderOrigin\.Executor\)\s*Tactical\.Battle\.TacticalPlayerDispatchRuntime\.Memory\.ForgetDispatch\(e\.UnitId\);"),
+            "an executor dispatch that was discarded is forgotten, so the next order to that place is sent");
+        AssertTrue(BodyOf(flowCode, "public bool TaskHolds(").Contains("TacticalPlayerDispatchRuntime.TaskHolds(e.UnitId, e.DispatchTask, out heldAtHours)"), "the host asks the memory for the entry's unit and task");
         string run = Code("src/WhiskeyRealism/Tactical/Battle/TacticalPlayerDispatchRuntime.cs");
         string emit = BodyOf(run, "internal static bool Emit(");
         AssertTrue(emit.Contains("Memory.IsRepeat(") && emit.Contains("Memory.RecordDispatch("), "Emit asks the memory first and records a queued dispatch");
