@@ -21,6 +21,8 @@ internal static class DirectChildRoleHoldTests
             ("role hold a guard point or a screen target passes at once and its end does too", GuardAndScreenPass),
             ("role hold a lost Main is replaced by the fresh Main", ALostMainIsReplaced),
             ("role hold a new child is accepted and a vanished child is forgotten", NewAndVanishedChildren),
+            ("role hold a child that arrives as Main beside the held Main is not a second one", ANewcomerIsNotASecondMain),
+            ("role hold a hold that runs out on a child while the Main stands is not a second Main", AnExpiredHoldIsNotASecondMain),
             ("role hold a minute of five-second allocations over the same enemy keeps every division in one role", AMinuteKeepsOneRolePerDivision),
             ("role hold the army keeps its roles through flickering evidence under one plan and reorganises when the plan changes", TheArmyKeepsItsRolesUnderOnePlan),
         });
@@ -216,5 +218,41 @@ internal static class DirectChildRoleHoldTests
             bool mainFamily = (a == DirectChildRole.Main || a == DirectChildRole.SupportMain) && (b == DirectChildRole.Main || b == DirectChildRole.SupportMain);
             AssertTrue(a == b || mainFamily, "a new plan reorganises the line: child " + i + " cold " + a + " held " + b);
         }
+    }
+
+    private static int Mains(IReadOnlyList<DirectChildIntent> a)
+    {
+        int n = 0;
+        for (int i = 0; i < a.Count; i++) if (a[i].Role == DirectChildRole.Main) n++;
+        return n;
+    }
+
+    private static void ANewcomerIsNotASecondMain()
+    {
+        var hold = new DirectChildRoleHold();
+        hold.Apply(Set(DI("a", DirectChildRole.Main), DI("b", DirectChildRole.SupportMain)), 1, 5.0);
+        // the allocator now calls the newly arrived division c the Main and demotes a: a's old role is held, c is accepted as Main
+        var next = hold.Apply(Set(DI("a", DirectChildRole.SupportMain), DI("b", DirectChildRole.SupportMain), DI("c", DirectChildRole.Main)), 1, 5.02);
+        AssertEqual(1, Mains(next), "one Main, never two");
+        AssertEqual(DirectChildRole.Main, RoleOf(next, "a"), "the held Main keeps it: the allocation's Main hysteresis judges the challenger");
+        AssertEqual(DirectChildRole.SupportMain, RoleOf(next, "c"), "the newcomer supports");
+        var again = hold.Apply(Set(DI("a", DirectChildRole.SupportMain), DI("b", DirectChildRole.SupportMain), DI("c", DirectChildRole.Main)), 1, 5.04);
+        AssertEqual(1, Mains(again), "and the next allocation");
+        AssertEqual(DirectChildRole.Main, RoleOf(again, "a"), "agrees");
+    }
+
+    private static void AnExpiredHoldIsNotASecondMain()
+    {
+        var hold = new DirectChildRoleHold();
+        hold.Apply(Set(DI("b", DirectChildRole.Reserve)), 1, 5.0);
+        // a arrives at 5.2 as the Main and is held in that role
+        hold.Apply(Set(DI("a", DirectChildRole.Main), DI("b", DirectChildRole.Reserve)), 1, 5.2);
+        // at 6.05 the allocator puts the Main on b and demotes a: a's hold is 0.85 h old and stands, b's is 1.05 h old and has run out
+        var next = hold.Apply(Set(DI("a", DirectChildRole.SupportMain), DI("b", DirectChildRole.Main)), 1, 6.05);
+        AssertEqual(1, Mains(next), "one Main, never two: " + RoleOf(next, "a") + "/" + RoleOf(next, "b"));
+        AssertEqual(DirectChildRole.Main, RoleOf(next, "a"), "the Main held the longest keeps it");
+        var later = hold.Apply(Set(DI("a", DirectChildRole.SupportMain), DI("b", DirectChildRole.Main)), 1, 6.25);
+        AssertEqual(DirectChildRole.Main, RoleOf(later, "b"), "once a's hour has run out the allocator's Main takes it");
+        AssertEqual(1, Mains(later), "still one");
     }
 }

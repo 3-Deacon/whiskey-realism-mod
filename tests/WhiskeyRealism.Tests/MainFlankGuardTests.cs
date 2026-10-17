@@ -48,6 +48,8 @@ internal static class MainFlankGuardTests
             ("flank guard the same enemy and odds one minute apart give one answer", TheAnswerIsStable),
             ("flank guard the leaf map overlay posts the reserve and leaves the cascade's roles alone", TheOverlayPostsTheGuard),
             ("flank guard the overlay keeps a post across rebuilds and leaves a Defender alone", TheOverlayIsStickyAndSparesADefender),
+            ("flank guard the overlay changes only the units it posts, whatever the geometry does between rebuilds", TheOverlayLeavesTheCascadeAlone),
+            ("flank guard the works hold guard forwards a leaf's flank post", TheWorksGuardForwardsThePost),
             ("flank guard the main holds on a snapshot with a lone brigade and goes when a guard is in reach", TheMainHoldsOnASnapshot),
             ("flank guard a guard in transit keeps the main holding and one that is not moving does not", TheSnapshotSeesTransit),
             ("flank guard the guard is sent to the post by a Move and not again while its order leads there", TheGuardIsSentToThePost),
@@ -469,6 +471,53 @@ internal static class MainFlankGuardTests
 
         var defender = TacticalLeafBrigadeMap.ApplyFlankGuards(cascade, tree, FacingPlusZ(), defender: true, null, null, null);
         AssertTrue(ReferenceEquals(defender, cascade), "a Defender's main advances nowhere: the map is the cascade");
+    }
+
+    // Every five doctrine minutes the overlay is laid again over the same cached cascade: a division of six brigades wandering about between the looks
+    // keeps every role the cascade gave it except the units that hold a post.
+    private static void TheOverlayLeavesTheCascadeAlone()
+    {
+        var rng = new Random(7);
+        float[] x0 = { -1250f, -750f, -250f, 250f, 750f, 1250f };
+        TacticalCommandTreeProbe.ExtendedProbe[] Probes(float[] xs, float[] zs)
+        {
+            var probes = new List<TacticalCommandTreeProbe.ExtendedProbe> { new TacticalCommandTreeProbe.ExtendedProbe(10, 15, "Div", true, 0, true, 0f, 0f, 2) };
+            for (int b = 0; b < xs.Length; b++) probes.Add(new TacticalCommandTreeProbe.ExtendedProbe(100 + b, 14, "B" + b, true, 10, false, xs[b], zs[b], 2));
+            return probes.ToArray();
+        }
+        var zeros = new float[6];
+        var tree0 = TacticalCommandTreeProbe.BuildTree(Probes(x0, zeros), -1);
+        var cascade = TacticalLeafBrigadeMap.BuildMap(tree0, new[] { new TacticalLeafBrigadeMap.TopAssignment(10, DirectChildRole.Main) }, 0.5f,
+            CascadeEnvelopmentMode.None, FacingPlusZ());
+        var posts = new Dictionary<int, MainFlankGuard.Post>();
+        for (int look = 0; look < 25; look++)
+        {
+            var xs = new float[6];
+            var zs = new float[6];
+            for (int b = 0; b < 6; b++)
+            {
+                xs[b] = x0[b] + (float)(rng.NextDouble() * 1200 - 600);
+                zs[b] = (float)(rng.NextDouble() * 1200 - 600);
+            }
+            var tree = TacticalCommandTreeProbe.BuildTree(Probes(xs, zs), -1);
+            var overlay = TacticalLeafBrigadeMap.ApplyFlankGuards(cascade, tree, FacingPlusZ(), false, null, posts, null);
+            foreach (var pair in overlay)
+                if (!pair.Value.HasFlankPost)
+                    AssertEqual(cascade[pair.Key].LeafRole, pair.Value.LeafRole, "look " + look + ": " + pair.Key + " keeps the cascade's role");
+            posts.Clear();
+            foreach (var pair in overlay)
+                if (pair.Value.HasFlankPost) posts[pair.Key] = new MainFlankGuard.Post(pair.Value.FlankPostMain, pair.Value.FlankPostLeft);
+        }
+    }
+
+    private static void TheWorksGuardForwardsThePost()
+    {
+        var leaf = new TacticalLeafBrigadeMap.LeafAssignment(101, "B", DirectChildRole.Main, CommandTaskType.AttackObjective, new[] { DirectChildRole.Main }, new[] { "B" }, 0,
+            worksHeld: false, flankPostMain: 100, flankPostLeft: true);
+        var context = new WorksGuardContext { WorksHold = true, FacesWorks = true };
+        AssertTrue(WorksHoldGuard.ApplyLeaf(in leaf, in context, out TacticalLeafBrigadeMap.LeafAssignment guarded), "the works guard turns the attack into a hold");
+        AssertEqual(CommandTaskType.HoldObjective, guarded.LeafTask, "a hold");
+        AssertTrue(guarded.WorksHeld && guarded.FlankPostMain == 100 && guarded.FlankPostLeft, "and the leaf keeps its post");
     }
 
     // ---- the posture pass over a snapshot (FlankGuardLeaf, what ProduceLeaf calls) ----

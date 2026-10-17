@@ -148,7 +148,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     buildBattleHours,
                     bundle.OwnEvidence,
                     bundle.EnemyVisible,
-                    bundle.OwnMainEffortStrength,
+                    bundle.OwnActiveForce,
                     bundle.OwnArmyMorale,
                     bundle.OwnReservesCommittedFraction,
                     bundle.OwnReinforcementsArriving,

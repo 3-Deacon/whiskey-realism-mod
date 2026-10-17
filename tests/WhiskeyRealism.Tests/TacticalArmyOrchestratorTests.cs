@@ -1290,7 +1290,7 @@ internal static class TacticalArmyOrchestratorTests
             0.5f, anyContactSpotted: false, anyContactBroken: false);
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence, visible,
-            ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
+            ownActiveForce: 8000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.1f, ownAvgAmmo01: 0.95f,
@@ -1330,7 +1330,7 @@ internal static class TacticalArmyOrchestratorTests
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 8000f, 5000f),
-            ownMainEffortStrength: 20000f, ownArmyMorale: 0.7f,
+            ownActiveForce: 20000f, ownArmyMorale: 0.7f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.7f, ownAvgAmmo01: 0.5f,
@@ -1356,7 +1356,7 @@ internal static class TacticalArmyOrchestratorTests
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
-            ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
+            ownActiveForce: 18000f, ownArmyMorale: 0.8f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
@@ -1382,7 +1382,7 @@ internal static class TacticalArmyOrchestratorTests
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local
-            ownMainEffortStrength: 18000f, ownArmyMorale: 0.8f,
+            ownActiveForce: 18000f, ownArmyMorale: 0.8f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.4f, ownAvgAmmo01: 0.7f,
@@ -1408,7 +1408,7 @@ internal static class TacticalArmyOrchestratorTests
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 10f, evidence,
             QuietEnemyVisibleState(0, 6000f, 4000f),  // 1.5x local, no intent shift
-            ownMainEffortStrength: 8000f, ownArmyMorale: 1.0f,
+            ownActiveForce: 8000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60);
 
@@ -1442,7 +1442,7 @@ internal static class TacticalArmyOrchestratorTests
 
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 5f, evidence, visible,
-            ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
+            ownActiveForce: 12000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 60,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
@@ -1510,7 +1510,7 @@ internal static class TacticalArmyOrchestratorTests
 
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 1.5f, new ArmyEvidence(1.0f, TerrainKind.Open, 0), visible,
-            ownMainEffortStrength: 10000f, ownArmyMorale: 1.0f,
+            ownActiveForce: 10000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.2f, ownReinforcementsArriving: 0f,
             minReplanSeconds: 600,
             ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
@@ -1545,7 +1545,7 @@ internal static class TacticalArmyOrchestratorTests
 
         ArmyTickCycle.MaybeReplan(
             orch, deltaSeconds: 5f, evidence, visible,
-            ownMainEffortStrength: 12000f, ownArmyMorale: 1.0f,
+            ownActiveForce: 12000f, ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,  // above exploit-gate min 0.4
             ownReinforcementsArriving: 0f,
             minReplanSeconds: 0,
@@ -1626,7 +1626,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             ownEvidence,
             NormalEnemyVisibleState(),
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,
@@ -1650,7 +1650,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             ownEvidence,
             NormalEnemyVisibleState(),
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,
@@ -1674,7 +1674,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             ownEvidence,
             NormalEnemyVisibleState(),
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,
@@ -1685,7 +1685,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             ownEvidence,
             NormalEnemyVisibleState(),
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,
@@ -1756,7 +1756,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             ownEvidence,
             NormalEnemyVisibleState(),
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,
@@ -1790,7 +1790,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             ownEvidence,
             enemy,
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,
@@ -1810,7 +1810,7 @@ internal static class TacticalArmyOrchestratorTests
             deltaSeconds: 5f,
             new ArmyEvidence(1.0f, TerrainKind.Open, 0),
             NormalEnemyVisibleState(),
-            ownMainEffortStrength: 5000f,
+            ownActiveForce: 5000f,
             ownArmyMorale: 1.0f,
             ownReservesCommittedFraction: 0.5f,
             ownReinforcementsArriving: 0f,

@@ -657,7 +657,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     deltaSeconds: 0f,
                     ownEvidence: bundleForReplan.OwnEvidence,
                     enemyVisible: bundleForReplan.EnemyVisible,
-                    ownMainEffortStrength: bundleForReplan.OwnMainEffortStrength,
+                    ownActiveForce: bundleForReplan.OwnActiveForce,
                     ownArmyMorale: bundleForReplan.OwnArmyMorale,
                     ownReservesCommittedFraction: bundleForReplan.OwnReservesCommittedFraction,
                     ownReinforcementsArriving: bundleForReplan.OwnReinforcementsArriving,
@@ -757,7 +757,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         var objectives = TacticalBattleSnapshotBuilder.BuildObjectiveRecords(snapshot, battle);
                         objectivesToUse = objectives;
                         bundleForStrategic = bundle;
-                        forceMain = bundle.OwnMainEffortStrength;
+                        forceMain = bundle.OwnActiveForce;
                         forceReserveAvail = Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction));
                     }
                     else
@@ -777,7 +777,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         _lastLedgerIntentsHash[s] = intentsHash;
                         objectivesToUse = snap.Objectives;
                         bundleForStrategic = BundleFromSnapshot(snap);
-                        forceMain = snap.OwnMainEffortStrength;
+                        forceMain = snap.OwnActiveForce;
                         forceReserveAvail = Math.Max(0f, 1f - Clamp01(snap.OwnReservesCommittedFraction));
                     }
                     _lastLedgerMode[s] = mode;
@@ -952,7 +952,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return new ArmyEvidenceBuilder.Bundle(
                 snap.OwnEvidence,
                 snap.EnemyVisible,
-                snap.OwnMainEffortStrength,
+                snap.OwnActiveForce,
                 snap.OwnArmyMorale,
                 snap.OwnReservesCommittedFraction,
                 snap.OwnReinforcementsArriving,

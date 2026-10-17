@@ -70,8 +70,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     since = _since[at];
                     double hold = IsCrisisRole(h.Role) ? CrisisRoleHoldHours : HoldHours;
                     accept = f.Role == h.Role || Forced(h, f) || nowHours - since >= hold || nowHours < since;
-                    if (accept && f.Role == h.Role) since = _since[at];
-                    else if (accept) since = nowHours;
+                    if (accept && f.Role != h.Role) since = nowHours;
                 }
                 result[i] = accept ? f : _held[at];
                 nextHeld[i] = result[i];
@@ -90,6 +89,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 nextSince[freshMainAt] = nowHours;
             }
 
+            // And never two: a child that arrives as Main (or whose hold has run out) while the held Main stands is a second one. The Main held the longest
+            // keeps it (the allocation's own Main hysteresis, StabilizeMain, then judges a challenger by its streak); the others support it.
+            int keeper = -1;
+            for (int i = 0; i < result.Length; i++)
+                if (result[i].Role == DirectChildRole.Main && (keeper < 0 || nextSince[i] < nextSince[keeper])) keeper = i;
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (i == keeper || result[i].Role != DirectChildRole.Main) continue;
+                result[i] = AsSupport(result[i]);
+                nextHeld[i] = result[i];
+                nextSince[i] = nowHours;
+            }
+
             _held = nextHeld;
             _since = nextSince;
             _count = fresh.Count;
@@ -103,6 +115,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (string.Equals(_held[i].ChildId, childId, StringComparison.Ordinal)) return i;
             return -1;
         }
+
+        private static DirectChildIntent AsSupport(in DirectChildIntent x)
+            => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector, DirectChildRole.SupportMain,
+                DirectChildAxis.SectorAxis, x.AxisSector, 0.7f, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen);
 
         private static bool IsCrisisRole(DirectChildRole role)
             => role == DirectChildRole.Fix || role == DirectChildRole.RefuseLeft || role == DirectChildRole.RefuseRight;

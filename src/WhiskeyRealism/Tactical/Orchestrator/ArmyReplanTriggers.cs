@@ -219,13 +219,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 i.MainEffortOwnStrength / i.MainEffortHistoryOwnStrength <= MainEffortLossFraction)
                 return ReplanTrigger.MainEffortSectorLoss;
 
+            // The crises come first (IsCrisis): the fall of the odds and the break of morale. A rising-odds shift is no crisis, and a trigger that fires every
+            // tick while its condition holds must not shadow a morale collapse behind it inside the plan commitment hold.
             if (i.GlobalOddsCurrent <= OddsLowHysteresis && i.GlobalOddsHistory > OddsLowHysteresis)
-                return ReplanTrigger.ForceImbalanceShift;
-            if (i.GlobalOddsCurrent >= OddsHighHysteresis && i.GlobalOddsHistory < OddsHighHysteresis)
                 return ReplanTrigger.ForceImbalanceShift;
 
             if (i.ArmyMoraleCurrent < i.ArmyMoraleFloor && i.ArmyMoraleAtLastReplan >= i.ArmyMoraleFloor)
                 return ReplanTrigger.CasualtyThreshold;
+
+            if (i.GlobalOddsCurrent >= OddsHighHysteresis && i.GlobalOddsHistory < OddsHighHysteresis)
+                return ReplanTrigger.ForceImbalanceShift;
+
             if (IsReserveCommitFractionKnown(i.ReservesCommittedFraction) &&
                 i.ReservesCommittedFraction >= ReservesAlmostSpent &&
                 !(IsReserveCommitFractionKnown(i.ReservesCommittedAtLastReplan) && i.ReservesCommittedAtLastReplan >= ReservesAlmostSpent))

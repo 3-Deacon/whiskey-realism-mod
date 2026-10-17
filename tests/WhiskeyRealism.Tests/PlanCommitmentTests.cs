@@ -17,6 +17,8 @@ internal static class PlanCommitmentTests
             ("plan commitment lets a non-crisis trigger through once the commitment has passed, with the score margin", NonCrisisTriggerAfterTheCommitmentKeepsThePlan),
             ("plan commitment a review outside a crisis keeps a plan its challenger beats by less than the margin, a crisis does not", TheMarginAppliesOutsideACrisisOnly),
             ("plan commitment lets a morale collapse replan inside the commitment", CrisisReplansInsideTheCommitment),
+            ("plan commitment a morale collapse is not shadowed by a rising-odds shift that fires first", MoraleIsNotShadowedByRisingOdds),
+            ("plan commitment a broken maneuver assumption replans inside the commitment although a held trigger fires first", ABrokenAssumptionReplansInsideTheHold),
             ("plan commitment lets any trigger through while a group is outflanked severely", FlankCrisisUnlocksAnyTrigger),
             ("plan commitment classifies the crisis triggers", CrisisClassification),
             ("plan commitment a crisis re-pick that lands on the held plan keeps the release state", SamePlanRepickWipesNothing),
@@ -42,9 +44,9 @@ internal static class PlanCommitmentTests
     }
 
     private static ReplanOutcome Step(ArmyOrchestrator orch, float battleSeconds, float morale = 1f, float reserves = 0.5f, float total = 6000f,
-        EnemyVisibleState? enemy = null, int cooldown = 60)
-        => ArmyTickCycle.MaybeReplan(orch, 0f, new ArmyEvidence(1f, TerrainKind.Open, 2), enemy ?? Front, total, morale, reserves, 0f, cooldown,
-            0.2f, 0.9f, 0f, 0f, battleSeconds, double.NaN, null);
+        EnemyVisibleState? enemy = null, int cooldown = 60, float odds = 1f, string assumption = null)
+        => ArmyTickCycle.MaybeReplan(orch, 0f, new ArmyEvidence(odds, TerrainKind.Open, 2), enemy ?? Front, total, morale, reserves, 0f, cooldown,
+            0.2f, 0.9f, 0f, 0f, battleSeconds, double.NaN, assumption);
 
     private static void NonCrisisTriggerIsHeldInsideTheCommitment()
     {
@@ -116,6 +118,36 @@ internal static class PlanCommitmentTests
         ReplanOutcome crisis = Step(orch, 600f, morale: 0.3f);
         AssertEqual(ReplanTrigger.CasualtyThreshold, crisis.Trigger, "morale collapse");
         AssertTrue(crisis.Replanned || crisis.Kept, "is acted on at once");
+    }
+
+    // The odds crossing the high line rise from 1 to 3 on the same tick the army's morale breaks: the rising odds are no crisis and fired first, so the
+    // morale collapse behind them was held for the hour.
+    private static void MoraleIsNotShadowedByRisingOdds()
+    {
+        var orch = Orch();
+        ReplanOutcome rising = Step(orch, 600f, odds: 3f);
+        AssertEqual(ReplanTrigger.ForceImbalanceShift, rising.Trigger, "rising odds alone");
+        AssertFalse(rising.Replanned || rising.Kept, "are held inside the commitment");
+        var orch2 = Orch();
+        ReplanOutcome both = Step(orch2, 600f, morale: 0.3f, odds: 3f);
+        AssertEqual(ReplanTrigger.CasualtyThreshold, both.Trigger, "with the morale broken the crisis is the trigger");
+        AssertTrue(both.Replanned || both.Kept, "and it is acted on at once");
+    }
+
+    // A held trigger is level-like: it fires every tick while its condition holds and sits ahead of the broken-assumption trigger in the order. While it
+    // is held the assumption, itself a crisis, is raised in its place.
+    private static void ABrokenAssumptionReplansInsideTheHold()
+    {
+        var orch = Orch();
+        ReplanOutcome o = Step(orch, 600f, reserves: 0.9f, assumption: "test-assumption");
+        AssertEqual(ReplanTrigger.ManeuverAssumptionBroken, o.Trigger, "the assumption is raised in place of the held trigger");
+        AssertTrue(o.Replanned || o.Kept, "and acted on inside the commitment");
+        AssertTrue(o.Suppression != ReplanOutcome.SuppressedByPlanHold, "not held by it");
+        AssertTrue(orch.PlanAgeSeconds >= 600f, "an assumption is the monitor's finding, not a review: the plan keeps its age");
+
+        var held = Orch();
+        ReplanOutcome control = Step(held, 600f, reserves: 0.9f);
+        AssertEqual(ReplanOutcome.SuppressedByPlanHold, control.Suppression, "(the same tick without the assumption is held)");
     }
 
     private static void FlankCrisisUnlocksAnyTrigger()
