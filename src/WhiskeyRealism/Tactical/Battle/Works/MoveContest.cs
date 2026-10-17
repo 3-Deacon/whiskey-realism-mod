@@ -35,7 +35,7 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// BC14O (requirement-historical-chain): the chain contest applies to this group (Enable Objective Doctrine on, the group not engaged), its
         /// task is a hold (a held group is never marched), and the move Whiskey last issued it was issued at or after the current plan began.
-        /// <see cref="ChainMove"/>: the group is a due chain's own group and its waypoint is near the chain's head objective, that is, the move is
+        /// <see cref="ChainMove"/>: the group is a due chain's own group and its waypoint is near the chain's head objective and closes on it, that is, the move is
         /// the chain's and not one of vanilla's reactions (march to the sound of guns, an assault, the outflanked retreat).
         /// </summary>
         public bool Chain, HoldTask, IssuedUnderPlan, ChainMove;
@@ -292,8 +292,7 @@ namespace WhiskeyRealism.Tactical.Battle
             var input = new ContestInput
             {
                 Chain = true, HoldTask = o.HoldTask, HasPath = o.HasPath, HasLastIssued = o.HasLastIssued,
-                ChainMove = o.HasChainObjective && o.HasPath &&
-                    MoveContest.Distance(o.WaypointX, o.WaypointZ, o.ChainObjectiveX, o.ChainObjectiveZ) <= DueChainTable.NearObjectiveMeters,
+                ChainMove = IsChainMove(in o),
                 IssuedUnderPlan = o.HasLastIssued && o.LastIssuedHours >= o.PlanStartHours,
                 LastSeenPath = m.LastSeenPath, X = o.X, Z = o.Z, WaypointX = o.WaypointX, WaypointZ = o.WaypointZ, LastSeenX = m.LastSeenX, LastSeenZ = m.LastSeenZ,
                 LastIssuedX = o.LastIssuedX, LastIssuedZ = o.LastIssuedZ,
@@ -309,6 +308,15 @@ namespace WhiskeyRealism.Tactical.Battle
             m.LastSeenZ = o.WaypointZ;
             _chains[groupId] = m;
             return action;
+        }
+
+        // The chain's move: the waypoint lies within DueChainTable.NearObjectiveMeters of the head and closes on it, that is, stands nearer the head than
+        // the group does. A move that ends farther from the head than the group stands (a retreat, however near the head it ends) is not the chain's.
+        private static bool IsChainMove(in ContestObservation o)
+        {
+            if (!o.HasChainObjective || !o.HasPath) return false;
+            float toHead = MoveContest.Distance(o.WaypointX, o.WaypointZ, o.ChainObjectiveX, o.ChainObjectiveZ);
+            return toHead <= DueChainTable.NearObjectiveMeters && toHead < MoveContest.Distance(o.X, o.Z, o.ChainObjectiveX, o.ChainObjectiveZ);
         }
 
         // groupstancename (65061): 4 = assault.

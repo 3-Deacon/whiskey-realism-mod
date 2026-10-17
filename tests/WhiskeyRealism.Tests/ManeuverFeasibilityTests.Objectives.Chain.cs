@@ -336,6 +336,28 @@ internal static partial class ManeuverFeasibilityTests
         chainToGuns.ChainObjectiveX = 500f;
         chainToGuns.ChainObjectiveZ = 500f;
         AssertEqual(ContestAction.None, state.Evaluate(62, 2, in chainToGuns, out _, out _), "the chain's own group moved by vanilla's march to the guns, away from its head, is not contested");
+        // A move that ends 200 m from the head is not near it (the radius is 150), and one at 85 m is.
+        ContestObservation far = ChainObservation(10.7, 500f, 700f);
+        far.ChainObjectiveX = 500f;
+        far.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.None, state.Evaluate(63, 1, in far, out _, out _), "a waypoint 200 m from the head is not the chain's move");
+        // A retreat that ends 50 m from the head but farther than the group stands is not the chain's move; the same waypoint for a group 200 m out closes.
+        ContestObservation retreat = ChainObservation(10.8, 500f, 450f);
+        retreat.X = 500f; retreat.Z = 520f;
+        retreat.ChainObjectiveX = 500f;
+        retreat.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.None, state.Evaluate(64, 1, in retreat, out _, out _), "a retreat ending 50 m from the head, from 20 m, moves away from it: not contested");
+        ContestObservation closing = ChainObservation(10.8, 500f, 450f);
+        closing.X = 500f; closing.Z = 700f;
+        closing.ChainObjectiveX = 500f;
+        closing.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.Reissue, state.Evaluate(65, 1, in closing, out _, out _), "the same waypoint for a group 200 m out closes on the head: contested");
+        // The verifier's probe geometry (a group 100 m beyond the head, a retreat to 50 m from it) gets nearer the head by distance, so it closes.
+        ContestObservation probe = ChainObservation(10.9, 500f, 450f);
+        probe.X = 500f; probe.Z = 600f;
+        probe.ChainObjectiveX = 500f;
+        probe.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.Reissue, state.Evaluate(66, 1, in probe, out _, out _), "distance alone cannot tell the verifier's probe from a close: it ends nearer the head and is contested");
         ContestObservation shifted = ChainObservation(10.9, 560f, 560f);
         shifted.ChainObjectiveX = 500f;
         shifted.ChainObjectiveZ = 500f;
