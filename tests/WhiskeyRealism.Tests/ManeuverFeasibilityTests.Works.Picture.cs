@@ -373,17 +373,17 @@ internal static partial class ManeuverFeasibilityTests
             "src/WhiskeyRealism/Tactical/Battle/Works/WorksRules.cs",
             "src/WhiskeyRealism/Tactical/Battle/Works/WorksPicture.cs",
             "src/WhiskeyRealism/Tactical/Battle/Works/PreparationTable.cs",
+            "src/WhiskeyRealism/Tactical/Battle/Works/MoveContest.cs",
             "src/WhiskeyRealism/Tactical/Battle/Works/FortificationPointsRuntime.cs",
-            "src/WhiskeyRealism/Tactical/Battle/MoveContest.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/PlayExecutorRules.cs",
-            "src/WhiskeyRealism/Tactical/Orchestrator/FocalAssaultPlaybook.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Works.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Station.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Playbooks/FocalAssaultPlaybook.cs",
         };
+        // Every task has landed: a file that is not found is a path that moved, and a pin over fewer files than it names says nothing.
         var found = new System.Collections.Generic.List<string>();
-        foreach (string rel in relative)
-        {
-            try { found.Add(TestFixtures.FindRepoPath(rel)); }
-            catch (FileNotFoundException) { }       // a file a later task creates
-        }
+        foreach (string rel in relative) found.Add(TestFixtures.FindRepoPath(rel));
+        AssertEqual(relative.Length, found.Count, "every BC14W file is found");
         return found.ToArray();
     }
 
@@ -409,7 +409,7 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(FirstWorksRead("var o = s.Observations[i]; // EnemyRecords are never read") == null, "a comment naming the rule is no read");
         AssertTrue(FirstMarchLiteral("float t = cost * 1000f;") != null, "the march scanner fires on a planted literal");
         string[] files = Bc14wFiles();
-        AssertTrue(files.Length >= 2, "the BC14W file set is found (" + files.Length + " files)");
+        AssertEqual(9, files.Length, "the BC14W file set is found");
         foreach (string file in files)
         {
             string text = File.ReadAllText(file);
