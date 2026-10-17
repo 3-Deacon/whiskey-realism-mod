@@ -428,8 +428,8 @@ internal static class ArmyChildrenTests
         var crossing = new DirectChildIntent("child-13", 15, 15, "Corps13", 2, DirectChildRole.RefuseLeft, DirectChildAxis.SectorAxis, 2, 0f, default(TacticalIntentModel),
             guardPoint: new GuardPoint(-250f, 150f, 315f), releasedFromReserve: true);
         var intents = new[] { station, crossing };
-        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, 12, false, out _, out _), "the stationed child is no release: the producer plans no move for it");
-        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, 13, false, out _, out _), "control: a crossing guard is a release");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, 12, false, out _, out _, out _), "the stationed child is no release: the producer plans no move for it");
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, 13, false, out _, out _, out _), "control: a crossing guard is a release");
     }
 
     private static void AHoldingDivisionKeepsAThirdInReserve()

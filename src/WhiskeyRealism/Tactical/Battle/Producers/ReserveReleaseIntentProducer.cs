@@ -33,7 +33,7 @@ namespace WhiskeyRealism.Tactical.Battle
     //   - the child's intent is a release the allocation made out of Reserve (DirectChildIntent.ReleasedFromReserve); a role the evidence
     //     tiers gave a child the ledger still holds is a disagreement the ledger resolves, not a release; on a Defender side Main and
     //     SupportMain never release a held reserve (TacticalReserveCommitGate.TryReleasedDirectChild);
-    //   - the release stands ReserveReleasePacing.HoldMinutes of doctrine time in one role before its move goes out (a crisis Fix is not held);
+    //   - the release stands ReserveReleasePacing.HoldMinutes of doctrine time in one role before its move goes out (a crisis Fix and a crossing guard are not held);
     //   - no new move while the last one is queued for its courier or when it is within the executor's dedupe radius of the last release target.
     // Every submitted, held or withheld move writes one TacticalReserveReleaseMove row (bounded, signature-deduped).
     //
@@ -87,8 +87,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (index < 0) continue;
 
                     // No per-tick strings: the direct child's intent is matched by id in place.
-                    bool released = TacticalReserveCommitGate.TryReleasedDirectChild(army.CurrentDirectChildIntents, id, defender, out int sector, out DirectChildRole role);
-                    if (!pacing.HoldElapsed(id, released, role, snapshot.DoctrineHours))
+                    bool released = TacticalReserveCommitGate.TryReleasedDirectChild(army.CurrentDirectChildIntents, id, defender, out int sector, out DirectChildRole role, out bool guardPoint);
+                    if (!pacing.HoldElapsed(id, released, role, guardPoint, snapshot.DoctrineHours))
                     {
                         if (released) EmitMoveRow(snapshot.Alliance, id, "hold", role, sector, 0f, 0f, pacing.HeldFor(id, snapshot.DoctrineHours));
                         continue;

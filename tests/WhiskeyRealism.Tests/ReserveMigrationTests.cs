@@ -322,16 +322,16 @@ internal static class ReserveMigrationTests
             ChildIntent("child-" + LeftLine, DirectChildRole.Main, primarySector: 0, axisSector: 0),
             ChildIntent("child-" + Reserve, DirectChildRole.Fix, primarySector: 2, axisSector: leftSector),
         };
-        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, defender: false, out int band, out DirectChildRole bandRole), "found");
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, defender: false, out int band, out DirectChildRole bandRole, out _), "found");
         AssertEqual(leftSector, band, "crisis band");
         AssertEqual(DirectChildRole.Fix, bandRole, "the role the release gave");
-        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, false, out _, out _), "unknown child");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, false, out _, out _, out _), "unknown child");
         AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve, DirectChildRole.Reserve, 0, 1) },
-            Reserve, false, out _, out _), "allocator still holds it in reserve");
+            Reserve, false, out _, out _, out _), "allocator still holds it in reserve");
         AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve + "0", DirectChildRole.Fix, 0, 1) },
-            Reserve, false, out _, out _), "prefix of a longer id is not a match");
+            Reserve, false, out _, out _, out _), "prefix of a longer id is not a match");
         AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("synth-army--" + Reserve, DirectChildRole.Fix, 0, 3) },
-            -Reserve, false, out int synth, out _) && synth == 3, "synthetic army id, negative instance id");
+            -Reserve, false, out int synth, out _, out _) && synth == 3, "synthetic army id, negative instance id");
 
         BattleSnapshot owned = ArmySnapshot(reserveFlags: UnitFlags.PlayerOwned);
         AssertFalse(TacticalReserveCommitGate.TryPlanRelease(owned, owned.IndexOfOwn(Reserve), leftSector, out _), "player-owned reserve");

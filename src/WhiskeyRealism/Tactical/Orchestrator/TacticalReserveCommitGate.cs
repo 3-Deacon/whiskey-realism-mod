@@ -202,7 +202,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// (<see cref="DirectChildIntent.ReleasedFromReserve"/>: the base allocation held
         /// it and a crisis, stagger, odds, flank or crossing release took it out), the
         /// band it was sent to (DirectChildIntent.AxisSector, DirectChildAllocator.ReleaseReserves)
-        /// and the role it took. The command-node intent carries only the child's own band.
+        /// and the role it took, and whether it carries a crossing guard point (a release timed to the enemy's arrival). The command-node intent carries
+        /// only the child's own band.
         /// Pair with a ledger state that HeldInReserve.
         ///
         /// A role the evidence tiers gave a child the ledger still holds (the base allocation
@@ -214,10 +215,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// releases are the crisis Fix and the refuse roles (flank, crossing guard).
         /// </summary>
         public static bool TryReleasedDirectChild(IReadOnlyList<DirectChildIntent> intents, int instanceId, bool defender,
-            out int sector, out DirectChildRole role)
+            out int sector, out DirectChildRole role, out bool guardPoint)
         {
             sector = 0;
             role = DirectChildRole.Unknown;
+            guardPoint = false;
             if (intents == null || instanceId == 0) return false;
             for (int i = 0; i < intents.Count; i++)
             {
@@ -229,6 +231,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (defender && (found == DirectChildRole.Main || found == DirectChildRole.SupportMain)) return false;
                 sector = intents[i].AxisSector;
                 role = found;
+                guardPoint = intents[i].HasGuardPoint;
                 return true;
             }
             return false;

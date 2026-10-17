@@ -34,7 +34,7 @@ internal static class ReserveReleasePacingTests
             new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()), releasedFromReserve: released);
 
     private static bool Released(DirectChildRole role, bool released, bool defender)
-        => TacticalReserveCommitGate.TryReleasedDirectChild(new[] { Intent(role, released) }, Group, defender, out _, out _);
+        => TacticalReserveCommitGate.TryReleasedDirectChild(new[] { Intent(role, released) }, Group, defender, out _, out _, out _);
 
     private static void AnEvidenceRoleIsNoRelease()
     {
@@ -103,7 +103,13 @@ internal static class ReserveReleasePacingTests
         AssertTrue(Released(DirectChildRole.RefuseLeft, released: true, defender: true), "a flank guard");
         AssertTrue(Released(DirectChildRole.RefuseRight, released: true, defender: true), "a crossing guard");
         AssertTrue(Released(DirectChildRole.Main, released: true, defender: false), "control: an attacker's Main release stands");
-        TacticalReserveCommitGate.TryReleasedDirectChild(new[] { Intent(DirectChildRole.RefuseLeft, true, axisSector: 4) }, Group, true, out int sector, out DirectChildRole role);
+        TacticalReserveCommitGate.TryReleasedDirectChild(new[] { Intent(DirectChildRole.RefuseLeft, true, axisSector: 4) }, Group, true, out int sector, out DirectChildRole role, out _);
+        var guarded = new DirectChildIntent("child-" + Group, 15, 15, "2nd_Brigade", 3, DirectChildRole.RefuseLeft, DirectChildAxis.SectorAxis, 4, 0.5f,
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()), guardPoint: new GuardPoint(250f, 150f, 45f), releasedFromReserve: true);
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { guarded }, Group, true, out _, out _, out bool guard), "a crossing guard is a release");
+        AssertTrue(guard, "and says it carries a guard point");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { Intent(DirectChildRole.RefuseLeft, true) }, Group, true, out _, out _, out bool none) && none,
+            "a flank guard carries none");
         AssertEqual(4, sector, "the band");
         AssertEqual(DirectChildRole.RefuseLeft, role, "the role");
     }
@@ -114,31 +120,34 @@ internal static class ReserveReleasePacingTests
     {
         var pacing = new ReserveReleasePacing();
         double t = 10.0;
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, t), "the first observation starts the hold");
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, t + 2 * Minute), "inside the hold");
-        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, t + ReserveReleasePacing.HoldHours), "the hold stood");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, t), "the first observation starts the hold");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, t + 2 * Minute), "inside the hold");
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, t + ReserveReleasePacing.HoldHours), "the hold stood");
         AssertTrue(Math.Abs(ReserveReleasePacing.HoldHours - pacing.HeldFor(Group, t + ReserveReleasePacing.HoldHours)) < 1e-9, "held for");
 
         // A swap of the role restarts the hold.
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, t + 4 * Minute), "another role starts afresh");
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, t + 6 * Minute), "inside the new hold");
-        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, t + 4 * Minute + ReserveReleasePacing.HoldHours), "the new hold stood");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 4 * Minute), "another role starts afresh");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 6 * Minute), "inside the new hold");
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 4 * Minute + ReserveReleasePacing.HoldHours), "the new hold stood");
 
         // The allocation takes the release back inside the hold: nothing goes out, and the next release starts afresh.
         double u = 20.0;
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, u), "start");
-        AssertFalse(pacing.HoldElapsed(Group, false, DirectChildRole.Unknown, u + 2 * Minute), "taken back");
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, u + 2.5 * Minute), "released again: a new hold");
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, u + 2.5 * Minute + 2.9 * Minute), "the old start does not count");
-        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, u + 2.5 * Minute + ReserveReleasePacing.HoldHours), "the new start counts");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u), "start");
+        AssertFalse(pacing.HoldElapsed(Group, false, DirectChildRole.Unknown, false, u + 2 * Minute), "taken back");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u + 2.5 * Minute), "released again: a new hold");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u + 2.5 * Minute + 2.9 * Minute), "the old start does not count");
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u + 2.5 * Minute + ReserveReleasePacing.HoldHours), "the new start counts");
         AssertTrue(pacing.HeldFor(999, u) == 0.0, "an unknown group has held nothing");
     }
 
     private static void ACrisisReleaseIsNotHeld()
     {
         var pacing = new ReserveReleasePacing();
-        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.Fix, 10.0), "a crisis band release goes at once: the line it answers is in contact");
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, 10.0 + Minute), "control: another role is held");
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.Fix, false, 10.0), "a crisis band release goes at once: the line it answers is in contact");
+        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, 10.0 + Minute), "control: another role is held");
+        // A crossing guard is timed to the enemy's arrival and holds its own binding: not held either.
+        AssertTrue(pacing.HoldElapsed(Group + 1, true, DirectChildRole.RefuseRight, guardPoint: true, 10.0), "a crossing guard goes at once");
+        AssertFalse(pacing.HoldElapsed(Group + 2, true, DirectChildRole.RefuseRight, guardPoint: false, 10.0), "control: a flank guard without a guard point is held");
     }
 
     private static void ACourierStillWaitingHoldsTheNextMove()
@@ -196,8 +205,8 @@ internal static class ReserveReleasePacingTests
         {
             double now = 10.0 + s / 3600.0;
             var intents = new[] { Intent(roleAt(s), releasedAt(s)) };
-            bool released = TacticalReserveCommitGate.TryReleasedDirectChild(intents, Group, defender, out _, out DirectChildRole role);
-            if (!pacing.HoldElapsed(Group, released, role, now)) continue;
+            bool released = TacticalReserveCommitGate.TryReleasedDirectChild(intents, Group, defender, out _, out DirectChildRole role, out bool guard);
+            if (!pacing.HoldElapsed(Group, released, role, guard, now)) continue;
             float x = 1000f + driftMeters * submitted;
             int queued = !double.IsNaN(lastIssued) && now - lastIssued < CourierHours ? 1 : 0;
             if (pacing.Admit(Group, x, -1400f, now, queued, lastIssued) != ReserveReleasePacing.Admission.Go) continue;
@@ -226,8 +235,8 @@ internal static class ReserveReleasePacingTests
     {
         string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ReserveReleaseIntentProducer.cs");
         FlankResponseTests.AssertPinned(producer, "army.CurrentBattleStance == BattleStance.Defender", "the Defender rule reads the army's stance");
-        FlankResponseTests.AssertPinned(producer, "TryReleasedDirectChild(army.CurrentDirectChildIntents, id, defender, out int sector, out DirectChildRole role)", "the real release, with the stance");
-        FlankResponseTests.AssertPinned(producer, "pacing.HoldElapsed(id, released, role, snapshot.DoctrineHours)", "the hold, on the snapshot's doctrine clock");
+        FlankResponseTests.AssertPinned(producer, "TryReleasedDirectChild(army.CurrentDirectChildIntents, id, defender, out int sector, out DirectChildRole role, out bool guardPoint)", "the real release, with the stance");
+        FlankResponseTests.AssertPinned(producer, "pacing.HoldElapsed(id, released, role, guardPoint, snapshot.DoctrineHours)", "the hold, on the snapshot's doctrine clock");
         FlankResponseTests.AssertPinned(producer, "pacing.Admit(id,", "the dead-band");
         FlankResponseTests.AssertPinned(producer, "pacing.NoteSubmitted(id,", "the producer records what it sent");
         FlankResponseTests.AssertPinned(producer, "BattleScope.Register(\"reserve-release-producer\"", "the pacing is battle-scoped");

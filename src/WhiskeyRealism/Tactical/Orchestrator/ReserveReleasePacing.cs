@@ -10,7 +10,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// <item>The hold: a release must stand for <see cref="HoldMinutes"/> of doctrine time, in one role, before its move goes out. A release the
     /// allocation takes back inside the hold (or swaps for another role) sends nothing; the allocator's own roles changed every few seconds in the
     /// 2026-10-17 smoke and each change queued a courier order. A crisis release (<see cref="DirectChildRole.Fix"/>) is exempt: the allocator already
-    /// confirmed it across two cycles (ReleaseHysteresis), and the line it answers is in contact now.</item>
+    /// confirmed it across two cycles (ReleaseHysteresis), and the line it answers is in contact now. So is a crossing guard (a release with a guard
+    /// point): it is timed to the enemy's arrival at the crossing and holds its own binding (ReserveReleaseState.BindCrossing).</item>
     /// <item>The dead-band: no new move while the last one the executor took is still waiting for its courier (the unit's queue is not empty, for at
     /// most <see cref="CourierWaitCapHours"/>), and none to a target within the executor's dedupe radius of the last one. The executor's own duplicate
     /// test reads vanilla's last waypoint, which vanilla's link follow keeps overwriting, so it cannot tell a repeat of this producer's order; the
@@ -57,10 +58,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// One observation of a group the ledger holds in reserve: whether the allocation released it and in which role. True when the move may go out
-        /// (the release has stood for <see cref="HoldHours"/> in this role, or is a crisis release). Not released: false, and the group's next release
+        /// (the release has stood for <see cref="HoldHours"/> in this role, or is a crisis release or a crossing guard). Not released: false, and the group's next release
         /// starts its hold afresh.
         /// </summary>
-        public bool HoldElapsed(int groupId, bool released, DirectChildRole role, double nowHours)
+        public bool HoldElapsed(int groupId, bool released, DirectChildRole role, bool guardPoint, double nowHours)
         {
             _entries.TryGetValue(groupId, out Entry e);
             if (!released)
@@ -79,7 +80,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 e.Since = nowHours;
                 _entries[groupId] = e;
             }
-            return role == DirectChildRole.Fix || nowHours - e.Since >= HoldHours;
+            return role == DirectChildRole.Fix || guardPoint || nowHours - e.Since >= HoldHours;
         }
 
         /// <summary>The doctrine hours the group's current release has stood, 0 when it is not being released.</summary>
