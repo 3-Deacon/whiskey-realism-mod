@@ -93,6 +93,7 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonReinforcement = "reinforcement";
         internal const string ReasonGarrison = "garrison";
         internal const string ReasonSecession = "secession-garrison";
+        internal const string ReasonGarrisonPost = "garrison-post";
         internal const string ReasonPlayerMapGroup = "player-map-group";
         internal const string ReasonGaveUp = "gave-up";
 

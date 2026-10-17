@@ -92,6 +92,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReserveRules.cs" Link="Planner\ReserveRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ForceAllocator.cs" Link="Planner\ForceAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\GarrisonPlanner.cs" Link="Planner\GarrisonPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\GarrisonLedger.cs" Link="Planner\GarrisonLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerChapterRules.cs" Link="Planner\PlannerChapterRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignTempoGate.cs" Link="Planner\CampaignTempoGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveTracker.cs" Link="Planner\MoveTracker.cs" />

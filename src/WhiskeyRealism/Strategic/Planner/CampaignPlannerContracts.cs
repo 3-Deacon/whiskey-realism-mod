@@ -123,6 +123,10 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Accomplished;      // IDAccomplished
         public ObjectiveRole Roles;
         public float Importance01;
+        // The strength of the side's own and allied forts' garrison units that guard this target (G8: the fort's closest town, else its
+        // parent or closest IIP), 0 for none. Own and allied forts only: an enemy fort's garrison reaches the side as a G1 belief
+        // (spec C14/C25), never as a snapshot read.
+        public float GarrisonStrength;
         // The state the target lies in (GetStateOfField), -1 unknown; stored plus one so an unset record reads -1.
         private int _state;
         public int StateId { get => _state - 1; set => _state = value + 1; }
@@ -139,6 +143,14 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool OwnTroops;      // Union only: GameVars.nation[state].alliancetroops[0], vanilla's own "a Union group stands here" flag (garrisons included)
         public bool HasTown;
         public float TownX, TownZ;  // the objective's town (Louisville, St.Louis), from its objective record
+    }
+
+    // One of the side's own forts (G8; BattleUnits.fort entries with Owner == the alliance): a place a garrison post can stand at, and
+    // the strength of the garrison dummy that guards it. An ally's fort is not a record (its garrison still adds to the target it guards).
+    public struct FortRecord
+    {
+        public float X, Z;
+        public float GarrisonStrength; // the fort's garrisonunit groupstrengthdirect, 0 with none
     }
 
     public enum SupplySourceKind
@@ -288,8 +300,9 @@ namespace WhiskeyRealism.Strategic.Planner
         DepotBuilder = 5,
         Recover = 6,
         Recon = 7,
-        // D8 (smoke amendments 2026-10-16): a formation sent to stand in a secession state (a live objective 15/16 the CSA could win) until
-        // it is in it; once inside it is Hold in place, withheld, with the secession reason.
+        // A formation sent to stand at a garrison post until it is there; once there it is Hold in place, withheld. One role for both
+        // sorts of post: D8's secession garrison (a live objective 15/16 the CSA could win; reason secession-garrison) and G8's posts
+        // beyond the capital (an objective town, rail hub, port, depot or fort; reason garrison-post).
         Garrison = 8
     }
 
@@ -388,9 +401,26 @@ namespace WhiskeyRealism.Strategic.Planner
         }
     }
 
-    // One secession state's garrison (D8): the post (the objective's town), the formations that hold it and whether one already stands in the state.
+    // What a garrison post guards. Secession is D8's (a state the CSA could win); the others are G8's posts beyond the capital.
+    public enum GarrisonPostKind
+    {
+        ObjectiveTown = 0,
+        RailHub = 1,
+        Port = 2,
+        Depot = 3,
+        Fort = 4,
+        Secession = 5
+    }
+
+    // One garrison post. D8's (Kind Secession): the post is a secession state's objective town, the formations that hold it and whether one
+    // already stands in the state. G8's (any other Kind): a place away from the capital, the believed threat it needs covering
+    // (Need) and the strength already there (ExistingStrength); the allocator seats one formation at it. Both sorts ride TheaterPlan.Garrisons,
+    // are seated by ForceAllocator under the one Garrison role and recorded by the one GarrisonLedger.
     public sealed class GarrisonPost
     {
+        public GarrisonPostKind Kind = GarrisonPostKind.Secession;
+        public float ExistingStrength;             // G8: the fort garrison dummy and the own formations at the post, net of its own incumbent
+        public int QuietDays;                      // G8: review days since a live land belief last lay within the relocation range of the post
         public string StateName;
         public int StateId;
         public float X, Z;
@@ -430,10 +460,20 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Withheld;
     }
 
+    // A formation the allocator seated at a garrison post (either sort): which post of TheaterPlan.Garrisons, which formation, and whether
+    // it already stands at the post (then it holds in place) or is marching to it. GarrisonLedger.Sync reads these.
+    public struct GarrisonSeat
+    {
+        public int PostIndex;
+        public int InstanceId;
+        public bool AtPost;
+    }
+
     public sealed class Allocation
     {
         public int Alliance;
         public List<Assignment> Assignments = new List<Assignment>();
+        public List<GarrisonSeat> Seats = new List<GarrisonSeat>();
         public List<int> Shortfalls = new List<int>(); // instance ids, worst first
         public List<int> Surpluses = new List<int>();
 

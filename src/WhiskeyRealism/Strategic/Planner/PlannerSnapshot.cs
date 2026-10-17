@@ -4,8 +4,8 @@ namespace WhiskeyRealism.Strategic.Planner
 {
     // Everything one alliance's planner keeps across a save (sidecar v3, FactionDto.planner), as plain data: the
     // hysteresis and seed state, the telemetry run of the map-group player's unreliable days, the belief picture, the
-    // appointment protection windows and the three ledgers that name a formation (the mover's tracked moves, the depot
-    // task ledger, the recon missions). Every reference to a formation is its UnitKey (name:commander), never a Unity
+    // appointment protection windows and the four ledgers that name a formation (the mover's tracked moves, the depot
+    // task ledger, the recon missions, the garrison posts). Every reference to a formation is its UnitKey (name:commander), never a Unity
     // instance id (those change on every load); PlannerRebind turns the keys back into this session's ids on the first
     // review after a load. A null PlannerSnapshot is a sidecar without planner state (v1/v2): the planner starts fresh.
     public sealed class PlannerSnapshot
@@ -18,6 +18,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public readonly List<DepotTaskRecord> DepotTasks = new List<DepotTaskRecord>();
         public readonly List<MoveRecord> Moves = new List<MoveRecord>();
         public readonly List<ReconMission> ReconMissions = new List<ReconMission>();
+        public readonly List<GarrisonPostRecord> GarrisonPosts = new List<GarrisonPostRecord>();
     }
 
     // The first review after a load: the saved formation references (unit keys) become this session's formations.

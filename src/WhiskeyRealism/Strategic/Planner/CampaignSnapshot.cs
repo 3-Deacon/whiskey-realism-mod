@@ -43,6 +43,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<ArmyGroupRecord> ArmyGroups { get; } = new List<ArmyGroupRecord>(); // G2 appointment targets
         public List<CrossingRecord> Crossings { get; } = new List<CrossingRecord>(); // fords and bridges (G3)
         public List<SecessionRecord> Secessions { get; } = new List<SecessionRecord>(); // D8: Kentucky and Missouri, read live each review
+        public List<FortRecord> Forts { get; } = new List<FortRecord>();               // G8: the side's own forts (post sites and their garrison dummies)
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
 
@@ -74,6 +75,7 @@ namespace WhiskeyRealism.Strategic.Planner
             ArmyGroups.Clear();
             Crossings.Clear();
             Secessions.Clear();
+            Forts.Clear();
             Detections.Clear();
             Beliefs.Clear();
         }
@@ -210,6 +212,11 @@ namespace WhiskeyRealism.Strategic.Planner
             if (partOfFollowedObjective) value += objectiveBonus;
             if (isTown && capitalOfFactionIndex) value += capitalBonus;
             return value;
+        }
+
+        internal static bool SideKnowsGarrison(int alliance, int fortOwner, bool allied)
+        {
+            return false;
         }
 
         internal static float Clamp01(float value)
