@@ -4,6 +4,7 @@ using System.Linq;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Operations;
 using static TestHarness;
 
 // Smoke 2026-10-17 (session 20261017-001611-436): the orchestrator saw each army as one
@@ -25,6 +26,8 @@ internal static class ArmyChildrenTests
             ("army children player owned detached command stays out", PlayerOwnedDetachedCommandStaysOut),
             ("army children w and l depth keeps the player's ai brigade, division and army", WlDepthKeepsThePlayersAiBrigadeDivisionAndArmy),
             ("army children vanilla depth finds corps under the army", VanillaDepthFindsCorpsUnderTheArmy),
+            ("army children union division child cascades a role to every brigade", UnionDivisionChildCascadesARoleToEveryBrigade),
+            ("army children csa brigade children each own a leaf assignment", CsaBrigadeChildrenEachOwnALeafAssignment),
         });
     }
 
@@ -187,6 +190,57 @@ internal static class ArmyChildrenTests
         AssertTrue(children.All(c => c.ChildId == "child-10" || c.ChildId == "child-11"), "the corps are the children");
     }
 
+    // Discovery -> registration -> allocation -> leaf map, on the Union evidence: the division is
+    // the one direct child and its four brigades each get a leaf role (smoke: the army was the
+    // one child and "synth-army--221568=Reserve:4" parked the whole army).
+    private static void UnionDivisionChildCascadesARoleToEveryBrigade()
+    {
+        var h = Union(UnitFlags.PermanentlyDetached);
+        for (int b = 0; b < 4; b++) h.SetPosition(11 + b, 100f * b, 0f);
+        h.Assemble();
+        var army = ArmyWithPlan(h.Discover(-1));
+        h.Cascade(army);
+        var map = army.CurrentLeafBrigadeMap;
+        AssertEqual(4, map.Count, "one leaf assignment per brigade");
+        for (int b = 0; b < 4; b++)
+            AssertTrue(map.ContainsKey(11 + b), "brigade " + (11 + b) + " has an assignment");
+        AssertTrue(map.Values.Select(a => a.LeafRole).Distinct().Count() > 1, "the brigades are not all one role: " + string.Join(",", map.Values.Select(a => a.LeafRole)));
+        AssertTrue(map.Values.All(a => a.CascadeChain.Count >= 2), "the division's role cascades down to each brigade");
+    }
+
+    private static void CsaBrigadeChildrenEachOwnALeafAssignment()
+    {
+        var h = new Hierarchy();
+        h.Add(100, 16, UnitFlags.None, 110, 111, 112, 120, 121, 122);
+        h.Add(200, 16, UnitFlags.None, 210, 211, 220, 221);
+        for (int b = 0; b < 3; b++) h.Add(110 + b, 14, UnitFlags.PermanentlyDetached, 120 + b);
+        for (int b = 0; b < 3; b++) h.Add(120 + b, TacticalUnitType.Infantry, UnitFlags.None);
+        for (int b = 0; b < 2; b++) h.Add(210 + b, 14, UnitFlags.PermanentlyDetached, 220 + b);
+        for (int b = 0; b < 2; b++) h.Add(220 + b, TacticalUnitType.Infantry, UnitFlags.None);
+        int[] brigades = { 110, 111, 112, 210, 211 };
+        for (int i = 0; i < brigades.Length; i++) h.SetPosition(brigades[i], 80f * i, 0f);
+        h.Assemble();
+        var army = ArmyWithPlan(h.Discover(-1));
+        h.Cascade(army);
+        var map = army.CurrentLeafBrigadeMap;
+        AssertEqual(5, map.Count, "every brigade of both armies has a leaf assignment");
+        foreach (int id in brigades) AssertTrue(map.ContainsKey(id), "brigade " + id + " is commanded");
+        AssertTrue(map.Values.Any(a => a.LeafRole == DirectChildRole.Main), "one brigade carries the main effort");
+        AssertTrue(map.Values.Select(a => a.LeafRole).Distinct().Count() > 1, "roles differ by brigade, not one role for the army");
+    }
+
+    private static ArmyOrchestrator ArmyWithPlan(IReadOnlyList<DirectChildSnapshot> children)
+    {
+        var army = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        army.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.GenericMethodical, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
+        army.RegisterDirectChildren(children);
+        army.ObserveGlobalOdds(1.2f);
+        var evidence = new DirectChildEvidence[children.Count];
+        for (int i = 0; i < evidence.Length; i++) evidence[i] = new DirectChildEvidence(2 + (i % 2), 1, false, i % 3, 0, 0.9f);
+        army.ObserveDirectChildEvidenceWithZones(evidence, null, null);
+        return army;
+    }
+
     private sealed class Hierarchy
     {
         private readonly List<UnitRecord> _records = new List<UnitRecord>();
@@ -203,6 +257,22 @@ internal static class ArmyChildrenTests
             list[0] = id; // GetComponentsInChildren(true) includes the component's own object
             Array.Copy(descendants, 0, list, 1, descendants.Length);
             _attached[id] = list;
+        }
+
+        internal void SetPosition(int id, float x, float z)
+        {
+            int i = _records.FindIndex(r => r.InstanceId == id);
+            var r = _records[i];
+            r.X = x;
+            r.Z = z;
+            _records[i] = r;
+        }
+
+        internal void Cascade(ArmyOrchestrator army)
+        {
+            var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>();
+            BattleSnapshotAssembler.ToExtendedProbes(_snapshot, null, -1, probes);
+            army.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, -1));
         }
 
         internal void SetFlag(int id, UnitFlags flag)
