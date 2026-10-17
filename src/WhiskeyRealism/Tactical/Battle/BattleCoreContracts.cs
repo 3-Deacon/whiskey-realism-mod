@@ -258,6 +258,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
         // still applies. (4096 is the BC14W bombard start's.)
         Contest = 16384,
+        // W&L dispatch, Move only: the move re-lays a group where it was already bound (recovery of an interrupted path, a leaf
+        // brigade's move to its formation slot). It is not a new order, so the player's panel is not told of it
+        // (OrderExecutor.PlanCore step 9). (32768 is unit churn's Deploy.)
+        Maintenance = 65536,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

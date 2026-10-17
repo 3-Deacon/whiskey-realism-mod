@@ -125,6 +125,15 @@ internal static partial class WlOrderFlowTests
             ("wl order move lost latest move leaves the last order he can have", LostLatestMoveLeavesThePlayerWithTheLastOrderHeCan),
             ("wl order move no order is silently lost and the latest is shown last", NoOrderIsSilentlyLostAndTheLatestIsShownLast),
             ("wl order pin runtime arms from the executors carrier", RuntimeArmsFromTheExecutorsCarrier),
+            // the executor's dispatch decision
+            ("wl order dispatch whose task changed is discarded", DispatchWhoseTaskChangedIsDiscarded),
+            ("wl order dispatch waits until its task has held", DispatchWaitsUntilItsTaskHasHeld),
+            ("wl order dispatch whose task has held is delivered at once", DispatchWhoseTaskHasHeldIsDeliveredAtOnce),
+            ("wl order dispatch orders without a task are not asked", OrdersWithoutADispatchTaskAreNotAskedAboutATask),
+            ("wl order dispatch task gate comes after the move gate", TaskGateComesAfterTheMoveGate),
+            ("wl order dispatch task changed is structural", TaskChangedIsStructuralForP62),
+            ("wl order pin maintenance moves are not dispatched", MaintenanceMovesAreNotDispatched),
+            ("wl order pin dispatch runtime applies the memory", DispatchRuntimeAppliesTheMemory),
             ("wl order pin executor voids the groups old orders before queueing the new one", ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne),
             // follow-up
             ("wl order followup over reached attack admits with clear", FollowUpOverReachedAttackAdmitsWithClear),

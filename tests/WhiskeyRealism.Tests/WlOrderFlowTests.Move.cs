@@ -579,7 +579,7 @@ internal static partial class WlOrderFlowTests
         AssertTrue(loop >= 0 && issue > loop && note > issue && emit > note, "each moved target's queue entry is noted after its IssueMove, inside the target loop, before Emit");
         AssertTrue(Regex.IsMatch(body, @"if \(unit\.regimentpaths > 0 && WlMoveQueue\.TryPending\(unit,\s*out float queuedAt,\s*out float stamp,\s*out int orderType\)\)\s*carrier\.Consider\(own\[targetIndex\]\.InstanceId,\s*queuedAt,\s*stamp,\s*orderType,\s*x,\s*z\);"),
             "the carrier candidate is the issued target (a child in a fan-out) that holds a path, with its pending entry's processing time, stamp and ordertype and the target it was given");
-        AssertTrue(Regex.IsMatch(body, @"IntentKind\(winner\.Task\),\s*in carrier\)"), "and Emit receives it");
+        AssertTrue(Regex.IsMatch(body, @"IntentKind\(winner\.Task\),\s*in carrier,\s*winner\.Task\)"), "and Emit receives it, with the group's task");
         string code = Code(FlowRuntime);
         AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.Carrier\.Has && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.Carrier = call\.Carrier;\s*\}"),
             "Route arms an entry from the call's carrier and only while couriers are on");

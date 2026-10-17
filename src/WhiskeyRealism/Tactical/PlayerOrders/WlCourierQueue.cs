@@ -36,6 +36,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public WlMoveCarrier Carrier;
         // Why the move gate released the order (written on the flow row); None until the gate looked.
         public MoveBasis Gate;
+        // An executor dispatch: the group's CommandTaskType (as an int; 0 = none) the order was made for. Delivered
+        // only while the group is still under it (WlOrderFlow.TaskStillHolds).
+        public int DispatchTask;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.

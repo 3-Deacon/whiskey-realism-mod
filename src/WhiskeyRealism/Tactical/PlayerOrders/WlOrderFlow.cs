@@ -208,6 +208,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // `basis` is why an executed move counts as carried out (None otherwise).
         MoveState MoveOf(in CourierEntry e, out MoveBasis basis);
         bool ReleaseStillDue(in CourierEntry e);
+        // An executor dispatch (DispatchTask != 0): is the ordered group still under the task the order was made
+        // for? `heldAtHours` is when that task has held for the task-hold time (<= now: it has). False when the
+        // group has been given another task since.
+        bool TaskHolds(in CourierEntry e, out double heldAtHours);
         void SetDelivering(bool on);
         void ClearSlot();
         void RestoreSlot(object saved);
@@ -350,6 +354,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 case WlCourierQueue.Superseded:
                 case WlCourierQueue.SupersededIntent:
+                case TaskChanged:
                 case WlCourierQueue.Overflow:
                 case "unit-gone":
                 case "cross-scope":
@@ -381,6 +386,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         public const string MoveInFlight = "move-in-flight";
         public const string MoveLost = "move-lost";
+        public const string TaskChanged = "task-changed";
+        public const string TaskHold = "task-hold";
 
         public static double DueAt(double issuedAt, double delayHours, bool couriersOn, double deferUntil)
         {
@@ -552,6 +559,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (Queue.IsSuperseded(in e)) { Queue.Discard(in e, WlCourierQueue.Superseded); return false; }
             if (_host.UnitGone(in e)) { Queue.Discard(in e, "unit-gone"); return false; }
             if (e.AwaitsMove && !ReleaseOnMove(ref e, out requeue)) return requeue;
+            if (e.DispatchTask != 0 && !TaskStillHolds(ref e, out requeue)) return requeue;
             if (IsCrossScope(_host.SlotType)) { Queue.Discard(in e, "cross-scope"); return false; }
             if (e.Origin == OrderOrigin.Release && (_host.SlotType != 13 || !_host.ReleaseStillDue(in e)))
             {
@@ -649,6 +657,25 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             e.AwaitsMove = false;
             e.DueAt = Math.Max(e.DueAt, now + e.LegHours);
             if (e.DueAt <= now) return true;
+            requeue = true;
+            return false;
+        }
+
+        // An executor dispatch is delivered only while the group is still under the task it was made for, and once that
+        // task has held for the task-hold time (a task that flips every few seconds announces nothing). False when the
+        // entry is finished (the task changed: reported) or waits for the hold (requeue: due when the hold is met).
+        private bool TaskStillHolds(ref CourierEntry e, out bool requeue)
+        {
+            requeue = false;
+            if (!_host.TaskHolds(in e, out double heldAt))
+            {
+                Queue.Discard(in e, TaskChanged);
+                return false;
+            }
+            double now = _host.NowHours;
+            if (heldAt <= now) return true;
+            e.DueAt = Math.Max(e.DueAt, heldAt);
+            _host.Row(in e, "defer", TaskHold);
             requeue = true;
             return false;
         }

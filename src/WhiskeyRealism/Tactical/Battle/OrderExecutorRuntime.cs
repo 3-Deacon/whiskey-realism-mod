@@ -123,8 +123,14 @@ namespace WhiskeyRealism.Tactical.Battle
             executor.Crossings = Plugin.CrossingMoveGateEnabled() ? RiverCrossingGateRuntime.Instance : null;
             WaypointValidatorRuntime.TryMapSize(out float sizeX, out float sizeZ);
             executor.SetMapSize(sizeX, sizeZ);
+            executor.TaskHoldHours = TaskHoldHours();
+        }
+
+        /// <summary>The same-task hold (Plugin.BrigadeTaskHoldSeconds, real seconds at 1x) in battle hours: the executor's re-issue hold and the W&amp;L dispatch's task-hold.</summary>
+        internal static float TaskHoldHours()
+        {
             float holdSeconds = Plugin.BrigadeTaskHoldSeconds != null ? Plugin.BrigadeTaskHoldSeconds.Value : 12f;
-            executor.TaskHoldHours = TacticalBattleClock.RealSecondsAtOneXToHours(holdSeconds);
+            return TacticalBattleClock.RealSecondsAtOneXToHours(holdSeconds);
         }
 
         /// <summary>
@@ -235,6 +241,9 @@ namespace WhiskeyRealism.Tactical.Battle
             // move just replaced); the new move's own order is queued after.
             if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner))
                 WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);
+            // The group's task, for the task-hold test of the dispatch queued below or earlier.
+            if (executed > 0 && winner.Task != CommandTaskType.None)
+                TacticalPlayerDispatchRuntime.NoteTask(winner.GroupId, winner.Task, nowHours);
 
             // Emit never throws (it logs its own failure once).
             if (OrderExecutor.ShouldDispatch(plan, executed))
@@ -242,7 +251,12 @@ namespace WhiskeyRealism.Tactical.Battle
                 Regiment ancestor = BattleSnapshotBuilder.UnitAt(view, groupIndex, enemy: false);
                 if ((UnityEngine.Object)ancestor != null)
                     TacticalPlayerDispatchRuntime.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading,
-                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task), in carrier);
+                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task), in carrier, winner.Task);
+            }
+            else if (executed > 0 && winner.Channel == OrderChannel.Move && (winner.Flags & IntentFlags.Maintenance) != 0 && plan.Targets.PlayerShareNeedsDispatch)
+            {
+                // A recovery or a formation slot of an ancestor of the player's command: not an order for him (one bounded row).
+                WlOrderFlowRuntime.NoteDispatchSkipped(winner.GroupId, 0, TacticalPlayerDispatchRuntime.MaintenanceMove);
             }
 
             return executed;

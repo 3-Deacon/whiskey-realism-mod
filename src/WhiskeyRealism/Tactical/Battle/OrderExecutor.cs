@@ -761,7 +761,7 @@ namespace WhiskeyRealism.Tactical.Battle
             //    hold, courier cadence, dedupe; a retry skips the first two once)
             //    are its throttle; Emit's 110 m record and vanilla's own repeat
             //    check (8643) sit behind it.
-            if (w.Channel == OrderChannel.Move && !immediate && plan.Targets.PlayerShareNeedsDispatch)
+            if (w.Channel == OrderChannel.Move && !immediate && (w.Flags & IntentFlags.Maintenance) == 0 && plan.Targets.PlayerShareNeedsDispatch)
                 plan.DispatchType = TacticalDispatchTypeMapper.Map(w.Task, EnemyObservedNear(s, x, z), rec.AiStanceOrdered == AssaultStance);
             return plan;
         }

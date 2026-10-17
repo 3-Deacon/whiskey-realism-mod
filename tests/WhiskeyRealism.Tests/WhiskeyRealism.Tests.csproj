@@ -292,6 +292,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SilentExitPrecheck.cs" Link="Battle\SilentExitPrecheck.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\WaypointValidator.cs" Link="Battle\WaypointValidator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OrderArbiter.cs" Link="Battle\OrderArbiter.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PlayerDispatchMemory.cs" Link="Battle\PlayerDispatchMemory.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleLod.cs" Link="Battle\BattleLod.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleLodState.cs" Link="Battle\BattleLodState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PostureRecords.cs" Link="Battle\PostureRecords.cs" />

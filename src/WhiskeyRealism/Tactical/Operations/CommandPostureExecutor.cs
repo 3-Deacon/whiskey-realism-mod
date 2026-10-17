@@ -1392,8 +1392,11 @@ namespace WhiskeyRealism.Tactical.Operations
         /// </summary>
         public static BattleOrderIntent LeafMove(int groupId, CommandTaskType task, float x, float z, float heading, bool inContactWithdrawal)
         {
-            return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false, exploit: false,
+            BattleOrderIntent move = MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false, exploit: false,
                 IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
+            // A leaf brigade keeping its slot in the division's formation: a re-lay, not an order for the player.
+            move.Flags |= IntentFlags.Maintenance;
+            return move;
         }
 
         public static BattleOrderIntent FacingPulse(int unitId, float heading)
@@ -1562,6 +1565,8 @@ namespace WhiskeyRealism.Tactical.Operations
             BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings, r.Exploit,
                 r.Priority, r.Source, r.Reason);
             move.ExploitId = r.ExploitId;
+            // Re-issuing an interrupted order is the group going on with what it was doing, not a new order for the player.
+            if (r.Action == PostureExecutionAction.RecoverInterruptedOrder) move.Flags |= IntentFlags.Maintenance;
             if (r.ViaCount > 0)
             {
                 move.ViaCount = Math.Min(r.ViaCount, 2);

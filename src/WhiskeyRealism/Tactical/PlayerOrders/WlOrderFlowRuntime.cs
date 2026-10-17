@@ -180,6 +180,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             // identity and the target the unit was given. Has false when the dispatch moved nothing through
             // the queue.
             public WlMoveCarrier Carrier;
+            // An executor dispatch: the group's CommandTaskType (as an int) the order was made for; 0 = none.
+            public int DispatchTask;
         }
 
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
@@ -233,13 +235,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // True when the order went on a courier. With both order-flow switches off the call goes to vanilla
         // as it always did, and the result is whether vanilla showed a new order.
         internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind,
-            in WlMoveCarrier carrier)
+            in WlMoveCarrier carrier, int dispatchTask)
         {
             var call = new OrderCall
             {
                 Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
                 Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin, Kind = kind,
-                Carrier = carrier,
+                Carrier = carrier, DispatchTask = dispatchTask,
             };
             return EnqueueCall(in call);
         }
@@ -258,6 +260,18 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 OnceLog.Warning("wl-order:supersede-intent", "[W&LOrder] voiding a superseded executor order failed: " + ex.GetType().Name + " " + ex.Message);
             }
+        }
+
+        // The executor made no dispatch to the player for a move of this group (`drop` row): the same order again, or a
+        // maintenance move. Bounded by the drop ring.
+        internal static void NoteDispatchSkipped(int groupId, int type, string reason)
+        {
+            var entry = new CourierEntry
+            {
+                UnitId = groupId, Type = type, Origin = OrderOrigin.Executor, IssuerKey = groupId,
+                IssuedAt = TacticalDoctrineTime.NowBattleHours,
+            };
+            EmitRow(in entry, "drop", reason);
         }
 
         // #62's order, with the candidate its bookkeeping follows through the delivery callback.
@@ -356,6 +370,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return CaptureVerdict.Pass;
             entry.P62Candidate = call.P62;
             entry.Kind = call.Kind;
+            entry.DispatchTask = call.DispatchTask;
             // The executor moved the unit (or its children) through the order queue: the player is told one
             // leg after that move is carried out, not when it is queued (WlOrderFlow.ReleaseOnMove).
             if (call.Carrier.Has && CouriersOn())
@@ -852,6 +867,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             // The release is stale when contact has resumed (or the hysteresis no longer holds) while its
             // courier rode: the same test that derived it, on fresh facts.
+            public bool TaskHolds(in CourierEntry e, out double heldAtHours)
+            {
+                return Tactical.Battle.TacticalPlayerDispatchRuntime.TaskHolds(e.UnitId, e.DispatchTask, out heldAtHours);
+            }
+
             public bool ReleaseStillDue(in CourierEntry e)
             {
                 if (_isCic || !ReadmitOn()) return false;
@@ -888,7 +908,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 OnceLog.Info("wl-order:first-delivery", "[W&LOrder] first order delivered type=" + e.Type + " origin=" + e.Origin);
             }
 
-            public void Row(in CourierEntry e, string action, string reason) => EmitRow(in e, action, reason);
+            public void Row(in CourierEntry e, string action, string reason)
+            {
+                EmitRow(in e, action, reason);
+                // A dispatch that never reached the panel is no longer "told": the next order to the same place is sent.
+                if (action == "discard" && e.Origin == OrderOrigin.Executor)
+                    Tactical.Battle.TacticalPlayerDispatchRuntime.Memory.ForgetDispatch(e.UnitId);
+            }
 
             public void NotifyP62(in CourierEntry e, P62Outcome outcome)
             {

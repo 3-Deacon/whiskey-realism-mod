@@ -87,6 +87,15 @@ internal static partial class WlOrderFlowTests
             return CarrierMoves.TryGetValue(e.Carrier.UnitId, out MoveState state) ? state : Move;
         }
         public bool ReleaseStillDue(in CourierEntry e) => ReleaseDue;
+        public bool TaskChangedSince;
+        public double TaskHeldAt = double.NegativeInfinity;
+        public int TaskAsks;
+        public bool TaskHolds(in CourierEntry e, out double heldAtHours)
+        {
+            TaskAsks++;
+            heldAtHours = TaskHeldAt;
+            return !TaskChangedSince;
+        }
         public void SetDelivering(bool on) => Delivering = on;
         public void ClearSlot() { SavedBeforeClear = Slot; Slot = null; }
         public void RestoreSlot(object saved) { Slot = (FakeOrder)saved; RestoredWith = saved; }
