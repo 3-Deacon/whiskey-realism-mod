@@ -129,9 +129,10 @@ internal static class StanceArtilleryMigrationTests
         arbiter.Submit(new BattleOrderIntent { GroupId = 21, Channel = OrderChannel.Move, TargetX = 10f, TargetZ = -10f, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test" });
         var winners = new BattleOrderIntent[4];
         AssertEqual(2, arbiter.Resolve(winners), "stance and move resolve independently");
-        AssertEqual(OrderChannel.Stance, winners[0].Channel, "stance first");
-        AssertEqual(IntentSource.ChargeDemotion, winners[0].Source, "the demotion outranks the executor's assault");
-        AssertEqual(2, winners[0].Value, "demoted stance");
+        AssertEqual(OrderChannel.Move, winners[0].Channel, "move first");
+        AssertEqual(OrderChannel.Stance, winners[1].Channel, "stance after the move");
+        AssertEqual(IntentSource.ChargeDemotion, winners[1].Source, "the demotion outranks the executor's assault");
+        AssertEqual(2, winners[1].Value, "demoted stance");
         AssertTrue(arbiter.TryGetClaim(21, OrderChannel.Stance, out BattleOrderIntent claim) && claim.Priority == IntentPriority.Safety,
             "the published claim is the Safety demotion");
     }

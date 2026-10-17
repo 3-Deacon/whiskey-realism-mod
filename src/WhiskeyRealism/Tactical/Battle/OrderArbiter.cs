@@ -11,10 +11,19 @@ namespace WhiskeyRealism.Tactical.Battle
     // AdjustGroupAIStance 5869). Resolve keeps the highest IntentPriority per
     // (group, channel); a tie keeps the source that won the previous tick
     // (hysteresis), else the first submitted. Winners come out in execution order
-    // Stance → Stop → Move → Formation → Facing → CombatBehavior: #61 changed
-    // stance before the waypoint (L768-774) and only re-formed when no move went
-    // out (L976-988), because vanilla's courier formation order re-lays a moving
-    // group at its current position (SetGroupFormation newpath, 91884).
+    // Stop → Move → Stance → Formation → Facing → CombatBehavior. A move comes
+    // before every stance order, whatever group it is for: vanilla queues each
+    // order on the unit's parent behind the latest queued processing time, 0.02 h
+    // apart (AddToOrderQueue 124954-124966), so a stance order issued first
+    // delays every move issued after it (the 2026-10-16 smoke: eight stance
+    // orders put the brigade's move 0.16 h later). A stop comes before a move
+    // (it would cancel the new path), and a formation only follows a move that
+    // did not go out (#61 L976-988), because vanilla's courier formation order
+    // re-lays a moving group at its current position (SetGroupFormation newpath,
+    // 91884). Stance before the waypoint (#61 L768-774) ordered nothing that
+    // matters: ChangeStance detaches the group at the call (90782-90790) and
+    // vanilla's own AdjustGroupAIStance has already run for the pool in the same
+    // UpdateAITasks (5869), so a pool group is detached before this tick's moves.
     //
     // The resolved winners are published as the claim table that patches read
     // through TryGetClaim (D4: inline executor calls are refused under a higher
@@ -32,9 +41,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static readonly OrderChannel[] ExecutionOrder =
         {
-            OrderChannel.Stance,
             OrderChannel.Stop,
             OrderChannel.Move,
+            OrderChannel.Stance,
             OrderChannel.Formation,
             OrderChannel.Facing,
             OrderChannel.CombatBehavior,
