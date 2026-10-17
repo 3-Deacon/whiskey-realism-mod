@@ -59,6 +59,8 @@ namespace WhiskeyRealism.Tactical.Battle
             public bool HasEnemy;
             public float EnemyBearing, EnemyDistance;
             public int CorridorCount, CorridorHash;
+            /// <summary>The #45 cached stance decision (ITaskLookup.StanceDecision) and the stance last ordered on the group.</summary>
+            public int StanceDecision, StanceOrdered;
         }
 
         private GroupLod[] _groups = new GroupLod[64];
@@ -73,6 +75,11 @@ namespace WhiskeyRealism.Tactical.Battle
         // Classify's scratch (grow-only): the folds over the command tree, the latched and remembered observations.
         internal bool[] Near = new bool[BattleSnapshot.InitialCapacity];
         internal bool[] Hot = new bool[BattleSnapshot.InitialCapacity];
+        internal bool[] Unsettled = new bool[BattleSnapshot.InitialCapacity];
+        private bool[] _claimWoken = new bool[BattleSnapshot.InitialCapacity];
+        // Wake scratch: the units whose claim lapsed, and for each own index whether one lies at or under it.
+        internal int[] LapsedUnits = new int[16];
+        internal bool[] LapsedBelow = new bool[BattleSnapshot.InitialCapacity];
         internal float[] SubtreeRadius = new float[BattleSnapshot.InitialCapacity];
         internal float[] ChangedX = new float[64];
         internal float[] ChangedZ = new float[64];
@@ -81,10 +88,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private int _planSignature;
         private bool _hasPlanSignature;
-        private readonly int[] _promotionCounts = new int[LodPromotionReasons];
-
-        /// <summary>The number of single <see cref="LodPromotion"/> flags (LodPromotion.PlayerChain is 1 &lt;&lt; 10).</summary>
-        public const int LodPromotionReasons = 11;
+        private readonly int[] _promotionCounts = new int[LodReasons.Count];
 
         /// <summary>Snapshot id of the last Classify; a snapshot whose id differs was not classified (every group is due).</summary>
         public long SnapshotTickId { get; private set; } = -1;
@@ -144,6 +148,18 @@ namespace WhiskeyRealism.Tactical.Battle
             DueCount++;
             CountPromotion(reason);
             return true;
+        }
+
+        /// <summary>The group was woken this tick because a claim of a producer that runs every tick lapsed (BattleLod.WakeLapsedClaims).</summary>
+        internal void MarkClaimWoken(int ownIndex)
+        {
+            if (ownIndex >= 0 && ownIndex < ClassifiedOwnCount) _claimWoken[ownIndex] = true;
+        }
+
+        /// <summary>Whether <see cref="MarkClaimWoken"/> named the group this tick: the second pass of the tiered producers runs for these alone.</summary>
+        public bool IsClaimWoken(int ownIndex)
+        {
+            return ownIndex >= 0 && ownIndex < ClassifiedOwnCount && _claimWoken[ownIndex];
         }
 
         // ---- the nav budget's report -----------------------------------------------------------------
@@ -226,11 +242,16 @@ namespace WhiskeyRealism.Tactical.Battle
                 _last = new LodPromotion[size];
                 Near = new bool[size];
                 Hot = new bool[size];
+                Unsettled = new bool[size];
+                _claimWoken = new bool[size];
+                LapsedBelow = new bool[size];
                 SubtreeRadius = new float[size];
             }
             Array.Clear(_tier, 0, n);
             Array.Clear(Near, 0, n);
             Array.Clear(Hot, 0, n);
+            Array.Clear(Unsettled, 0, n);
+            Array.Clear(_claimWoken, 0, n);
             Array.Clear(_last, 0, n);
             for (int i = 0; i < n; i++) _due[i] = true;
             SnapshotTickId = s.TickId;
@@ -290,7 +311,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         internal void CountPromotion(LodPromotion reasons)
         {
-            for (int bit = 0; bit < LodPromotionReasons; bit++)
+            for (int bit = 0; bit < LodReasons.Count; bit++)
                 if (((int)reasons & (1 << bit)) != 0) _promotionCounts[bit]++;
         }
 
@@ -310,13 +331,33 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Resize(ref RememberedZ, size);
         }
 
-        private static int BitIndex(LodPromotion single)
+        /// <summary>The bit index of a single <see cref="LodPromotion"/> flag, or -1 for none, several, or a bit beyond the enum.</summary>
+        internal static int BitIndex(LodPromotion single)
         {
             int v = (int)single;
             if (v <= 0 || (v & (v - 1)) != 0) return -1;
             int bit = 0;
             while ((v >>= 1) != 0) bit++;
-            return bit < LodPromotionReasons ? bit : -1;
+            return bit < LodReasons.Count ? bit : -1;
+        }
+    }
+
+    /// <summary>How many single flags <see cref="LodPromotion"/> has, derived from the enum: one counter per flag, so a flag added later is counted.</summary>
+    internal static class LodReasons
+    {
+        public static readonly int Count = Derive();
+
+        private static int Derive()
+        {
+            int highest = 0;
+            foreach (LodPromotion flag in Enum.GetValues(typeof(LodPromotion)))
+            {
+                int v = (int)flag;
+                int bit = 0;
+                while (v > 1) { v >>= 1; bit++; }
+                if ((int)flag > 0 && bit + 1 > highest) highest = bit + 1;
+            }
+            return highest;
         }
     }
 }

@@ -58,6 +58,8 @@ namespace WhiskeyRealism.Tactical.Battle
         private static readonly int[] _macroAi = new int[2];
         private static BattleOrderIntent[] _winners = new BattleOrderIntent[256];
         private static BattleOrderIntent[] _carried = new BattleOrderIntent[256];
+        // BC15 decision 14: the intent count after each producer's first-pass block, where its second-pass intents are inserted.
+        private static readonly int[] _producerEnds = new int[32];
         private static readonly BattleOrderIntent[] _retries = new BattleOrderIntent[32];
         private static readonly OrderOutcome[] _outcomes = new OrderOutcome[256];
         private static readonly ArbiterStats[] _stats = { new ArbiterStats(), new ArbiterStats() };
@@ -191,6 +193,43 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     OnceLog.Warning(Producers.ThrewKey(p),
                         "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
+                }
+                if (p < _producerEnds.Length) _producerEnds[p] = arbiter.IntentCount;
+            }
+
+            // BC15 decision 14: a Full-only producer's claim on a Distant group's cell that was not renewed hid the group's own intent at full rate; the
+            // group is woken now and the tiered producers run once more for it alone, before Resolve.
+            if (BattleLodRuntime.WakeLapsedClaims(snapshot, arbiter, now) > 0)
+            {
+                BattleLodRuntime.BeginWakePass();
+                try
+                {
+                    // Each second-pass block goes in where its producer's first-pass block ended, so a tie in priority between two sources is won by
+                    // the one that submitted first at full rate, where the tiered producers come before the Full-only ones after them.
+                    int shift = 0;
+                    for (int p = 0; p < Producers.Count; p++)
+                    {
+                        IBattleIntentProducer producer = Producers[p];
+                        if (!BattleLodRuntime.IsTieredProducer(producer.Name) || p >= _producerEnds.Length) continue;
+                        arbiter.BeginInsert(_producerEnds[p] + shift);
+                        try
+                        {
+                            producer.Produce(snapshot, arbiter);
+                        }
+                        catch (Exception ex)
+                        {
+                            OnceLog.Warning(Producers.ThrewKey(p),
+                                "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
+                        }
+                        finally
+                        {
+                            shift += arbiter.EndInsert();
+                        }
+                    }
+                }
+                finally
+                {
+                    BattleLodRuntime.EndWakePass();
                 }
             }
 

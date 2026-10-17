@@ -51,6 +51,15 @@ internal static partial class BattleLodTests
 
         public bool HasLatchOrManeuver(int groupId) => Latched.Contains(groupId);
 
+        // The #45 cached decision per group id (-1: none).
+        public readonly Dictionary<int, int> Stance = new Dictionary<int, int>();
+
+        public int StanceDecision(int ownIndex)
+        {
+            int id = World != null && ownIndex >= 0 && ownIndex < World.Units.Count ? World.IdAtIndex(ownIndex) : 0;
+            return Stance.TryGetValue(id, out int v) ? v : -1;
+        }
+
         public bool TrySlot(int ownIndex, out float x, out float z, out float heading)
         {
             int id = World != null && ownIndex >= 0 && ownIndex < World.Units.Count ? World.IdAtIndex(ownIndex) : 0;
@@ -160,7 +169,7 @@ internal static partial class BattleLodTests
         }
 
         // An enemy the side sees: enters memory through the real Update, so it carries the real latch.
-        public void SeeEnemy(int id, float x, float z)
+        public void SeeEnemy(int id, float x, float z, bool reinforcement = false)
         {
             var probe = PerceptionProbeResult.Create(1);
             probe.Count = 1;
@@ -170,6 +179,7 @@ internal static partial class BattleLodTests
             probe.Z[0] = z;
             probe.Strength[0] = 500f;
             probe.UnitTyp[0] = 0;
+            probe.IsReinforcement[0] = reinforcement;
             BattlePerception.Update(Memory, ref MemoryCount, in probe, Hours, Drops);
         }
 

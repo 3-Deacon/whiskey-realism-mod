@@ -8,12 +8,13 @@ using static TestHarness;
 //   .Equivalence the fixture battle run with and without the tiers
 //   .Arbiter    OrderArbiter carried claims and the executor's unsettled test
 //   .Nav        the stable NavPlanBudget cursor
+//   .Amendment  the verify round 1 rulings: carried records, untiered producers, the stance and unsettled-below inputs, boundaries
 //   .Runtime    source pins for the runtime halves (BattleCoreTick, the producers, the flag, the telemetry row)
 internal static partial class BattleLodTests
 {
     public static void Run()
     {
-        RunAll(Join(LatchTests(), TierTests(), PromotionTests(), EquivalenceTests(), ArbiterTests(), NavTests(), CorridorTests(), RuntimeTests()));
+        RunAll(Join(LatchTests(), TierTests(), PromotionTests(), EquivalenceTests(), ArbiterTests(), NavTests(), CorridorTests(), AmendmentTests(), RuntimeTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

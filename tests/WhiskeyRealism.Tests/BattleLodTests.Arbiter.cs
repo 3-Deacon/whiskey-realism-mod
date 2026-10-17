@@ -188,8 +188,7 @@ internal static partial class BattleLodTests
     {
         var tiered = new[]
         {
-            IntentSource.PostureExecutor, IntentSource.FacingPulse, IntentSource.FireControl, IntentSource.DivisionPlay,
-            IntentSource.GroupStanceScorer, IntentSource.ArtilleryDoctrine,
+            IntentSource.PostureExecutor, IntentSource.FacingPulse, IntentSource.GroupStanceScorer,
         };
         foreach (IntentSource source in Enum.GetValues(typeof(IntentSource)))
         {

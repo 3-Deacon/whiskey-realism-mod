@@ -55,7 +55,7 @@ internal static partial class BattleLodTests
         AssertTrue(budget.TryConsume(10), "first");
         AssertTrue(budget.TryConsume(11), "second");
         AssertFalse(budget.TryConsume(12), "third deferred");
-        AssertEqual(11, budget.LastPlannedId, "the cursor is the last id that got a plan, not the deferred one");
+        AssertEqual(2, budget.StartIndex(new[] { 10, 11, 12, 13 }, 4), "the cursor is the last id that got a plan (11), not the deferred one: the walk resumes at 12");
         budget.NextApply();
         AssertTrue(budget.TryConsume(12), "refilled next apply");
     }

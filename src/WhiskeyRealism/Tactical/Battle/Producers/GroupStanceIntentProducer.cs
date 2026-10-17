@@ -29,7 +29,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)
         {
-            using (TelemetryPerf.Scope("tactical.producer.group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.group-stance.wake" : "tactical.producer.group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 if (snapshot == null || sink == null || !PluginEnabled()) return;
                 UnitRecord[] own = snapshot.Own;
