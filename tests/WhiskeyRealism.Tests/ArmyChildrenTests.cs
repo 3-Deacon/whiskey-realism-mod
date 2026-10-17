@@ -41,6 +41,7 @@ internal static class ArmyChildrenTests
             ("army children an exposed wing in perceived contact draws the last reserve to guard it", AnExposedWingInPerceivedContactDrawsTheLastReserve),
             ("army children the leaf map applies the released reserves and takes them back when the crisis ends", TheLeafMapAppliesTheReleasedReservesAndTakesThemBack),
             ("army children the orchestrator releases a Defender's leaf reserve on a perceived crisis", TheOrchestratorReleasesALeafReserveOnAPerceivedCrisis),
+            ("army children the Defender reserve row throttle is battle-scoped state", TheDefenderReserveThrottleResetsWithTheBattle),
             ("army children an attacking division keeps no cascade reserve", AnAttackingDivisionKeepsNoCascadeReserve),
             ("army children the orchestrator's defender leaf map keeps a reserve and rebuilds on a stance change", TheOrchestratorDefenderLeafMapKeepsAReserve),
             ("army children a division in no army is a direct child beside the army's divisions", ALooseDivisionIsADirectChildBesideTheArmysDivisions),
@@ -633,6 +634,19 @@ internal static class ArmyChildrenTests
         army.ObserveFrontGeometry(new EnemyVisibleState(new[] { crisis }, 0f, true, false, axis));
         h.Cascade(army);
         AssertEqual(0, army.LeafRelease.Released.Count, "an attacker's leaf map has no reserve to release");
+    }
+
+    // The row throttle keys on the trace signature, so it grows with the battle unless it is reset with it (BattleScope).
+    private static void TheDefenderReserveThrottleResetsWithTheBattle()
+    {
+        var army = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector)); // runs the static constructor
+        var field = typeof(ArmyOrchestrator).GetField("_lastDefenderReserveAt", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        AssertTrue(field != null, "the throttle table exists");
+        var table = (Dictionary<string, float>)field.GetValue(null);
+        table["tactical-defender-reserve:0|side=0|x"] = 1f;
+        WhiskeyRealism.Util.BattleScope.ResetAll();
+        AssertEqual(0, table.Count, "a new battle starts with an empty throttle table");
+        AssertTrue(WhiskeyRealism.Util.BattleScope.RegisteredNames.Contains("army-orchestrator-defender-reserve-throttle"), "registered under its own name");
     }
 
     // A flank column perceived on the right end of the line (the cascade's flank-threat input, vanilla's 0-4 scale):

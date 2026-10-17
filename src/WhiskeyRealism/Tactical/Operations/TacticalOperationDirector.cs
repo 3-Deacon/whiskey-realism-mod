@@ -211,8 +211,9 @@ namespace WhiskeyRealism.Tactical.Operations
             // A side that perceives the enemy does not scout for him. The best-scoring objective can be an empty map
             // objective on strong ground while the side's picture already holds a formed enemy line elsewhere (the
             // VisibleEnemyLine objective, fog-honest: only what the side sees). An operation not yet on the empty
-            // objective then works the perceived contact; a Defender keeps the ground it holds and forms its line
-            // (smoke 2026-10-17: both sides stayed Scouting through heavy contact).
+            // objective then works the perceived contact; a Defender forms its line (DefensiveNetwork, Forming) on that
+            // best-scoring objective, the ledger's own pick of ground (ObjectiveSelectionScore), and does not walk to the
+            // objective the enemy was perceived at (smoke 2026-10-17: both sides stayed Scouting through heavy contact).
             if (primary.EnemyStrength <= 0f &&
                 !(activeOperation && ObjectiveIdMatches(input.Current.PrimaryObjectiveId, primary.ObjectiveId)) &&
                 TryPickPerceivedContact(input.Objectives, input.Stance, out BattlefieldObjectiveEstimate contact))
