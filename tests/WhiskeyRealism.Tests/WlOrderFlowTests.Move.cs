@@ -221,6 +221,29 @@ internal static partial class WlOrderFlowTests
         AssertEqual("1:defer:move-in-flight,1:deliver:accepted", RowsOf(host), "rows: " + RowsOf(host));
     }
 
+    private static void PolicyDeferralSurvivesTheMoveGate()
+    {
+        // A capture that the re-admit policy defers (inside the hold window) carries a later due time than
+        // the leg alone; the move gate never makes it earlier.
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.InFlight };
+        var flow = NewFlow(host);
+        CourierEntry e = QEntry(issuer: 1, type: 1, origin: OrderOrigin.Executor, issuedAt: 10.0, dueAt: 12.0);
+        e.UnitId = 1;
+        e.AwaitsMove = true;
+        e.LegHours = Leg;
+        flow.Queue.TryEnqueue(in e, 0.0, out _);
+        flow.RunPass();
+        host.Now = 10.9;
+        host.Move = MoveState.Executed;
+        flow.RunPass();
+        host.Now = 10.9 + Leg;
+        flow.RunPass();
+        AssertEqual(0, host.Calls, "the deferral to 12.0 still holds after the move executed");
+        host.Now = 12.0;
+        flow.RunPass();
+        AssertEqual(1, host.Calls, "and the order is shown at 12.0");
+    }
+
     private static void HeldPassAllocatesNothing()
     {
         // The pass runs every UpdateDLCPlayerOrders (once per 30 frames) for as long as a move is in flight.

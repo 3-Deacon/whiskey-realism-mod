@@ -101,6 +101,7 @@ internal static partial class WlOrderFlowTests
             ("wl order move held order still meets the readmit policy", HeldOrderStillMeetsTheReadmitPolicy),
             ("wl order move held entries do not block others", HeldEntriesDoNotBlockOthersAndKeepEnqueueOrder),
             ("wl order move smoke 2026-10-16 brigade move reaches the player when the brigade has it", SmokeBrigadeMoveReachesThePlayerWhenTheBrigadeHasIt),
+            ("wl order move policy deferral survives the gate", PolicyDeferralSurvivesTheMoveGate),
             ("wl order move held pass allocates nothing", HeldPassAllocatesNothing),
             ("wl order pin executor dispatch follows the move it waits for", ExecutorDispatchFollowsTheMoveItWaitsFor),
             ("wl order move gate arms only move shaped orders", MoveGateArmsOnlyMoveShapedOrders),
