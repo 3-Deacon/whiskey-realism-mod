@@ -96,8 +96,10 @@ internal static partial class FormationSlotTests
     private static void RowsAreComparedWithinThemselves()
     {
         // A double line: the second row stands far to the left of the first, which says nothing about either row's own order.
+        // Columns run on across the rows (0 1 | 2 3), so every cross-row pair looks reversed here: a classifier that compared across rows would
+        // out-vote each row's own order four to one.
         var row = new[] { 0, 0, 1, 1 };
-        var column = new[] { 0, 1, 0, 1 };
+        var column = new[] { 0, 1, 2, 3 };
         AssertEqual(MirrorVerdict.Agree, Classify(row, column, new[] { 400f, 500f, -500f, -400f }), "both rows left to right");
         AssertEqual(MirrorVerdict.Reversed, Classify(row, column, new[] { 500f, 400f, -400f, -500f }), "both rows right to left");
     }
@@ -166,6 +168,7 @@ internal static partial class FormationSlotTests
 
     private static void BudgetIsPerDepth()
     {
+        AssertEqual(128, LayoutMirrorBudget.MaxRowsPerDepth, "the cap the build record states: 10 rows per depth are needed, so 128 leaves room");
         var budget = new LayoutMirrorBudget();
         for (int i = 0; i < LayoutMirrorBudget.MaxRowsPerDepth; i++) AssertTrue(budget.TryTake(1), "depth 1 row " + i);
         AssertFalse(budget.TryTake(1), "depth 1 is full");

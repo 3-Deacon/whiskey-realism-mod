@@ -102,6 +102,7 @@ internal static partial class FormationSlotTests
 
     private static void RowBudgetIsCapped()
     {
+        AssertEqual(256, FormationFlipDetector.MaxRows, "the cap the build record states");
         var d = new FormationFlipDetector();
         int taken = 0;
         for (int i = 0; i < FormationFlipDetector.MaxRows + 50; i++) if (d.TryTakeRow()) taken++;
