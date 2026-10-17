@@ -101,6 +101,10 @@ namespace WhiskeyRealism.Tactical
         public DoctrineArtilleryDecision Doctrine; // Observe without a doctrine order for the parent group
         public bool InHold;                  // Artillery Audit Min Hold Seconds
 
+        // The battery is bombarding (9) again inside ArtilleryRestartAcceptHours of the doctrine's own cancel (7): vanilla restarted it
+        // (BattleWriterPolicy.RestartedAfterOwnCancel over the executor's last combat behavior outcome).
+        public bool RestartedAfterOurCancel;
+
         // BC14W (requirement-focal-execution): the parent group's doctrine order carries a preparation point (the focal assault's focal point) while the
         // plan prepares its assault, and the battery's mean ammo as vanilla's CheckAIBombardment computes it (Sum(ammo) / 3, 3896).
         public bool HasPreparation;
@@ -505,13 +509,45 @@ namespace WhiskeyRealism.Tactical
             return !FriendlyDangerClose(s, index, b.FireRange);
         }
 
+        /// <summary>Unit churn: how long a bombardment vanilla restarted after the doctrine's own cancel is left alone, in battle hours (the stance hold's length).</summary>
+        public const double ArtilleryRestartAcceptHours = 0.25;
+
+        /// <summary>
+        /// The battery's last combat behavior outcome is the artillery doctrine's own cancel of a bombardment (behavior 7 flagged
+        /// <see cref="IntentFlags.CancelsBombard"/>, not the counter-battery release or the ammo-conserving cease-fire, which are also 7), issued, and no older than
+        /// <see cref="ArtilleryRestartAcceptHours"/>: a battery seen bombarding (9) now was restarted by vanilla. A stamp from the future (a reload, a new
+        /// battle) has expired.
+        /// </summary>
+        public static bool RestartedAfterOwnCancel(in OrderOutcome last, double nowHours)
+        {
+            if (last.Channel != OrderChannel.CombatBehavior || last.Kind != OrderOutcomeKind.Issued) return false;
+            if (last.Source != IntentSource.ArtilleryDoctrine || last.Value != CombatBehaviorFireAtWill || (last.Flags & IntentFlags.CancelsBombard) == 0) return false;
+            double age = nowHours - last.AtHours;
+            return age >= 0.0 && age < ArtilleryRestartAcceptHours;
+        }
+
+        // The two cancels that guard the battery (TacticalArtilleryDoctrine: low ammo; unsupported with the enemy close). Vanilla's own cancel covers
+        // the first at a mean of 0.2 (3896); neither is accepted away.
+        private static bool CancelGuardsTheBattery(float ammoRatio01, TacticalSupportScreen.Result screen, bool enemyClose)
+        {
+            return ammoRatio01 < 0.10f || (screen == TacticalSupportScreen.Result.Unsupported && enemyClose);
+        }
+
         // Doctrine + micro intents for battery `index` (ArtilleryBatteryEligible
         // checked by the caller). Returns how many were written to buffer (at most
         // one per channel; up to 3: behavior, formation, facing). Limber is Safety:
         // the micro doctrine limbers only to escape (point-blank or unsupported
         // close), so it must pass the executor's recent-order cooldown.
         public static int ArtilleryDoctrineIntents(BattleSnapshot s, int index, in BattleArtilleryState b, in BattleArtilleryRules r, BattleOrderIntent[] buffer)
+            => ArtilleryDoctrineIntents(s, index, in b, in r, buffer, out _);
+
+        // cancelAccepted: the doctrine wanted to cancel a bombardment (9) that vanilla had restarted after the doctrine's own cancel, inside
+        // ArtilleryRestartAcceptHours, and the cancel was not one of the two that guard the battery (ammo below 0.10, an unsupported battery with the
+        // enemy inside 0.2 of its range): it is accepted away and the bombardment left to vanilla for the rest of the window.
+        public static int ArtilleryDoctrineIntents(BattleSnapshot s, int index, in BattleArtilleryState b, in BattleArtilleryRules r, BattleOrderIntent[] buffer,
+            out bool cancelAccepted)
         {
+            cancelAccepted = false;
             if (s == null || buffer == null || buffer.Length < 3 || b.InHold || b.Guns <= 0) return 0;
             ref UnitRecord battery = ref s.Own[index];
             int n = 0;
@@ -570,9 +606,20 @@ namespace WhiskeyRealism.Tactical
                 if ((decision == TacticalArtilleryDoctrine.Decision.CancelBombard || decision == TacticalArtilleryDoctrine.Decision.CounterBattery) &&
                     PreparationKeepsBombarding(s, index, in b, screen, (hasEnemy ? enemyDistance : 9999f) <= b.FireRange * 0.20f))
                     decision = TacticalArtilleryDoctrine.Decision.PreserveFire;
+                // Unit churn: vanilla restarts a bombardment on its own micro cycle (CheckAIBombardment 3890-3906) as long as its group conditions hold,
+                // so a cancel made every cycle is a 7 <-> 9 loop (41 alternations in ten minutes, each a courier order in the brigade's queue). A
+                // restart after the doctrine's own cancel is accepted for the window; the cancels that guard the battery are never.
+                if (decision == TacticalArtilleryDoctrine.Decision.CancelBombard && b.RestartedAfterOurCancel &&
+                    !CancelGuardsTheBattery(b.AmmoRatio01, screen, (hasEnemy ? enemyDistance : 9999f) <= b.FireRange * 0.20f))
+                {
+                    cancelAccepted = true;
+                    decision = TacticalArtilleryDoctrine.Decision.PreserveFire;
+                }
                 if (decision == TacticalArtilleryDoctrine.Decision.CancelBombard)
                 {
-                    buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-cancel-bombard");
+                    BattleOrderIntent cancel = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-cancel-bombard");
+                    cancel.Flags = IntentFlags.CancelsBombard;
+                    buffer[n++] = cancel;
                     behaviorWritten = true;
                 }
                 else if (decision == TacticalArtilleryDoctrine.Decision.CounterBattery)

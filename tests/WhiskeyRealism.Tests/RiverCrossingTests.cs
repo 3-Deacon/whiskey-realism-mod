@@ -19,7 +19,10 @@ internal static class RiverCrossingTests
             ("river crossing a leg on one bank needs no crossing", ALegOnOneBankNeedsNoCrossing),
             ("river crossing a leg across a river with no link has no known crossing", ALegAcrossARiverWithNoLinkHasNoKnownCrossing),
             ("river crossing only a clear or watched link carries a move, the shortest detour first", OnlyAClearOrWatchedLinkCarriesAMove),
-            ("river crossing an unready picture or a point on the river lets the leg through", AnUnreadyPictureLetsTheLegThrough),
+            ("river crossing an unready picture lets the leg through and says it had no map", AnUnreadyPictureLetsTheLegThrough),
+            ("river crossing an end on the river takes the bank the leg reaches or leaves it by (smoke 2026-10-17: a leg whose end read no region passed as one bank)", AnEndOnTheRiverTakesTheBankAlongTheLeg),
+            ("river crossing an end with no land along the leg within reach stays unjudged and says so", AnEndWithNoLandAlongTheLegStaysUnjudged),
+            ("river crossing a move waits for the river map while it is being built, for a bounded time", AMoveWaitsForTheRiverMapForABoundedTime),
             ("river crossing a leg over several rivers is routed link by link and the first two crossings are the vias", ALegOverSeveralRiversIsRoutedLinkByLink),
             ("river crossing a refused leg names the first unknown crossing of its best route and asks for a look at it", ARefusedLegAsksForALook),
             ("river crossing a held crossing is no look and a crossing the plan chose is not refused", AHeldCrossingIsNoLookAndAPlannedOneIsNotRefused),
@@ -43,6 +46,8 @@ internal static class RiverCrossingTests
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
             ("river crossing no gate leaves the move as validated", NoGateLeavesTheMove),
+            ("river crossing a pending river map refuses the gated move for now and asks again, an ungated move goes", APendingMapRefusesTheGatedMoveForNow),
+            ("river crossing the gate runtime waits only on a terrain with fords while the build can still arrive, and writes its rows", TheGateRuntimeWaitsOnlyWhileTheMapCanArrive),
         });
     }
 
@@ -54,7 +59,9 @@ internal static class RiverCrossingTests
         internal readonly HashSet<int> Planned = new HashSet<int>();
         internal readonly List<int> Looks = new List<int>();
         public bool Ready { get; set; } = true;
-        public int RegionAt(float x, float z) => x < 0f ? -1 : x < 500f ? 0 : x < 1000f ? 1 : x < 1500f ? 2 : 3;
+        // A fixture that lays open river (or a ford block) between banks sets Water: points it holds read as no land.
+        internal Func<float, float, bool> Water;
+        public int RegionAt(float x, float z) => x < 0f || (Water != null && Water(x, z)) ? -1 : x < 500f ? 0 : x < 1000f ? 1 : x < 1500f ? 2 : 3;
         public int LinkCount => Links.Count;
         public object Topology => this;
         public int RegionsOfLink(int link, Span<int> regions) { regions[0] = Links[link].a; regions[1] = Links[link].b; return 2; }
@@ -110,9 +117,76 @@ internal static class RiverCrossingTests
     private static void AnUnreadyPictureLetsTheLegThrough()
     {
         var p = new Picture { Ready = false };
-        AssertEqual(CrossingVerdict.SameBank, Decide(p, 100f, -100f, 700f, -100f), "no picture, no wall");
-        var ready = new Picture();
-        AssertEqual(CrossingVerdict.SameBank, Decide(ready, -5f, -100f, 700f, -100f), "a start on the river or a ford is on no bank");
+        AssertEqual(CrossingVerdict.SameBank, RiverCrossingRule.Decide(p, 100f, -100f, 700f, -100f, out CrossingRoute route), "no picture, no wall");
+        AssertTrue(route.PictureNotReady, "and the route says it had no map, so a pass is not read as one bank");
+        AssertEqual(-1, route.FromRegion, "no region judged");
+        RiverCrossingRule.Decide(new Picture(), 100f, -100f, 400f, -100f, out CrossingRoute same);
+        AssertFalse(same.PictureNotReady, "control: a ready picture says so");
+        AssertEqual(0, same.FromRegion, "the start's region");
+        AssertEqual(0, same.ToRegion, "the target's region");
+    }
+
+    // The river lies between x = 480 and 520 (water), a ford block at x = 700 to 710. A group standing in the river belongs to the bank its leg takes
+    // it to; a target laid on the river line belongs to the bank the leg reaches it from.
+    private static void AnEndOnTheRiverTakesTheBankAlongTheLeg()
+    {
+        Func<float, float, bool> water = (x, z) => (x >= 480f && x < 520f) || (x >= 700f && x < 710f);
+        var none = new Picture { Water = water };
+        // Standing in the first river, going east: it is leaving the river for region 1 and crosses nothing.
+        AssertEqual(CrossingVerdict.SameBank, RiverCrossingRule.Decide(none, 500f, -100f, 800f, -100f, out CrossingRoute east), "a start in the river heading for the east bank");
+        AssertEqual(1, east.FromRegion, "the east bank");
+        AssertTrue(east.FromResolved, "resolved along the leg");
+        AssertFalse(east.EndUnresolved, "judged");
+        // The same start heading west leaves it for region 0.
+        AssertEqual(CrossingVerdict.SameBank, RiverCrossingRule.Decide(none, 500f, -100f, 100f, -100f, out CrossingRoute west), "a start in the river heading for the west bank");
+        AssertEqual(0, west.FromRegion, "the west bank");
+        // A start in the river, a target two banks on: the leg leaves for region 1 and needs a crossing into region 2 that is not known.
+        AssertEqual(CrossingVerdict.NoKnownCrossing, RiverCrossingRule.Decide(none, 500f, -100f, 1200f, -100f, out CrossingRoute far), "region 1 to region 2, no crossing");
+        AssertEqual(1, far.FromRegion, "taken east");
+        AssertEqual(2, far.ToRegion, "the target");
+        // A target on a ford block, reached from the west across the river at x = 500: the block belongs to region 1, the bank the leg reaches it from.
+        AssertEqual(CrossingVerdict.NoKnownCrossing, RiverCrossingRule.Decide(none, 100f, -100f, 705f, -100f, out CrossingRoute ford), "region 0 to the block, no crossing known");
+        AssertEqual(1, ford.ToRegion, "the bank the leg reaches the block from");
+        AssertTrue(ford.ToResolved, "resolved along the leg");
+        // A target laid on the river line itself, reached from the east: its bank is the east one (the bank the leg reaches it from), so no river is crossed.
+        AssertEqual(CrossingVerdict.SameBank, RiverCrossingRule.Decide(none, 800f, -100f, 500f, -100f, out CrossingRoute line), "a target on the river line, reached from the east bank");
+        AssertEqual(1, line.ToRegion, "the east bank, not the far one");
+        // The known crossing carries that leg, with the end resolved: before, a block target read no region and the leg passed as one bank.
+        var known = new Picture { Water = water };
+        known.Links.Add((500f, -100f, CrossingState.Clear, 0, 1));
+        AssertEqual(CrossingVerdict.ViaCrossing, RiverCrossingRule.Decide(known, 100f, -100f, 705f, -100f, out CrossingRoute via), "a known crossing carries the leg to the ford block");
+        AssertEqual(500f, via.ViaX0, "by that crossing");
+    }
+
+    private static void AnEndWithNoLandAlongTheLegStaysUnjudged()
+    {
+        // A start 300 m or more out in water, with the nearest land past the reach: nothing to judge by.
+        var lake = new Picture { Water = (x, z) => x >= 100f && x < 800f };
+        AssertEqual(CrossingVerdict.SameBank, RiverCrossingRule.Decide(lake, 400f, -100f, 1200f, -100f, out CrossingRoute far), "no land within reach of the start");
+        AssertTrue(far.EndUnresolved, "unjudged: the pass is for want of a bank");
+        AssertFalse(far.PictureNotReady, "the picture was ready");
+        // Land inside the reach resolves; the walk goes along the leg only.
+        var shore = new Picture { Water = (x, z) => x >= 100f && x < 430f };
+        AssertEqual(0, RiverCrossingRule.LandRegionAlong(shore, 400f, -100f, 1200f, -100f), "east: region 0 starts at 430");
+        AssertEqual(-1, RiverCrossingRule.LandRegionAlong(shore, 400f, -100f, 100f, -100f), "west: water to the reach, no land");
+        AssertEqual(-1, RiverCrossingRule.LandRegionAlong(shore, 400f, -100f, 400f, -100f), "no leg, no direction");
+        AssertEqual(2, RiverCrossingRule.LandRegionAlong(shore, 1200f, -100f, 400f, -100f), "an end on land is its own region");
+        AssertEqual(CrossingVerdict.NoKnownCrossing, RiverCrossingRule.Decide(shore, 400f, -100f, 1200f, -100f, out CrossingRoute near), "region 0 to region 2: a crossing that is not known");
+        AssertFalse(near.EndUnresolved, "judged");
+    }
+
+    private static void AMoveWaitsForTheRiverMapForABoundedTime()
+    {
+        var wait = new CrossingPictureWait();
+        double t = 5.0;
+        AssertTrue(wait.Waits(pending: true, t), "the first pending move waits");
+        AssertTrue(wait.Waits(pending: true, t + CrossingPictureWait.CapHours * 0.9), "inside the cap");
+        AssertFalse(wait.Waits(pending: true, t + CrossingPictureWait.CapHours * 1.01), "the cap runs out: the gate opens");
+        AssertFalse(wait.Waits(pending: true, t + 1.0), "and stays open while the map is pending");
+        AssertFalse(wait.Waits(pending: false, t + 1.1), "the map arrived (or never will): nothing waits");
+        AssertTrue(wait.Waits(pending: true, t + 2.0), "a later pending spell waits afresh");
+        wait.Clear();
+        AssertTrue(wait.Waits(pending: true, t + 2.5), "a cleared wait forgets the spell it was counting and starts a new one");
     }
 
     // verify F2: the rule took one link joining both banks, so a leg over two rivers had none and was refused although the chain
@@ -557,19 +631,47 @@ internal static class RiverCrossingTests
         AssertEqual(CrossingVerdict.ViaCrossing, Decide(p, 100f, 100f, 700f, 100f), "and built again when the next battle asks");
     }
 
+    // The graph's edges: ordered pairs of links that share a land region (the rule's own adjacency), counted by brute force from the picture.
+    private static long AdjacencyEntries(ICrossingPicture picture)
+    {
+        Span<int> a = stackalloc int[RiverCrossingRule.MaxRegionsPerLink], b = stackalloc int[RiverCrossingRule.MaxRegionsPerLink];
+        long entries = 0;
+        for (int u = 0; u < picture.LinkCount; u++)
+        {
+            int na = picture.RegionsOfLink(u, a);
+            for (int v = 0; v < picture.LinkCount; v++)
+            {
+                if (v == u) continue;
+                int nb = picture.RegionsOfLink(v, b);
+                bool shares = false;
+                for (int i = 0; i < na && !shares; i++)
+                    for (int j = 0; j < nb && !shares; j++)
+                        shares = a[i] == b[j];
+                if (shares) entries++;
+            }
+        }
+        return entries;
+    }
+
     private static void TheSearchOver252LinksIsBounded()
     {
         var wide = new Wide();
         AssertEqual(252, wide.LinkCount, "(fixture) 252 links");
         RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out CrossingRoute warm);
         AssertEqual(3, warm.Crossings, "the leg over three rivers is routed link by link");
-        const int calls = 400;
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        for (int i = 0; i < calls; i++) RiverCrossingRule.Decide(wide, 100f + i % 7, 400f, 1700f, 400f, out _);
-        watch.Stop();
-        double ms = watch.Elapsed.TotalMilliseconds / calls;
-        Console.WriteLine("INFO RIVER-ROUTE 252 links, 3 crossings: " + ms.ToString("0.000") + " ms a call (adjacency built once per map)");
-        AssertTrue(ms < 1.0, "a call over 252 links stays under a millisecond: " + ms);
+        // The bound is the search's work, not a clock (a wall-clock limit failed under load): every link is expanded at most once and each
+        // expansion relaxes only the edges of that link, so one call is bounded by the links and by the graph's undirected edges (a pair is relaxed only from the end expanded first).
+        long expandedBefore = RiverCrossingRule.ExpandedLinks, relaxedBefore = RiverCrossingRule.RelaxedEdges;
+        RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out _);
+        long expanded = RiverCrossingRule.ExpandedLinks - expandedBefore, relaxed = RiverCrossingRule.RelaxedEdges - relaxedBefore;
+        Console.WriteLine("INFO RIVER-ROUTE 252 links, 3 crossings: " + expanded + " links expanded, " + relaxed + " of " + AdjacencyEntries(wide) / 2 + " edges relaxed a call");
+        AssertTrue(expanded > 0, "(control) the search counts its work: " + expanded);
+        AssertTrue(expanded <= wide.LinkCount, "a call expands each of the 252 links at most once: " + expanded);
+        AssertTrue(relaxed <= AdjacencyEntries(wide) / 2, "and relaxes each edge of the graph at most once, from the end expanded first (E/2 = " + AdjacencyEntries(wide) / 2 + "): " + relaxed);
+        // The work does not grow across calls (the adjacency is built once per map, and nothing accumulates).
+        long beforeMany = RiverCrossingRule.ExpandedLinks;
+        for (int i = 0; i < 50; i++) RiverCrossingRule.Decide(wide, 100f + i % 7, 400f, 1700f, 400f, out _);
+        AssertEqual(50 * expanded, RiverCrossingRule.ExpandedLinks - beforeMany, "50 calls cost 50 times one");
         long begin = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 100; i++) RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out _);
         AssertEqual(0L, TestFixtures.AllocatedSince(begin), "and allocates nothing once the adjacency is built");
@@ -721,5 +823,36 @@ internal static class RiverCrossingTests
     {
         var executor = Executor(null);
         AssertTrue(executor.Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.PostureExecutor, CommandTaskType.Screen), 1.0).Execute, "without a gate the move is as validated");
+    }
+
+    private sealed class PendingGate : ICrossingGate
+    {
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route)
+        {
+            route = default;
+            return CrossingVerdict.Pending;
+        }
+    }
+
+    private static void APendingMapRefusesTheGatedMoveForNow()
+    {
+        var executor = Executor(new PendingGate());
+        ExecutionPlan plan = executor.Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.ReserveRelease, CommandTaskType.ReleaseReserve), 1.0);
+        AssertFalse(plan.Execute, "the river map is not built: the move does not pass unchecked");
+        AssertEqual(SkipReason.CrossingPending, plan.Skip, "and says why, so the producer asks again next tick");
+        AssertTrue(Executor(new PendingGate()).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.Withdrawal, CommandTaskType.FallBackToLine), 1.0).Execute,
+            "a withdrawal is not gated");
+    }
+
+    private static void TheGateRuntimeWaitsOnlyWhileTheMapCanArrive()
+    {
+        string gate = FlankResponseTests.SourceText("Tactical", "Battle", "RiverCrossingGateRuntime.cs");
+        FlankResponseTests.AssertPinned(gate, "pending = grid != null && !grid.Frozen && grid.CrossingCount > 0 && RiverRegionsRuntime.Pending();", "a river terrain whose build can still arrive");
+        FlankResponseTests.AssertPinned(gate, "bool wait = Wait.Waits(pending, TacticalDoctrineTime.NowBattleHours);", "bounded, on the doctrine clock");
+        FlankResponseTests.AssertPinned(gate, "CrossingVerdict verdict = wait ? CrossingVerdict.Pending : CrossingVerdict.SameBank;", "wait or open");
+        FlankResponseTests.AssertPinned(gate, "if (picture == null) return NoPicture(alliance, x0, z0, x1, z1, out route);", "no picture goes through the wait");
+        FlankResponseTests.AssertPinned(gate, "EmitRow(alliance, verdict, in route, x0, z0, x1, z1);", "and every verdict writes its row");
+        string regions = FlankResponseTests.SourceText("Tactical", "Battle", "RiverRegionsRuntime.cs");
+        FlankResponseTests.AssertPinned(regions, "internal static bool Pending() => !_failed && Plugin.ManeuverFeasibilityEnabled() && (_regions == null || !_regions.Ready);", "off or failed is not pending");
     }
 }

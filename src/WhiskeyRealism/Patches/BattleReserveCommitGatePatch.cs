@@ -327,13 +327,13 @@ namespace WhiskeyRealism.Patches
                     if (!VanillaMayCommitReserve(aigroup)) return;
                     if (!TacticalWriteGuard.CanWrite(aigroup)) return;
 
-                    CommandIntentResolution resolution = ResolveIntent(aigroup, out CommandIntentResolution allocator);
+                    CommandIntentResolution resolution = ResolveIntent(aigroup, out CommandIntentResolution allocator, out bool defender);
                     if (!resolution.Found || resolution.Intent.Role != DirectChildRole.Reserve) return;
 
                     __state = new ReserveCommitState
                     {
                         Resolution = resolution,
-                        ReserveReleased = TacticalReserveCommitGate.ReleasedByAllocator(resolution, allocator),
+                        ReserveReleased = TacticalReserveCommitGate.ReleasedByAllocator(resolution, allocator, defender),
                         Units = SnapshotReserveCandidates(aigroup)
                     };
                 }
@@ -821,9 +821,11 @@ namespace WhiskeyRealism.Patches
 
         // Ledger command state first, then the command-node intent; allocator is
         // always the command-node intent (the direct-child allocator's current view).
-        private static CommandIntentResolution ResolveIntent(Regiment group, out CommandIntentResolution allocator)
+        // defender: the side's battle stance (the army orchestrator's read-only state), for #59's Defender Main/SupportMain rule.
+        private static CommandIntentResolution ResolveIntent(Regiment group, out CommandIntentResolution allocator, out bool defender)
         {
             allocator = new CommandIntentResolution(false, default, "unresolved");
+            defender = false;
             try
             {
                 if (group == null)
@@ -835,6 +837,7 @@ namespace WhiskeyRealism.Patches
 
                 int componentInstanceId = TacticalPatchIds.ComponentInstanceId(group);
                 int gameObjectInstanceId = TacticalPatchIds.GameObjectInstanceId(group);
+                defender = side.Army.CurrentBattleStance == BattleStance.Defender;
                 allocator = side.Army.ResolveCommandIntentForGroup(componentInstanceId, gameObjectInstanceId);
                 return TacticalReserveCommitGate.HeldResolution(
                     side.Army.CurrentCommandOperations, gameObjectInstanceId, componentInstanceId, allocator);

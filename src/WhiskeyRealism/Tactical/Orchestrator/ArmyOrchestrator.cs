@@ -732,15 +732,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // per-child enemy intent are not part of the evidence signature.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
             IReadOnlyList<DirectChildIntent> previousIntents = _directChildIntents;
-            _directChildIntents = DirectChildAllocator.StabilizeMain(
-                DirectChildAllocator.AllocateWithZones(
-                    _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                    perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext()),
-                _mainHysteresis);
+            IReadOnlyList<DirectChildIntent> allocated = DirectChildAllocator.AllocateWithZones(
+                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
+                perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext());
+            _directChildIntents = DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis);
             ScreenSecondaryObjectives();
             // A child keeps its role until the plan (its id, side, phase or main effort band) changes, an hour passes or a crisis forces it: the
             // allocation above is a pure function of flickering evidence (smoke 2026-10-17: 3 to 6 role changes in 7 allocations under one plan).
             _directChildIntents = _roleHold.Apply(_directChildIntents, RoleHoldPlanKey(), HoursSource());
+            // Any further pass that keeps an intent from an earlier tick (a role hold) goes ABOVE this line. The release marks are a fact about the
+            // allocation that just ran, so they are re-derived from it last, immediately before the command tree reads the intents: a kept intent
+            // must not carry a taken-back release into the tree (DirectChildAllocator.RestampReleases; pinned by a source test).
+            _directChildIntents = DirectChildAllocator.RestampReleases(_directChildIntents, allocated);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
             EmitStaggeredReleaseTelemetry();

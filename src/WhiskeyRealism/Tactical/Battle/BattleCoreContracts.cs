@@ -263,10 +263,20 @@ namespace WhiskeyRealism.Tactical.Battle
         // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
         // still applies. (4096 is the BC14W bombard start's.)
         Contest = 16384,
+        // Unit churn, Formation on an infantry regiment: stop its march, then re-form it to line facing the intent's heading
+        // (OrderExecutorRuntime.IssueDeploy; ColumnDeployment). Vanilla re-columns a regiment that still has a path, so the stop comes first.
+        Deploy = 32768,
+        // Unit churn, CombatBehavior 7 only: the artillery doctrine's cancel of a vanilla bombardment (9). It is the one write the restart memory
+        // (BattleWriterPolicy.RestartedAfterOwnCancel) reads back from the executor's outcome; the counter-battery release (8 to 7) and the ammo-conserving
+        // cease-fire are also behavior 7 from the same source and are not a cancel of a bombardment.
+        CancelsBombard = 65536,
+        // Unit churn, Formation + Deploy: deploy the column regiment in march, as vanilla's own deploy near an enemy does (CheckFormationChange 127676-127682:
+        // ChangeRegimentFormation with a manual line, no stop), so its path survives and it keeps advancing in line. Without it the deploy stops the regiment.
+        DeployInMarch = 131072,
         // Move only: a standing claim and nothing more. It raises the unit's Move claim for the tick, so a lower-priority move of an ancestor fans out around
         // the unit (OrderExecutor.BeginTickClaims), and the executor writes nothing for it (SkipReason.StandingClaim). A posted flank guard holds one for as
         // long as it is posted.
-        StandingClaim = 32768,
+        StandingClaim = 262144,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -353,6 +363,8 @@ namespace WhiskeyRealism.Tactical.Battle
         LowerPriorityThanClaim,
         /// <summary>A move across a river with no crossing the side knows (RiverCrossingRule).</summary>
         NoKnownCrossing,
+        /// <summary>A move the river map has not been built for yet: it waits (CrossingPictureWait) rather than passing unchecked.</summary>
+        CrossingPending,
         /// <summary>A standing claim (IntentFlags.StandingClaim): raised for the tick, nothing to write.</summary>
         StandingClaim,
     }
@@ -366,5 +378,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public IntentSource Source;
         public double AtHours;
         public int Retries;
+        // The intent's Value when an issued write is recorded (a combat behavior, a stance, a formation index); 0 for the other outcomes.
+        public int Value;
+        // The intent's flags when an issued write is recorded; None for the other outcomes.
+        public IntentFlags Flags;
     }
 }

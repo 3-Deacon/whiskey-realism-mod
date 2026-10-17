@@ -21,7 +21,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<CommandNodeIntent> intents,
             OperationRecord operation,
             IReadOnlyList<ObjectiveRecord> objectives,
-            BattleStance stance)
+            BattleStance stance,
+            ICommandGround ground = null)
         {
             if (intents == null || intents.Count == 0) return Array.Empty<CommandNodeOperationalState>();
 
@@ -51,6 +52,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     role,
                     task,
                     CommandTaskState.Planning);
+                // Smoke 2026-10-17: a state built from the intent alone has no position, and every node was planned from the map origin. The
+                // ground places it where the node stands; a node the ground does not know stays unplaced and is planned nowhere.
+                if (ground != null && ground.TryPlace(intent.NodeId, out float x, out float z, out float facing))
+                    states[i] = states[i].WithPosition(x, z, facing);
             }
 
             return states;

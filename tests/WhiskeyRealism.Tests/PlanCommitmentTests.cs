@@ -270,7 +270,7 @@ internal static class ReplanThrashWiringTests
     private static void LedgerHoldsTargets()
     {
         string body = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
-        FlankResponseTests.AssertPinned(body, "reverseSlope, _targetHold);", "the doctrine build gets the ledger's hold");
+        FlankResponseTests.AssertPinned(body, "Ground.HomeBank(commandStates) : -1, _targetHold);", "the doctrine build gets the ledger's hold, last after the crossings and the home bank");
         FlankResponseTests.AssertPinned(body, "_targetHold.Clear();", "and a ledger that does not run forgets it");
     }
 

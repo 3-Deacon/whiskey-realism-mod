@@ -69,7 +69,7 @@ namespace WhiskeyRealism.Tactical.Operations
             for (int i = 0; i < nodes.Length; i++)
             {
                 CommandNodeOperationalState node = nodes[i];
-                if (node.Role == CommandNodeRole.Unknown || !IsFinite(node.X) || !IsFinite(node.Z))
+                if (node.Role == CommandNodeRole.Unknown || !node.HasPosition || !IsFinite(node.X) || !IsFinite(node.Z))
                     continue;
 
                 if (count == 0)

@@ -64,7 +64,7 @@ internal static class ReserveMigrationTests
         AssertTrue(held.Found, "ledger state found");
         AssertEqual("operations-ledger-command-state:SupportingAttack:ReserveWait", held.Reason, "reason keeps role and task");
         AssertEqual(DirectChildRole.Reserve, held.Intent.Role, "ReserveWait task holds in reserve");
-        AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain)), "allocator released it");
+        AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain), defender: false), "allocator released it");
         CommandIntentResolution noLedger = TacticalReserveCommitGate.HeldResolution(ops, LeftLine, 0, Resolved(DirectChildRole.Fix));
         AssertEqual(DirectChildRole.Fix, noLedger.Intent.Role, "no ledger state: the allocator's view");
         var mainOps = new[]
@@ -322,15 +322,16 @@ internal static class ReserveMigrationTests
             ChildIntent("child-" + LeftLine, DirectChildRole.Main, primarySector: 0, axisSector: 0),
             ChildIntent("child-" + Reserve, DirectChildRole.Fix, primarySector: 2, axisSector: leftSector),
         };
-        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, out int band), "found");
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, defender: false, out int band, out DirectChildRole bandRole, out _), "found");
         AssertEqual(leftSector, band, "crisis band");
-        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, out _), "unknown child");
+        AssertEqual(DirectChildRole.Fix, bandRole, "the role the release gave");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, false, out _, out _, out _), "unknown child");
         AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve, DirectChildRole.Reserve, 0, 1) },
-            Reserve, out _), "allocator still holds it in reserve");
+            Reserve, false, out _, out _, out _), "allocator still holds it in reserve");
         AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve + "0", DirectChildRole.Fix, 0, 1) },
-            Reserve, out _), "prefix of a longer id is not a match");
+            Reserve, false, out _, out _, out _), "prefix of a longer id is not a match");
         AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("synth-army--" + Reserve, DirectChildRole.Fix, 0, 3) },
-            -Reserve, out int synth) && synth == 3, "synthetic army id, negative instance id");
+            -Reserve, false, out int synth, out _, out _) && synth == 3, "synthetic army id, negative instance id");
 
         BattleSnapshot owned = ArmySnapshot(reserveFlags: UnitFlags.PlayerOwned);
         AssertFalse(TacticalReserveCommitGate.TryPlanRelease(owned, owned.IndexOfOwn(Reserve), leftSector, out _), "player-owned reserve");
@@ -491,16 +492,17 @@ internal static class ReserveMigrationTests
             beforePaths: 0, afterPaths: afterPaths, beforeQueue: 0, afterQueue: 0, useOrderDelays: useOrderDelays);
     }
 
-    private static CommandIntentResolution Resolved(DirectChildRole role)
+    private static CommandIntentResolution Resolved(DirectChildRole role, bool released = true)
     {
         return new CommandIntentResolution(true,
-            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0), "test");
+            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0, released), "test");
     }
 
-    private static DirectChildIntent ChildIntent(string childId, DirectChildRole role, int primarySector, int axisSector)
+    // released: the allocation's own release (DirectChildIntent.ReleasedFromReserve); false is a role the evidence tiers gave.
+    private static DirectChildIntent ChildIntent(string childId, DirectChildRole role, int primarySector, int axisSector, bool released = true)
     {
         return new DirectChildIntent(childId, 15, 15, "test", primarySector, role, DirectChildAxis.SectorAxis, axisSector, 0.5f,
-            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()), releasedFromReserve: released);
     }
 
     private static CommandDoctrineOrder FallbackOrder(float x, float z)

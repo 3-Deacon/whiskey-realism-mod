@@ -426,6 +426,25 @@ namespace WhiskeyRealism.Tactical.Operations
                 task == CommandTaskType.Consolidate;
         }
 
+        private static bool MovesToItsPost(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Screen:
+                case CommandTaskType.GuardFlank:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         public static PostureExecutionDecision Decide(
             CommandDoctrineOrder order,
             CommandPhysicalState physical,
@@ -544,6 +563,10 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 return NoWrite("movement-in-progress");
             }
+
+            // A node the ledger could not place has no post: its movement tasks are no move (a hold, a fallback and a reserve's legal idle
+            // are decided above and below), not an objective stand-off from where it happens to stand.
+            if (order.HasNoPost && MovesToItsPost(order.Task)) return NoWrite("no-position");
 
             switch (order.Task)
             {
@@ -1178,7 +1201,7 @@ namespace WhiskeyRealism.Tactical.Operations
             if (guarded == state.Task && (!hasOrder || TacticalDecisionDoctrine.TaskForStance(order.Task, stance) == order.Task))
                 return false;
             state = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, guarded, state.TaskState,
-                state.X, state.Z, state.FacingDegrees, state.Reason, state.PreGuardTask);
+                state.X, state.Z, state.FacingDegrees, state.Reason, state.PreGuardTask, state.HasPosition);
             if (hasOrder) order = order.WithTask(guarded, guarded == CommandTaskType.Screen ? ScreenReason : HoldReason);
             return true;
         }
@@ -1243,7 +1266,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return false;
             }
             guarded = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, CommandTaskType.HoldObjective, state.TaskState,
-                state.X, state.Z, state.FacingDegrees, Reason, state.Task);
+                state.X, state.Z, state.FacingDegrees, Reason, state.Task, state.HasPosition);
             return true;
         }
 

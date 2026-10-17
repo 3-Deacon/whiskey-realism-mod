@@ -89,8 +89,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildAxis axis,
             int primarySector,
             int supportPriority,
-            int depth)
+            int depth,
+            bool releasedFromReserve = false)
         {
+            ReleasedFromReserve = releasedFromReserve;
             NodeId = string.IsNullOrWhiteSpace(nodeId) ? "node-unknown" : nodeId;
             SourceNodeId = string.IsNullOrWhiteSpace(sourceNodeId) ? NodeId : sourceNodeId;
             Role = role;
@@ -107,6 +109,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int PrimarySector { get; }
         public int SupportPriority { get; }
         public int Depth { get; }
+
+        /// <summary>
+        /// The direct child this node's role comes from was released out of Reserve by the allocation (<see cref="DirectChildIntent.ReleasedFromReserve"/>);
+        /// a descendant carries its source's mark. A role from the evidence tiers is false: #59 allows a ledger-held group's reserve commit only on a release.
+        /// </summary>
+        public bool ReleasedFromReserve { get; }
     }
 
     internal readonly struct CommandIntentResolution

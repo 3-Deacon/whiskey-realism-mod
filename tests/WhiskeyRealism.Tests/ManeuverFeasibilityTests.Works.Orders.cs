@@ -100,12 +100,13 @@ internal static partial class ManeuverFeasibilityTests
         return army;
     }
 
+    // Placed nodes (a node the ledger could not place is planned nowhere, DefenderGroundTests): a line 500 m below the ridge objective at (10, 20).
     static CommandNodeOperationalState[] FourStates() => new[]
     {
-        new CommandNodeOperationalState("node-2", CommandEchelonKind.CorpsLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, CommandTaskState.Planning),
-        new CommandNodeOperationalState("node-10", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, CommandTaskState.Planning),
-        new CommandNodeOperationalState("node-3", CommandEchelonKind.CorpsLike, CommandNodeRole.FixingForce, CommandTaskType.FixEnemy, CommandTaskState.Planning),
-        new CommandNodeOperationalState("node-20", CommandEchelonKind.BrigadeLike, CommandNodeRole.FixingForce, CommandTaskType.FixEnemy, CommandTaskState.Planning),
+        CommandNodeOperationalState.Create("node-2", CommandEchelonKind.CorpsLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, -200f, -500f, 0f),
+        CommandNodeOperationalState.Create("node-10", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.AttackObjective, -100f, -500f, 0f),
+        CommandNodeOperationalState.Create("node-3", CommandEchelonKind.CorpsLike, CommandNodeRole.FixingForce, CommandTaskType.FixEnemy, 100f, -500f, 0f),
+        CommandNodeOperationalState.Create("node-20", CommandEchelonKind.BrigadeLike, CommandNodeRole.FixingForce, CommandTaskType.FixEnemy, 200f, -500f, 0f),
     };
 
     static TacticalOperationsLedgerRuntime ActiveLedger()

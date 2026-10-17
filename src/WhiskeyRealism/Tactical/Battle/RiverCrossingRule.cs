@@ -36,6 +36,8 @@ namespace WhiskeyRealism.Tactical.Battle
         RoadCrossing,
         /// <summary>The leg crosses a river and the side knows no chain of crossings it may use: no move.</summary>
         NoKnownCrossing,
+        /// <summary>The river map is still being built (CrossingPictureWait): no move yet, the producer asks again next tick.</summary>
+        Pending,
     }
 
     /// <summary>
@@ -67,6 +69,14 @@ namespace WhiskeyRealism.Tactical.Battle
         public int Crossings;
         /// <summary>With <see cref="CrossingVerdict.NoKnownCrossing"/>: the first Unknown link of the best route if every link were passable, else -1.</summary>
         public int LookLink;
+        /// <summary>The land regions of the leg's start and target (-1: not judged, the picture was not ready or an end found no land).</summary>
+        public int FromRegion, ToRegion;
+        /// <summary>The end stood on no land (open river, a ford or bridge block) and its region is the first land found along the leg: see <see cref="RiverCrossingRule.LandRegionAlong"/>.</summary>
+        public bool FromResolved, ToResolved;
+        /// <summary>The picture was not ready (or absent): the verdict is SameBank for want of a map, not because the leg stays on one bank.</summary>
+        public bool PictureNotReady;
+        /// <summary>An end stood on no land and no land lay along the leg within reach: the verdict is SameBank for want of a bank, not because the leg stays on one.</summary>
+        public bool EndUnresolved;
     }
 
     /// <summary>
@@ -103,11 +113,33 @@ namespace WhiskeyRealism.Tactical.Battle
         /// </summary>
         public static CrossingVerdict Decide(ICrossingPicture picture, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route)
         {
-            route = new CrossingRoute { LookLink = -1 };
-            if (picture == null || !picture.Ready) return CrossingVerdict.SameBank;
+            route = new CrossingRoute { LookLink = -1, FromRegion = -1, ToRegion = -1 };
+            if (picture == null || !picture.Ready)
+            {
+                route.PictureNotReady = true;
+                return CrossingVerdict.SameBank;
+            }
+            // An end on no land (open river, a ford or bridge block: a group standing on its crossing, a target laid on the river line) is on the bank
+            // the leg reaches or leaves it by, not on the same bank as the other end by default: the first land along the leg decides.
             int from = picture.RegionAt(x0, z0);
+            if (from < 0)
+            {
+                from = LandRegionAlong(picture, x0, z0, x1, z1);
+                route.FromResolved = from >= 0;
+            }
             int to = picture.RegionAt(x1, z1);
-            if (from < 0 || to < 0) return CrossingVerdict.SameBank;
+            if (to < 0)
+            {
+                to = LandRegionAlong(picture, x1, z1, x0, z0);
+                route.ToResolved = to >= 0;
+            }
+            route.FromRegion = from;
+            route.ToRegion = to;
+            if (from < 0 || to < 0)
+            {
+                route.EndUnresolved = true;
+                return CrossingVerdict.SameBank;
+            }
             // A road leg that leaves its bank and comes back to it crosses the river twice: the road's recorded links are checked although both ends lie on one bank.
             if (from == to && !(road.Is && road.LinkCount > 0)) return CrossingVerdict.SameBank;
 
@@ -138,6 +170,35 @@ namespace WhiskeyRealism.Tactical.Battle
                 break;
             }
             return CrossingVerdict.NoKnownCrossing;
+        }
+
+        /// <summary>The metres between the samples <see cref="LandRegionAlong"/> takes (one terrain block).</summary>
+        public const float ResolveStepMeters = TerrainPicture.SampleMeters;
+
+        /// <summary>How far from its end <see cref="LandRegionAlong"/> looks for land (the regions' own snap reach).</summary>
+        public const float ResolveReachMeters = RiverRegions.SnapReachMeters;
+
+        /// <summary>
+        /// The land region of an end that stands on no land: the first land found walking from (<paramref name="x"/>, <paramref name="z"/>) toward
+        /// (<paramref name="towardX"/>, <paramref name="towardZ"/>), the other end of the leg, in blocks of <see cref="ResolveStepMeters"/>, over at most
+        /// <see cref="ResolveReachMeters"/> or the leg's length. -1 when the end is on land of no region, or none lies along the leg within reach.
+        /// Along the leg, not the nearest land in any direction: a group in a ford belongs to the bank the leg takes it to.
+        /// </summary>
+        public static int LandRegionAlong(ICrossingPicture picture, float x, float z, float towardX, float towardZ)
+        {
+            int here = picture.RegionAt(x, z);
+            if (here >= 0) return here;
+            float dx = towardX - x, dz = towardZ - z;
+            float length = (float)Math.Sqrt(dx * dx + dz * dz);
+            if (length < 1e-3f) return -1;
+            float ux = dx / length, uz = dz / length;
+            float reach = Math.Min(length, ResolveReachMeters);
+            for (float d = ResolveStepMeters; d <= reach; d += ResolveStepMeters)
+            {
+                int region = picture.RegionAt(x + ux * d, z + uz * d);
+                if (region >= 0) return region;
+            }
+            return -1;
         }
 
         // The crossings a road leg takes: the road's own links when the planner found them, else the best route over every link. Each must be one
@@ -275,6 +336,12 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        /// <summary>
+        /// The search's work, counted for the harness (a deterministic bound where a clock would flake): links taken off the frontier and edges relaxed,
+        /// summed over every <see cref="Search"/> since the process began. A call expands each link at most once.
+        /// </summary>
+        internal static long ExpandedLinks, RelaxedEdges;
+
         // Dijkstra over the admitted links: a link's cost is the straight distance from the point the group is at when it takes it. The start
         // links are those of the start region; the route ends at a link of the target region. Returns the links in order; 0 when none.
         private static int Search(Graph g, ICrossingPicture p, ReadOnlySpan<bool> admit, float x0, float z0, float x1, float z1, int from, int to, Span<int> path)
@@ -300,6 +367,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (!done[i] && dist[i] < best) { best = dist[i]; u = i; }
                 if (u < 0 || best >= total) break;      // nothing left that can beat the route found
                 done[u] = true;
+                ExpandedLinks++;
                 if (Touches(g, u, to))
                 {
                     float through = dist[u] + Distance(g.X[u], g.Z[u], x1, z1);
@@ -309,6 +377,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     int v = g.Neighbours[e];
                     if (done[v] || !admit[v]) continue;
+                    RelaxedEdges++;
                     float via = dist[u] + g.Weight[e];
                     if (via < dist[v]) { dist[v] = via; prev[v] = u; }
                 }

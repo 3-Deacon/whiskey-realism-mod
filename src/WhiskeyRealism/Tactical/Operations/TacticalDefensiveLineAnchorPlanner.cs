@@ -18,7 +18,8 @@ namespace WhiskeyRealism.Tactical.Operations
             bool anchoredRight = false,
             float lineDirX = 0f,
             float lineDirZ = 0f,
-            float lineHalfLength = 0f)
+            float lineHalfLength = 0f,
+            bool ownFront = false)
         {
             HasAnchor = hasAnchor && center.HasValue && approachAvenue.HasAvenue;
             Center = HasAnchor ? center : DoctrineTargetPoint.None;
@@ -27,6 +28,7 @@ namespace WhiskeyRealism.Tactical.Operations
             DefensiveArtilleryDepth = SanitizeNonNegative(defensiveArtilleryDepth);
             CorridorAnchor = HasAnchor && corridorAnchor;
             OnTerrainLine = HasAnchor && terrainLine && !corridorAnchor;
+            OnOwnFront = HasAnchor && ownFront && !corridorAnchor && !terrainLine;
             AnchoredLeft = OnTerrainLine && anchoredLeft;
             AnchoredRight = OnTerrainLine && anchoredRight;
             bool hasDirection = OnTerrainLine && lineHalfLength > 0f && (lineDirX != 0f || lineDirZ != 0f);
@@ -44,6 +46,8 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool CorridorAnchor { get; }
         /// <summary>BC12: the anchor is a terrain line (crest, wall, river ...) from the terrain picture, not an approach intercept.</summary>
         public bool OnTerrainLine { get; }
+        /// <summary>The anchor is the side's own front (PlanOwnFront): the centre of its placed nodes, the axis from the enemy line to it; the line slots stand on it.</summary>
+        public bool OnOwnFront { get; }
         /// <summary>BC12: the +L end of the line (L = (-Dz, Dx) of the approach axis; command index 0) rests on a river or crest.</summary>
         public bool AnchoredLeft { get; }
         /// <summary>BC12: the -L end of the line (command index n-1) rests on a river or crest.</summary>
@@ -194,6 +198,60 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         private const float MaxTerrainFrontage = 760f;
+        private const float OwnFrontAvenueConfidence = 0.80f;
+
+        /// <summary>
+        /// A Defender whose objective is the enemy line (the visible-enemy-line fallback, <see cref="TacticalObjectiveType.EnemyLine"/>) has no
+        /// line to defend in that objective: every slot laid relative to it lies on the enemy's side of its own front (smoke 2026-10-17: a
+        /// Defender formed 210 m short of the enemy line and 325 m past it). It stands on its own front instead: the centre is the mean of its
+        /// placed nodes, the approach axis runs from the enemy line to that centre, and the frontage is the placed nodes' spread (at least the
+        /// minimum, at most 180 m a node), so the line slots, the reserve post and the flank guards all lie on the line or behind it.
+        /// None without a placed node, or when the front is on the enemy line.
+        /// </summary>
+        public static TacticalDefensiveLineAnchor PlanOwnFront(
+            BattlefieldObjectiveEstimate objective,
+            CommandNodeOperationalState[] nodes,
+            TacticalBattlefrontSnapshot battlefront)
+        {
+            if (objective.Type != TacticalObjectiveType.EnemyLine)
+                return TacticalDefensiveLineAnchor.None("defensive-line-not-enemy-line");
+
+            double sumX = 0d, sumZ = 0d;
+            int placed = 0;
+            for (int i = 0; nodes != null && i < nodes.Length; i++)
+            {
+                if (nodes[i].Role == CommandNodeRole.Unknown || !nodes[i].HasPosition) continue;
+                sumX += nodes[i].X;
+                sumZ += nodes[i].Z;
+                placed++;
+            }
+
+            if (placed == 0) return TacticalDefensiveLineAnchor.None("defensive-line-no-placed-node");
+            float centerX = (float)(sumX / placed);
+            float centerZ = (float)(sumZ / placed);
+            if (Distance(objective.X, objective.Z, centerX, centerZ) < 1f)
+                return TacticalDefensiveLineAnchor.None("defensive-line-on-enemy-line");
+
+            TacticalApproachAvenueEstimate avenue = TacticalApproachAvenueEstimate.Create(
+                new TacticalMapPoint(objective.X, objective.Z),
+                new TacticalMapPoint(centerX, centerZ),
+                TacticalApproachAvenueSource.VisibleEnemyLine,
+                OwnFrontAvenueConfidence,
+                roadAnchored: false,
+                crossingAnchored: false,
+                "own-front");
+            float spread = battlefront.HasFrontage ? battlefront.FrontageWidth : 0f;
+            float frontage = Math.Max(MinimumFrontageWidth, Math.Min(spread, Math.Max(1, placed) * 180f));
+            return new TacticalDefensiveLineAnchor(
+                true,
+                DoctrineTargetPoint.From(centerX, centerZ),
+                avenue,
+                frontage,
+                DefensiveArtilleryDepth,
+                corridorAnchor: false,
+                "own-front",
+                ownFront: true);
+        }
 
         // Null when there is no usable line. The threat axis is the reverse of the avenue axis (the enemy's travel direction).
         private static TacticalDefensiveLineAnchor? TerrainLineAnchor(
