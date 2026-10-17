@@ -195,13 +195,13 @@ internal static class PlanCommitmentTests
     private static void EmptyBandBaselineIsNotTheArmyTotal()
     {
         var orch = Orch();
-        // A replan while the main band holds nobody: the old code stored the whole army (6000) as that band's baseline.
-        var emptyBand = new EnemyVisibleState(new[] { new EnemyVisibleSector(1, 6000f, 5000f, false) }, 0.5f, true, false);
-        ReplanOutcome c = Step(orch, 600f, morale: 0.3f, enemy: emptyBand, total: 6000f);
+        // A replan while the main band (2) holds nobody and no band has an enemy, so the main effort stays where it is: the old code stored the
+        // whole army (6000) as that band's baseline.
+        var nobody = new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0.5f, true, false);
+        ReplanOutcome c = Step(orch, 600f, morale: 0.3f, enemy: nobody, total: 6000f);
         AssertTrue(c.Replanned || c.Kept, "a replan happened with the main band empty");
-        Step(orch, 600f, morale: 1f, enemy: emptyBand, total: 6000f);
-        // The band fills with a corps of 2000: that is where the army stands, not a loss.
-        // (The army has lost most of its men elsewhere meanwhile, which would pass the old baseline's loss test: 6000 "in the band" down to 2000.)
+        // The band fills with a corps of 2000 while the army has lost most of its men elsewhere (6000 down to 2400): the band's first sighting is its
+        // baseline, not a loss (with the army total as the baseline it read 6000 down to 2000).
         ReplanOutcome filled = Step(orch, 4000f, enemy: new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false), total: 2400f);
         AssertTrue(filled.Trigger != ReplanTrigger.MainEffortSectorLoss, "the first sighting of a band is a baseline, not a loss: " + filled.Trigger);
     }
