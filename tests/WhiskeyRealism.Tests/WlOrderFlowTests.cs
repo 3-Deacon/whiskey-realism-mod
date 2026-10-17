@@ -108,6 +108,7 @@ internal static partial class WlOrderFlowTests
             ("wl order move fan out order waits for the latest child move", FanOutOrderWaitsForTheLatestChildMove),
             ("wl order move carrier is the latest entry of the units ordered", MoveCarrierIsTheLatestEntryOfTheUnitsOrdered),
             ("wl order move only the carrying entry counts", OnlyTheCarryingEntryCounts),
+            ("wl order move replacement entry with an earlier processing time still carries", ReplacementEntryWithAnEarlierProcessingTimeStillCarries),
             ("wl order move later order delivered first supersedes the held one", LaterOrderDeliveredFirstSupersedesTheHeldOne),
             ("wl order move held orders released together arrive in issue order", HeldOrdersReleasedTogetherArriveInIssueOrder),
             ("wl order move latest held order wins when its move executes first", LatestHeldOrderWinsWhenItsMoveIsCarriedOutFirst),

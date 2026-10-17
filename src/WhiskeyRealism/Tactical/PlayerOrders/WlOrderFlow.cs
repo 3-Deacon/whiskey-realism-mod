@@ -57,9 +57,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // Where the vanilla move of the unit an order names stands (WlMoveState.Classify).
     internal enum MoveState
     {
-        Executed, // no move of that unit is queued any more: its superior's order has been carried out
+        Executed, // the entry is gone and the unit holds the path: its superior's order has been carried out
         InFlight, // the move is still in its superior's order queue (courier riding or processing time not reached)
-        Lost,     // the move is still queued but its courier is gone: vanilla will clear the waypoints, not carry it out
+        Lost,     // vanilla will not carry the move out: its courier is gone, or the entry is gone and the path with it
     }
 
     // What vanilla's own order queue says about a unit's move (decompile build 14703111). SetWaypoint with
@@ -68,44 +68,59 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // entry (ordertype 0 append, 1 new path) stays in that queue until ProcessOrders carries it out and
     // deletes it (125425, DeleteOrderQueue 124844); carrying it out transmits every path the unit holds at
     // that time (SetOrderStatus 125484-125508), so a path added while an entry is pending rides that entry,
-    // new or older. A mounted courier line (type 1) whose courier is gone is vanilla's own test for a lost
-    // order (125281-125286, 125308-125320): it clears the untransmitted waypoints, so the move will not be
-    // made. The unit's orderstate says nothing about one order: it is shared by every order to the unit,
-    // and carrying out an entry resets it to 0 (124849, 125506).
+    // new or older.
+    //
+    // A lost order is mostly gone from the queue before anyone looks. A mounted courier line (type 1) that is
+    // still active and has no courier is vanilla's lost-order test (125282-125286, 125308-125320): it zeroes
+    // the line, sets orderstate 3 and clears the untransmitted waypoints (125282, 125285), and the entry is
+    // carried out and deleted one or two ProcessOrders passes later (125425), which resets orderstate (124857).
+    // Neither the line nor orderstate outlives that. What does is the unit's path: a carried-out move leaves
+    // the unit holding its transmitted path until it arrives, a lost one leaves it holding none. So the
+    // verdict for an entry that is gone is the unit's path, read when the entry is first seen gone; a unit
+    // that had no path when the dispatch was captured is never a carrier (the executor's rule), and a move
+    // so short that the unit arrived between two passes reads as lost, which costs the player the order of a
+    // move that was over before he could be told.
     internal static class WlMoveState
     {
-        public static MoveState Classify(bool moveQueued, bool courierLost)
+        public static MoveState Classify(bool moveQueued, bool courierLost, bool pathHeld)
         {
-            if (!moveQueued) return MoveState.Executed;
-            return courierLost ? MoveState.Lost : MoveState.InFlight;
+            if (moveQueued) return courierLost ? MoveState.Lost : MoveState.InFlight;
+            return pathHeld ? MoveState.Executed : MoveState.Lost;
         }
 
-        // Does a queue entry of the carrier unit carry the order? A move entry (ordertype 0 or 1) whose
-        // processing time is not before the carrier's: the entry the dispatch recorded, or a later one that
-        // replaced it. An older entry of the same unit (earlier processing time) is another move.
-        public static bool Carries(int orderType, float entryProcessingTime, float carrierProcessingTime)
+        // Does a queue entry of the carrier unit carry the order? A move entry (ordertype 0 or 1) created or
+        // last processed at or after the stamp the dispatch recorded from the carrier's entry: that entry (its
+        // stamp only grows, ProcessOrders 125331) or one that replaced it. A replacement is not later in
+        // processing time: a permanently detached pool brigade's second SetWaypoint deletes the old entry and
+        // adds the new one without the 0.02 h standard time (124929-124931, 124966), so its processing time
+        // can be earlier than the old entry's. The creation stamp (OrderQueue constructor, lastupdate) does
+        // not go backwards.
+        public static bool Carries(int orderType, float entryStamp, float carrierStamp)
         {
-            return orderType >= 0 && orderType <= 1 && entryProcessingTime >= carrierProcessingTime;
+            return orderType >= 0 && orderType <= 1 && entryStamp >= carrierStamp;
         }
     }
 
     // The queued move that carries an executor dispatch: among the units one dispatch moved (the ordered
     // group, or the children a fan-out around the player's command ordered), the one whose entry is carried
-    // out last. The player is told one leg after that entry; the others are carried out earlier or with it.
+    // out last (processing time). The player is told one leg after that entry; the others are carried out
+    // earlier or with it. Stamp is that entry's creation stamp, the identity WlMoveState.Carries matches by.
     internal struct WlMoveCarrier
     {
         public int UnitId;
         public float ProcessingTime;
+        public float Stamp;
 
         public bool Has => UnitId != 0;
 
-        public void Consider(int unitId, float processingTime)
+        public void Consider(int unitId, float processingTime, float stamp)
         {
             if (unitId == 0) return;
             if (UnitId == 0 || processingTime > ProcessingTime)
             {
                 UnitId = unitId;
                 ProcessingTime = processingTime;
+                Stamp = stamp;
             }
         }
     }

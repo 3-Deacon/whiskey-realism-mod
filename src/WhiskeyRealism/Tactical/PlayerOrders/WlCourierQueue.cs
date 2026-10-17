@@ -28,13 +28,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // An executor dispatch made while the move it accompanies was still in its superior's order queue
         // (WlMoveCarrier): the superior has not got that order yet, so the player is not told until it has.
         // CarrierUnitId is the instance id of the unit whose queued move carries the order (the ordered unit
-        // itself, or the latest of the children a fan-out ordered) and CarrierTime that entry's processing
-        // time. LegHours is the delay from the superior to the player (courier delay), run from the moment the
+        // itself, or the latest of the children a fan-out ordered) and CarrierStamp that entry's creation stamp
+        // (WlMoveState.Carries). LegHours is the delay from the superior to the player (courier delay), run from the moment the
         // move is carried out. MoveHeld: the "move-in-flight" row was written.
         public bool AwaitsMove;
         public bool MoveHeld;
         public int CarrierUnitId;
-        public float CarrierTime;
+        public float CarrierStamp;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.

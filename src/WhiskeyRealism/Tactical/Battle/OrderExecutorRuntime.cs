@@ -186,7 +186,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (wrote)
                     {
                         _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = x, Z = z };
-                        if (WlMoveQueue.TryPending(unit, out float queuedAt)) carrier.Consider(own[targetIndex].InstanceId, queuedAt);
+                        if (unit.regimentpaths > 0 && WlMoveQueue.TryPending(unit, out float queuedAt, out float stamp))
+                            carrier.Consider(own[targetIndex].InstanceId, queuedAt, stamp);
                         pathsBefore += before;
                         pathsAfter += MovingUnits(unit);
                         if (blocked) viaBlockedOrder = true;

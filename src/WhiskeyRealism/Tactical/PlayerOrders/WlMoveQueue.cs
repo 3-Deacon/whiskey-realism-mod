@@ -14,25 +14,33 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     //   AddToOrderQueue 124917: an entry is {advisedunit, ordertype, processingtime}; ordertype 0 is a path
     //     append and 1 a new path; a unit with a move already in flight gets no second entry (SetWaypoint
     //     91485, ordertypeactive).
-    //   OrderQueue constructor (109640): processingtime is never before the entry's creation.
-    //   ProcessOrders 125173-125425: an entry is carried out and deleted when every courier line has run out.
+    //   OrderQueue constructor (109640): processingtime is never before the entry's creation, and lastupdate is
+    //     the creation stamp (ProcessOrders rewrites it only to a later time, 125331). A replacement entry
+    //     (124929-124931) skips the 0.02 h standard time (124966), so the stamp, not the processing time,
+    //     identifies the entry an order rides.
+    //   ProcessOrders 125173-125425: an entry is carried out and deleted when every courier line has run out; a
+    //     lost line clears the untransmitted waypoints (125282) and the entry goes one or two passes later, so
+    //     a lost move is told from a carried-out one by the unit's path once the entry is gone (WlMoveState).
     //   SetOrderStatus 125484-125508: carrying it out transmits all the paths the unit then holds.
     internal static class WlMoveQueue
     {
-        // The unit's pending move entry with the latest processing time, or false when it has none.
-        internal static bool TryPending(Regiment unit, out float processingTime)
+        // The unit's pending move entry with the latest processing time: its processing time (which entry is
+        // carried out last) and its creation stamp (which entry the order rides, WlMoveState.Carries).
+        internal static bool TryPending(Regiment unit, out float processingTime, out float stamp)
         {
             processingTime = 0f;
+            stamp = 0f;
             Regiment.OrderQueue entry = Latest(unit);
             if (entry == null) return false;
             processingTime = entry.processingtime;
+            stamp = entry.lastupdate;
             return true;
         }
 
-        // Where the carrier unit's move stands: carried out (no entry that carries the order), queued, or
-        // queued with its courier gone. Only an entry that WlMoveState.Carries counts, so an older move of
-        // the same unit is another order's.
-        internal static MoveState StateOf(Regiment unit, float carrierProcessingTime)
+        // Where the carrier unit's move stands: queued, queued with its courier gone, or no longer queued,
+        // when the unit's path says whether it was carried out or lost (WlMoveState). Only an entry that
+        // WlMoveState.Carries counts, so an older move of the same unit is another order's.
+        internal static MoveState StateOf(Regiment unit, float carrierStamp)
         {
             var queue = OwnerQueue(unit);
             if (queue == null) return MoveState.Executed;
@@ -43,11 +51,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 Regiment.OrderQueue entry = queue[i];
                 if (entry == null || (UnityEngine.Object)entry.advisedunit != (UnityEngine.Object)moved) continue;
-                if (!WlMoveState.Carries(entry.ordertype, entry.processingtime, carrierProcessingTime)) continue;
+                if (!WlMoveState.Carries(entry.ordertype, entry.lastupdate, carrierStamp)) continue;
                 queued = true;
                 lost |= CourierLost(entry, moved);
             }
-            return WlMoveState.Classify(queued, lost);
+            return WlMoveState.Classify(queued, lost, unit.regimentpaths > 0);
         }
 
         private static Regiment.OrderQueue Latest(Regiment unit)
@@ -75,8 +83,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return owner.orderqueue;
         }
 
-        // The entry's own line to the moved unit is a mounted courier line (type 1) whose courier is gone:
-        // vanilla's lost-order test (125281-125286). Secondary lines to the unit's regiments are not asked.
+        // The entry's own line to the moved unit is an active mounted courier line (type 1) whose courier is
+        // gone: vanilla's lost-order test (125282-125286, the line must still be active). Secondary lines to
+        // the unit's regiments are not asked.
         private static bool CourierLost(Regiment.OrderQueue entry, GameObject moved)
         {
             var lines = entry.courierline;
@@ -84,7 +93,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             for (int k = 0; k < lines.Count; k++)
             {
                 Regiment.OrderQueue.CourierLine line = lines[k];
-                if (line != null && line.type == 1 && (UnityEngine.Object)line.targetunit == (UnityEngine.Object)moved
+                if (line != null && line.type == 1 && line.lineactive && (UnityEngine.Object)line.targetunit == (UnityEngine.Object)moved
                     && (UnityEngine.Object)line.courierref == null) return true;
             }
             return false;

@@ -176,10 +176,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public bool Campaign;
             public PlayerOrderCandidate P62;
             public OrderIntentKind Kind;
-            // An executor dispatch's carrier: the unit whose queued move the order accompanies, and when that
-            // entry is carried out (WlMoveCarrier). Zero when the dispatch moved nothing through the queue.
+            // An executor dispatch's carrier: the unit whose queued move the order accompanies, and that entry's
+            // creation stamp (WlMoveCarrier). Zero when the dispatch moved nothing through the queue.
             public int CarrierUnitId;
-            public float CarrierTime;
+            public float CarrierStamp;
         }
 
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
@@ -239,7 +239,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
                 Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin, Kind = kind,
-                CarrierUnitId = carrier.UnitId, CarrierTime = carrier.ProcessingTime,
+                CarrierUnitId = carrier.UnitId, CarrierStamp = carrier.Stamp,
             };
             return EnqueueCall(in call);
         }
@@ -346,7 +346,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             {
                 entry.AwaitsMove = true;
                 entry.CarrierUnitId = call.CarrierUnitId;
-                entry.CarrierTime = call.CarrierTime;
+                entry.CarrierStamp = call.CarrierStamp;
             }
 
             if (verdict == CaptureVerdict.Drop)
@@ -831,7 +831,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 // The unit whose queued move carries the order (the ordered group, or the latest child a fan-out
                 // ordered); one that is gone has no move to wait for.
                 Regiment carrier = ResolveUnit(e.CarrierUnitId);
-                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, e.CarrierTime);
+                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, e.CarrierStamp);
             }
 
             // The release is stale when contact has resumed (or the hysteresis no longer holds) while its
