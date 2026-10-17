@@ -65,6 +65,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
         internal static ConfigEntry<bool> EnableBattleTerrainPicture;
+        internal static ConfigEntry<bool> EnableBattleAiLevelOfDetail;
         internal static ConfigEntry<bool> EnablePerCommanderPersonality;
         internal static ConfigEntry<bool> EnableCommanderOpportunity;
         internal static ConfigEntry<bool> EnableDefenderCounterstroke;
@@ -91,6 +92,13 @@ namespace WhiskeyRealism
         internal static bool TerrainPictureEnabled()
         {
             try { return EnableBattleTerrainPicture != null && EnableBattleTerrainPicture.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Battle AI Level Of Detail (BC15: the tier pass, the carried claims and the id-ordered nav walk).</summary>
+        internal static bool BattleAiLevelOfDetailEnabled()
+        {
+            try { return EnableBattleAiLevelOfDetail != null && EnableBattleAiLevelOfDetail.Value; }
             catch { return false; }
         }
 
@@ -655,6 +663,16 @@ namespace WhiskeyRealism
                 "The picture itself builds either way (the playbook terrain reads it). Off: objectives keep their types and zero " +
                 "terrain strength, the defensive anchor keeps its terrain-anchor-preserved behaviour, no strong-ground evidence, and " +
                 "ReverseSlopeDefense is never chosen (it needs a crest line).");
+            EnableBattleAiLevelOfDetail = Config.Bind(
+                "Tactical",
+                "Enable Battle AI Level Of Detail",
+                true,
+                "Default ON. BC15: the battle AI spends its producer time where the battle is. A group far from every enemy the side perceives " +
+                "(none within 1.5 km, no fire, no melee, nothing moving under it), settled, on a holding task (hold, form up, flank guard, reserve " +
+                "wait, consolidate), with no order in flight and nothing changed in what its producers read, re-evaluates every fourth " +
+                "side-stat cycle instead of every cycle; its last claims stand in between. Every wake-up reads perceived and own state only: a " +
+                "sighting within 3 km, fire, its parent moving, its order target or its path corridor changing, a new closest enemy bearing, a " +
+                "plan change. The player's own command chain is never slowed. Off: every group runs every producer on every cycle, as before.");
             EnablePerCommanderPersonality = Config.Bind(
                 "Tactical",
                 "Enable Per-Commander Personality",

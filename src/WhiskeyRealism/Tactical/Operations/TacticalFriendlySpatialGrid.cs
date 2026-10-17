@@ -101,6 +101,56 @@ namespace WhiskeyRealism.Tactical.Operations
             return Math.Min(1f, worst);
         }
 
+        // BC15 decision 2(e): which friendly units stand in a group's path corridor, as a count and an order-free hash of their ids, so the tier
+        // pass can tell that the set changed. The corridor runs from (x0, z0) toward (x1, z1), widthMeters wide, over at most MaxCorridorMeters
+        // (the longest move the posture pipeline orders), and skips what stands within CorridorMinForward of the start (the group's own line).
+        // Allocation-free; the hash is a sum, so it does not depend on the order the grid was filled in.
+        public const float MaxCorridorMeters = 2500f;
+
+        public int CorridorSignature(int selfId, float x0, float z0, float x1, float z1, float widthMeters, out int count)
+        {
+            count = 0;
+            float ax = x1 - x0;
+            float az = z1 - z0;
+            float length = (float)Math.Sqrt(ax * ax + az * az);
+            if (length < 1f || Count == 0) return 0;
+            ax /= length;
+            az /= length;
+            if (length > MaxCorridorMeters)
+            {
+                length = MaxCorridorMeters;
+                x1 = x0 + ax * length;
+                z1 = z0 + az * length;
+            }
+            float half = widthMeters * 0.5f;
+            int minCx = Cell(Math.Min(x0, x1) - half);
+            int maxCx = Cell(Math.Max(x0, x1) + half);
+            int minCz = Cell(Math.Min(z0, z1) - half);
+            int maxCz = Cell(Math.Max(z0, z1) + half);
+
+            int hash = 0;
+            for (int cx = minCx; cx <= maxCx; cx++)
+            {
+                for (int cz = minCz; cz <= maxCz; cz++)
+                {
+                    if (!_cells.TryGetValue(Key(cx, cz), out List<Entry> list)) continue;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        Entry e = list[i];
+                        if (e.Id == selfId) continue;
+                        float rx = e.X - x0;
+                        float rz = e.Z - z0;
+                        float forward = rx * ax + rz * az;
+                        if (forward < CorridorMinForward || forward > length) continue;
+                        if (Math.Abs(rx * az - rz * ax) > half) continue;
+                        count++;
+                        hash = unchecked(hash + (int)((uint)e.Id * 2654435761u));
+                    }
+                }
+            }
+            return hash;
+        }
+
         private static int Cell(float v)
         {
             return (int)Math.Floor(v / CellSize);

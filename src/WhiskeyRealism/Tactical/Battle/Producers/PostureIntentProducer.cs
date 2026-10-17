@@ -86,6 +86,25 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public int[] GroupIds = new int[64];
             public int[] GroupOrder = new int[64];
             public int GroupCount;
+            // BC15: the posture each group's last evaluation recorded, kept for the ticks the group is carried (Carry): recon and fire control
+            // read Groups[i], which is cleared every tick, and a Distant group's producers do not run to fill it.
+            public readonly Dictionary<int, GroupPosture> Last = new Dictionary<int, GroupPosture>(128);
+
+            /// <summary>A group that is not due this tick keeps its last recorded posture and claims no submission.</summary>
+            internal void Carry(int ownIndex, int groupId)
+            {
+                if (!Last.TryGetValue(groupId, out GroupPosture posture)) return;
+                posture.Submitted = false;
+                posture.FacingSubmitted = false;
+                Groups[ownIndex] = posture;
+            }
+
+            /// <summary>The posture an evaluation of the group recorded (none when it recorded none).</summary>
+            internal void Remember(int ownIndex, int groupId)
+            {
+                if (Groups[ownIndex].Has) Last[groupId] = Groups[ownIndex];
+                else Last.Remove(groupId);
+            }
             // BC10 decision 4: the NavMesh query filter of the path probe, built once per
             // snapshot from the live area costs plus AddPath's battle costs.
             public NavMeshQueryFilter NavFilter;
@@ -171,6 +190,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return t;
         }
 
+        /// <summary>BC15: a stand-down or a new battle day: no carried posture survives it.</summary>
+        internal static void ForgetLast(int alliance)
+        {
+            if (alliance >= 0 && alliance < _states.Length) _states[alliance].Last.Clear();
+        }
+
         /// <summary>The scratch only when the posture producer already ran on this snapshot.</summary>
         internal static State Current(BattleSnapshot s)
         {
@@ -186,6 +211,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 _states[a].TickId = -1;
                 _states[a].Friendly.Clear();
                 _states[a].EnemyIndexById.Clear();
+                _states[a].Last.Clear();
             }
         }
     }
@@ -230,41 +256,57 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     int i = t.GroupOrder[(start + k) % t.GroupCount];
                     ref UnitRecord rec = ref own[i];
 
-                    // #61 iterated AIBattle.unitsused, then the leaf brigades
-                    // outside it; the pool is captured on the coordinator tick.
-                    if (ArmyPostureInputsRuntime.InAiPool(s.Alliance, rec.InstanceId))
+                    // BC15: a Distant group that is not due submits nothing; its last posture stays on record for recon and fire control.
+                    if (!BattleLodRuntime.IsDue(s, i))
                     {
-                        // An exploit order overrides the ledger order of the asset; a descendant follows (requirement-exploit-override).
-                        bool hasState = PostureLedger.TryResolveState(rec.InstanceId, side, out CommandNodeOperationalState state);
-                        bool hasOrder = false;
-                        CommandDoctrineOrder order = default(CommandDoctrineOrder);
-                        ExploitOverrideKind exploitKind = ExploitOverrideKind.None;
-                        if (exploits.TryOverride(rec.InstanceId, out CommandDoctrineOrder exploitOrder, out CommandNodeOperationalState exploitState))
-                        {
-                            exploitKind = ExploitPosture.KindOf(in exploitOrder);
-                            state = ExploitPosture.Overlay(state, hasState, exploitState, exploitKind);
-                            hasState = true;
-                            hasOrder = true;
-                            order = exploitOrder;
-                        }
-                        else if (hasState)
-                        {
-                            hasOrder = PostureLedger.TryResolveDoctrineOrder(rec.InstanceId, army, state.NodeId, out order);
-                        }
-                        if (!hasState) continue;
-                        bool submitted = PosturePipeline.Run(s, t, i, state, hasOrder, order, side, sink,
-                            IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason,
-                            recordTick: true, exploitKind);
-                        t.Groups[i].Submitted = submitted;
+                        t.Carry(i, rec.InstanceId);
                         continue;
                     }
 
-                    if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) continue;
-                    if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) continue;
-                    if (leaf.LeafTask == CommandTaskType.None) continue;
-                    ProduceLeaf(s, t, i, leaf, side, army, sink, exploits);
+                    ProduceGroup(s, t, i, side, army, leafMap, exploits, sink);
+                    t.Remember(i, rec.InstanceId);
                 }
             }
+        }
+
+        private static void ProduceGroup(BattleSnapshot s, PostureTick.State t, int i, TacticalBattleOrchestrator side, ArmyOrchestrator army,
+            IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap, ExploitTable exploits, IIntentSink sink)
+        {
+            ref UnitRecord rec = ref s.Own[i];
+
+            // #61 iterated AIBattle.unitsused, then the leaf brigades
+            // outside it; the pool is captured on the coordinator tick.
+            if (ArmyPostureInputsRuntime.InAiPool(s.Alliance, rec.InstanceId))
+            {
+                // An exploit order overrides the ledger order of the asset; a descendant follows (requirement-exploit-override).
+                bool hasState = PostureLedger.TryResolveState(rec.InstanceId, side, out CommandNodeOperationalState state);
+                bool hasOrder = false;
+                CommandDoctrineOrder order = default(CommandDoctrineOrder);
+                ExploitOverrideKind exploitKind = ExploitOverrideKind.None;
+                if (exploits.TryOverride(rec.InstanceId, out CommandDoctrineOrder exploitOrder, out CommandNodeOperationalState exploitState))
+                {
+                    exploitKind = ExploitPosture.KindOf(in exploitOrder);
+                    state = ExploitPosture.Overlay(state, hasState, exploitState, exploitKind);
+                    hasState = true;
+                    hasOrder = true;
+                    order = exploitOrder;
+                }
+                else if (hasState)
+                {
+                    hasOrder = PostureLedger.TryResolveDoctrineOrder(rec.InstanceId, army, state.NodeId, out order);
+                }
+                if (!hasState) return;
+                bool submitted = PosturePipeline.Run(s, t, i, state, hasOrder, order, side, sink,
+                    IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason,
+                    recordTick: true, exploitKind);
+                t.Groups[i].Submitted = submitted;
+                return;
+            }
+
+            if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) return;
+            if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) return;
+            if (leaf.LeafTask == CommandTaskType.None) return;
+            ProduceLeaf(s, t, i, leaf, side, army, sink, exploits);
         }
 
         // AI-controlled command groups: Active, not player-owned (spec §3).
@@ -506,6 +548,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             ArmyOrchestrator army = side.Army;
             ref UnitRecord rec = ref s.Own[i];
             UnitFlags descendants = t.Descendants[i];
+
+            // BC15 decision 7: this evaluation starts with no plan outstanding for the group; TryNavPlan reports a deferral again if the budget is spent.
+            if (recordTick) BattleLodRuntime.NavPlanned(s, rec.InstanceId);
 
             if (hasOrder && order.Task != state.Task)
                 state = state.WithRoleAndTask(order.Role, order.Task);
@@ -1390,6 +1435,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (!t.Nav.TryConsume(s.Own[i].InstanceId))
             {
                 t.NavDeferred = true;
+                // BC15 decision 7: a group waiting for a plan stays Full until one runs for it.
+                BattleLodRuntime.NavDeferred(s, s.Own[i].InstanceId);
                 return false;
             }
 
@@ -1826,6 +1873,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 {
                     ref GroupPosture g = ref t.Groups[i];
                     if (!g.Has || g.Submitted) continue;
+                    // BC15: the pulse is tiered with the posture it follows; a carried group's record is kept, its pulse is not re-run.
+                    if (!BattleLodRuntime.IsDue(s, i)) continue;
                     TacticalFacingPulseScope scope = ScopeFor(g.State.Echelon);
                     if (scope == TacticalFacingPulseScope.Division)
                     {

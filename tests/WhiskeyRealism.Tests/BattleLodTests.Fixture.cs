@@ -16,7 +16,8 @@ internal static partial class BattleLodTests
         public int Id, ParentId, UnitTyp;
         public float X, Z, Rotation;
         public UnitFlags Flags = UnitFlags.Alive | UnitFlags.Active;
-        public int RegimentPaths, MovementMode, QueuedOrders;
+        public int RegimentPaths, MovementMode, QueuedOrders, Formation, AiStanceOrdered;
+        public float LastWaypointX, LastWaypointZ;
         public bool ReceivedFire;
         public bool IsGroup => (Flags & UnitFlags.IsGroup) != 0;
     }
@@ -26,6 +27,10 @@ internal static partial class BattleLodTests
         public readonly Dictionary<int, CommandTaskType> Task = new Dictionary<int, CommandTaskType>();
         public readonly Dictionary<int, (float x, float z, float heading, int formation)> Target = new Dictionary<int, (float, float, float, int)>();
         public readonly HashSet<int> Latched = new HashSet<int>();
+        // The operation's primary objective: the target of a group whose order carries none (the pipeline's objective approach).
+        public bool HasObjective;
+        public int ObjectiveGroupId;   // the one group whose order carries no target of its own
+        public float ObjectiveX, ObjectiveZ;
         public readonly Dictionary<int, (float x, float z, float heading)> Slot = new Dictionary<int, (float, float, float)>();
         public LodWorld World;
 
@@ -39,7 +44,9 @@ internal static partial class BattleLodTests
                 return true;
             }
             x = z = 0f; maneuverHeading = -1f; orderFormation = -1;
-            return false;
+            if (!HasObjective || groupId != ObjectiveGroupId) return false;
+            x = ObjectiveX; z = ObjectiveZ;
+            return true;
         }
 
         public bool HasLatchOrManeuver(int groupId) => Latched.Contains(groupId);
@@ -82,7 +89,7 @@ internal static partial class BattleLodTests
                 count++;
                 hash = unchecked(hash * 31 + f.id);
             }
-            return hash;
+            return count == 0 ? 0 : hash;   // an empty corridor hashes to 0 whatever its length, as the runtime grid's does
         }
     }
 
@@ -221,7 +228,7 @@ internal static partial class BattleLodTests
                 {
                     InstanceId = u.Id, UnitTyp = u.UnitTyp, Alliance = 0, X = u.X, Z = u.Z, RotationY = u.Rotation, Flags = u.Flags,
                     RegimentPaths = u.RegimentPaths, MovementMode = u.MovementMode, QueuedOrders = u.QueuedOrders, ReceivedFire = u.ReceivedFire,
-                    Strength = 500,
+                    Strength = 500, Formation = u.Formation, AiStanceOrdered = u.AiStanceOrdered, LastWaypointX = u.LastWaypointX, LastWaypointZ = u.LastWaypointZ,
                 });
             }
             var index = new Dictionary<int, int>();

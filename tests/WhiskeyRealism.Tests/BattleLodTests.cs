@@ -13,7 +13,7 @@ internal static partial class BattleLodTests
 {
     public static void Run()
     {
-        RunAll(Join(LatchTests(), TierTests(), PromotionTests(), ArbiterTests(), NavTests()));
+        RunAll(Join(LatchTests(), TierTests(), PromotionTests(), EquivalenceTests(), ArbiterTests(), NavTests(), CorridorTests(), RuntimeTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

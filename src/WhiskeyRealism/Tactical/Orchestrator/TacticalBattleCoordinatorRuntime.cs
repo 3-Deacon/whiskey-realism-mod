@@ -488,6 +488,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _lastHeavyBuildFrame[i] = -1;
                 _replanAfterNight[i] = true;
             }
+            // BC15: the battle AI tiers start over with the day (every group Full for the minimum hold).
+            Battle.BattleLodRuntime.NewBattleDay();
             TelemetryRouter.LegacyInfo("[TacticalOrchestrator] new battle day: snapshots rebuilt and plans re-evaluated", TelemetryLayer.Tactical);
         }
 

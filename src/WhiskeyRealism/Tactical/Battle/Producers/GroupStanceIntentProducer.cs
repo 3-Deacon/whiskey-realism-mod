@@ -36,6 +36,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {
                     if ((own[i].Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp)) continue;
+                    // BC15: a Distant group that is not due keeps the stance claim it published; its hold is renewed on its due tick.
+                    if (!BattleLodRuntime.IsDue(snapshot, i)) continue;
                     if (!TryResolvedDecision(snapshot, i, out TacticalResolvedGroupDecision resolved)) continue;
                     if (BattleWriterPolicy.TryGroupStanceIntent(own[i], resolved, out BattleOrderIntent intent)) sink.Submit(intent);
                 }

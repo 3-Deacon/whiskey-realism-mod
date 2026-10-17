@@ -100,6 +100,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalEnvelopment", TelemetryCategory.Decision);
             AddTactical("TacticalReserveRelease", TelemetryCategory.Decision);
             AddTactical("TacticalVanillaFlankMove", TelemetryCategory.State);
+            AddTactical("TacticalLod", TelemetryCategory.State);
             // BC13: commander personality, openings, exploits, cavalry strike discipline, stance cooldown, separated-enemy steer.
             AddTactical("TacticalCommanderPersonality", TelemetryCategory.State);
             AddTactical("TacticalOpening", TelemetryCategory.State);
