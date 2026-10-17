@@ -84,6 +84,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
             AddTactical("TacticalDirectChildIntent", TelemetryCategory.Decision);
+            AddTactical("TacticalDefenderReserve", TelemetryCategory.Decision);
             AddTactical("TacticalPlayExecution", TelemetryCategory.Decision);
             AddTactical("TacticalDirectChildGate", TelemetryCategory.Gate);
             AddTactical("TacticalDeploymentPhase", TelemetryCategory.State);

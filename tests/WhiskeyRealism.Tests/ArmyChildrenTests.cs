@@ -31,6 +31,11 @@ internal static class ArmyChildrenTests
             ("army children union division child cascades a role to every brigade", UnionDivisionChildCascadesARoleToEveryBrigade),
             ("army children csa brigade children each own a leaf assignment", CsaBrigadeChildrenEachOwnALeafAssignment),
             ("army children union defender line holds with a flank guard and covers the loose division", UnionDefenderLineHoldsWithAFlankGuard),
+            ("army children a holding division keeps floor(n/3) brigades in reserve, rearmost interior first", AHoldingDivisionKeepsAThirdInReserve),
+            ("army children a holding division with fewer than three brigades says the numbers are thin", AHoldingDivisionWithTwoBrigadesSaysThin),
+            ("army children an exposed end of a holding division draws the nearest reserve to guard the flank", AnExposedEndDrawsTheNearestReserve),
+            ("army children an attacking division keeps no cascade reserve", AnAttackingDivisionKeepsNoCascadeReserve),
+            ("army children the orchestrator's defender leaf map keeps a reserve and rebuilds on a stance change", TheOrchestratorDefenderLeafMapKeepsAReserve),
             ("army children a division in no army is a direct child beside the army's divisions", ALooseDivisionIsADirectChildBesideTheArmysDivisions),
             ("army children a side of two armies and a loose corps covers every top command", ASideOfTwoArmiesAndALooseCorpsCoversEveryTopCommand),
             ("army children only a command-level top with no parent group is a loose child", OnlyACommandLevelTopWithNoParentGroupIsALooseChild),
@@ -366,6 +371,119 @@ internal static class ArmyChildrenTests
         var tasks = map.Values.Select(a => PostureStanceGuard.Task(a.LeafTask, BattleStance.Defender)).ToList();
         AssertTrue(tasks.All(t => t == CommandTaskType.HoldObjective || t == CommandTaskType.GuardFlank || t == CommandTaskType.ReserveWait),
             "a Defender's brigades hold, guard a flank or wait: " + string.Join(",", tasks));
+    }
+
+    // ---- the Defender's reserve inside a holding division (user, 2026-10-17: of 6 brigades 4 on the line and
+    // 1-2 in reserve; when the numbers do not allow it the trace says so). The rule is the deployment
+    // doctrine's own: floor(N / 3) of N >= 3 (DeploymentDoctrine.ProposeReserve), the farthest from the
+    // enemy first, never the anchor of the line. ----
+
+    // One division of n brigades in a row across the front (facing +Z), the later ones farther back.
+    private static (IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree, int divisionId) DivisionOf(int n)
+    {
+        var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>
+        {
+            new TacticalCommandTreeProbe.ExtendedProbe(10, 15, "Division", true, 0, true, 0f, 0f, 1),
+        };
+        for (int b = 0; b < n; b++)
+            probes.Add(new TacticalCommandTreeProbe.ExtendedProbe(100 + b, 14, "Brigade" + b, true, 10, true, 100f * b, -10f * b, 1));
+        return (TacticalCommandTreeProbe.BuildTree(probes, -1), 10);
+    }
+
+    private static TacticalFrontAxis FacingPlusZ() => TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 1000f).WithOwnExtent(0f, 500f, 5);
+
+    private static IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> HoldingMap(int n, bool defender, List<DefenderReserveRecord> report)
+    {
+        var (tree, id) = DivisionOf(n);
+        return TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) }, 0.5f,
+            CascadeEnvelopmentMode.None, FacingPlusZ(), null, defender, report);
+    }
+
+    private static void AHoldingDivisionKeepsAThirdInReserve()
+    {
+        foreach (var (n, reserves) in new[] { (3, 1), (4, 1), (5, 1), (6, 2), (9, 3) })
+        {
+            var report = new List<DefenderReserveRecord>();
+            var map = HoldingMap(n, defender: true, report);
+            var reserved = map.Values.Where(a => a.LeafRole == DirectChildRole.Reserve).Select(a => a.InstanceId).ToList();
+            AssertEqual(reserves, reserved.Count, n + " brigades keep " + reserves + " in reserve: " + string.Join(",", map.Values.OrderBy(a => a.InstanceId).Select(a => a.InstanceId + ":" + a.LeafRole)));
+            AssertEqual(n, map.Count, "every brigade keeps an assignment");
+            AssertTrue(map.Values.Count(a => a.LeafRole == DirectChildRole.Main) == 1, "exactly one anchor of the line");
+            AssertTrue(map.Values.All(a => a.LeafRole != DirectChildRole.Reserve || a.LeafTask == CommandTaskType.ReserveWait), "a reserve waits");
+            AssertEqual(1, report.Count, "one trace record for the division");
+            AssertEqual(n, report[0].Children, "the record names the numbers");
+            AssertEqual(reserves, report[0].Held, "and what it holds back");
+            AssertEqual("reserved", report[0].Reason, "and why");
+        }
+        // Rearmost first: with six brigades the interior brigades farthest back (the highest index here) go to reserve.
+        var six = HoldingMap(6, defender: true, null);
+        AssertEqual(DirectChildRole.Reserve, six[104].LeafRole, "the rearmost interior brigade is in reserve");
+        AssertTrue(six[100].LeafRole != DirectChildRole.Reserve && six[105].LeafRole != DirectChildRole.Reserve, "the wings keep the line's ends");
+    }
+
+    // A flank column perceived on the right end of the line (the cascade's flank-threat input, vanilla's 0-4 scale):
+    // the nearest reserve goes to guard that end instead of sitting behind the line.
+    private static void AnExposedEndDrawsTheNearestReserve()
+    {
+        var (tree, id) = DivisionOf(6);
+        var calm = new List<DefenderReserveRecord>();
+        var tops = new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) };
+        var held = TacticalLeafBrigadeMap.BuildMap(tree, tops, 0.5f, CascadeEnvelopmentMode.None, FacingPlusZ(), null, true, calm);
+        AssertEqual(2, held.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "calm: two held");
+        var threat = new Dictionary<int, float> { { 105, 4f } };
+        var exposed = new List<DefenderReserveRecord>();
+        var map = TacticalLeafBrigadeMap.BuildMap(tree, tops, 0.5f, CascadeEnvelopmentMode.None, FacingPlusZ(), threat, true, exposed);
+        AssertEqual(1, map.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "one reserve left behind the line");
+        AssertEqual(DirectChildRole.RefuseRight, map[105].LeafRole, "the right end guards its flank");
+        AssertTrue(map.Values.Count(a => a.LeafRole == DirectChildRole.RefuseRight) >= 2, "a reserve went to the right: " + string.Join(",", map.Values.OrderBy(a => a.InstanceId).Select(a => a.InstanceId + ":" + a.LeafRole)));
+        AssertEqual(DefenderReserveRecord.ReleasedToFlank, exposed[0].Reason, "the trace says it was released to the flank");
+        AssertEqual(1, exposed[0].Held, "and what is still held");
+    }
+
+    private static void AHoldingDivisionWithTwoBrigadesSaysThin()
+    {
+        var report = new List<DefenderReserveRecord>();
+        var map = HoldingMap(2, defender: true, report);
+        AssertEqual(0, map.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "two brigades keep no reserve");
+        AssertEqual(1, report.Count, "the trace says so");
+        AssertEqual("thin-numbers", report[0].Reason, "thin numbers");
+        AssertEqual(2, report[0].Children, "of two brigades");
+        AssertEqual(0, report[0].Held, "none held");
+    }
+
+    private static void AnAttackingDivisionKeepsNoCascadeReserve()
+    {
+        var report = new List<DefenderReserveRecord>();
+        var map = HoldingMap(6, defender: false, report);
+        AssertEqual(0, map.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "the attacker's cascade is unchanged");
+        AssertEqual(0, report.Count, "and writes no reserve record");
+    }
+
+    private static void TheOrchestratorDefenderLeafMapKeepsAReserve()
+    {
+        var h = UnionWithLooseDivision();
+        var children = h.Discover(-1);
+        var army = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        army.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.PreparedDefense, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
+        army.RegisterDirectChildren(children);
+        army.ObserveGlobalOdds(0.7f);
+        army.ObserveDirectChildEvidenceWithZones(new[]
+        {
+            new DirectChildEvidence(2, 2, true, 0, 0, 0.9f),
+            new DirectChildEvidence(1, 2, false, 4, 0, 0.9f),
+        }, null, null);
+        h.Cascade(army);
+        AssertEqual(0, army.CurrentLeafBrigadeMap.Values.Count(a => a.LeafRole == DirectChildRole.Reserve && a.InstanceId >= 11 && a.InstanceId <= 14),
+            "as a Meeting-engagement army the cascade keeps no reserve inside the four-brigade division");
+        army.UpdateBattleStance(BattleStance.Defender);
+        h.Cascade(army);
+        var map = army.CurrentLeafBrigadeMap;
+        int reserved = map.Values.Count(a => a.LeafRole == DirectChildRole.Reserve && a.InstanceId >= 11 && a.InstanceId <= 14);
+        AssertEqual(1, reserved, "the Defender's four-brigade division keeps one brigade in reserve");
+        AssertTrue(army.CurrentDefenderReserveReport.Count >= 1 && army.CurrentDefenderReserveReport.Any(r => r.Children == 4 && r.Held == 1),
+            "the orchestrator exposes the trace");
+        AssertTrue(army.CurrentDefenderReserveReport.Any(r => r.Children == 2 && r.Reason == "thin-numbers"),
+            "and says the loose division of two is too thin to hold one back");
     }
 
     private static ArmyOrchestrator ArmyWithPlan(IReadOnlyList<DirectChildSnapshot> children)

@@ -158,6 +158,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float LateralOf(float x, float z)
             => (x - OriginX) * RightX + (z - OriginZ) * RightZ;
 
+        /// <summary>How far toward the enemy a point stands along the front's forward direction (smaller = farther back).</summary>
+        public float DepthOf(float x, float z)
+            => (x - OriginX) * ForwardX + (z - OriginZ) * ForwardZ;
+
         public int SectorOf(float x, float z)
         {
             if (!IsValid) return 0;

@@ -978,6 +978,55 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        // One row per change of the Defender's reserve split (bounded by the signature and an interval): the numbers each holding
+        // command had, what it holds back and why, so thin numbers are on the trace and not a silent absence.
+        private string _lastDefenderReserveSig = string.Empty;
+        private static readonly System.Collections.Generic.Dictionary<string, float> _lastDefenderReserveAt =
+            new System.Collections.Generic.Dictionary<string, float>();
+        private const float DefenderReserveTelemetrySeconds = 5f;
+
+        private void EmitDefenderReserveTelemetry()
+        {
+            if (_defenderReserveReport.Count == 0) return;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                int held = 0, thin = 0;
+                for (int i = 0; i < _defenderReserveReport.Count; i++)
+                {
+                    var r = _defenderReserveReport[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append(r.ParentName).Append('#').Append(r.ParentInstanceId).Append('=').Append(r.Held).Append('/').Append(r.Children).Append(':').Append(r.Reason);
+                    held += r.Held;
+                    if (r.Reason != DefenderReserveRecord.Reserved && r.Reason != DefenderReserveRecord.AlreadyHeld) thin++;
+                }
+                string sig = "side=" + AllianceId + "|" + sb;
+                if (string.Equals(sig, _lastDefenderReserveSig, System.StringComparison.Ordinal)) return;
+                _lastDefenderReserveSig = sig;
+                if (!WhiskeyRealism.Tactical.TacticalTelemetry.ShouldEmit(_lastDefenderReserveAt, "tactical-defender-reserve:" + AllianceId, sig,
+                        System.Environment.TickCount * 0.001f, DefenderReserveTelemetrySeconds, false))
+                    return;
+                string detail = sb.ToString();
+                int commands = _defenderReserveReport.Count;
+                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                    WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                    "TacticalDefenderReserve",
+                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalDefenderReserve", thin == 0 ? "reserved" : "thin", sig)
+                        .WithField("side", AllianceId)
+                        .WithField("commands", commands)
+                        .WithField("held", held)
+                        .WithField("thinCommands", thin)
+                        .WithField("detail", detail));
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalDefenderReserve] emit failed: " + ex.Message); } catch { }
+            }
+        }
+
         public DirectChildRole GetDirectChildRole(string childId)
         {
             if (string.IsNullOrEmpty(childId)) return DirectChildRole.Unknown;
@@ -1012,6 +1061,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
             => _leafBrigadeMap;
+
+        // The Defender's reserve trace of the latest leaf map: one record per holding command that split among
+        // two or more subordinates (what it had, what it holds back, why). Empty for an army that is not the Defender.
+        private readonly List<DefenderReserveRecord> _defenderReserveReport = new List<DefenderReserveRecord>();
+        public IReadOnlyList<DefenderReserveRecord> CurrentDefenderReserveReport => _defenderReserveReport;
 
         // Front geometry from the latest evidence (EnemyVisibleState). The leaf
         // cascade orders siblings across this axis and reads flank exposure
@@ -1099,9 +1153,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     : CascadeEnvelopmentMode.DoubleWingEchelon;
             }
 
+            _defenderReserveReport.Clear();
             _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
-                tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat);
+                tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat,
+                defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport);
             _leafBrigadeMapSignature = sig;
+            EmitDefenderReserveTelemetry();
         }
 
         /// <summary>
@@ -1292,6 +1349,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // ConsiderMainEffortShift, the cache must invalidate so cascade
             // rebuilds with new positional priorities.
             sb.Append("|me=").Append(HasPlan ? _plan.MainEffortSector : -1);
+            // The Defender keeps a reserve inside a holding command (TacticalLeafBrigadeMap), so a stance change rebuilds the map.
+            sb.Append("|st=").Append((int)_currentForceBalanceStance);
             sb.Append("|ph=").Append(HasPlan ? (int)_plan.Phase : -1);
             float sigAggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
             if (sigAggression01 < 0f) sigAggression01 = 0f;

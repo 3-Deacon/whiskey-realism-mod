@@ -124,6 +124,13 @@ namespace WhiskeyRealism.Tactical.Battle
         public const int MinChildrenForReserve = 3;
 
         /// <summary>
+        /// How many of <paramref name="eligible"/> sibling commands the doctrine holds back as a reserve: floor(N / 3) from N = 3,
+        /// none below. One rule for the deployment echelon (<see cref="ProposeReserve"/>) and the Defender's holding division
+        /// (TacticalLeafBrigadeMap).
+        /// </summary>
+        public static int ReserveShare(int eligible) => eligible < MinChildrenForReserve ? 0 : eligible / MinChildrenForReserve;
+
+        /// <summary>
         /// The point this side's deployment assumes the enemy is at, seen from (gx, gz).
         /// RangeOnly perception: the nearest enemy-owned entry point, else the map centre (no
         /// observation is used). Otherwise: the strength-weighted centroid of the Visible
@@ -297,7 +304,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (ChildEligible(groups, groupCount, id)) children[childCount++] = id;
             }
             if (childCount < MinChildrenForReserve) return 0;
-            int reserveCount = childCount / MinChildrenForReserve;
+            int reserveCount = ReserveShare(childCount);
 
             // Farthest from the assumed enemy first.
             float[] distance = new float[childCount];

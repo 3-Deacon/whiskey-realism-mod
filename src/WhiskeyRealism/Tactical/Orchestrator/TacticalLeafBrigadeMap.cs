@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -21,6 +22,35 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// distribution is geometry-aware (left-to-right across the front axis) and
     /// personality-modulated (high-aggression commanders widen the attack band).
     /// </summary>
+    /// <summary>
+    /// What a holding command's cascade did about a reserve (the Defender's trace): the numbers it had, what it holds back and why.
+    /// </summary>
+    public readonly struct DefenderReserveRecord
+    {
+        public const string Reserved = "reserved";
+        public const string AlreadyHeld = "already-held";
+        public const string ThinNumbers = "thin-numbers";
+        public const string NoFreeBrigade = "no-free-brigade";
+        public const string ReleasedToFlank = "released-to-flank";
+
+        public DefenderReserveRecord(int parentInstanceId, string parentName, int children, int held, string reason)
+        {
+            ParentInstanceId = parentInstanceId;
+            ParentName = parentName ?? string.Empty;
+            Children = children;
+            Held = held;
+            Reason = reason;
+        }
+
+        public int ParentInstanceId { get; }
+        public string ParentName { get; }
+        /// <summary>Sibling commands the parent splits among.</summary>
+        public int Children { get; }
+        /// <summary>Siblings in the Reserve role after the cascade.</summary>
+        public int Held { get; }
+        public string Reason { get; }
+    }
+
     public static class TacticalLeafBrigadeMap
     {
         public readonly struct LeafAssignment
@@ -96,6 +126,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// top-level children (not Fallback / Refuse) the wings are the army's
         /// outer corps, ordered across the front. Smaller armies keep the old
         /// behaviour of splitting the Main child's own subordinates.
+        ///
+        /// <paramref name="defenderReserve"/> (the side is the Defender): a holding command with three
+        /// or more subordinate commands keeps <see cref="DeploymentDoctrine.ReserveShare"/> of them back
+        /// as Reserve, interior ones first and the rearmost first, never the anchor of the line nor a
+        /// flank guard; each such split is written to <paramref name="reserveReport"/>.
         /// </summary>
         public static IReadOnlyDictionary<int, LeafAssignment> BuildMap(
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
@@ -103,7 +138,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float commanderAggression01,
             CascadeEnvelopmentMode envelopmentMode = CascadeEnvelopmentMode.None,
             TacticalFrontAxis frontAxis = default(TacticalFrontAxis),
-            IReadOnlyDictionary<int, float> flankThreat = null)
+            IReadOnlyDictionary<int, float> flankThreat = null,
+            bool defenderReserve = false,
+            List<DefenderReserveRecord> reserveReport = null)
         {
             var result = new Dictionary<int, LeafAssignment>();
             if (tree == null || topLevelAssignments == null) return result;
@@ -139,7 +176,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     geometry,
                     visited,
                     depth: 0,
-                    result);
+                    result,
+                    defenderReserve,
+                    reserveReport);
             }
 
             return result;
@@ -236,7 +275,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CascadeGeometry geometry,
             HashSet<int> visited,
             int depth,
-            Dictionary<int, LeafAssignment> output)
+            Dictionary<int, LeafAssignment> output,
+            bool defenderReserve,
+            List<DefenderReserveRecord> reserveReport)
         {
             if (!node.Active) return;
             if (depth > MaxCascadeDepth) return;
@@ -323,20 +364,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
             }
 
+            var derivedRoles = new DirectChildRole[children.Count];
+            var flankBuckets = new int[children.Count];
             for (int idx = 0; idx < children.Count; idx++)
             {
                 var child = children[idx];
+                flankBuckets[idx] = geometry.FlankBucket(child, idx, children.Count);
                 var ctx = new TacticalRoleCascade.CascadeContext(
                     parentRole: nodeRole,
                     childIndex: idx,
                     childCount: children.Count,
                     childStrengthBucket: child.StrengthBucket,
-                    childFlankExposureBucket: geometry.FlankBucket(child, idx, children.Count),
+                    childFlankExposureBucket: flankBuckets[idx],
                     commanderAggression01: commanderAggression01,
                     anchorIndex: anchorIndex,
                     envelopmentMode: activeMode,
                     secondaryAnchorIndex: secondaryAnchorIndex);
-                var derived = TacticalRoleCascade.DistributeChildRole(ctx);
+                derivedRoles[idx] = TacticalRoleCascade.DistributeChildRole(ctx);
+            }
+
+            if (defenderReserve && children.Count >= 2 && nodeRole != DirectChildRole.Reserve && nodeRole != DirectChildRole.Fallback)
+                HoldBackDefenderReserve(node, children, derivedRoles, flankBuckets, geometry.Axis, reserveReport);
+
+            for (int idx = 0; idx < children.Count; idx++)
+            {
+                var child = children[idx];
+                var derived = derivedRoles[idx];
 
                 var nextChain = new List<DirectChildRole>(chainSoFar.Count + 1);
                 nextChain.AddRange(chainSoFar);
@@ -358,8 +411,85 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     geometry,
                     visited,
                     depth + 1,
-                    output);
+                    output,
+                    defenderReserve,
+                    reserveReport);
             }
         }
+
+        // The Defender's reserve inside a holding command. The deployment doctrine's rule (floor(N / 3) from N = 3) sets
+        // how many; the candidates are the subordinates whose cascade role is SupportMain or Fix, or a Refuse role that is not
+        // at the end of the line (the cascade gives every sibling outside the support band a Refuse role, but only the outermost
+        // one guards a flank); never the anchor, a Screen or an end-of-line flank guard. Interior ones go before the two ends of
+        // the line, the rearmost first (smallest depth along the front axis, else the later index). A command that already
+        // holds some reserve counts them. A reserve is not spent for nothing: when an end of the line is exposed
+        // (flank bucket at FlankExposureRefuseThreshold, the allocator's own bar) the nearest reserve goes to guard that flank
+        // (RefuseLeft / RefuseRight, task GuardFlank), the cascade's form of DirectChildAllocator.ReleaseReserveToThreatenedWing.
+        private static void HoldBackDefenderReserve(
+            TacticalCommandTreeProbe.ProbeNode parent,
+            IReadOnlyList<TacticalCommandTreeProbe.ProbeNode> children,
+            DirectChildRole[] roles,
+            int[] flankBuckets,
+            TacticalFrontAxis axis,
+            List<DefenderReserveRecord> report)
+        {
+            int n = children.Count;
+            int held = 0;
+            for (int i = 0; i < n; i++) if (roles[i] == DirectChildRole.Reserve) held++;
+            int wanted = DeploymentDoctrine.ReserveShare(n);
+            if (wanted == 0)
+            {
+                report?.Add(new DefenderReserveRecord(parent.InstanceId, parent.Name, n, held, DefenderReserveRecord.ThinNumbers));
+                return;
+            }
+
+            string reason = DefenderReserveRecord.AlreadyHeld;
+            int needed = wanted - held;
+            if (needed > 0)
+            {
+                var candidates = new List<int>(n);
+                for (int i = 0; i < n; i++)
+                {
+                    bool end = i == 0 || i == n - 1;
+                    bool refuse = roles[i] == DirectChildRole.RefuseLeft || roles[i] == DirectChildRole.RefuseRight;
+                    if (roles[i] == DirectChildRole.SupportMain || roles[i] == DirectChildRole.Fix || (refuse && !end)) candidates.Add(i);
+                }
+                candidates.Sort((a, b) =>
+                {
+                    bool wingA = a == 0 || a == n - 1, wingB = b == 0 || b == n - 1;
+                    if (wingA != wingB) return wingA ? 1 : -1;
+                    float da = axis.IsValid ? axis.DepthOf(children[a].WorldX, children[a].WorldZ) : -a;
+                    float db = axis.IsValid ? axis.DepthOf(children[b].WorldX, children[b].WorldZ) : -b;
+                    int c = da.CompareTo(db);
+                    return c != 0 ? c : b.CompareTo(a);
+                });
+                int take = Math.Min(needed, candidates.Count);
+                for (int k = 0; k < take; k++) roles[candidates[k]] = DirectChildRole.Reserve;
+                held += take;
+                reason = take == needed ? DefenderReserveRecord.Reserved : DefenderReserveRecord.NoFreeBrigade;
+            }
+
+            // An exposed end draws the nearest reserve to guard it.
+            for (int end = 0; end < 2; end++)
+            {
+                int endIndex = end == 0 ? 0 : n - 1;
+                if (flankBuckets[endIndex] < FlankExposureRefuseThreshold) continue;
+                DirectChildRole guard = end == 0 ? DirectChildRole.RefuseLeft : DirectChildRole.RefuseRight;
+                int nearest = -1;
+                for (int i = 0; i < n; i++)
+                {
+                    if (roles[i] != DirectChildRole.Reserve) continue;
+                    if (nearest < 0 || Math.Abs(i - endIndex) < Math.Abs(nearest - endIndex)) nearest = i;
+                }
+                if (nearest < 0) continue;
+                roles[nearest] = guard;
+                held--;
+                reason = DefenderReserveRecord.ReleasedToFlank;
+            }
+            report?.Add(new DefenderReserveRecord(parent.InstanceId, parent.Name, n, held, reason));
+        }
+
+        // The allocator's bar for locking a brigade onto a flank (DirectChildAllocator.FlankExposureRefuseThreshold).
+        private const int FlankExposureRefuseThreshold = 3;
     }
 }
