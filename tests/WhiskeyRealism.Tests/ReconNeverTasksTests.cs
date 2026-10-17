@@ -33,6 +33,7 @@ internal static class ReconNeverTasksTests
             ("ABelievedSectorThatStillCoversItsNeedGivesAScout", ABelievedSectorThatStillCoversItsNeedGivesAScout),
             ("APresumptionOnlySectorGivesAScoutAndNamesItsCarrier", APresumptionOnlySectorGivesAScoutAndNamesItsCarrier),
             ("OneStandingScoutPerMainEffortAcrossReviews", OneStandingScoutPerMainEffortAcrossReviews),
+            ("AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw", AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw),
             ("AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord", AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord),
             ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
             ("TheUnfilledCountMatchesTasksByKindPointAndReason", TheUnfilledCountMatchesTasksByKindPointAndReason),
@@ -660,6 +661,29 @@ internal static class ReconNeverTasksTests
             day = Review(s2, state, ledger);
             AssertTrue(MainScouts(day.Allocation) <= 1, "day " + k + ": never a second scout for the main objective: " + MainScouts(day.Allocation));
         }
+    }
+
+    // A scout of the main objective already stands from an earlier review (a free formation on an advance-guard mission): the reserve is not
+    // drawn on for a second pair of eyes, whatever task is still open.
+    private static void AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw()
+    {
+        var s = SmokeUnion();
+        var free = Corps(30, 365f, 3000f);
+        s.Own.Add(free);
+        var ledger = new ReconMissionLedger();
+        ledger.Restore(new[]
+        {
+            new ReconMission
+            {
+                MissionId = 1, Kind = ReconKind.AdvanceGuard, InstanceId = 30, UnitKey = free.UnitKey, HoldX = 350f, HoldZ = 0f, SectorId = 0,
+                State = ReconState.Moving, IssuedDay = s.DaySerial - 1, Reason = "advance-guard", ObservedEnemyStrength = -1f, ObservedObjectiveId = -1, ClearedDay = -1
+            }
+        });
+        var day = Review(s, new PlannerState(), ledger);
+        AssertTrue(day.Plan.MainStaged, "staged");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "the East reserve is not drawn on");
+        AssertEqual(1, MainScouts(day.Allocation), "one scout for the main objective: the one already out");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 30).Role, "that one");
     }
 
     // Three candidates, pinned: the kept record trails the objective's best record; a challenger objective is compared with the BEST record of
