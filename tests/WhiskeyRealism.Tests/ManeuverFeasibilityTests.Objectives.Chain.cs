@@ -356,7 +356,7 @@ internal static partial class ManeuverFeasibilityTests
             ContestTurnFacts chain71 = TurnFacts(71, 2, 20.1, 500f, 500f), guns72 = TurnFacts(72, 2, 20.1, 500f, 500f);
             AssertEqual(1, ContestTurn.Run(in chain71, sink), "the table's group moved to its head: contested");
             AssertEqual(0, ContestTurn.Run(in guns72, sink), "another group moved to the very same place by vanilla: not in the table, not contested");
-            ContestTurnFacts engaged71 = TurnFacts(71, 3, 20.3, 505f, 495f, engaged: true);
+            ContestTurnFacts engaged71 = TurnFacts(71, 3, 20.3, 560f, 520f, engaged: true);   // a new move near the head, 63 m from the last waypoint seen
             AssertEqual(0, ContestTurn.Run(in engaged71, sink), "a chain group in close contact is left to vanilla's reaction");
         }
         finally
