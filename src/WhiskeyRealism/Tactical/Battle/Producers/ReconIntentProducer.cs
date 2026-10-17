@@ -147,6 +147,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             p.Phase = army != null && army.HasPlan ? army.CurrentPlan.Phase : (BattlePhase?)null;
             p.SideDefending = army != null && army.CurrentBattleStance == BattleStance.Defender;
             p.HasObjective = PostureTargets.TryOperationObjective(side, out p.ObjectiveX, out p.ObjectiveZ, out _);
+            // BC14W: the held works the plan sees (null with Enable Enemy Works Doctrine off, or before any works are seen).
+            p.Works = army?.Feasibility?.HeldWorks;
 
             // BC14: the unknown crossings the plan depends on (the feasibility ledger's look requests, already expired against the live crossing watch).
             if (army?.Feasibility != null)

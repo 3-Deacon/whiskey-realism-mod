@@ -447,7 +447,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 reservesCommittedFraction: reservesCommittedFraction,
                 commanderAggression01: aggression01,
                 mainEffortReadiness: mainEffortReadiness,
-                intelConfidence01: intelConfidence01);
+                intelConfidence01: intelConfidence01,
+                worksHold: WorksHoldOn);
 
             var decision = TacticalPhaseProgressionDoctrine.Decide(input);
             if (decision.NextPhase != _plan.Phase)

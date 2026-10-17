@@ -39,6 +39,7 @@ internal static class BattleReconTests
             ("recon mission times out", MissionTimesOut),
             ("probe nominates one group per empty band in the probe phase", ProbeNominatesPerEmptyBand),
             ("probe never for a defender or outside the probe phase", ProbeNeverForDefenderOrOtherPhase),
+            ("bc14w WORKS-PROBE a look point on held works or in the works band is refused, so no probe is nominated for it", WorksProbe),
             ("probe skips linked groups and player subtrees", ProbeSkipsLinkedAndPlayerSubtree),
             ("probe one start per band per doctrine hour", ProbeBoundedPerBandPerHour),
             ("probe ends on visible contact with one stop", ProbeEndsOnContactWithStop),
@@ -682,6 +683,60 @@ internal static class BattleReconTests
         AssertFalse(rig.Memory.TryGetProbe(InfDivision, out _, out _), "the division is not in the AI pool");
         AssertTrue((rig.Last.Events & ReconEvents.ProbeNominated) != 0, "nomination event");
         AssertEqual(0, rig.Sink.CountOf(OrderChannel.Move), "the probe move is the posture producer's");
+    }
+
+    // A held-works picture reduced to the two questions the recon planner asks: a box of works and the band in front of it.
+    private sealed class BoxWorks : IWorksQuery
+    {
+        private readonly float _x, _z, _half;
+        public BoxWorks(float x, float z, float half) { _x = x; _z = z; _half = half; }
+        public bool OnHeldWorks(float x, float z) => Math.Abs(x - _x) <= _half && Math.Abs(z - _z) <= _half;
+        public bool InWorksBand(float x, float z) => Math.Abs(x - _x) <= _half + 150f && Math.Abs(z - _z) <= _half + 150f;
+    }
+
+    // BC14W: under the works doctrine a Scout or Probe never looks into held works or their band (spec § 7A requirement-works-hold).
+    private static void WorksProbe()
+    {
+        var s = Field(3.0);
+        int inf = s.IndexOfOwn(InfBrigade);
+
+        // The infantry brigade's look point is (400, -800); the works stand on it, the cavalry brigade's look point (0, -800) is clear.
+        var rig = new Rig();
+        ReconPicture p = Picture(s, confidence: 0.6f, phase: BattlePhase.Probe);
+        p.Works = new BoxWorks(400f, -800f, 50f);
+        AssertFalse(BattleRecon.LookPoint(s, inf, Settings(), p, out _, out _), "a look point on held works is refused");
+        rig.Plan(s, p);
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "no probe is nominated into the works");
+        AssertTrue(rig.Memory.TryGetProbe(CavBrigade, out _, out _), "the clear band still probes");
+
+        // In the band, short of the works themselves: refused too.
+        p.Works = new BoxWorks(400f, -640f, 50f);
+        AssertFalse(BattleRecon.LookPoint(s, inf, Settings(), p, out _, out _), "a look point inside the works band is refused");
+        var bandRig = new Rig();
+        bandRig.Plan(s, p);
+        AssertFalse(bandRig.Memory.TryGetProbe(InfBrigade, out _, out _), "no probe is nominated into the band");
+
+        // Works farther off than the band leave the look as it was.
+        p.Works = new BoxWorks(400f, 400f, 50f);
+        AssertTrue(BattleRecon.LookPoint(s, inf, Settings(), p, out float x, out float z), "works beyond the band refuse nothing");
+        AssertNear(400f, x, 0.5f, "x");
+        AssertNear(-800f, z, 0.5f, "z");
+
+        // No query (the works doctrine off, or no works seen): nothing changes.
+        p.Works = null;
+        AssertTrue(BattleRecon.LookPoint(s, inf, Settings(), p, out _, out _), "with no query the look point stands");
+        var plain = new Rig();
+        plain.Plan(s, p);
+        AssertTrue(plain.Memory.TryGetProbe(InfBrigade, out _, out _) && plain.Memory.TryGetProbe(CavBrigade, out _, out _), "and both bands probe");
+
+        // The picture's query is per tick: BeginTick clears it, so a stale picture never refuses a later look.
+        p.Works = new BoxWorks(400f, -800f, 50f);
+        p.BeginTick(s.OwnCount);
+        AssertTrue(p.Works == null, "BeginTick clears the works query");
+
+        // The producer fills it from the side's ledger and from nowhere else.
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ReconIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "p.Works = army?.Feasibility?.HeldWorks;", "the picture takes the ledger's held works");
     }
 
     private static void ProbeNeverForDefenderOrOtherPhase()

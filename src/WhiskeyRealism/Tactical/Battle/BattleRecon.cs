@@ -139,6 +139,11 @@ namespace WhiskeyRealism.Tactical.Battle
         // direction to look in while the snapshot front axis has no target yet.
         public bool HasObjective;
         public float ObjectiveX, ObjectiveZ;
+        /// <summary>
+        /// BC14W: the side's held enemy works (the feasibility ledger's picture), null with the works doctrine off or no works seen. A look point
+        /// on them or in their band is refused (<see cref="BattleRecon.LookPoint"/>), so no probe is nominated and no Scout looks into the works.
+        /// </summary>
+        public IWorksQuery Works;
         public bool[] AiPool = new bool[BattleSnapshot.InitialCapacity];
         public bool[] PostureMoved = new bool[BattleSnapshot.InitialCapacity];
         // The posture pipeline's task for the group this tick (PostureTick GroupPosture
@@ -171,6 +176,7 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Clear(PostureTask, 0, ownCount);
             EntryCount = 0;
             LookCount = 0;
+            Works = null;
             HasStaleBand = false;
             StaleBandRecency = 1f;
         }
@@ -1105,6 +1111,8 @@ namespace WhiskeyRealism.Tactical.Battle
             x = rec.X + dx * advance;
             z = rec.Z + dz * advance;
             if (!PostureSense.IsMoveAway(rec, x, z)) return false;
+            // BC14W: a look never points into held works or the band in front of them (a probe nominated there would walk the group in).
+            if (p.Works != null && (p.Works.OnHeldWorks(x, z) || p.Works.InWorksBand(x, z))) return false;
             float strength = Math.Max(1f, Math.Max(rec.Strength, rec.GroupStrengthAiGroup));
             return StandPointSafe(s, rec.X, rec.Z, x, z, strength, st);
         }

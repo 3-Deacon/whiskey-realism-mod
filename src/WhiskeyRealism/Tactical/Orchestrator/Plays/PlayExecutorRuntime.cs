@@ -536,10 +536,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
             }
 
+            // BC14W (requirement-works-hold): a hopeless works assault is never launched, whichever plan carries it. The body that assaults works
+            // and every start delay of the plan stay in Hold, with no planned release published for them (the ledger's release below).
+            if (feasibility != null && Plugin.EnemyWorksDoctrineEnabled() && feasibility.WorksHold(out string worksReason))
+                input.HoldForWorks = EnvelopmentManeuver.HoldForWorksFor(worksReason, feasibility.AssaultsWorks(childId), !spec.Envelops);
+
             // BC14: the ledger's release, time budget and vias, for a child of the plan the ledger selected and still on the ledger's side
             // (BC11's own mirrored try, or a plan the ledger does not know, leaves BC11's rule as it is).
             LedgerPlan(feasibility, planId, childId, mirrored, in state, in input, out PlannedLeg planned);
-            if (planned.HasRelease)
+            if (planned.HasRelease && !input.HoldForWorks)
             {
                 input.HasPlannedRelease = true;
                 input.PlannedReleaseHours = planned.ReleaseHours;

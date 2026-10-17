@@ -149,6 +149,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>BC14W: the hour the works hold last cleared (latched when <see cref="ManeuverInput.HoldForWorks"/> turns false after a hold), beside its flag.</summary>
         public bool HasWorksClear;
         public double WorksClearHours;
+        /// <summary>BC14W: the body is held for the works now (set while <see cref="ManeuverInput.HoldForWorks"/> keeps it in Hold); the next step without the flag is the clear.</summary>
+        public bool WorksHeld;
     }
 
     public struct ManeuverOrder
@@ -204,7 +206,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// BC14W: whether the maneuver of a body holds for the works. Only the <c>hopeless-assault</c> hold sets it, for a body that assaults works and
         /// for a start delay of the plan (the focal assault's support); <c>turn-not-struck</c> never does: the turning wing must march.
         /// </summary>
-        public static bool HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay) => false;
+        public static bool HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay)
+            => worksHoldReason == FeasibilityLedger.ReasonHopelessAssault && (assaultsWorks || startDelay);
+
+        // BC14W: the works hold keeps the body in Hold, with no ceiling and no release or budget latched; the hour it clears is latched
+        // (NoteWorksClear) and the ceiling counts from it. Only a body still before its March is held: a wing on the march is not recalled.
+        private static ManeuverOrder WorksHoldOrder(ref ManeuverState state, in ManeuverInput input)
+        {
+            state.WorksHeld = true;
+            state.HasFirstPlannedRelease = false;
+            state.HasBudget = false;
+            return HoldOrder(in input, "works-hold");
+        }
+
+        private static void NoteWorksClear(ref ManeuverState state, in ManeuverInput input)
+        {
+            if (!state.WorksHeld) return;
+            state.WorksHeld = false;
+            state.HasWorksClear = true;
+            state.WorksClearHours = input.NowHours;
+        }
 
         // ---- the state machine ---------------------------------------------------------------
 
@@ -226,6 +247,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // long after the play's activation and then returns to its allocator role. It never marches, turns or attacks.
         private static ManeuverOrder StepStartDelay(ref ManeuverState state, in ManeuverInput input)
         {
+            // BC14W: a start delay of a plan whose works assault is hopeless stays unreleased, whatever its offset or planned release.
+            if (input.HoldForWorks && (state.Phase == ManeuverPhase.None || state.Phase == ManeuverPhase.Hold))
+            {
+                if (state.Phase == ManeuverPhase.None)
+                {
+                    state.Phase = ManeuverPhase.Hold;
+                    state.PhaseSinceHours = input.NowHours;
+                }
+                return WorksHoldOrder(ref state, in input);
+            }
+            if (state.Phase == ManeuverPhase.Hold) NoteWorksClear(ref state, in input);
             if (input.HoldsForRelease) return StepFixHold(ref state, in input);
             if (!(input.StartOffsetSeconds > 0f))
             {
@@ -283,6 +315,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             double ceiling = input.PlayActivatedHours + MaxManeuverHours;
             if (state.HasFirstPlannedRelease) ceiling = Math.Max(ceiling, state.FirstPlannedReleaseHours + MaxManeuverHours);
+            if (state.HasWorksClear) ceiling = Math.Max(ceiling, state.WorksClearHours + MaxManeuverHours);
             return ceiling;
         }
 
@@ -296,6 +329,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
             if (state.Phase == ManeuverPhase.Hold)
             {
+                if (input.HoldForWorks) return WorksHoldOrder(ref state, in input);
+                NoteWorksClear(ref state, in input);
                 // The ceiling: a Hold never outlasts MaxManeuverHours from the play's activation (a Center child that never makes
                 // contact, or is destroyed, must not hold the wings for good); the wings then proceed on their own checks. BC14: with a
                 // planned release it is never earlier than an hour past the release first planned.
