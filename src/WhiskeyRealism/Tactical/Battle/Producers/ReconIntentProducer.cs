@@ -216,6 +216,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         "[BattleRecon] first reconnaissance in force: a group probes its front band in the Probe phase");
                     Row(s, alliance, ReconEvents.ProbeNominated, "probe-phase", 0, 0f, 0f);
                 }
+                if ((r.Events & ReconEvents.LookIdle) != 0)
+                    Row(s, alliance, ReconEvents.LookIdle, r.LookIdleReason ?? "idle", 0, 0f, 0f);
                 if ((r.Events & ReconEvents.ProbeHeld) != 0)
                 {
                     OnceLog.Info("tactical-battle-core:probe-hold-first-fire",

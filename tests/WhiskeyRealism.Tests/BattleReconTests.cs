@@ -19,6 +19,7 @@ internal static class BattleReconTests
             ("recon only a started mission names a target in its row (no scout is sent to the map origin)", OnlyAStartedMissionNamesATarget),
             ("recon scout is a standing AI cavalry regiment", ScoutIsStandingAiCavalryRegiment),
             ("bc14 LOOK-RECON a crossing look is taken after stale entry points and bands, from the stand-off, inside the mission cap, never toward a superior enemy", CrossingLookRecon),
+            ("recon an unanswered crossing look names why: no scout, the start budget, no safe stand-off, a look just made", AnUnansweredLookNamesItsReason),
             ("recon scout never a company, player-owned, feuding or shaken regiment", ScoutFilterRefusals),
             ("recon scout's brigade must be settled and not moved by posture this tick", ScoutParentMustBeSettled),
             ("recon stale entry point beats stale band and forward", StaleEntryPointPickedFirst),
@@ -433,6 +434,75 @@ internal static class BattleReconTests
         var u = Field(4.1);
         rig.Plan(u, WithEntry(Picture(u), 30f, -200f, -1.0));
         AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "after the hour");
+    }
+
+    // Smoke 2026-10-17: a Defender's ledger posted two crossing looks from 14.2 h and no Crossing mission started in the next 1.6 h; the row said nothing of why.
+    // A look that is requested and not started names the first thing in the way (a static literal, one row per signature and throttle).
+    private static void AnUnansweredLookNamesItsReason()
+    {
+        // No scout: the cavalry brigade was ordered by posture this tick.
+        var noScout = Field(3.0);
+        var p1 = Picture(noScout);
+        p1.AddLook(0f, -200f);
+        p1.PostureMoved[noScout.IndexOfOwn(CavBrigade)] = true;
+        var rig1 = new Rig();
+        rig1.Plan(noScout, p1);
+        AssertEqual(ReconLeg.None, rig1.Memory.Leg, "no mission");
+        AssertTrue((rig1.Last.Events & ReconEvents.LookIdle) != 0, "the look is reported idle");
+        AssertEqual("no-scout", rig1.Last.LookIdleReason, "no cavalry regiment is free to ride");
+
+        // The start budget: four starts in the hour.
+        var capped = new Rig();
+        double h = 3.0;
+        for (int k = 0; k < ReconSettings.MaxMissionStartsPerHour; k++)
+        {
+            var t = Field(h);
+            var q = Picture(t);
+            q.AddLook(-400f + 200f * k, -200f);
+            capped.Plan(t, q);
+            EndMission(capped, h + 0.01);
+            h += 0.05;
+        }
+        var over = Field(h);
+        var overPicture = Picture(over);
+        overPicture.AddLook(600f, -200f);
+        capped.Plan(over, overPicture);
+        AssertEqual("start-budget", capped.Last.LookIdleReason, "four missions this hour");
+
+        // A superior enemy at the stand point: nowhere safe to look from.
+        var near = Field(3.0);
+        SeeEnemy(near, 0f, -260f, 2000f, 3.0);
+        var nearPicture = Picture(near);
+        nearPicture.AddLook(0f, -200f);
+        var refused = new Rig();
+        refused.Plan(near, nearPicture);
+        AssertEqual("no-stand-off", refused.Last.LookIdleReason, "no safe stand-off point");
+
+        // The same crossing inside the hour.
+        var again = new Rig();
+        var a1 = Field(3.0);
+        var look1 = Picture(a1);
+        look1.AddLook(0f, -200f);
+        again.Plan(a1, look1);
+        EndMission(again, 3.01);
+        var a2 = Field(3.2);
+        var look2 = Picture(a2);
+        look2.AddLook(30f, -200f);
+        again.Plan(a2, look2);
+        AssertEqual("look-recent", again.Last.LookIdleReason, "ridden to a moment ago");
+
+        // A started mission, or no look pending, reports nothing.
+        var ok = Field(3.0);
+        var okPicture = Picture(ok);
+        okPicture.AddLook(0f, -200f);
+        var started = new Rig();
+        started.Plan(ok, okPicture);
+        AssertEqual(0, (int)(started.Last.Events & ReconEvents.LookIdle), "a started mission is not idle");
+        var none = Field(3.0);
+        var nonePicture = Picture(none);
+        var quiet = new Rig();
+        quiet.Plan(none, nonePicture);
+        AssertEqual(0, (int)(quiet.Last.Events & ReconEvents.LookIdle), "no look, nothing to report");
     }
 
     // BC14 requirement-crossing-look: the feasibility ledger's look requests become a Crossing target of the same mission machinery.
