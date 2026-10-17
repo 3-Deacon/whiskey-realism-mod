@@ -141,7 +141,8 @@ internal static class TacticalCommandTreeTests
         AssertEqual(CommandTaskType.Screen, states[3].Task, "screen task");
         AssertEqual(CommandNodeRole.Reserve, states[4].Role, "reserve role");
         AssertEqual(CommandNodeRole.FallbackGuard, states[5].Role, "fallback role");
-        AssertEqual(CommandNodeRole.Defender, states[6].Role, "refuse role");
+        AssertEqual(CommandNodeRole.FlankMarch, states[6].Role, "refuse role (a meeting engagement: the flank guard; a Defender's is the Defender node, NodeRoleStanceTests)");
+        AssertEqual(CommandTaskType.GuardFlank, states[6].Task, "refuse task");
         AssertEqual(CommandNodeRole.Unknown, states[7].Role, "unknown role");
         AssertEqual("division", states[2].NodeId, "node id preserved");
         AssertEqual(0, CommandNodeOperationsRuntime.Build(null, TacticalOperationShape.SingleMainEffort).Count, "null input");
@@ -177,7 +178,12 @@ internal static class TacticalCommandTreeTests
         }, operation, objectives, BattleStance.Meeting);
 
         AssertEqual(CommandTaskType.FixEnemy, states[0].Task, "fixing force reacts to contested objective as contact");
-        AssertEqual(CommandTaskType.HoldObjective, states[1].Task, "defender at contested objective holds instead of marching");
+        AssertEqual(CommandTaskType.GuardFlank, states[1].Task, "a refused flank outside a defence guards the flank instead of marching (NodeRoleStanceTests)");
+        var defending = CommandNodeOperationsRuntime.Build(new[]
+        {
+            new CommandNodeIntent("defend", "defend", DirectChildRole.RefuseLeft, DirectChildAxis.Hold, 3, 50, 2),
+        }, operation, objectives, BattleStance.Defender);
+        AssertEqual(CommandTaskType.HoldObjective, defending[0].Task, "defender at contested objective holds instead of marching");
     }
 
     private static void CommandNodeOperationsRuntimeBuildsSingleFallbackState()
