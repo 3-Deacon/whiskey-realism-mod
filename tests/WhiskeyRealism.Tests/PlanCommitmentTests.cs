@@ -170,3 +170,46 @@ internal static class PlanCommitmentTests
         AssertTrue(filled.Trigger != ReplanTrigger.MainEffortSectorLoss, "the first sighting of a band is a baseline, not a loss: " + filled.Trigger);
     }
 }
+
+// The runtime halves (excluded from the test project) are pinned to the pure pieces they hand their memory to.
+internal static class ReplanThrashWiringTests
+{
+    public static void Run()
+    {
+        RunAll(new (string, Action)[]
+        {
+            ("replan thrash wiring: the executor hands its last assignment to the next one for the same plan and side", ExecutorKeepsRects),
+            ("replan thrash wiring: the army holds roles through the role hold and keys them on plan, side, phase and band", ArmyHoldsRoles),
+            ("replan thrash wiring: the ledger hands its target hold to the doctrine build", LedgerHoldsTargets),
+            ("replan thrash wiring: the coordinator reports a look that started no mission", CoordinatorReportsLookIdle),
+        });
+    }
+
+    private static void ExecutorKeepsRects()
+    {
+        string body = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
+        FlankResponseTests.AssertPinned(body, "_lastComputePlan[allianceId] == planId && _lastComputeMirrored[allianceId] == mirrored ? cached : null;", "only the same plan and side");
+        FlankResponseTests.AssertPinned(body, "PlayCorpsAssignment.Assign(worldRects, corpsPositions, objectives, held);", "and the memory reaches the assignment");
+    }
+
+    private static void ArmyHoldsRoles()
+    {
+        string body = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
+        FlankResponseTests.AssertPinned(body, "_directChildIntents = _roleHold.Apply(_directChildIntents, RoleHoldPlanKey(), HoursSource());", "the allocation passes through the hold on the doctrine clock");
+        FlankResponseTests.AssertPinned(body, "=> unchecked((((int)_plan.PlanId * 31 + (_plan.Mirrored ? 1 : 0)) * 31 + (int)_plan.Phase) * 31 + _plan.MainEffortSector);", "keyed on plan, side, phase and band");
+    }
+
+    private static void LedgerHoldsTargets()
+    {
+        string body = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
+        FlankResponseTests.AssertPinned(body, "reverseSlope, _targetHold);", "the doctrine build gets the ledger's hold");
+        FlankResponseTests.AssertPinned(body, "_targetHold.Clear();", "and a ledger that does not run forgets it");
+    }
+
+    private static void CoordinatorReportsLookIdle()
+    {
+        string body = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ReconIntentProducer.cs");
+        FlankResponseTests.AssertPinned(body, "if ((r.Events & ReconEvents.LookIdle) != 0)", "the producer reports the idle look");
+        FlankResponseTests.AssertPinned(body, "Row(s, alliance, ReconEvents.LookIdle, r.LookIdleReason ?? \"idle\", 0, 0f, 0f);", "with its reason");
+    }
+}

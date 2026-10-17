@@ -203,5 +203,18 @@ internal static class DirectChildRoleHoldTests
         for (int i = 0; i < 5; i++) after[i] = new DirectChildEvidence(2, 1, false, i % 5, 0, 0.9f);
         army.ObserveDirectChildEvidenceWithZones(after, null, null);
         AssertTrue(army.CurrentDirectChildIntents.Count == 5, "five intents after the change");
+        // The fresh allocation is the allocation of an army with no memory at all.
+        var cold = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        cold.HoursSource = () => clock;
+        cold.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.PreparedDefense, BattlePhase.MainEffort, 3, null, null, 99f, 0f, 7));
+        cold.RegisterDirectChildren(snaps);
+        cold.ObserveDirectChildEvidenceWithZones(after, null, null);
+        // (Main's own three-cycle handover memory, StabilizeMain, is older than the hold and carries across a plan: Main and SupportMain may swap.)
+        for (int i = 0; i < 5; i++)
+        {
+            DirectChildRole a = cold.CurrentDirectChildIntents[i].Role, b = army.CurrentDirectChildIntents[i].Role;
+            bool mainFamily = (a == DirectChildRole.Main || a == DirectChildRole.SupportMain) && (b == DirectChildRole.Main || b == DirectChildRole.SupportMain);
+            AssertTrue(a == b || mainFamily, "a new plan reorganises the line: child " + i + " cold " + a + " held " + b);
+        }
     }
 }
