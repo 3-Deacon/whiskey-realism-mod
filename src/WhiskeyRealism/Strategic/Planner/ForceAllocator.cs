@@ -469,18 +469,20 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
 
-            // G8: an ordinary post's incumbent keeps it. Claimed right after D8's members, ahead of the depot builder and the recon pick, which
+            // G8: an ordinary post's incumbents (every member the ledger remembers) keep it. Claimed right after D8's members, ahead of the depot builder and the recon pick, which
             // would otherwise take a seated garrison (SmallestIn favours the smallest formation of the sector, which is often the garrison) and
             // leave the post to be refilled from elsewhere. Only an incumbent that is still fit and free (PostCandidate: outside the mass,
             // not claimed by a role of its own, not given up on) is claimed; the rest of a post's need is met after the reserve split.
             private void ClaimPostIncumbents()
             {
+                var members = new List<int>();
                 for (int g = 0; g < _plan.Garrisons.Count; g++)
                 {
                     var post = _plan.Garrisons[g];
                     if (post.Kind == GarrisonPostKind.Secession) continue;
-                    int incumbent = GarrisonPlanner.Incumbent(_s, post, PostPool(post));
-                    if (incumbent >= 0) SeatAtPost(g, post, incumbent);
+                    members.Clear();
+                    GarrisonPlanner.Incumbents(_s, post, PostPool(post), members);
+                    for (int k = 0; k < members.Count; k++) SeatAtPost(g, post, members[k]);
                 }
             }
 
@@ -538,7 +540,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (!_done[i] || !WlChainRules.MayMove(f.Chain) || !TheaterPlanner.Movable(f)) return false;
                 if (_role[i] == FormationRole.Reserve) return true;
                 return _role[i] == FormationRole.Hold && ReferenceEquals(_reason[i], ReasonHoldReserve)
-                    && post.InstanceIds.Count > 0 && post.InstanceIds[0] == f.InstanceId && _sector[i] == _sectors.SectorAt(post.X, post.Z);
+                    && post.InstanceIds.Contains(f.InstanceId) && _sector[i] == _sectors.SectorAt(post.X, post.Z);
             }
 
             // Spec C21: the supply threshold is the raw metric.

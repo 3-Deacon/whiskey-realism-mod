@@ -12,7 +12,7 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public GarrisonPostKind Kind;
         public float X, Z;
-        public string AssignedUnitKey;   // null: the post stood but no formation held it
+        public string[] AssignedUnitKeys; // every member seated at the post, in seat order; empty: the post stood but no formation held it
         public int QuietSinceDay;        // -1 while a live land belief lies within the relocation range of the post
     }
 
@@ -75,7 +75,7 @@ namespace WhiskeyRealism.Strategic.Planner
             _transitions.Clear();
             if (posts == null) return;
             foreach (var record in posts)
-                _entries.Add(new Entry { Record = record, Name = NameOf(record.Kind, record.X, record.Z, null), Unit = record.AssignedUnitKey != null ? EnemyArmyModel.NameOf(record.AssignedUnitKey) : "none" });
+                _entries.Add(new Entry { Record = record, Name = NameOf(record.Kind, record.X, record.Z, null), Unit = record.AssignedUnitKeys != null && record.AssignedUnitKeys.Length > 0 ? EnemyArmyModel.NameOf(record.AssignedUnitKeys[0]) : "none" });
         }
 
         // Records the review's posts and who holds them (the allocation's seats), and what changed since the last review.
@@ -90,7 +90,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 var post = posts[g];
                 string name = NameOf(post);
                 GarrisonPostState state = GarrisonPostState.Uncovered;
-                string unit = "none", key = null;
+                string unit = "none";
+                var keys = new List<string>();
                 float seated = 0f;
                 int members = 0;
                 bool allThere = true;
@@ -101,7 +102,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (i >= 0)
                     {
                         unit = members == 0 ? s.Own[i].Name : unit + "+" + s.Own[i].Name;
-                        if (key == null) key = s.Own[i].UnitKey;
+                        keys.Add(s.Own[i].UnitKey);
                         seated += Math.Max(0f, s.Own[i].Strength);
                     }
                     members++;
@@ -121,7 +122,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     _transitions.Add(new GarrisonTransition { Name = name, Kind = post.Kind, Unit = unit, State = state, Need = post.Need, Existing = post.ExistingStrength, Short = shortfall });
                 next.Add(new Entry
                 {
-                    Record = new GarrisonPostRecord { Kind = post.Kind, X = post.X, Z = post.Z, AssignedUnitKey = key, QuietSinceDay = post.QuietSinceDay },
+                    Record = new GarrisonPostRecord { Kind = post.Kind, X = post.X, Z = post.Z, AssignedUnitKeys = keys.ToArray(), QuietSinceDay = post.QuietSinceDay },
                     Name = name, Unit = unit, State = state
                 });
             }

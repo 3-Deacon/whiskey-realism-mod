@@ -45,13 +45,17 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int k = 0; k < posts.Count && k < MaxPostsPerAlliance; k++) into.Add(posts[k]);
         }
 
-        // The post's incumbent (index into s.Own) when it is still fit and free in `pool`, -1 for none. The allocator claims it before the depot
-        // and recon steps, so neither can take a seated garrison; its hysteresis does not depend on the post's need.
-        public static int Incumbent(CampaignSnapshot s, GarrisonPost post, bool[] pool)
+        // The post's incumbents (indexes into s.Own, in the post's order): every member the ledger remembers that is still fit and free in `pool`.
+        // The allocator claims them before the depot and recon steps, so neither can take a seated garrison; their hysteresis does not depend on
+        // the post's need.
+        public static void Incumbents(CampaignSnapshot s, GarrisonPost post, bool[] pool, List<int> into)
         {
-            if (s == null || post == null || pool == null || pool.Length < s.Own.Count || post.InstanceIds.Count == 0) return -1;
-            int incumbent = s.IndexOfOwn(post.InstanceIds[0]);
-            return incumbent >= 0 && pool[incumbent] && Seatable(s, s.Own[incumbent]) ? incumbent : -1;
+            if (s == null || post == null || pool == null || into == null || pool.Length < s.Own.Count) return;
+            for (int k = 0; k < post.InstanceIds.Count; k++)
+            {
+                int at = s.IndexOfOwn(post.InstanceIds[k]);
+                if (at >= 0 && pool[at] && Seatable(s, s.Own[at])) into.Add(at);
+            }
         }
 
         // Adds to `into` the formations (indexes into s.Own) that hold the rest of the post's need, `have` being the strength already seated
@@ -184,41 +188,44 @@ namespace WhiskeyRealism.Strategic.Planner
             float threat = ReserveRules.VanillaThreat(s, site.X, site.Z, s.RelocationRange, null);
             bool threatened = threat > 0f;
 
-            int incumbent = -1, quietSince = -1;
-            string incumbentKey = null;
+            // The record's members that are still on the map and the planner may move: the post's incumbents, in seat order.
+            var incumbents = new List<int>();
+            int quietSince = -1;
             if (retained != null)
             {
                 for (int r = 0; r < retained.Count; r++)
                 {
                     if (RiverLines.Distance(retained[r].X, retained[r].Z, site.X, site.Z) > SiteRadius) continue;
-                    incumbentKey = retained[r].AssignedUnitKey;
                     quietSince = retained[r].QuietSinceDay;
-                    incumbent = s.IndexOfKeyOrName(incumbentKey);
-                    if (incumbent >= 0 && !WlChainRules.MayMove(s.Own[incumbent].Chain)) incumbent = -1;
+                    var keys = retained[r].AssignedUnitKeys;
+                    for (int k = 0; keys != null && k < keys.Length && incumbents.Count < MaxFormationsPerPost; k++)
+                    {
+                        int at = s.IndexOfKeyOrName(keys[k]);
+                        if (at >= 0 && WlChainRules.MayMove(s.Own[at].Chain) && !incumbents.Contains(at)) incumbents.Add(at);
+                    }
                     break;
                 }
             }
-            int incumbentId = incumbent >= 0 ? s.Own[incumbent].InstanceId : -1;
 
             float existing = site.Garrison;
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (f.InstanceId == incumbentId || !WlChainRules.MayMove(f.Chain) || (f.Flags & FormationFlags.FightingForce) == 0) continue;
+                if (incumbents.Contains(i) || !WlChainRules.MayMove(f.Chain) || (f.Flags & FormationFlags.FightingForce) == 0) continue;
                 if (plan.MassInstanceIds.Contains(f.InstanceId) || !AtPost(f, site.X, site.Z)) continue;
                 existing += Math.Max(0f, f.Strength);
             }
             float need = Math.Max(0f, ThreatShare * threat - existing);
 
             int since = threatened ? -1 : (quietSince >= 0 && quietSince <= s.DaySerial ? quietSince : s.DaySerial);
-            bool held = incumbentId >= 0 && (since < 0 || s.DaySerial - since < ReleaseQuietDays);
+            bool held = incumbents.Count > 0 && (since < 0 || s.DaySerial - since < ReleaseQuietDays);
             if (need <= 0f && !held) return null;
 
             var post = new GarrisonPost
             {
                 Kind = site.Kind, X = site.X, Z = site.Z, Need = need, ExistingStrength = existing, QuietSinceDay = since
             };
-            if (incumbentId >= 0) post.InstanceIds.Add(incumbentId);
+            for (int k = 0; k < incumbents.Count; k++) post.InstanceIds.Add(s.Own[incumbents[k]].InstanceId);
             return post;
         }
 

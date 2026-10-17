@@ -486,7 +486,7 @@ namespace WhiskeyRealism.Strategic
                 });
             }
             foreach (var g in p.GarrisonPosts)
-                dto.GarrisonPosts.Add(new GarrisonPostDto { Kind = g.Kind.ToString(), X = g.X, Z = g.Z, UnitKey = g.AssignedUnitKey, QuietSinceDay = g.QuietSinceDay });
+                dto.GarrisonPosts.Add(new GarrisonPostDto { Kind = g.Kind.ToString(), X = g.X, Z = g.Z, UnitKey = g.AssignedUnitKeys != null && g.AssignedUnitKeys.Length > 0 ? g.AssignedUnitKeys[0] : null, UnitKeys = new List<string>(g.AssignedUnitKeys ?? new string[0]), QuietSinceDay = g.QuietSinceDay });
             return dto;
         }
 
@@ -558,9 +558,20 @@ namespace WhiskeyRealism.Strategic
                 {
                     if (g == null) continue;
                     Enum.TryParse<GarrisonPostKind>(g.Kind, out var kind);
-                    p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = kind, X = g.X, Z = g.Z, AssignedUnitKey = g.UnitKey, QuietSinceDay = g.QuietSinceDay });
+                    p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = kind, X = g.X, Z = g.Z, AssignedUnitKeys = KeysOf(g), QuietSinceDay = g.QuietSinceDay });
                 }
             return p;
+        }
+
+        // A post's members: "unitKeys" when the file has them, else the one "unitKey" an older file wrote.
+        private static string[] KeysOf(GarrisonPostDto g)
+        {
+            var keys = new List<string>();
+            if (g.UnitKeys != null)
+                foreach (string key in g.UnitKeys)
+                    if (!string.IsNullOrEmpty(key)) keys.Add(key);
+            if (keys.Count == 0 && !string.IsNullOrEmpty(g.UnitKey)) keys.Add(g.UnitKey);
+            return keys.ToArray();
         }
 
         private static void CopyList<T>(List<T> source, T[] target)

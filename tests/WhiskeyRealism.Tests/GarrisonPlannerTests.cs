@@ -46,6 +46,8 @@ internal static class GarrisonPlannerTests
             ("ADepotBuilderDoesNotTakeASeatedGarrison", ADepotBuilderDoesNotTakeASeatedGarrison),
             ("AReconPickDoesNotTakeASeatedGarrison", AReconPickDoesNotTakeASeatedGarrison),
             ("ASeatedGarrisonIsWithheldByItsOwnRule", ASeatedGarrisonIsWithheldByItsOwnRule),
+            ("EveryMemberOfAPostIsItsIncumbent", EveryMemberOfAPostIsItsIncumbent),
+            ("ATwoFormationPostHoldsBothMembersForTenDays", ATwoFormationPostHoldsBothMembersForTenDays),
             ("APlayerFormationIsNeverAPostsIncumbent", APlayerFormationIsNeverAPostsIncumbent),
             ("AFormationAtThePostHoldsInPlaceAndOneAwayMarches", AFormationAtThePostHoldsInPlaceAndOneAwayMarches),
             ("AReserveSurplusMayBePostedButTheMassNever", AReserveSurplusMayBePostedButTheMassNever),
@@ -137,7 +139,12 @@ internal static class GarrisonPlannerTests
 
     private static GarrisonPostRecord Record(GarrisonPostKind kind, float x, string key, int quietSince = -1)
     {
-        return new GarrisonPostRecord { Kind = kind, X = x, Z = 0f, AssignedUnitKey = key, QuietSinceDay = quietSince };
+        return new GarrisonPostRecord { Kind = kind, X = x, Z = 0f, AssignedUnitKeys = key == null ? new string[0] : new[] { key }, QuietSinceDay = quietSince };
+    }
+
+    private static GarrisonPostRecord Record(GarrisonPostKind kind, float x, params string[] keys)
+    {
+        return new GarrisonPostRecord { Kind = kind, X = x, Z = 0f, AssignedUnitKeys = keys, QuietSinceDay = -1 };
     }
 
     // ---- the plan's tests ----
@@ -580,6 +587,73 @@ internal static class GarrisonPlannerTests
         AssertTrue(garrison.Withheld, "and is withheld by the post's rule alone");
     }
 
+    // Every seated member is an incumbent: the post names all of them, each is claimed, and none counts as the post's existing strength.
+    private static void EveryMemberOfAPostIsItsIncumbent()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(515f, 60000f));
+        s.Own.Add(Corps(1, 503f, 5500f));
+        s.Own.Add(Corps(2, 497f, 5500f));
+        s.Own.Add(Corps(3, 440f, 5500f));
+        var retained = new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1", "corps2:2") };
+        var post = Posts(s, null, retained)[0];
+        AssertEqual("1,2", string.Join(",", post.InstanceIds), "both members are named, in record order");
+        AssertNear(0f, post.ExistingStrength, 0.01f, "neither counts as existing strength");
+        AssertNear(GarrisonPlanner.ThreatShare * Weighted(60000f, 15f), post.Need, 2f, "so the need is the whole threat");
+        var alloc = Allocate(s, HandPlan(s), retained);
+        AssertEqual("1,2", string.Join(",", alloc.Seats.Select(x => x.InstanceId).OrderBy(x => x)), "both are claimed and no third is added");
+        AssertTrue(alloc.Seats.All(x => x.AtPost), "both hold at the post");
+        var ledger = new GarrisonLedger();
+        var plan = HandPlan(s);
+        plan.Garrisons.AddRange(Posts(s, plan, retained));
+        ledger.Sync(plan.Garrisons, ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null), s);
+        AssertEqual("corps1:1,corps2:2", string.Join(",", ledger.Posts[0].AssignedUnitKeys), "and the ledger records both");
+    }
+
+    // The verifier's probe: a 60000 army makes a need of 6657, corps 1 and 2 (5500 each) are posted and march in, a larger corps 3 stands in
+    // the same sector, and a depot task opens on days 5-6. Corps 2 stays seated and withheld every day: it is never counted as existing
+    // strength, never taken as the depot builder, never re-picked.
+    private static void ATwoFormationPostHoldsBothMembersForTenDays()
+    {
+        var ledger = new GarrisonLedger();
+        for (int day = 0; day < 10; day++)
+        {
+            var s = ExecutorFixtures.Line(0, 11, day);
+            s.MinStrengthForMovement = 5000f;
+            s.MinMoraleForMovement = 0.3f;
+            s.Objectives.Add(Town(40, 500f));
+            s.Beliefs.Add(Seen(515f, 60000f));
+            float step = Math.Min(1f, day / 2f);                           // marching on days 0-1, at the post from day 2
+            s.Own.Add(Corps(1, 450f + 50f * step, 5500f));
+            s.Own.Add(Corps(2, 460f + 40f * step, 5500f));
+            s.Own.Add(Corps(3, 300f, 9000f));                              // in the sector, beyond the post's relocation range
+            var plan = HandPlan(s);
+            if (day == 5 || day == 6)
+                plan.DepotTasks.Add(new DepotTask { X = 520f, Z = 0f, SectorId = ExecutorFixtures.Sectors(s).SectorAt(503f, 0f), Priority = 1f });
+            var alloc = Allocate(s, plan, ledger.Posts);
+            ledger.Sync(plan.Garrisons, alloc, s);
+            foreach (int id in new[] { 1, 2 })
+            {
+                alloc.TryGet(id, out var a);
+                AssertEqual(ForceAllocator.ReasonGarrisonPost, a.Reason, "day " + day + ": corps " + id + " keeps the post");
+                AssertTrue(a.Withheld, "day " + day + ": corps " + id + " is withheld");
+            }
+            AssertEqual(2, alloc.Seats.Count, "day " + day + ": exactly its two members, no third");
+            if (day >= 2)
+            {
+                alloc.TryGet(2, out var arrived);
+                AssertEqual(FormationRole.Hold, arrived.Role, "day " + day + ": corps 2 holds at the post");
+            }
+            if (day == 5 || day == 6)
+            {
+                alloc.TryGet(3, out var builder);
+                AssertEqual(FormationRole.DepotBuilder, builder.Role, "day " + day + ": the depot goes to the free corps 3");
+            }
+            AssertEqual(2, ledger.Posts[0].AssignedUnitKeys.Length, "day " + day + ": the ledger holds both keys");
+        }
+    }
+
     // A player's formation can never be a post's incumbent, whatever the ledger says: it would keep a post alive that nobody holds.
     private static void APlayerFormationIsNeverAPostsIncumbent()
     {
@@ -691,8 +765,8 @@ internal static class GarrisonPlannerTests
     private static void GarrisonPostsRoundTripInSidecar()
     {
         var p = new PlannerSnapshot();
-        p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = GarrisonPostKind.Port, X = 701.5f, Z = -12.25f, AssignedUnitKey = "1st Corps:7", QuietSinceDay = 812 });
-        p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = GarrisonPostKind.Secession, X = 300f, Z = 4f, AssignedUnitKey = null, QuietSinceDay = -1 });
+        p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = GarrisonPostKind.Port, X = 701.5f, Z = -12.25f, AssignedUnitKeys = new[] { "1st Corps:7", "2nd Corps:8" }, QuietSinceDay = 812 });
+        p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = GarrisonPostKind.Secession, X = 300f, Z = 4f, AssignedUnitKeys = new string[0], QuietSinceDay = -1 });
         var snap = CampaignLifecycleFixTests.SampleSnapshot();
         snap.Planner[0] = p;
         string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
@@ -703,10 +777,10 @@ internal static class GarrisonPlannerTests
         AssertEqual(GarrisonPostKind.Port, posts[0].Kind, "kind");
         AssertNear(701.5f, posts[0].X, 0.001f, "x");
         AssertNear(-12.25f, posts[0].Z, 0.001f, "z");
-        AssertEqual("1st Corps:7", posts[0].AssignedUnitKey, "the formation is its unit key, never an instance id");
+        AssertEqual("1st Corps:7,2nd Corps:8", string.Join(",", posts[0].AssignedUnitKeys), "every member is its unit key, never an instance id, in seat order");
         AssertEqual(812, posts[0].QuietSinceDay, "the quiet began on that day");
         AssertEqual(GarrisonPostKind.Secession, posts[1].Kind, "the secession post is in the same ledger");
-        AssertTrue(posts[1].AssignedUnitKey == null, "an unmanned post keeps no key");
+        AssertEqual(0, posts[1].AssignedUnitKeys.Length, "an unmanned post keeps no key");
         AssertEqual(-1, posts[1].QuietSinceDay, "and was not quiet");
         AssertFalse(json.Contains("InstanceId"), "no Unity instance id reaches the file");
 
@@ -714,6 +788,11 @@ internal static class GarrisonPlannerTests
         AssertTrue(SidecarDtoCodec.TryDeserialize(old, out var oldDto, out reason), "an older v3 file without garrisonPosts: " + reason);
         AssertTrue(SidecarDtoCodec.TryDecode(oldDto, out var oldBack, out reason), "decodes: " + reason);
         AssertEqual(0, oldBack.Planner[0].GarrisonPosts.Count, "to no posts");
+        const string oneKey = "{\"version\":3,\"factions\":[{\"factionId\":0,\"currentEra\":\"Operational1862\",\"planner\":{\"garrisonPosts\":[{\"kind\":\"Fort\",\"x\":5,\"z\":6,\"unitKey\":\"1st Corps:7\",\"quietSinceDay\":-1}]}}]}";
+        AssertTrue(SidecarDtoCodec.TryDeserialize(oneKey, out var oneDto, out reason), "a file written with one unitKey: " + reason);
+        AssertTrue(SidecarDtoCodec.TryDecode(oneDto, out var oneBack, out reason), "decodes: " + reason);
+        AssertEqual("1st Corps:7", string.Join(",", oneBack.Planner[0].GarrisonPosts[0].AssignedUnitKeys), "an older file's one key loads as one member");
+        AssertTrue(json.Contains("\"unitKeys\""), "the new file carries every member");
 
         // The ledger takes the records back and plans the incumbent by key, or by name when the commander has changed.
         var ledger = new GarrisonLedger();
@@ -799,8 +878,8 @@ internal static class GarrisonPlannerTests
         AssertEqual(2, result.Manned, "both manned");
         AssertEqual(2, ledger.Posts.Count, "two records");
         AssertEqual(GarrisonPostKind.Secession, ledger.Posts[0].Kind, "the secession one");
-        AssertEqual("corps2:2", ledger.Posts[0].AssignedUnitKey, "named by the formation's unit key");
-        AssertEqual("corps6:6", ledger.Posts[1].AssignedUnitKey, "likewise");
+        AssertEqual("corps2:2", string.Join(",", ledger.Posts[0].AssignedUnitKeys), "named by the formation's unit key");
+        AssertEqual("corps6:6", string.Join(",", ledger.Posts[1].AssignedUnitKeys), "likewise");
     }
 
     // D8's in-state member is seated at its post too (the ledger reads it as Holding), and holds in place under the one role.

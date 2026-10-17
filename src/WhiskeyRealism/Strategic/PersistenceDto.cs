@@ -116,8 +116,10 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("kind")] public string Kind;
         [JsonProperty("x")] public float X;
         [JsonProperty("z")] public float Z;
-        // The holder's unit key (name:commander); absent for a post no formation held.
+        // Every member's unit key (name:commander) in seat order; empty for a post no formation held. "unitKey" is the first member's: what an
+        // older file carries (it loads as one member) and what an older reader still finds.
         [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("unitKeys")] public List<string> UnitKeys = new List<string>();
         [JsonProperty("quietSinceDay")] public int QuietSinceDay = -1;
     }
 
