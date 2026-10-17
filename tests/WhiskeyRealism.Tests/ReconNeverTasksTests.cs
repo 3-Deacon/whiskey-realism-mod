@@ -317,7 +317,10 @@ internal static class ReconNeverTasksTests
         var counts = ReconStep.CountsOf(s, ledger, tasks);
         AssertEqual(5, counts.Tasks, "five tasks");
         AssertEqual(4, counts.Unfilled, "one has its mission");
-        ledger.ReleaseAll("test");
+        var cleared = ledger.Missions[0];
+        cleared.State = ReconState.Cleared;       // same kind, point and reason, but over: it fills nothing
+        ledger.Restore(new[] { cleared });
+        AssertEqual("belief", ledger.Missions[0].Reason, "the cleared mission still carries the task's reason");
         AssertEqual(5, ReconStep.CountsOf(s, ledger, tasks).Unfilled, "a cleared mission fills nothing");
     }
 
