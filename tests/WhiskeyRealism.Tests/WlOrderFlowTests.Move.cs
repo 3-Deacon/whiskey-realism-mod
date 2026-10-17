@@ -499,6 +499,7 @@ internal static partial class WlOrderFlowTests
             "lost is vanilla's own test (125282-125286: an active mounted line without a courier) on the entry's primary line");
         AssertTrue(queue.Contains("WlMoveState.Classify(queued, lost, unit.regimentpaths > 0)"), "an entry that is gone is told lost from carried out by the unit's path");
         AssertTrue(queue.Contains("if (latest == null || entry.processingtime > latest.processingtime) latest = entry;"), "the carrier entry of a unit is its latest pending move");
+        AssertTrue(queue.Contains("processingTime = entry.processingtime;") && queue.Contains("stamp = entry.lastupdate;"), "the carrier records the entry's processing time and its creation stamp");
         AssertTrue(queue.Contains("unit.transform.parent"), "the scene parent is the queue owner");
         AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs").Contains("SetWaypoint 91461-91504"),
             "and the comment names the vanilla lines it mirrors (SetWaypoint 91461-91504)");

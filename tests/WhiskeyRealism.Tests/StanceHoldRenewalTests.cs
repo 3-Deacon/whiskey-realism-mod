@@ -142,6 +142,7 @@ internal static class StanceHoldRenewalTests
         AssertFalse(TacticalStanceOwnership.RenewalLive(10f, 9.9f), "a clock that went backwards ends them");
         AssertTrue(TacticalStanceOwnership.RenewalBoundHours > 3f * 0.5f - 1e-4f,
             "the bound is at least three times the smoke's march (1000 m, about 0.5 h)");
+        AssertTrue(TacticalStanceOwnership.RenewalBoundHours <= 3f, "and short enough that a stuck march does not hold a stance for hours");
         // Past the bound the hold lapses 0.25 h later and vanilla re-decides the group (the control above).
         var first = Input(default(StanceHoldRecord), Written, ordered: 3);
         StanceWriteDecision write = TacticalStanceOwnership.Decide(first);
@@ -173,7 +174,7 @@ internal static class StanceHoldRenewalTests
         AssertTrue(Regex.IsMatch(body, @"IsRenewalCandidate\(\(own\[i\]\.Flags & UnitFlags\.IsGroup\) != 0,\s*\(own\[i\]\.Flags & UnitFlags\.PlayerOwned\) != 0, own\[i\]\.RegimentPaths, own\[i\]\.QueuedOrders\)\) continue;"),
             "the pure candidate test decides (group, not player-owned, path or queued order), from the snapshot record");
         AssertTrue(body.Contains("TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carryingOrder: true)"), "the pure predicate decides");
-        AssertTrue(Regex.IsMatch(body, @"if \(!TacticalStanceOwnership\.RenewalLive\(since, now\)\) continue;"), "bounded");
+        AssertTrue(Regex.IsMatch(body, @"if \(!_renewSince\.TryGetValue\(id, out float since\)\) _renewSince\[id\] = since = now;\s*if \(!TacticalStanceOwnership\.RenewalLive\(since, now\)\) continue;"), "bounded, from the first renewal after a producer's claim");
         AssertTrue(Regex.IsMatch(body, @"EnsureStance\(bunits, group, record\.Stance, RenewTag, record\.Source\)"), "through EnsureStance with the record's own stance and source");
         string ensure = writer.Substring(writer.IndexOf("public static bool EnsureStance(", StringComparison.Ordinal));
         AssertTrue(ensure.Contains("if (!ReferenceEquals(contextTag, RenewTag)) _renewSince.Remove(id);"), "a producer's claim restarts the bound; a renewal does not");
