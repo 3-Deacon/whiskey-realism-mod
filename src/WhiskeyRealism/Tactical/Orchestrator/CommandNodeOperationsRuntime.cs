@@ -104,7 +104,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return objectives[0];
         }
 
-        private static CommandNodeRole MapRole(DirectChildRole role)
+        internal static CommandNodeRole MapRole(DirectChildRole role)
         {
             switch (role)
             {

@@ -345,6 +345,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, t.Descendants[i]);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
+            // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
+            // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
             int slotParent = rec.ParentIndex;
@@ -366,6 +369,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (!move.Move) { PostureTelemetry.Leaf(s, i, leaf, task, move.Reason, false); return; }
 
             sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));
+            t.Groups[i].Submitted = true;
             PostureTelemetry.Leaf(s, i, leaf, task, "submitted", true);
         }
 

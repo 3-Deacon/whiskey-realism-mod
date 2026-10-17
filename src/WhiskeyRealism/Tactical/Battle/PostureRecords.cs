@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator;
 
 namespace WhiskeyRealism.Tactical.Battle.Producers
 {
@@ -14,6 +15,24 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         public bool FlankRisk;
         public bool Submitted;
         public bool FacingSubmitted;
+    }
+
+    // The posture row of a leaf brigade (a brigade nested under an AI pool group, led by the leaf map and not by the ledger). Unit churn, 2026-10-17: the
+    // leaf path never filled the row, so FacingPulseIntentProducer and FireControlIntentProducer, which read only rows with Has set, skipped every leaf
+    // brigade: all eleven Union brigades of the smoke had no contact facing, no formation correction and no fire control (Confederate pool brigades had 317
+    // Brigade and 105 Regiment pulse rows, the Union side none). Pure.
+    internal static class LeafPosture
+    {
+        public static GroupPosture Record(DirectChildRole role, CommandTaskType task, int groupId, bool closeEngaged, bool flankRisk)
+        {
+            return new GroupPosture
+            {
+                Has = true,
+                State = new CommandNodeOperationalState("leaf-" + groupId, CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role), task, CommandTaskState.Committed),
+                CloseEngaged = closeEngaged,
+                FlankRisk = flankRisk,
+            };
+        }
     }
 
     // BC15: the posture each group's last evaluation recorded, kept for the ticks the group is not due (a Distant group's producers do not run, and
