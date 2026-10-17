@@ -550,10 +550,12 @@ internal static class DefenderGroundTests
             BattleScope.ResetAll();
             var river = new[]
             {
-                CommandNodeOperationalState.Create("a", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -100f, -1000f, 0f),
-                CommandNodeOperationalState.Create("b", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 700f, -1000f, 0f),
+                CommandNodeOperationalState.Create("a", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -600f, -1000f, 0f),
+                CommandNodeOperationalState.Create("b", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -400f, -1000f, 0f),
+                CommandNodeOperationalState.Create("c", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 200f, -1000f, 0f),
             };
-            AssertEqual(0, HomeBank.Settle(0, picture, null, river), "the centre's bank");
+            AssertEqual(-1, picture.RegionAt(-267f, -1000f), "the centre (x -267) is on no bank");
+            AssertEqual(0, HomeBank.Settle(0, picture, null, river), "a centre on no bank gives the bank of the placed node nearest it");
         }
         finally { BattleScope.ResetAll(); }
     }
