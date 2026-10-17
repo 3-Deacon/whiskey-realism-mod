@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
@@ -37,6 +38,9 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core ArtilleryFallbackWheelHonoursVanillaReach", ArtilleryFallbackWheelHonoursVanillaReach),
             ("battle-core InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy", InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy),
             ("battle-core ArtilleryIgnoresFeudPlayerAndHeldBatteries", ArtilleryIgnoresFeudPlayerAndHeldBatteries),
+            ("bc14w BOMBARD-START-INTENT a battery vanilla's start test would admit is given the bombard-start intent for the preparation point, and no other", BombardStartIntent),
+            ("bc14w FOCAL-PREP-ARTILLERY a battery whose group carries a preparation point keeps bombarding through the doctrine's cancel and counter-battery, except the safety rules", PreparationExemptsBombard),
+            ("bc14w BOMBARD-START the two field writes are executor-only behind the gate, in vanilla's order, and the producer notes the table", BombardStartWriter),
         });
     }
 
@@ -478,6 +482,151 @@ internal static class StanceArtilleryMigrationTests
         {
             DoctrineOn = true, AuditOn = true, FallbackDistance = 180f, TurnTriggerDegrees = 20f, MaxCoverValueForRotation = 0.5f, AdditionalAngleInCover = 30f,
         };
+    }
+
+    // ------------------------------------------------------------------ BC14W: the bombard start
+
+    private static BattleArtilleryState PrepState(float ammoMean = 0.9f, float ammo = 0.9f, float px = 500f, float pz = -1100f, int guns = 4, float fireRange = 1000f,
+        DoctrineArtilleryDecision doctrine = default(DoctrineArtilleryDecision))
+    {
+        BattleArtilleryState b = State(ammo, false, doctrine);
+        b.Guns = guns;
+        b.FireRange = fireRange;
+        b.HasPreparation = true;
+        b.PreparationX = px;
+        b.PreparationZ = pz;
+        b.AmmoMean = ammoMean;
+        return b;
+    }
+
+    private static void BombardStartIntent()
+    {
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f);
+        AssertTrue(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(), out BattleOrderIntent start), "admitted");
+        AssertEqual(OrderChannel.CombatBehavior, start.Channel, "on the combat behavior channel");
+        AssertEqual(9, start.Value, "behavior 9, bombardment");
+        AssertTrue(start.TargetX == 500f && start.TargetZ == -1100f, "carrying the preparation point");
+        AssertTrue((start.Flags & IntentFlags.BombardStart) != 0, "flagged BombardStart");
+        AssertEqual(IntentSource.ArtilleryDoctrine, start.Source, "the artillery doctrine's");
+        AssertEqual(IntentPriority.Executor, start.Priority, "at executor priority");
+        AssertEqual(Battery, start.GroupId, "of the battery itself");
+
+        BattleOrderIntent none;
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, State(), out none), "a battery whose group carries no preparation point");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(pz: -1600f), out none), "a point beyond the fire range (1100 m of 1000)");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(guns: 0), out none), "no guns");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(ammoMean: 0.2f), out none), "mean ammo at 0.2 is not above it");
+        AssertTrue(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(ammoMean: 0.21f), out _), "just above it");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f), 1, PrepState(), out none), "already on counter-battery");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f), 1, PrepState(), out none), "already bombarding");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, paths: 1), 1, PrepState(), out none), "on a path");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.Routed), 1, PrepState(), out none), "routed");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.MarkedForRout), 1, PrepState(), out none), "marked for rout");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.PermanentlyDetached), 1, PrepState(), out none), "permanently detached");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 0, PrepState(), out none), "the brigade is no battery");
+
+        // In the doctrine: Enable Tactical Artillery Doctrine on, the start is the behavior channel's one intent; off (the audit alone), it is never made.
+        var buffer = new BattleOrderIntent[4];
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, PrepState(), Rules(), buffer);
+        int starts = 0;
+        for (int i = 0; i < n; i++) if ((buffer[i].Flags & IntentFlags.BombardStart) != 0) starts++;
+        AssertEqual(1, starts, "the doctrine submits the start");
+        BattleArtilleryRules audit = Rules();
+        audit.DoctrineOn = false;
+        n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, PrepState(), audit, buffer);
+        for (int i = 0; i < n; i++) AssertTrue((buffer[i].Flags & IntentFlags.BombardStart) == 0, "with the doctrine off the producer runs and starts nothing");
+        n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer);
+        for (int i = 0; i < n; i++) AssertTrue((buffer[i].Flags & IntentFlags.BombardStart) == 0, "a battery with no preparation point starts nothing");
+        BattleArtilleryState held = PrepState();
+        held.InHold = true;
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, held, Rules(), buffer), "a battery in its hold is left alone");
+    }
+
+    private static int CountCancels(BattleSnapshot s, BattleArtilleryState b, out int counterBattery)
+    {
+        var buffer = new BattleOrderIntent[4];
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, b, Rules(), buffer);
+        int cancels = 0;
+        counterBattery = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (buffer[i].Channel != OrderChannel.CombatBehavior) continue;
+            if (buffer[i].Value == 7) cancels++;
+            if (buffer[i].Value == 8) counterBattery++;
+        }
+        return cancels;
+    }
+
+    private static void PreparationExemptsBombard()
+    {
+        var deny = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "doctrine-says-no");
+        BattleSnapshot bombarding = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+
+        // The doctrine's own Deny cancels a bombardment; with a preparation point it does not.
+        AssertEqual(1, CountCancels(bombarding, State(ammo: 0.9f, doctrine: deny), out _), "without a preparation point a Deny cancels");
+        AssertEqual(0, CountCancels(bombarding, PrepState(doctrine: deny), out _), "with one it does not: the doctrine does not stop the bombardment it started");
+
+        // Counter-battery: an enemy battery in range switches a bombardment to 8; not under preparation.
+        BattleSnapshot enemyGuns = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, enemyUnitTyp: TacticalUnitType.Artillery);
+        CountCancels(enemyGuns, State(), out int counter);
+        AssertEqual(1, counter, "without a preparation point enemy guns draw counter-battery");
+        CountCancels(enemyGuns, PrepState(), out counter);
+        AssertEqual(0, counter, "with one the battery keeps bombarding");
+
+        // The safety rules stay: low ammo, an unsupported battery with the enemy close, a friend in danger close.
+        AssertEqual(1, CountCancels(bombarding, PrepState(ammo: 0.05f), out _), "ammo below 0.10 cancels");
+        BattleSnapshot close = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 150f);
+        AssertEqual(1, CountCancels(close, PrepState(), out _), "an unsupported battery with the enemy inside 0.2 of its range cancels");
+        BattleSnapshot friendClose = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, parentFlags: UnitFlags.None);
+        AddFriendlyInfantry(friendClose, 500f, -450f);
+        AssertEqual(1, CountCancels(friendClose, PrepState(doctrine: deny), out _), "friendly infantry in danger close keeps the doctrine's Deny a cancel");
+        AssertEqual(0, CountCancels(bombarding, PrepState(doctrine: deny), out _), "the same Deny with no friend close is exempt");
+
+        // The exemption is the point's: a battery ordered to prepare is exempt only while its order carries it.
+        AssertEqual(1, CountCancels(bombarding, State(ammo: 0.05f), out _), "a battery without the point is cancelled as before");
+    }
+
+    private static void AddFriendlyInfantry(BattleSnapshot s, float x, float z)
+    {
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = 77, UnitTyp = TacticalUnitType.Infantry, X = x, Z = z, Strength = 400,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry,
+        });
+    }
+
+    private static void BombardStartWriter()
+    {
+        string runtime = FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
+        string start = FlankResponseTests.Between(runtime, "private static bool StartBombard(", "// Artillery limber");
+        FlankResponseTests.AssertPinned(start, "TacticalWriteGuard.ModeAllowsWrites()", "behind Commander Mode Active");
+        FlankResponseTests.AssertPinned(start, "TacticalWriteGuard.CanWrite(unit)", "and the write guard (never a player-owned battery)");
+        int behavior = start.IndexOf("TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, BattleWriterPolicy.CombatBehaviorBombard, perRegiment: false)", StringComparison.Ordinal);
+        int position = start.IndexOf("unit.bombardposition =", StringComparison.Ordinal);
+        int range = start.IndexOf("unit.bombardrange = GamePrefs.bombardmentmaxrangesize;", StringComparison.Ordinal);
+        AssertTrue(behavior >= 0 && position > behavior && range > position, "the behavior first, only then the position and the range, as vanilla writes them (3897-3900)");
+        AssertTrue(start.IndexOf("lastfeudactiontime", StringComparison.Ordinal) < 0, "and not the W&L feud action timer, which Whiskey never acts for");
+        FlankResponseTests.AssertPinned(runtime, "(w.Flags & IntentFlags.BombardStart) != 0", "the combat behavior case routes the flagged intent to it");
+
+        // The pattern: the two writes are battle writes the gate scan knows, and nothing else in the source makes them.
+        AssertTrue(BattleWriteGateTests.IsUngatedWriter("unit.bombardposition = p;"), "bombardposition = is a vanilla battle write");
+        AssertTrue(BattleWriteGateTests.IsUngatedWriter("unit.bombardrange = GamePrefs.bombardmentmaxrangesize;"), "bombardrange = too");
+        AssertFalse(BattleWriteGateTests.IsUngatedWriter("if (unit.bombardrange == r) return;"), "a comparison is not a write");
+        AssertFalse(BattleWriteGateTests.IsUngatedWriter("if (TacticalWriteGuard.CanWrite(unit)) unit.bombardposition = p;"), "behind a gate it is accepted");
+        var writers = new List<string>();
+        string src = TestFixtures.FindRepoPath("src/WhiskeyRealism");
+        var write = new System.Text.RegularExpressions.Regex(@"\.bombardposition\s*=[^=]|\.bombardrange\s*=[^=]");
+        var comment = new System.Text.RegularExpressions.Regex(@"//[^\n]*");
+        foreach (string path in System.IO.Directory.GetFiles(src, "*.cs", System.IO.SearchOption.AllDirectories))
+            if (write.IsMatch(comment.Replace(System.IO.File.ReadAllText(path), string.Empty))) writers.Add(System.IO.Path.GetFileName(path));
+        AssertEqual("OrderExecutorRuntime.cs", string.Join(",", writers), "only the executor's runtime writes the bombard fields");
+
+        // The producer: the preparation point comes from the parent group's doctrine order, the table is noted from the intents the doctrine made.
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ArtilleryIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "PreparationTable.ForAlliance(", "the preparation table is the producer's to write");
+        FlankResponseTests.AssertPinned(producer, "IntentFlags.BombardStart", "noted when a battery passed the start test");
+        FlankResponseTests.AssertPinned(producer, "state.HasPreparation = order.HasPreparation", "the point is the parent order's");
+        FlankResponseTests.AssertPinned(producer, "PlayExecutorRuntime.ActivatedHours(", "keyed by the play's activation hour");
     }
 
     private sealed class AllowGuard : IOrderGuard

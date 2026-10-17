@@ -1,5 +1,6 @@
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Telemetry;
 
 namespace WhiskeyRealism.Tactical.Battle.Producers
@@ -77,9 +78,22 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     BattleArtilleryState state = ReadState(snapshot, i, unit, rules);
                     state.InHold = InHold(executor, own[i].InstanceId, now, holdHours);
                     int n = BattleWriterPolicy.ArtilleryDoctrineIntents(snapshot, i, state, rules, _buffer);
-                    for (int k = 0; k < n; k++) sink.Submit(_buffer[k]);
+                    for (int k = 0; k < n; k++)
+                    {
+                        sink.Submit(_buffer[k]);
+                        // BC14W: a battery passed the start test for the focal point; the first pass of the assault floors its column.
+                        if ((_buffer[k].Flags & IntentFlags.BombardStart) != 0)
+                            PreparationTable.ForAlliance(snapshot.Alliance)?.Note(PlanOf(snapshot.Alliance), PlayExecutorRuntime.ActivatedHours(snapshot.Alliance),
+                                _buffer[k].TargetX, _buffer[k].TargetZ, now);
+                    }
                 }
             }
+        }
+
+        private static BattlePlanId PlanOf(int alliance)
+        {
+            ArmyOrchestrator army = TacticalBattleCoordinator.GetSideOrchestrator(alliance)?.Army;
+            return army != null && army.HasPlan ? army.CurrentPlan.PlanId : BattlePlanId.Unknown;
         }
 
         private static BattleArtilleryRules ReadRules()
@@ -115,21 +129,42 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 FallbackMoraleThreshold = fallback != null && parentStance >= 0 && parentStance < fallback.Length ? fallback[parentStance] : 0.4f,
                 CoverValue = unit.covervalue,
                 CoverObject = unit.coverobject,
+                AmmoMean = AmmoMeanOf(ammo),
             };
-            // Doctrine only speaks to a running bombardment (TacticalArtilleryDoctrine
-            // acts on 9 alone); skip the order lookup otherwise.
-            if (rules.DoctrineOn && battery.CombatBehaviorOrdered == BattleWriterPolicy.CombatBehaviorBombard)
-                state.Doctrine = DoctrineFor(snapshot, index, parent, state.FireRange, state.AmmoRatio01);
+            // The parent group's doctrine order: it carries the focal assault's preparation point (BC14W) and decides a running bombardment (TacticalArtilleryDoctrine
+            // acts on 9 alone). Looked up only for a battery that can use it.
+            if (rules.DoctrineOn)
+            {
+                bool bombarding = battery.CombatBehaviorOrdered == BattleWriterPolicy.CombatBehaviorBombard;
+                Regiment group = parent >= 0 ? BattleSnapshotBuilder.UnitAt(snapshot, parent, enemy: false) : null;
+                if ((UnityEngine.Object)group != null && TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
+                {
+                    state.HasPreparation = order.HasPreparation;
+                    state.PreparationX = order.PreparationX;
+                    state.PreparationZ = order.PreparationZ;
+                    if (bombarding) state.Doctrine = DoctrineFor(snapshot, index, order, picture, state.FireRange, state.AmmoRatio01);
+                }
+            }
             return state;
         }
 
-        // The parent group's doctrine order, as B7 resolved it.
-        private static DoctrineArtilleryDecision DoctrineFor(BattleSnapshot snapshot, int index, int parent, float fireRange, float ammoRatio01)
+        // Vanilla's mean ammo (CheckAIBombardment 3896): Sum(ammo) / 3. An unreadable array reads as full, as ArtilleryAmmoRatio01 does.
+        private static float AmmoMeanOf(float[] ammo)
         {
-            Regiment group = BattleSnapshotBuilder.UnitAt(snapshot, parent, enemy: false);
-            if ((UnityEngine.Object)group == null ||
-                !TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
-                return default(DoctrineArtilleryDecision);
+            if (ammo == null) return 1f;
+            float total = 0f;
+            for (int i = 0; i < ammo.Length; i++)
+            {
+                float slot = ammo[i];
+                if (!float.IsNaN(slot) && !float.IsInfinity(slot)) total += slot;
+            }
+            return total / 3f;
+        }
+
+        // The parent group's doctrine order, as B7 resolved it.
+        private static DoctrineArtilleryDecision DoctrineFor(BattleSnapshot snapshot, int index, in CommandDoctrineOrder order, BattlefieldPictureSnapshot picture,
+            float fireRange, float ammoRatio01)
+        {
             ref UnitRecord battery = ref snapshot.Own[index];
             int closest = snapshot.ClosestVisibleEnemy(index, out float distance);
             if (closest < 0) distance = 9999f;

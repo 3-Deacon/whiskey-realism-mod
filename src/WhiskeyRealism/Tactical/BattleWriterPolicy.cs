@@ -100,6 +100,12 @@ namespace WhiskeyRealism.Tactical
         public int CoverObject;
         public DoctrineArtilleryDecision Doctrine; // Observe without a doctrine order for the parent group
         public bool InHold;                  // Artillery Audit Min Hold Seconds
+
+        // BC14W (requirement-focal-execution): the parent group's doctrine order carries a preparation point (the focal assault's focal point) while the
+        // plan prepares its assault, and the battery's mean ammo as vanilla's CheckAIBombardment computes it (Sum(ammo) / 3, 3896).
+        public bool HasPreparation;
+        public float PreparationX, PreparationZ;
+        public float AmmoMean;
     }
 
     // Config and vanilla prefs for the artillery producers, read once per tick.
@@ -411,6 +417,8 @@ namespace WhiskeyRealism.Tactical
         public const int CombatBehaviorFireAtWill = 7;
         public const int CombatBehaviorCounterBattery = 8;
         public const int CombatBehaviorBombard = 9;
+        /// <summary>Vanilla's start test needs a mean ammo above this (CheckAIBombardment 3894).</summary>
+        public const float BombardMinAmmoMean = 0.2f;
         // Vanilla micro facing turns a unit only toward an enemy closer than
         // firerange * 1.5 (AIBattle 4606).
         public const float VanillaTurnReachFireRanges = 1.5f;
@@ -460,6 +468,43 @@ namespace WhiskeyRealism.Tactical
                 intent.Source == IntentSource.ArtilleryDoctrine;
         }
 
+        /// <summary>
+        /// BC14W (spec § 7A requirement-focal-execution, D34): the intent that starts a bombardment of the preparation point, if vanilla's own per-battery start
+        /// test (CheckAIBombardment 3890-3894) would admit this battery for it: artillery, not routed or marked for rout, guns, not permanently detached, not
+        /// already on counter-battery (8) or bombardment (9), mean ammo above 0.2, no path, and the point within its fire range (in place of vanilla's closest
+        /// enemy within it). The group conditions of vanilla's start (a group whose path was interrupted and is not engaged) are Whiskey's own plan here.
+        /// </summary>
+        public static bool TryBombardStartIntent(BattleSnapshot s, int index, in BattleArtilleryState b, out BattleOrderIntent intent)
+        {
+            intent = default(BattleOrderIntent);
+            if (s == null || index < 0 || index >= s.OwnCount || !b.HasPreparation) return false;
+            ref UnitRecord battery = ref s.Own[index];
+            UnitFlags f = battery.Flags;
+            if ((f & UnitFlags.IsArtillery) == 0 || (f & UnitFlags.IsGroup) != 0) return false;
+            if ((f & (UnitFlags.Routed | UnitFlags.MarkedForRout | UnitFlags.PermanentlyDetached)) != 0) return false;
+            if (b.Guns <= 0 || battery.RegimentPaths > 0) return false;
+            if (battery.CombatBehaviorOrdered == CombatBehaviorCounterBattery || battery.CombatBehaviorOrdered == CombatBehaviorBombard) return false;
+            if (!(b.AmmoMean > BombardMinAmmoMean)) return false;
+            if (DistSq(battery.X, battery.Z, b.PreparationX, b.PreparationZ) > b.FireRange * b.FireRange) return false;
+            intent = new BattleOrderIntent
+            {
+                GroupId = battery.InstanceId, Channel = OrderChannel.CombatBehavior, Value = CombatBehaviorBombard,
+                TargetX = b.PreparationX, TargetZ = b.PreparationZ, Heading = -1f, Flags = IntentFlags.BombardStart,
+                Priority = IntentPriority.Executor, Source = IntentSource.ArtilleryDoctrine, Reason = "artillery-bombard-start",
+            };
+            return true;
+        }
+
+        // BC14W: a battery whose group order carries the preparation point keeps bombarding through the doctrine's cancel and counter-battery rules, except
+        // the safety ones: ammo below 0.10, an unsupported battery with the enemy inside 0.2 of its range, and friendly infantry or cavalry in danger close.
+        private static bool PreparationKeepsBombarding(BattleSnapshot s, int index, in BattleArtilleryState b, TacticalSupportScreen.Result screen, bool enemyClose)
+        {
+            if (!b.HasPreparation) return false;
+            if (b.AmmoRatio01 < 0.10f) return false;
+            if (screen == TacticalSupportScreen.Result.Unsupported && enemyClose) return false;
+            return !FriendlyDangerClose(s, index, b.FireRange);
+        }
+
         // Doctrine + micro intents for battery `index` (ArtilleryBatteryEligible
         // checked by the caller). Returns how many were written to buffer (at most
         // one per channel; up to 3: behavior, formation, facing). Limber is Safety:
@@ -483,6 +528,14 @@ namespace WhiskeyRealism.Tactical
             if (r.DoctrineOn && ShouldReleaseCounterBattery(battery.CombatBehaviorOrdered, enemyArtilleryInRange))
             {
                 buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-counterbattery-release");
+                behaviorWritten = true;
+            }
+
+            // 1b. BC14W: the focal assault's preparation. A battery of the plan's children that vanilla's own start test admits for the preparation point
+            // starts a bombardment of it (the executor writes the point and the range as vanilla does).
+            if (r.DoctrineOn && !behaviorWritten && TryBombardStartIntent(s, index, in b, out BattleOrderIntent bombard))
+            {
+                buffer[n++] = bombard;
                 behaviorWritten = true;
             }
 
@@ -513,6 +566,10 @@ namespace WhiskeyRealism.Tactical
                     IsPlayerAiOrFeud = 0,
                     DoctrineDecision = b.Doctrine,
                 });
+                // BC14W: the doctrine does not stop the bombardment it started for the focal assault (the safety rules stay).
+                if ((decision == TacticalArtilleryDoctrine.Decision.CancelBombard || decision == TacticalArtilleryDoctrine.Decision.CounterBattery) &&
+                    PreparationKeepsBombarding(s, index, in b, screen, (hasEnemy ? enemyDistance : 9999f) <= b.FireRange * 0.20f))
+                    decision = TacticalArtilleryDoctrine.Decision.PreserveFire;
                 if (decision == TacticalArtilleryDoctrine.Decision.CancelBombard)
                 {
                     buffer[n++] = BatteryIntent(battery, OrderChannel.CombatBehavior, CombatBehaviorFireAtWill, IntentPriority.Executor, "artillery-cancel-bombard");

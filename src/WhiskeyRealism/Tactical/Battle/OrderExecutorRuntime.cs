@@ -459,6 +459,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     return TacticalStanceWriter.EnsureStance(bunits, unit, w.Value, w.Reason, w.Source, (w.Flags & IntentFlags.WorksHold) != 0);
                 case OrderChannel.CombatBehavior:
                 {
+                    // BC14W (D34): the focal assault's bombardment is started as vanilla starts one, not as a plain behavior write.
+                    if ((w.Flags & IntentFlags.BombardStart) != 0) return StartBombard(bunits, unit, w.TargetX, w.TargetZ);
                     bool wrote = TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);
                     // Charge doctrine Disarm (BC6b): behavior alone never ends charge mode 3
                     // (UpdateChargeTarget re-evaluates mode 3 whatever the behavior,
@@ -491,6 +493,21 @@ namespace WhiskeyRealism.Tactical.Battle
                 default:
                     return false;
             }
+        }
+
+        // BC14W (D34, the one new battle write path): vanilla's bombardment start, as AIBattle.CheckAIBombardment writes it (3897-3900) without the W&L
+        // feud timer it stamps (lastfeudactiontime: Whiskey never acts for the feud instance). Combat behavior 9 through the one behavior writer and, only
+        // when that changed it (a battery already bombarding gets no write), the battery's bombardposition (the point, on the terrain) and bombardrange
+        // (GamePrefs.bombardmentmaxrangesize, the radius vanilla's target filter then keeps the battery's fire inside, 118405/118433). Behind Commander
+        // Mode Active and TacticalWriteGuard.CanWrite: never a player-owned battery.
+        private static bool StartBombard(BattleUnits bunits, Regiment unit, float x, float z)
+        {
+            if (bunits == null || unit == null) return false;
+            if (!TacticalWriteGuard.ModeAllowsWrites() || !TacticalWriteGuard.CanWrite(unit)) return false;
+            if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, BattleWriterPolicy.CombatBehaviorBombard, perRegiment: false)) return false;
+            unit.bombardposition = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
+            unit.bombardrange = GamePrefs.bombardmentmaxrangesize;
+            return true;
         }
 
         // Artillery limber / unlimber: BattleUnits.MountUnits (90860-90890; formation

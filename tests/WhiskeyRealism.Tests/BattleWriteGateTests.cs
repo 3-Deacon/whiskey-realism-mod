@@ -22,7 +22,7 @@ internal static class BattleWriteGateTests
     }
 
     private static readonly Regex VanillaBattleWrite = new Regex(
-        @"\.(ChangeStance|ChangeCombatBehavior|SetWaypoint|DeleteOrderQueue|AddToOrderQueue|ChangeRegimentFormation|SetGroupFormation|SetFormation|RegimentSetPath|PerformActionForGroupForAllUnitsOnLevel|CheckCurrentOrderUpdate|MountUnits|RotateRegiment|SetMovementMode|BlockedMovingOrder)\(|\.macroai\s*=(?!=)");
+        @"\.(ChangeStance|ChangeCombatBehavior|SetWaypoint|DeleteOrderQueue|AddToOrderQueue|ChangeRegimentFormation|SetGroupFormation|SetFormation|RegimentSetPath|PerformActionForGroupForAllUnitsOnLevel|CheckCurrentOrderUpdate|MountUnits|RotateRegiment|SetMovementMode|BlockedMovingOrder)\(|\.macroai\s*=(?!=)|\.bombardposition\s*=(?!=)|\.bombardrange\s*=(?!=)");
 
     private static readonly Regex CommanderModeGate = new Regex(
         @"TacticalWriteGuard\.(CanWrite|ModeAllowsWrites)\(|TacticalCommanderModePolicy\.AllowsWrites\(");
