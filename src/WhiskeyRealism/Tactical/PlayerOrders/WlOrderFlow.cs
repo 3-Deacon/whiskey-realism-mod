@@ -349,6 +349,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             switch (reason)
             {
                 case WlCourierQueue.Superseded:
+                case WlCourierQueue.SupersededIntent:
                 case WlCourierQueue.Overflow:
                 case "unit-gone":
                 case "cross-scope":

@@ -231,6 +231,11 @@ namespace WhiskeyRealism.Tactical.Battle
                     "[OrderArbiter] first vanilla order issued channel=" + winner.Channel + " source=" + winner.Source);
             }
 
+            // A newer move of this group voids the group's queued executor orders to the player (they describe the
+            // move just replaced); the new move's own order is queued after.
+            if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner))
+                WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);
+
             // Emit never throws (it logs its own failure once).
             if (OrderExecutor.ShouldDispatch(plan, executed))
             {

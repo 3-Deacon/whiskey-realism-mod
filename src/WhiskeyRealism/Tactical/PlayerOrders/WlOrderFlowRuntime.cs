@@ -244,6 +244,22 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return EnqueueCall(in call);
         }
 
+        // The executor issued a newer move for `groupId` (instance id): that group's queued executor orders describe a
+        // move it replaced, so they are discarded (`superseded-intent`, one row each) before the new move's own
+        // order is queued. Reads and edits the courier queue only; it never touches a unit.
+        internal static void SupersedeExecutorOrders(int groupId, float x, float z)
+        {
+            try
+            {
+                if (Flow.Queue.Count == 0) return;
+                Flow.Queue.DiscardSupersededIntents(groupId, x, z, WlCourierQueue.SupersededIntent);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-order:supersede-intent", "[W&LOrder] voiding a superseded executor order failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
         // #62's order, with the candidate its bookkeeping follows through the delivery callback.
         internal static bool EnqueueP62(Regiment unit, in PlayerOrderCandidate candidate, string destinationName, OrderIntentKind kind)
         {

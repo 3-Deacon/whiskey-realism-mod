@@ -65,6 +65,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public const string EnRoute = "en-route";
         public const string Overflow = "courier-overflow";
         public const string Superseded = "superseded";
+        // The executor gave the same group a newer move: its queued executor orders describe a move that was replaced.
+        public const string SupersededIntent = "superseded-intent";
         // Vanilla's own order dedupe radius (8643); the en-route and campaign target radius.
         public const float SamePointMeters = 110f;
         private const int Retreat = 15;
@@ -131,6 +133,29 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public void Discard(in CourierEntry e, string reason)
         {
             _sink?.Discarded(in e, reason);
+        }
+
+        // A newer executor move of the group `unitId` voids that group's queued executor orders (WlOrderFlow:
+        // the order still waits for a courier or for a move that has since been replaced), unless the order is
+        // the same place again (within SamePointMeters of the new target, inclusive): that one keeps its place,
+        // and the en-route test drops the repeat. Each is reported through the sink. Returns how many went.
+        public int DiscardSupersededIntents(int unitId, float newX, float newZ, string reason)
+        {
+            int voided = 0;
+            int i = 0;
+            while (i < _count)
+            {
+                if (_pending[i].Origin != OrderOrigin.Executor || _pending[i].UnitId != unitId || Near(_pending[i].X, _pending[i].Z, newX, newZ))
+                {
+                    i++;
+                    continue;
+                }
+                CourierEntry gone = _pending[i];
+                RemoveAt(i);
+                _sink?.Discarded(in gone, reason);
+                voided++;
+            }
+            return voided;
         }
 
         // True when an entry from this origin is waiting.

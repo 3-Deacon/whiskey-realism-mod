@@ -276,6 +276,21 @@ internal static partial class WlOrderFlowTests
         AssertTrue(move >= 0 && dispatch > move, "Emit comes after IssueMove in Execute");
     }
 
+    // A newer move voids the queued orders of the old one BEFORE the new order is queued: voiding after Emit would discard the
+    // order the new move just queued.
+    private static void ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne()
+    {
+        string body = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs"), "internal static int Execute(");
+        int voidAt = body.IndexOf("WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);", StringComparison.Ordinal);
+        int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
+        AssertTrue(voidAt > 0 && emit > voidAt, "the group's old executor orders are voided before Emit queues the new one");
+        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\)\)\s*WlOrderFlowRuntime\.SupersedeExecutorOrders"),
+            "only an executed Move that is not a deployment placement voids");
+        string flow = Code(FlowRuntime);
+        string supersede = BodyOf(flow, "internal static void SupersedeExecutorOrders(");
+        AssertTrue(supersede.Contains("catch (Exception ex)") && supersede.Contains("OnceLog.Warning(\"wl-order:supersede-intent\""), "never throws, one static warning key");
+    }
+
     // A fan-out (the player's command is not detached from the brigade): the planner orders the brigade's
     // children, the brigade itself has no queue entry, and the dispatch still goes out for the brigade. The
     // children's moves ride the brigade's own queue; the gate asks about the carrier child, not the brigade.
