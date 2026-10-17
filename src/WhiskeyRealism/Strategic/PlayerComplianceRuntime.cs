@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.PlayerOrders;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -32,6 +33,10 @@ namespace WhiskeyRealism.Strategic
         private static readonly ComplianceOrderStream _orders = new ComplianceOrderStream();
         // The order object each scope's pending ledger entry stands for.
         private static readonly DLC_WL.GivenOrders[] _tracked = new DLC_WL.GivenOrders[2];
+        // What each scope's pending sample stands for, for the [PlayerCompliance] lines.
+        private static readonly int[] _sampleSession = new int[2];
+        private static readonly int[] _sampleType = new int[2];
+        private static readonly OrderOrigin[] _sampleOrigin = new OrderOrigin[2];
 
         static PlayerComplianceRuntime()
         {
@@ -102,7 +107,7 @@ namespace WhiskeyRealism.Strategic
             if (tracked != null)
             {
                 if (tracked.firstunitreached)
-                    Report(scope, ledger.OnReached(scope, ledger.PendingSession(scope)));
+                    Report(scope, ledger.OnReached(scope, ledger.PendingSession(scope)), null);
                 else if (!ReferenceEquals(order, tracked))
                 {
                     // Vanilla's re-issue of the pending order: follow the new object
@@ -126,19 +131,43 @@ namespace WhiskeyRealism.Strategic
                 bool battleOrder = order.IsBattleOrder();
                 if (playerDecides && order.showzone && battleOrder == (scope == ComplianceScope.Battle))
                 {
+                    OrderOrigin origin = scope == ComplianceScope.Battle ? WlOrderFlowRuntime.OriginOfSession(session) : OrderOrigin.Vanilla;
+                    if (!ComplianceSampleGate.OriginStartsSample(origin))
+                        Skip(scope, order, session, origin, AutomaticHold);
                     // D17 (a): an order that reaches the player already inside its zone is no compliance.
-                    if (scope == ComplianceScope.Battle && !StartsBattleSample(order))
-                        SkipInsideAtIssue(order, session);
+                    else if (scope == ComplianceScope.Battle && !StartsBattleSample(order))
+                        Skip(scope, order, session, origin, InsideAtIssue);
                     else
                     {
                         ledger.OnDispatch(scope, session, nowHours);
                         _tracked[s] = order;
+                        _sampleSession[s] = session;
+                        _sampleType[s] = order.type;
+                        _sampleOrigin[s] = origin;
+                        Line(scope, "start", session, order.type, origin, null);
                     }
                 }
             }
 
-            Report(scope, ledger.Tick(scope, nowHours));
+            ComplianceChain chain = scope == ComplianceScope.Battle && ledger.HasPending(scope) ? ReadChain(_tracked[s]) : ComplianceChain.Unknown;
+            Report(scope, ledger.Tick(scope, nowHours, chain), chain);
             if (!ledger.HasPending(scope)) _tracked[s] = null;
+        }
+
+        // The carrier of the pending battle order against its zone: the unit the order was addressed to (the player's
+        // parent group, or the ancestor the order was given to). Unknown when it cannot be read, or when it is the
+        // player's own command (then the player is the chain).
+        private static ComplianceChain ReadChain(DLC_WL.GivenOrders order)
+        {
+            if (order == null) return ComplianceChain.Unknown;
+            Regiment carrier = order.groupunit;
+            Regiment command = CurrentCommand();
+            bool known = (UnityEngine.Object)carrier != null && (UnityEngine.Object)carrier != (UnityEngine.Object)command;
+            if (!known) return ComplianceChain.Unknown;
+            UnityEngine.Vector3 at = carrier.transform.position;
+            bool inZone = !ComplianceSampleGate.StartsSample(at.x, at.z, order.position.x, order.position.z, order.arearotation, order.areawidth, order.areadepth);
+            bool moving = carrier.regimentpaths > 0 || carrier.groupsubordinatesmoving > 0f;
+            return ComplianceChainReading.Of(true, inZone, carrier.combatstatussubordinates > 0f, moving);
         }
 
         // The player's command against the order's zone when the order reaches him.
@@ -150,11 +179,21 @@ namespace WhiskeyRealism.Strategic
             return ComplianceSampleGate.StartsSample(at.x, at.z, order.position.x, order.position.z, order.arearotation, order.areawidth, order.areadepth);
         }
 
-        private static void SkipInsideAtIssue(DLC_WL.GivenOrders order, int session)
+        private const string InsideAtIssue = "inside-at-issue";
+        private const string AutomaticHold = "automatic-hold";
+
+        private static void Skip(ComplianceScope scope, DLC_WL.GivenOrders order, int session, OrderOrigin origin, string reason)
+        {
+            Line(scope, "skip reason=" + reason, session, order.type, origin, null);
+        }
+
+        // One [PlayerCompliance] line: scope, what happened, and which order (session, type, origin).
+        private static void Line(ComplianceScope scope, string what, int session, int type, OrderOrigin origin, string tail)
         {
             TelemetryRouter.LegacyInfoToMainLogIfAllowed(
-                "[PlayerCompliance] scope=battle skip reason=inside-at-issue type=" + order.type + " session=" + session,
-                TelemetryLayer.Tactical);
+                "[PlayerCompliance] scope=" + (scope == ComplianceScope.Battle ? "battle" : "campaign") + " " + what +
+                " session=" + session + " type=" + type + " origin=" + (scope == ComplianceScope.Battle ? origin.ToString() : "-") + tail,
+                scope == ComplianceScope.Battle ? TelemetryLayer.Tactical : TelemetryLayer.Campaign);
         }
 
         private static ComplianceOrderKey KeyOf(DLC_WL.GivenOrders order)
@@ -185,14 +224,23 @@ namespace WhiskeyRealism.Strategic
             return GameVars.commander[chosen].currentcommand;
         }
 
-        private static void Report(ComplianceScope scope, ComplianceOutcome outcome)
+        // Complied and missed samples, and the ones a halted, abandoned or slow carrier ended neutral (with the carrier's state).
+        // A neutral from a new order or a cleared one is not written: the order that replaced it has its own line.
+        private static void Report(ComplianceScope scope, ComplianceOutcome outcome, ComplianceChain? chain)
         {
-            if (outcome != ComplianceOutcome.Complied && outcome != ComplianceOutcome.Missed) return;
-            TelemetryRouter.LegacyInfoToMainLogIfAllowed(
-                "[PlayerCompliance] scope=" + (scope == ComplianceScope.Battle ? "battle" : "campaign") +
-                " outcome=" + (outcome == ComplianceOutcome.Complied ? "complied" : "missed") +
-                " reliability=" + _careers.Ledger.Reliability.ToString("0.00") + " samples=" + _careers.Ledger.Samples,
-                scope == ComplianceScope.Battle ? TelemetryLayer.Tactical : TelemetryLayer.Campaign);
+            int s = (int)scope;
+            string what;
+            switch (outcome)
+            {
+                case ComplianceOutcome.Complied: what = "outcome=complied"; break;
+                case ComplianceOutcome.Missed: what = "outcome=missed"; break;
+                case ComplianceOutcome.Neutral when chain.HasValue && chain.Value != ComplianceChain.Unknown:
+                    what = "outcome=neutral chain=" + chain.Value.ToString().ToLowerInvariant();
+                    break;
+                default: return;
+            }
+            Line(scope, what, _sampleSession[s], _sampleType[s], _sampleOrigin[s],
+                " reliability=" + _careers.Ledger.Reliability.ToString("0.00") + " samples=" + _careers.Ledger.Samples);
         }
 
         // Sidecar: the current career's estimate only (a saved estimate for it was
@@ -204,7 +252,7 @@ namespace WhiskeyRealism.Strategic
                 if (!DLC_WL.dlc_scenarioactive) return null;
                 EnsureCareer();
                 if (!_careers.TryExport(out string key, out float reliability, out int samples)) return null;
-                return new PlayerComplianceDto { CareerKey = key, Reliability = reliability, Samples = samples };
+                return new PlayerComplianceDto { CareerKey = key, Reliability = reliability, Samples = samples, Measure = PlayerComplianceLedger.MeasureVersion };
             }
             catch (Exception ex)
             {
@@ -218,6 +266,13 @@ namespace WhiskeyRealism.Strategic
         internal static void Restore(PlayerComplianceDto saved)
         {
             if (saved == null) return;
+            // An estimate taken with the old measure (clock from issue, automatic holds and halted orders counted as misses) is
+            // not adopted: the 0.10 of the 2026-10-17 smoke would otherwise weight his regiment at a tenth in every battle.
+            if (!ComplianceMeasure.Accepts(saved.Measure))
+            {
+                OnceLog.Info("player-compliance:measure-reset", "[PlayerCompliance] stored estimate of an older measure dropped (reliability restarts at the prior)");
+                return;
+            }
             _careers.Restore(saved.CareerKey, saved.Reliability, saved.Samples);
         }
     }

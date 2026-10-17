@@ -42,6 +42,21 @@ internal static class PlayerComplianceTests
             ("player compliance a hold at the player's position starts no sample", NonPayingSessionStartsNoSample),
             ("player compliance gate is a battle-only skip with a row", RuntimeSkipsInsideAtIssueInBattleOnly),
             ("player compliance adds no penalty path", NoPenaltyPathAdded),
+            // fair measure (smoke 2026-10-17)
+            ("player compliance automatic holds start no sample by origin", AutomaticHoldsStartNoSampleByOrigin),
+            ("player compliance a hold delivered after the player marched off is still no sample", AHoldDeliveredAfterThePlayerMarchedOffIsNoSample),
+            ("player compliance grace counts from the carrier's arrival", GraceCountsFromTheCarriersArrival),
+            ("player compliance a carrier that never arrives ends neutral", ACarrierThatNeverArrivesEndsNeutral),
+            ("player compliance a contact halt before arrival is neutral", AContactHaltBeforeArrivalIsNeutral),
+            ("player compliance an abandoned carrier is neutral", AnAbandonedCarrierIsNeutral),
+            ("player compliance a halt after arrival does not undo the arrival", AHaltAfterArrivalDoesNotUndoTheArrival),
+            ("player compliance an unknown carrier keeps the clock from issue", AnUnknownCarrierKeepsTheClockFromIssue),
+            ("player compliance a new order supersedes before the old deadline", ANewOrderSupersedesBeforeTheOldDeadline),
+            ("player compliance chain reading", ChainReading),
+            ("player compliance old measure estimate is not adopted", OldMeasureEstimateIsNotAdopted),
+            ("player compliance measure version survives the sidecar", MeasureVersionSurvivesTheSidecar),
+            ("player compliance sidecar without the measure decodes to the old one", SidecarWithoutTheMeasureIsTheOldOne),
+            ("player compliance runtime wiring of the fair measure", RuntimeWiringOfTheFairMeasure),
         });
     }
 
@@ -415,7 +430,7 @@ internal static class PlayerComplianceTests
         int dispatch = runtime.IndexOf("ledger.OnDispatch(scope, session, nowHours)", StringComparison.Ordinal);
         AssertTrue(gate >= 0 && dispatch > gate, "the gate decides before a sample is started");
         AssertTrue(runtime.Contains("scope == ComplianceScope.Battle && !StartsBattleSample(order)"), "only the battle scope is gated");
-        AssertTrue(runtime.Contains("skip reason=inside-at-issue"), "the skip is written as a row");
+        AssertTrue(runtime.Contains("InsideAtIssue = \"inside-at-issue\"") && runtime.Contains("\"skip reason=\" + reason"), "the skip is written as a row");
     }
 
     private static void NoPenaltyPathAdded()
@@ -434,5 +449,143 @@ internal static class PlayerComplianceTests
             foreach (string call in new[] { "EarnPrestige(", "LosePrestige(", "DLC_WL.prestige =", "DLC_WL.prestige -=", "ChangeRelation", "AddRelation", "relationship" })
                 AssertFalse(code.Contains(call), path + " never calls " + call);
         }
+    }
+
+    // --- the fair measure (smoke 2026-10-17: one complied, eight missed, reliability 0.10) ---
+
+    private static void AutomaticHoldsStartNoSampleByOrigin()
+    {
+        AssertFalse(ComplianceSampleGate.OriginStartsSample(WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.Release), "the released engage-at-will hold");
+        AssertFalse(ComplianceSampleGate.OriginStartsSample(WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.FollowUp), "the arrival follow-up hold");
+        foreach (var origin in new[] { WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.Vanilla, WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.Executor,
+                     WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.P62, WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.Retreat })
+            AssertTrue(ComplianceSampleGate.OriginStartsSample(origin), origin + " orders are measured");
+    }
+
+    private static void AHoldDeliveredAfterThePlayerMarchedOffIsNoSample()
+    {
+        // The gate alone would have started a sample: the zone (built on the player at 19:27:37, shown at 19:27:44) is behind him.
+        AssertTrue(Starts(300f, 0f, zx: 0f, zz: 0f), "fixture: the position test says outside, 300 m from the zone built on him");
+        AssertFalse(ComplianceSampleGate.OriginStartsSample(WhiskeyRealism.Tactical.PlayerOrders.OrderOrigin.Release), "the origin keeps it out anyway");
+    }
+
+    private static PlayerComplianceLedger Pending(double issued = 10.0)
+    {
+        var ledger = new PlayerComplianceLedger();
+        ledger.OnDispatch(ComplianceScope.Battle, 9, issued);
+        return ledger;
+    }
+
+    private static void GraceCountsFromTheCarriersArrival()
+    {
+        var ledger = Pending(10.0);
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 10.6, ComplianceChain.Marching), "0.6 h after issue, the carrier still marching: not yet a miss (the old clock would have missed it)");
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 11.0, ComplianceChain.Arrived), "the carrier arrives at 11.0");
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 11.49, ComplianceChain.Arrived), "inside the grace from arrival");
+        AssertEqual(ComplianceOutcome.Missed, ledger.Tick(ComplianceScope.Battle, 11.51, ComplianceChain.Arrived), "past the grace from arrival");
+        AssertEqual(1, ledger.Samples, "one sample");
+    }
+
+    private static void ACarrierThatNeverArrivesEndsNeutral()
+    {
+        var ledger = Pending(10.0);
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 12.9, ComplianceChain.Marching), "inside the chain wait");
+        AssertEqual(ComplianceOutcome.Neutral, ledger.Tick(ComplianceScope.Battle, 10.0 + PlayerComplianceLedger.ChainWaitHours + 0.01, ComplianceChain.Marching), "past it");
+        AssertEqual(0, ledger.Samples, "no sample");
+        AssertFalse(ledger.HasPending(ComplianceScope.Battle), "and nothing pending");
+    }
+
+    private static void AContactHaltBeforeArrivalIsNeutral()
+    {
+        var ledger = Pending(10.0);
+        AssertEqual(ComplianceOutcome.Neutral, ledger.Tick(ComplianceScope.Battle, 10.05, ComplianceChain.Halted), "vanilla's contact halt cut the move short (smoke order 10)");
+        AssertEqual(0, ledger.Samples, "not a miss");
+        AssertNear(1f, ledger.Reliability, 1e-6f, "reliability untouched");
+    }
+
+    private static void AnAbandonedCarrierIsNeutral()
+    {
+        var ledger = Pending(10.0);
+        AssertEqual(ComplianceOutcome.Neutral, ledger.Tick(ComplianceScope.Battle, 10.2, ComplianceChain.Abandoned), "the chain stopped short and is not in contact (smoke order 6)");
+        AssertEqual(0, ledger.Samples, "not a miss");
+    }
+
+    private static void AHaltAfterArrivalDoesNotUndoTheArrival()
+    {
+        var ledger = Pending(10.0);
+        ledger.Tick(ComplianceScope.Battle, 10.3, ComplianceChain.Arrived);
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 10.5, ComplianceChain.Halted), "contact at the zone after arriving: the arrival stands");
+        AssertEqual(ComplianceOutcome.Missed, ledger.Tick(ComplianceScope.Battle, 10.81, ComplianceChain.Halted), "and the grace from it runs out");
+    }
+
+    private static void AnUnknownCarrierKeepsTheClockFromIssue()
+    {
+        var ledger = Pending(10.0);
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 10.49, ComplianceChain.Unknown), "inside the grace");
+        AssertEqual(ComplianceOutcome.Missed, ledger.Tick(ComplianceScope.Battle, 10.51, ComplianceChain.Unknown), "the old rule when nothing can be read");
+        var campaign = new PlayerComplianceLedger();
+        campaign.OnDispatch(ComplianceScope.Campaign, 1, 100.0);
+        AssertEqual(ComplianceOutcome.Missed, campaign.Tick(ComplianceScope.Campaign, 100.0 + PlayerComplianceLedger.CampaignGraceHours + 0.01), "campaign orders are unchanged");
+    }
+
+    private static void ANewOrderSupersedesBeforeTheOldDeadline()
+    {
+        // Smoke orders 10 and 11: the courier delay put the newer order past the older one's deadline. With the grace counted from
+        // arrival the older order is still pending when the newer one comes, and the supersede is neutral, not a miss.
+        var ledger = Pending(10.0);
+        AssertEqual(ComplianceOutcome.None, ledger.Tick(ComplianceScope.Battle, 10.6, ComplianceChain.Marching), "no miss at 10.6");
+        AssertEqual(ComplianceOutcome.Neutral, ledger.OnDispatch(ComplianceScope.Battle, 10, 10.65), "the newer order supersedes it");
+        AssertEqual(0, ledger.Samples, "no sample from the older one");
+    }
+
+    private static void ChainReading()
+    {
+        AssertEqual(ComplianceChain.Unknown, ComplianceChainReading.Of(false, true, true, true), "no carrier");
+        AssertEqual(ComplianceChain.Arrived, ComplianceChainReading.Of(true, true, true, true), "in the zone outranks contact and movement");
+        AssertEqual(ComplianceChain.Halted, ComplianceChainReading.Of(true, false, true, true), "outside, in contact");
+        AssertEqual(ComplianceChain.Marching, ComplianceChainReading.Of(true, false, false, true), "outside, moving");
+        AssertEqual(ComplianceChain.Abandoned, ComplianceChainReading.Of(true, false, false, false), "outside, stopped, no contact");
+    }
+
+    private static void OldMeasureEstimateIsNotAdopted()
+    {
+        AssertFalse(ComplianceMeasure.Accepts(0), "an estimate written before the fix (no measure field)");
+        AssertFalse(ComplianceMeasure.Accepts(PlayerComplianceLedger.MeasureVersion - 1), "an older version");
+        AssertTrue(ComplianceMeasure.Accepts(PlayerComplianceLedger.MeasureVersion), "the current one");
+    }
+
+    private static void MeasureVersionSurvivesTheSidecar()
+    {
+        var snap = SidecarSnapshot.Empty();
+        snap.PlayerCompliance = new PlayerComplianceDto { CareerKey = "42:002/A", Reliability = 0.3f, Samples = 7, Measure = PlayerComplianceLedger.MeasureVersion };
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(snap));
+        AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out _), "deserialize");
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out _), "decode");
+        AssertEqual(PlayerComplianceLedger.MeasureVersion, back.PlayerCompliance.Measure);
+    }
+
+    private static void SidecarWithoutTheMeasureIsTheOldOne()
+    {
+        // The smoke's sidecar: {careerKey, reliability 0.10, samples 9} and no measure.
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(SidecarSnapshot.Empty()));
+        json = json.Replace("\"playerCompliance\": null", "\"playerCompliance\": { \"careerKey\": \"1:x\", \"reliability\": 0.1, \"samples\": 9 }");
+        if (!json.Contains("\"careerKey\": \"1:x\""))
+            json = json.TrimEnd().TrimEnd('}') + ", \"playerCompliance\": { \"careerKey\": \"1:x\", \"reliability\": 0.1, \"samples\": 9 } }";
+        AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out _), "deserialize");
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out _), "decode");
+        AssertTrue(back.PlayerCompliance != null && back.PlayerCompliance.Samples == 9, "the smoke's estimate is read");
+        AssertFalse(ComplianceMeasure.Accepts(back.PlayerCompliance.Measure), "and, without the measure field, not adopted");
+    }
+
+    private static void RuntimeWiringOfTheFairMeasure()
+    {
+        string runtime = System.IO.File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs"));
+        AssertTrue(runtime.Contains("ComplianceSampleGate.OriginStartsSample(origin)"), "the origin decides before the position test");
+        AssertTrue(runtime.IndexOf("OriginStartsSample(origin)", StringComparison.Ordinal) < runtime.IndexOf("StartsBattleSample(order)", StringComparison.Ordinal), "origin first");
+        AssertTrue(runtime.Contains("WlOrderFlowRuntime.OriginOfSession(session)"), "the origin is the one the order flow recorded for the session");
+        AssertTrue(runtime.Contains("ledger.Tick(scope, nowHours, chain)"), "battle samples are ticked with the carrier's state");
+        AssertTrue(runtime.Contains("ComplianceMeasure.Accepts(saved.Measure)") && runtime.Contains("Measure = PlayerComplianceLedger.MeasureVersion"), "the measure version is written and checked");
+        AssertTrue(runtime.Contains("\" session=\" + session + \" type=\" + type + \" origin=\""), "every [PlayerCompliance] line names session, type and origin");
+        AssertTrue(runtime.Contains("(UnityEngine.Object)carrier != (UnityEngine.Object)command"), "the player's own command is never his own chain");
     }
 }

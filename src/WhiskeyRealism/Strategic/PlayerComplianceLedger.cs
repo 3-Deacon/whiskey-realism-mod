@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.PlayerOrders;
 
 namespace WhiskeyRealism.Strategic
 {
@@ -14,6 +15,19 @@ namespace WhiskeyRealism.Strategic
         Complied,
         Missed,
         Neutral,
+    }
+
+    // Where the chain that carries a battle order stands against the order's zone, from the unit the order was
+    // addressed to (PlayerComplianceRuntime): the player is judged against what his chain did with the order, not
+    // against a clock that started when the order was given (2026-10-17 smoke: eight of nine samples missed, most
+    // because the order's own carrier never got there or was halted by contact).
+    internal enum ComplianceChain
+    {
+        Unknown,   // no carrier to read (a campaign order, the carrier is the player's own command): the old clock from issue
+        Marching,  // outside the zone, moving
+        Arrived,   // the carrier stands in the zone
+        Halted,    // outside the zone, stopped, in contact: vanilla's CheckEnemyContact cut the move short
+        Abandoned, // outside the zone, stopped, not in contact: the chain is no longer carrying the order out
     }
 
     // How reliably the W&L player executes the orders his superiors send
@@ -41,6 +55,14 @@ namespace WhiskeyRealism.Strategic
         // unit enters the zone, 123484-123517), so this is calibration: the stage F
         // plan's smoke item checks it against an obedient player's arrival times.
         public const double BattleGraceHours = 0.5;
+        // How long a battle order's carrier may still be marching before the sample is given up as neutral: past
+        // this the order no longer says anything about the player (calibration: smoke 2026-10-17 orders 2 and 9,
+        // carriers that crawled for more than a battle hour without arriving).
+        public const double ChainWaitHours = 3.0;
+        // Version of the measure a stored estimate was taken with. A sidecar estimate of an older version was taken
+        // with the clock from issue and counted automatic holds and halted orders as misses (smoke 2026-10-17:
+        // 0.10 from eight such misses); it is not adopted, once.
+        public const int MeasureVersion = 2;
         public const float Alpha = 0.25f;
         // Trust until evidence (stage F review, 2026-10-15): the AI plans around the
         // player only after it has seen him ignore orders; nothing is held against
@@ -50,6 +72,8 @@ namespace WhiskeyRealism.Strategic
         private readonly bool[] _pending = new bool[2];
         private readonly int[] _session = new int[2];
         private readonly double[] _issuedHours = new double[2];
+        // When the order's carrier was first seen in the zone; NaN until it was.
+        private readonly double[] _arrivedHours = { double.NaN, double.NaN };
 
         public float Reliability { get; private set; } = Prior;
         public int Samples { get; private set; }
@@ -67,6 +91,7 @@ namespace WhiskeyRealism.Strategic
             _pending[s] = true;
             _session[s] = session;
             _issuedHours[s] = nowHours;
+            _arrivedHours[s] = double.NaN;
             return superseded;
         }
 
@@ -81,12 +106,35 @@ namespace WhiskeyRealism.Strategic
 
         public ComplianceOutcome Tick(ComplianceScope scope, double nowHours)
         {
+            return Tick(scope, nowHours, ComplianceChain.Unknown);
+        }
+
+        // A battle order is judged from when its carrier arrived in the zone (the grace is the time to follow it
+        // there), not from when it was given. A carrier that was halted by contact or abandoned the move before it
+        // arrived, or is still marching after ChainWaitHours, ends the sample neutral. Unknown keeps the clock from
+        // issue (campaign orders, a carrier that cannot be read).
+        public ComplianceOutcome Tick(ComplianceScope scope, double nowHours, ComplianceChain chain)
+        {
             int s = (int)scope;
             if (!_pending[s]) return ComplianceOutcome.None;
             double elapsed = nowHours - _issuedHours[s];
             if (double.IsNaN(elapsed) || elapsed < 0.0) return DropPending(scope);
             double grace = scope == ComplianceScope.Campaign ? CampaignGraceHours : BattleGraceHours;
-            if (elapsed <= grace) return ComplianceOutcome.None;
+
+            if (chain == ComplianceChain.Unknown)
+            {
+                if (elapsed <= grace) return ComplianceOutcome.None;
+            }
+            else
+            {
+                if (chain == ComplianceChain.Arrived && double.IsNaN(_arrivedHours[s])) _arrivedHours[s] = nowHours;
+                if (double.IsNaN(_arrivedHours[s]))
+                {
+                    if (chain == ComplianceChain.Halted || chain == ComplianceChain.Abandoned) return DropPending(scope);
+                    return elapsed > ChainWaitHours ? DropPending(scope) : ComplianceOutcome.None;
+                }
+                if (nowHours - _arrivedHours[s] <= grace) return ComplianceOutcome.None;
+            }
             _pending[s] = false;
             Sample(0f);
             return ComplianceOutcome.Missed;
@@ -127,6 +175,27 @@ namespace WhiskeyRealism.Strategic
         }
 
         private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    // Reads a carrier as a ComplianceChain.
+    internal static class ComplianceChainReading
+    {
+        public static ComplianceChain Of(bool carrierKnown, bool inZone, bool inContact, bool moving)
+        {
+            if (!carrierKnown) return ComplianceChain.Unknown;
+            if (inZone) return ComplianceChain.Arrived;
+            if (inContact) return ComplianceChain.Halted;
+            return moving ? ComplianceChain.Marching : ComplianceChain.Abandoned;
+        }
+    }
+
+    // Whether a stored estimate was taken with the current measure (PlayerComplianceLedger.MeasureVersion).
+    internal static class ComplianceMeasure
+    {
+        public static bool Accepts(int savedVersion)
+        {
+            return savedVersion == PlayerComplianceLedger.MeasureVersion;
+        }
     }
 
     // The W&L career a compliance estimate belongs to (chain-of-command spec §E):
@@ -286,6 +355,16 @@ namespace WhiskeyRealism.Strategic
     internal static class ComplianceSampleGate
     {
         private const float EdgeTolerance = 1e-3f;
+
+        // Release and FollowUp are the superior's automatic hold at the player's position (they pay no prestige, and
+        // the player cannot fail them): never a sample, whatever the position test says. The hold is built at the
+        // player's position when it is decided and shown a courier leg later, 0.06-0.08 h in the 2026-10-17 smoke,
+        // while an attached player marches with his brigade: by the time it reached him the zone was behind him,
+        // the in-zone test started a sample, and the sample could only be missed.
+        public static bool OriginStartsSample(OrderOrigin origin)
+        {
+            return !WlOrderFlow.IsNonPaying(origin);
+        }
 
         public static bool StartsSample(float playerX, float playerZ, float zoneX, float zoneZ, float rotationDegrees, float width, float depth)
         {

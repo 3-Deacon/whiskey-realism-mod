@@ -225,6 +225,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return (UnityEngine.Object)_parent != null ? _parent : _command;
         }
 
+        // Who gave the order that opened this session: the Whiskey origin the delivery recorded, else vanilla's own.
+        // PlayerComplianceRuntime reads it to leave the automatic holds out of the sample.
+        internal static OrderOrigin OriginOfSession(int session)
+        {
+            return _originSession == session ? _originOfSession : OrderOrigin.Vanilla;
+        }
+
         // Doctrine hours since the order on the panel was accepted (+infinity when Whiskey never saw it issued).
         internal static double ActiveOrderAgeHours()
         {
