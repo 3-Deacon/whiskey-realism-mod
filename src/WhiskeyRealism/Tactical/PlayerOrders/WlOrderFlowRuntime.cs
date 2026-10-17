@@ -392,6 +392,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             entry.P62Candidate = call.P62;
             entry.Kind = call.Kind;
             entry.DispatchTask = call.DispatchTask;
+            entry.AdmitReason = reason;
             // The executor moved the unit (or its children) through the order queue: the player is told one
             // leg after that move is carried out, not when it is queued (WlOrderFlow.ReleaseOnMove).
             if (call.Carrier.Has && CouriersOn())
@@ -537,6 +538,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 Legs = legs,
                 Meters = meters,
                 LegHours = delay,
+                PlayerDetached = (UnityEngine.Object)_command != null && _command.permanentlydetached,
             };
             entry.DueAt = WlOrderFlow.DueAt(now, delay, CouriersOn(), deferUntil);
             return true;
@@ -847,6 +849,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                         .WithField("legs", row.Legs)
                         .WithField("meters", (double)row.Meters)
                         .WithField("dest", row.Name ?? string.Empty)
+                        .WithField("x", (double)row.X)
+                        .WithField("z", (double)row.Z)
+                        .WithField("gate", MoveBasisName.Of(row.Gate))
+                        .WithField("admit", row.AdmitReason ?? string.Empty)
+                        .WithField("detached", row.PlayerDetached)
                         .WithField("session", DLC_WL.GivenOrders.givenorderssession));
             }
             catch

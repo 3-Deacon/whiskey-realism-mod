@@ -73,6 +73,21 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         Contact,
     }
 
+    // The `gate` field of a flow row.
+    internal static class MoveBasisName
+    {
+        public static string Of(MoveBasis basis)
+        {
+            switch (basis)
+            {
+                case MoveBasis.Arrived: return "arrived";
+                case MoveBasis.Path: return "path";
+                case MoveBasis.Contact: return "contact";
+                default: return string.Empty;
+            }
+        }
+    }
+
     // What vanilla's own order queue says about a unit's move (decompile build 14703111). SetWaypoint with
     // an order delay does not give the unit its path at once: it queues the order on the unit's scene
     // parent (91461-91504) and the path waits for the courier (AddOrderCourierline 125009-125171). A move

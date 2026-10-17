@@ -203,4 +203,26 @@ internal static partial class WlOrderFlowTests
             "the called unit must hold a path now; its target is its last set waypoint, not the order's position; no queue entry is waited for");
         AssertTrue(pursuit.Contains("unit.gameObject.GetInstanceID()"), "the carrier is the called unit itself");
     }
+
+    // Smoke 2026-10-17: the rows could not say where an order pointed, why it was admitted, how the move gate released it, or
+    // whether the player was detached from his brigade when it was made.
+    private static void FlowRowsCarryPositionAdmitGateAndDetachedFlag()
+    {
+        string code = Code(FlowRuntime);
+        string row = BodyOf(code, "private static void EmitRow(");
+        foreach (string field in new[] { ".WithField(\"x\", (double)row.X)", ".WithField(\"z\", (double)row.Z)", ".WithField(\"gate\", MoveBasisName.Of(row.Gate))",
+                     ".WithField(\"admit\", row.AdmitReason ?? string.Empty)", ".WithField(\"detached\", row.PlayerDetached)" })
+            AssertTrue(row.Contains(field), "the row writes " + field);
+        AssertTrue(BodyOf(code, "private static bool TryMakeEntry(").Contains("PlayerDetached = (UnityEngine.Object)_command != null && _command.permanentlydetached"),
+            "every entry notes the player's detached flag (vanilla's permanentlydetached, 85321-85323) when it is made");
+        AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"entry\.AdmitReason = reason;"), "the capture notes the policy's reason");
+    }
+
+    private static void GateNamesAreStable()
+    {
+        AssertEqual("arrived", MoveBasisName.Of(MoveBasis.Arrived), "arrived");
+        AssertEqual("path", MoveBasisName.Of(MoveBasis.Path), "path");
+        AssertEqual("contact", MoveBasisName.Of(MoveBasis.Contact), "contact");
+        AssertEqual(string.Empty, MoveBasisName.Of(MoveBasis.None), "no gate looked");
+    }
 }

@@ -45,6 +45,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // X/Z the waypoint it was sent to. At delivery the order is discarded (chain-abandoned) when the unit no
         // longer pursues that point.
         public bool Pursuit;
+        // For the flow row: the re-admit policy's reason at capture (a static literal), and whether the player's command
+        // was detached from its parent group when the entry was made (vanilla detaches it from the AI engine at
+        // deployment, 85321-85323: the brigade then leaves without him and the order tells him to follow).
+        public string AdmitReason;
+        public bool PlayerDetached;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.

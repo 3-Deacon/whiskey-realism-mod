@@ -136,6 +136,8 @@ internal static partial class WlOrderFlowTests
             ("wl order dispatch task changed is structural", TaskChangedIsStructuralForP62),
             ("wl order pin maintenance moves are not dispatched", MaintenanceMovesAreNotDispatched),
             ("wl order pin dispatch runtime applies the memory", DispatchRuntimeAppliesTheMemory),
+            ("wl order pin flow rows carry position admit gate and the detached flag", FlowRowsCarryPositionAdmitGateAndDetachedFlag),
+            ("wl order gate names are stable", GateNamesAreStable),
             ("wl order vanilla carrier that abandoned the move is discarded", VanillaOrderWhoseCarrierAbandonedTheMoveIsDiscarded),
             ("wl order vanilla carrier that pursues is delivered", VanillaOrderWhoseCarrierPursuesIsDeliveredWithItsDueTime),
             ("wl order vanilla pursuit is checked at delivery", PursuitIsCheckedAtDeliveryNotAtCapture),
