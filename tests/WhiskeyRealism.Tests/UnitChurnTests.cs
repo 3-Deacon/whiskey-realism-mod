@@ -19,6 +19,9 @@ internal static class UnitChurnTests
             ("unit-churn FIX-ASSAULT a fixing force vanilla escalated to assault is taken back to the attack stance its task maps to", FixingForceAssaultIsDemotedToAttack),
             ("unit-churn FIX-ASSAULT-HOLD the demotion's hold is not given away by the scorer's own claim, so stance 3 and 4 do not alternate", FixDemotionHoldIsNotGivenAway),
             ("unit-churn FIX-ASSAULT-WIRING the coordinator hands the doctrine order's task to the denial", FixAssaultWiring),
+            ("unit-churn COLUMN-DEPLOY a march-column infantry regiment fired on, flanked or engaged deploys at once; a regiment in line, mounted, withdrawing or routed does not", ColumnDeployDecision),
+            ("unit-churn COLUMN-DEPLOY-PLAN the deploy intent is planned for a column regiment and is a duplicate for one already in line", ColumnDeployPlan),
+            ("unit-churn COLUMN-DEPLOY-WIRING the executor stops the march, then re-forms to line facing the threat; the pulse producer submits it behind its flag", ColumnDeployWiring),
         });
     }
 
@@ -119,5 +122,111 @@ internal static class UnitChurnTests
         string resolve = FlankResponseTests.Between(coordinator, "DoctrineConsumerAction doctrineAction = DoctrineConsumerAction.Observe;", "// 2) Charge override without a doctrine opinion.");
         FlankResponseTests.AssertPinned(resolve, "doctrineTask = order.Task;", "the doctrine order's task is kept");
         FlankResponseTests.AssertPinned(resolve, "fixEnemyTask: doctrineTask == CommandTaskType.FixEnemy", "and handed to the denial");
+    }
+
+    // ------------------------------------------------------------------ the march column under fire
+
+    // Vanilla puts any regiment with a path longer than mindistanceformarchcolumn (60 m, unitprefs 881) and no enemy within
+    // distancetoenemyforinterruption (100 m) into march column (CheckFormationChange 127662-127668), and takes it out only inside that 100 m, at the end of
+    // its path, or on a manual stop (132498-132511); it deploys facing lastwaypointrotation, the march heading, not the enemy (127677). A column shot
+    // from 300 m, or in the flank, kept marching in column (melee loss modifier 2.5, unitprefs 1453). The brigade object's own formation field reads 3
+    // for good (ChangeRegimentFormation 135437 forces 3 for every group), so the decision matrix's "3:MarchColumn" on a brigade is no column state.
+    private static ColumnDeployInput Column(int formation = 3, bool receivedFire = false, int fireFromFlank = 0, int outflanked = 0, bool groupFlankRisk = false,
+        bool groupCloseEngaged = false, bool infantry = true, bool mounted = false, bool withdrawing = false, bool routed = false, bool recent = false)
+    {
+        return new ColumnDeployInput(infantry, mounted, formation, receivedFire, fireFromFlank, outflanked, groupFlankRisk, groupCloseEngaged, withdrawing, routed, recent);
+    }
+
+    private static void ColumnDeployDecision()
+    {
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column()), "a column nobody threatens marches on (vanilla's own rules apply)");
+        AssertEqual(ColumnDeployReason.FiredOn, ColumnDeployment.Decide(Column(receivedFire: true)), "fired on: deploy");
+        AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(fireFromFlank: 1)), "fire from the flank");
+        AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(outflanked: 2)), "outflanked");
+        AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(groupFlankRisk: true)), "its brigade's perceived flank risk");
+        AssertEqual(ColumnDeployReason.Engaged, ColumnDeployment.Decide(Column(groupCloseEngaged: true)), "its brigade in close contact");
+        AssertEqual(ColumnDeployReason.FiredOn, ColumnDeployment.Decide(Column(receivedFire: true, fireFromFlank: 1, groupCloseEngaged: true)), "fire is named before the flank and the contact");
+        AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(fireFromFlank: 1, groupCloseEngaged: true)), "the flank before the contact");
+
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(formation: 0, receivedFire: true)), "already in line");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(formation: 2, receivedFire: true)), "any other regiment formation");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(infantry: false, receivedFire: true)), "artillery and cavalry limber and mount in formation 3");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(mounted: true, receivedFire: true)), "a mounted regiment");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(withdrawing: true, receivedFire: true)), "a column falling back under fire keeps falling back");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(routed: true, receivedFire: true)), "a routed regiment");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(recent: true, receivedFire: true)), "inside the cooldown of its last deployment");
+
+        AssertTrue(ColumnDeployment.WithdrawalTask(CommandTaskType.FallBackToLine), "a fall back is a withdrawal");
+        AssertTrue(ColumnDeployment.WithdrawalTask(CommandTaskType.Delay), "so is a delay");
+        AssertFalse(ColumnDeployment.WithdrawalTask(CommandTaskType.AttackObjective), "an attack is not");
+        AssertFalse(ColumnDeployment.WithdrawalTask(CommandTaskType.ReserveWait), "nor a reserve");
+        AssertEqual(3, ColumnDeployment.RegimentMarchColumn, "Regiment.formation 3 (CheckFormationChange 127668)");
+        AssertEqual(0, ColumnDeployment.RegimentLine, "Regiment.formation 0, the line CheckFormationChange deploys to (127677)");
+    }
+
+    private static void ColumnDeployPlan()
+    {
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        BattleOrderIntent deploy = ColumnDeployment.Intent(77, 135f);
+        AssertEqual(OrderChannel.Formation, deploy.Channel, "a formation write");
+        AssertEqual(ColumnDeployment.RegimentLine, deploy.Value, "to line");
+        AssertTrue((deploy.Flags & IntentFlags.Deploy) != 0, "flagged Deploy: the executor stops the march first");
+        AssertEqual(135f, deploy.Heading, "facing the threat");
+        AssertEqual(IntentSource.FacingPulse, deploy.Source, "the pulse's reaction");
+        AssertEqual(IntentPriority.Executor, deploy.Priority, "past the pulse's scorer rung, short of Safety (a withdrawal outranks it)");
+        AssertEqual(-1f, ColumnDeployment.Intent(77, -5f).Heading, "no threat bearing: no facing");
+
+        BattleSnapshot s = ChurnSnapshot(regimentFormation: 3);
+        ExecutionPlan plan = executor.Plan(s, deploy, 1.0);
+        AssertTrue(plan.Execute, "planned for a regiment in column");
+        s = ChurnSnapshot(regimentFormation: 0);
+        AssertEqual(SkipReason.Duplicate, executor.Plan(s, deploy, 1.0).Skip, "a regiment already in line has nothing to deploy from");
+    }
+
+    private static BattleSnapshot ChurnSnapshot(int regimentFormation)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = 77, UnitTyp = TacticalUnitType.Infantry, X = 500f, Z = -500f, Formation = regimentFormation, Strength = 400, ParentIndex = -1,
+            RegimentPaths = 1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry,
+        });
+        s.IndexCommandTree(null);
+        return s;
+    }
+
+    private sealed class AllowGuard : IOrderGuard
+    {
+        public bool CanWrite(in UnitRecord unit, out SkipReason reason)
+        {
+            reason = SkipReason.None;
+            return true;
+        }
+    }
+
+    private static void ColumnDeployWiring()
+    {
+        string runtime = FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
+        FlankResponseTests.AssertPinned(runtime, "(w.Flags & IntentFlags.Deploy) != 0", "the formation case routes the flagged intent to the deploy");
+        string deploy = FlankResponseTests.Between(runtime, "private static bool IssueDeploy(", "private static bool IssueFormation(");
+        int live = deploy.IndexOf("unit.formation != ColumnDeployment.RegimentMarchColumn", StringComparison.Ordinal);
+        int stop = deploy.IndexOf("\"StopRegiment\"", StringComparison.Ordinal);
+        int form = deploy.IndexOf("unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true", StringComparison.Ordinal);
+        AssertTrue(live >= 0 && stop > live && form > stop, "the live column test, then the manual stop, then the re-form: a regiment with no path is not re-columned by vanilla (127662-127668)");
+        FlankResponseTests.AssertPinned(deploy, "unit.unittyp != TacticalUnitType.Infantry", "infantry only");
+        FlankResponseTests.AssertPinned(deploy, "unit.isrouted", "never a routed regiment");
+
+        string pulse = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        string produce = FlankResponseTests.Between(pulse, "internal sealed class FacingPulseIntentProducer", "private static string FacingSourceOf(");
+        FlankResponseTests.AssertPinned(produce, "Plugin.EnableColumnDeployment", "behind its own rollback flag");
+        FlankResponseTests.AssertPinned(produce, "ColumnDeployment.Decide(", "the pure decision");
+        FlankResponseTests.AssertPinned(produce, "ColumnDeployment.Intent(", "builds the one intent");
+        FlankResponseTests.AssertPinned(produce, "ColumnDeployment.WithdrawalTask(", "and leaves a withdrawing ancestor's regiments alone");
+        FlankResponseTests.AssertPinned(produce, "IntentSource.Withdrawal", "as well as the withdrawal producer's");
+        string plugin = FlankResponseTests.SourceText("Plugin.cs");
+        FlankResponseTests.AssertPinned(plugin, "\"Enable Column Deployment\"", "the flag is declared");
     }
 }

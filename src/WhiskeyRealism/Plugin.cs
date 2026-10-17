@@ -223,6 +223,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
         public static ConfigEntry<bool> EnableTacticalContactFacingPulse;
+        public static ConfigEntry<bool> EnableColumnDeployment;
         public static ConfigEntry<bool> EnableTacticalReinforcementOpportunityDoctrine;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
@@ -1102,6 +1103,15 @@ namespace WhiskeyRealism
                 "with no detached or player-owned subordinate, a group facing toward the closest visible enemy; up to 4 of its regiments in " +
                 "contact may be rotated in place to face visible contact. Orders go through the battle-core order executor. Disable for rollback " +
                 "without turning off Tactical Commander Mode.");
+            EnableColumnDeployment = Config.Bind(
+                "Tactical",
+                "Enable Column Deployment",
+                true,
+                "Default ON. Battle-core facing-pulse producer: an AI infantry regiment that vanilla put in march column (a path longer than 60 m with no " +
+                "enemy within 100 m) and that is fired on, shot in the flank, outflanked or in close contact with its brigade stops its march and " +
+                "deploys to line facing the closest visible enemy, instead of marching on in column until an enemy is within 100 m (vanilla deploys " +
+                "it there, facing the way it was walking). A regiment of a withdrawing group, a routed or mounted one is left alone. Disable for " +
+                "rollback without turning off Tactical Commander Mode.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reinforcement Opportunity Doctrine",

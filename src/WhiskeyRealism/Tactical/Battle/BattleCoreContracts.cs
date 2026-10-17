@@ -258,6 +258,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
         // still applies. (4096 is the BC14W bombard start's.)
         Contest = 16384,
+        // Unit churn, Formation on an infantry regiment: stop its march, then re-form it to line facing the intent's heading
+        // (OrderExecutorRuntime.IssueDeploy; ColumnDeployment). Vanilla re-columns a regiment that still has a path, so the stop comes first.
+        Deploy = 32768,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

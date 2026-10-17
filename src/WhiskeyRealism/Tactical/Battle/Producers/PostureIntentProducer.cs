@@ -1789,6 +1789,35 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
+        // Unit churn: one row per regiment per TelemetrySeconds, the reason it was deployed from column and the bearing it was given.
+        internal static void Deploy(BattleSnapshot s, int u, ColumnDeployReason reason, float heading)
+        {
+            try
+            {
+                int id = s.Own[u].InstanceId;
+                OnceLog.Info("tactical-column-deploy:first", "[ColumnDeploy] first march column deployed: " + reason + " (stop, then line facing the threat)");
+                string signature = s.Alliance + "|" + id + "|" + reason;
+                if (!TacticalTelemetry.ShouldEmit(_lastAt, "tactical-column-deploy:" + s.Alliance + ":" + id, signature, Time.realtimeSinceStartup, TelemetrySeconds, false))
+                    return;
+                string unit = NameOf(s, u);
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Write, "TacticalColumnDeploy", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(s.Alliance)
+                        .WithUnit(unit)
+                        .WithDecision("ColumnDeploy", reason.ToString(), signature)
+                        .WithField("reason", reason.ToString())
+                        .WithField("targetFacing", heading)
+                        .WithField("receivedFire", s.Own[u].ReceivedFire)
+                        .WithField("fireFromFlank", s.Own[u].FireFromFlank)
+                        .WithField("outflanked", s.Own[u].Outflanked)
+                        .WithField("paths", s.Own[u].RegimentPaths));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-producer-posture:telemetry-failed", "[PostureProducer] telemetry threw: " + ex.Message);
+            }
+        }
+
         // BC11 decision 2: a refused flank of a group in combat, rotated in place (limited by vanilla's micro turn).
         internal static void RefuseInPlace(BattleSnapshot s, int i, RefuseFlank side, int rotated, int skipped)
         {
@@ -1844,6 +1873,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 PostureTick.State t = PostureTick.Current(s);
                 OrderExecutor executor = OrderExecutor.ForAlliance(s != null ? s.Alliance : -1);
                 if (t == null || executor == null || sink == null) return;
+
+                // Unit churn: a march column that is fired on or flanked deploys at once (ColumnDeployment), whether or not its brigade moved this tick.
+                // It reads the contact flags the posture producer recorded for the brigade, so it runs ahead of the group loop below, not inside it.
+                if (Plugin.EnableColumnDeployment != null && Plugin.EnableColumnDeployment.Value)
+                    SubmitColumnDeployments(s, t, executor, sink);
 
                 for (int i = 0; i < s.OwnCount; i++)
                 {
@@ -1902,6 +1936,71 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 for (int i = 0; i < s.OwnCount; i++)
                     if (t.Groups[i].Has && BattleLodRuntime.IsDue(s, i)) t.Records.Remember(t.Groups, i, s.Own[i].InstanceId);
             }
+        }
+
+        // Unit churn (2026-10-17): vanilla marches a regiment in column for any path over 60 m and deploys it only inside 100 m of an enemy, facing the way it
+        // was walking; the brigade-level formation correction follows groupformation, which stays Line. A column that is fired on, shot in the flank,
+        // outflanked, or whose brigade is in close contact stops and deploys facing the threat. A group the withdrawal doctrine or a fall back is walking away
+        // is left in column, as is a regiment inside the cooldown of its last deployment.
+        private static readonly double DeployCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(ColumnDeployment.CooldownRealSecondsAtOneX);
+        private const double WithdrawalWindowHours = 0.25;
+        private const int MaxDeploymentsPerTick = 16;
+        // Rifle fire comes from inside this; a threat bearing from further away is no bearing at all.
+        private const float DeployBearingReachMeters = 700f;
+
+        private static void SubmitColumnDeployments(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, IIntentSink sink)
+        {
+            UnitRecord[] own = s.Own;
+            int submitted = 0;
+            for (int u = 0; u < s.OwnCount && submitted < MaxDeploymentsPerTick; u++)
+            {
+                ref UnitRecord rec = ref own[u];
+                UnitFlags f = rec.Flags;
+                // The cheap rejects first: this loop visits every own unit every tick.
+                if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0 || rec.Formation != ColumnDeployment.RegimentMarchColumn) continue;
+                if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
+                if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
+
+                bool closeEngaged = false, flankRisk = false, withdrawing = (f & UnitFlags.OnRetreat) != 0;
+                int a = rec.ParentIndex;
+                for (int hops = 0; a >= 0 && a < s.OwnCount && hops < 4; hops++, a = own[a].ParentIndex)
+                {
+                    ref GroupPosture g = ref t.Groups[a];
+                    if (g.Has)
+                    {
+                        if (hops == 0) { closeEngaged = g.CloseEngaged; flankRisk = g.FlankRisk; }
+                        if (ColumnDeployment.WithdrawalTask(g.State.Task)) withdrawing = true;
+                    }
+                    if (WithdrawalRecent(executor, own[a].InstanceId, s.DoctrineHours)) withdrawing = true;
+                }
+                if (WithdrawalRecent(executor, rec.InstanceId, s.DoctrineHours)) withdrawing = true;
+
+                bool recent = PostureIntentPlan.IssuedWithin(executor, rec.InstanceId, OrderChannel.Formation, IntentSource.FacingPulse, s.DoctrineHours, DeployCooldownHours);
+                ColumnDeployReason reason = ColumnDeployment.Decide(new ColumnDeployInput(true, false, rec.Formation, rec.ReceivedFire, rec.FireFromFlank, rec.Outflanked,
+                    flankRisk, closeEngaged, withdrawing, PostureSense.Routed(rec), recent));
+                if (reason == ColumnDeployReason.None) continue;
+
+                // Facing: the strongest perceived pressure on the front when the flank response is on (the brigade pulse's own rule), else the closest
+                // visible enemy within rifle reach; none keeps the regiment's facing.
+                float heading = -1f;
+                if (Plugin.FlankResponseEnabled() && FlankFacing.MostPressuredBearing(s, u, rec.RotationY, out float pressure, out _)) heading = pressure;
+                else
+                {
+                    int k = s.ClosestVisibleEnemy(u, out float distance);
+                    if (k >= 0 && distance <= DeployBearingReachMeters)
+                        heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
+                }
+                sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading));
+                submitted++;
+                PostureTelemetry.Deploy(s, u, reason, heading);
+            }
+        }
+
+        private static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
+        {
+            return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
+                last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&
+                nowHours - last.AtHours < WithdrawalWindowHours;
         }
 
         // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).

@@ -482,6 +482,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 case OrderChannel.Formation:
                     if ((w.Flags & (IntentFlags.Limber | IntentFlags.Unlimber)) != 0) return IssueMount(bunits, unit, (w.Flags & IntentFlags.Limber) != 0);
+                    if ((w.Flags & IntentFlags.Deploy) != 0) return IssueDeploy(bunits, unit, w.Heading);
                     return IssueFormation(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Facing:
                     return IssueFacing(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
@@ -562,6 +563,24 @@ namespace WhiskeyRealism.Tactical.Battle
         // refused flank (BC5a) - the in-place wheel with the skew. The policy's
         // cooldown (0.05 h, 0.1 h under fire) runs from the group's last
         // formation or facing write, as #61's _lastFormationWriteAt did.
+        // Unit churn: deploy an infantry regiment out of the march column (ColumnDeployment). The live column test comes first (the snapshot is a tick
+        // old), then vanilla's own manual stop, which restores the formation the column replaced and ends distancemarchcolumn (132498-132511) and, with
+        // the path cleared, keeps CheckFormationChange (127662-127668) from re-columning the regiment on its next look; then the line, facing the
+        // threat (the manual rotation target of the formation param, in place of the march heading vanilla deploys to, 127677). Behind the executor's
+        // guards like every battle write; the target passed TacticalWriteGuard.CanWrite in the plan.
+        private static bool IssueDeploy(BattleUnits bunits, Regiment unit, float heading)
+        {
+            if (unit.unittyp != TacticalUnitType.Infantry || unit.isrouted || unit.markedforrout || unit.mounted != 0) return false;
+            if (unit.formation != ColumnDeployment.RegimentMarchColumn) return false;
+            GameObject go = ((Component)unit).gameObject;
+            if (go == null) return false;
+            bunits.PerformActionForGroupForAllUnitsOnLevel(go, -1, "StopRegiment", ManualStop,
+                alsononactive: false, excluderoutedandretreatingunits: false, sameaigrouponly: true);
+            if (unit.formation == ColumnDeployment.RegimentMarchColumn)
+                unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));
+            return true;
+        }
+
         private static bool IssueFormation(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w,
             bool feudReplay, double nowHours, float enemiesInRange, float lastShapeWriteHours)
         {
