@@ -456,7 +456,7 @@ namespace WhiskeyRealism.Tactical.Battle
             switch (w.Channel)
             {
                 case OrderChannel.Stance:
-                    return TacticalStanceWriter.EnsureStance(bunits, unit, w.Value, w.Reason, w.Source);
+                    return TacticalStanceWriter.EnsureStance(bunits, unit, w.Value, w.Reason, w.Source, (w.Flags & IntentFlags.WorksHold) != 0);
                 case OrderChannel.CombatBehavior:
                 {
                     bool wrote = TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, w.Value, (w.Flags & IntentFlags.PerRegiment) != 0);

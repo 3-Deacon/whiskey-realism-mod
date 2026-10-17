@@ -1145,6 +1145,9 @@ namespace WhiskeyRealism.Tactical.Operations
         public int RoadLinkCount, RoadLink0, RoadLink1;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public bool ColumnWait;
+        // BC14W: the works-hold stance was already submitted for the group this tick (PostureIntentPlan.SubmitWorksHoldStance): the request's own stance
+        // is not submitted again.
+        public bool StanceSubmitted;
     }
 
     // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
@@ -1456,8 +1459,28 @@ namespace WhiskeyRealism.Tactical.Operations
             return age >= 0.0 && age < windowHours;
         }
 
+        /// <summary>
+        /// BC14W (requirement-works-hold): the one stance of a group under the works hold, from the mapper alone (HoldObjective, 2) at the posture
+        /// executor's priority with <see cref="IntentFlags.WorksHold"/>. The pipeline submits it for every guarded group each tick, before the
+        /// posture decision and whatever that returns, so an idle group already in formation (an <c>already-correct</c> decision writes nothing) is
+        /// still held out of vanilla's assault; the writer's dedupe on the ordered stance keeps a standing group from being rewritten.
+        /// </summary>
+        public static int SubmitWorksHoldStance(IIntentSink sink, int groupId, IntentPriority priority, IntentSource source, int exploitId)
+        {
+            if (sink == null || groupId == 0) return 0;
+            int stance = TacticalCommandTaskToStanceMapper.Map(CommandTaskType.HoldObjective);
+            if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return 0;
+            sink.Submit(new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stance, Value = stance, Heading = -1f, Task = CommandTaskType.HoldObjective,
+                Priority = priority, Source = source, Flags = IntentFlags.WorksHold, Reason = WorksHoldGuard.Reason, ExploitId = exploitId,
+            });
+            return 1;
+        }
+
         private static int SubmitStance(IIntentSink sink, in PostureIntentRequest r)
         {
+            if (r.StanceSubmitted) return 0;
             int stance = TacticalCommandTaskToStanceMapper.Map(r.Task);
             if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return 0;
             sink.Submit(new BattleOrderIntent

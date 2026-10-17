@@ -242,6 +242,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC10, Move only: the intent's two vias are a road route (RoadRoutePlanner: the first road entry and the last road exit). The leg between
         // them follows the road, which takes its own crossing: the crossing gate inserts no via there and only checks the crossing the leg passes.
         RoadRoute = 2048,
+        // BC14W, Stance only: the stance is the works hold's (HoldObjective, 2) for a group the guard holds in front of enemy works. The stance
+        // ownership applies it after the army retreat and the charge demotion, yields to vanilla's weak-group screen, and against vanilla's own
+        // attack stances (3, 4) takes neither the yield step nor the vanilla-assault refusal. (2048 is RoadRoute; the BC14W bombard start, 4096, is task 8's.)
+        WorksHold = 8192,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

@@ -1,3 +1,5 @@
+using WhiskeyRealism.Tactical.Operations;
+
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
@@ -60,6 +62,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             FromLedger = fromLedger;
             IsChargeOverride = isChargeOverride;
             ChargeAction = chargeAction;
+        }
+
+        /// <summary>
+        /// BC14W: #45's cached answer for a group the works hold guard holds, from its doctrine order (<paramref name="fromDoctrine"/>) or its ledger
+        /// state. The posture executor owns the stance of such a group (stance 2, <see cref="WhiskeyRealism.Tactical.Battle.IntentFlags.WorksHold"/>), so
+        /// #45 writes none: the entry is a Skip whose only content is the charge demotion, the explicit denial of a vanilla assault (4) that the doctrine
+        /// Deny of a hold makes (to stance 2), when charge denial is on.
+        /// </summary>
+        public static TacticalResolvedGroupDecision ForWorksHold(int vanillaOrdered, bool chargeDenialOn, bool orchestratorArmyOn, bool fromDoctrine)
+        {
+            ChargeDenialDecision ifAssault = TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(
+                chargeDenialOn, orchestratorArmyOn, DoctrineConsumerAction.Deny, false));
+            return new TacticalResolvedGroupDecision(
+                finalStance: ifAssault.DemoteStance,
+                kind: TacticalDoctrineDecisionKind.Skip,
+                reason: "works-hold",
+                fromDoctrine: fromDoctrine,
+                fromLedger: !fromDoctrine,
+                isChargeOverride: vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault,
+                chargeAction: ifAssault.Demotes ? ChargeOverrideAction.DemoteToHold : ChargeOverrideAction.PreserveVanilla);
         }
 
         /// <summary>

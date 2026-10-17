@@ -284,7 +284,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             ReinforcementOpportunity opportunity = ReinforcementOpportunity.NoOpportunity;
             try { opportunity = army.CurrentReinforcementOpportunity.Opportunity; }
             catch { /* NoOpportunity keeps the ledger task */ }
-            CommandTaskType task = TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, out string overrideReason);
+            CommandTaskType task = TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, leaf.WorksHeld, out string overrideReason);
 
             // Arrival synchronization: a Main brigade on AttackObjective waits as
             // Screen for its SupportMain siblings (TacticalMainArrivalSynchronizer).
@@ -544,7 +544,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (hasOrder) order = order.WithTask(recon.Task, recon.Reason);
             }
 
-            if (hasCavalry && !probe && !exploit && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
+            // BC14W: the cavalry follow turns a task into an attack on the nearest enemy; a group the works hold guard holds is left a hold.
+            if (hasCavalry && !probe && !exploit && !WorksHoldGuard.Holds(state.Task, state.Reason) &&
+                TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
             {
                 state = state.WithRoleAndTask(state.Role, cavalryTask);
                 if (hasOrder) order = order.WithTask(cavalryTask, cavalryReason);
@@ -569,7 +571,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             string overrideReason = null;
             CommandTaskType overridden = exploit
                 ? state.Task
-                : TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, out overrideReason);
+                : TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, WorksHoldGuard.Holds(state.Task, state.Reason), out overrideReason);
             if (overridden != state.Task && overrideReason != null)
             {
                 OnceLog.Info("tactical-brigade-posture:opportunity-override",
@@ -582,6 +584,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC9 stance guard, after every rewrite above (GT recon, cavalry follow, local
             // emergency, opportunity): a Defender gets no Probe and no attack task.
             PostureStanceGuard.Apply(stance, ref state, hasOrder, ref order);
+
+            // BC14W (requirement-works-hold): a group the works hold guard holds gets the hold's one stance (the mapper's, 2, flagged WorksHold) before
+            // the posture decision and whatever it returns, so an idle group already in formation is still held out of vanilla's assault. A former
+            // fix whose lane lies outside the works band still goes to its lane (its decision is the fix's) and holds and fires there.
+            bool worksHeld = WorksHoldGuard.Holds(state.Task, state.Reason) || (hasOrder && WorksHoldGuard.Holds(order.Task, order.Reason));
+            int worksStance = worksHeld && recordTick
+                ? PostureIntentPlan.SubmitWorksHoldStance(sink, rec.InstanceId, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId))
+                : 0;
+            bool worksLane = worksHeld && hasOrder && WorksHoldGuard.LaneOpen(in order, army?.Feasibility?.HeldWorks);
 
             // BC9: a probe that ended short of a superior enemy holds the ground it gained
             // while the ledger keeps the task it probed under (BattleRecon.ProbeTick).
@@ -596,7 +607,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool alreadyCorrect = !physical.PathInterrupted &&
                 (physical.ActiveMove ||
                  ((targetFormation < 0 || rec.Formation == targetFormation) &&
-                  idle == TacticalIdleClassification.ValidIdle && CommandPostureExecutor.IdleCanSatisfyTask(state.Task)));
+                  idle == TacticalIdleClassification.ValidIdle && CommandPostureExecutor.IdleCanSatisfyTask(worksLane ? CommandTaskType.FixEnemy : state.Task)));
             var eligibility = new WriteEligibilitySnapshot(
                 modeAllowsWrites: true,
                 playerProtected: physical.PlayerProtected,
@@ -609,7 +620,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 closeEngaged: closeEngaged);
 
             PostureExecutionDecision decision = hasOrder
-                ? CommandPostureExecutor.Decide(order, physical, eligibility, (float)s.DoctrineHours)
+                ? CommandPostureExecutor.Decide(order, physical, eligibility, (float)s.DoctrineHours, worksLane)
                 : CommandPostureExecutor.Decide(state, physical, eligibility);
 
             if (recordTick)
@@ -639,16 +650,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 else
                 {
                     PostureRoutes.Forget(rec.InstanceId);
-                    PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
-                    return false;
+                    PostureTelemetry.Group(s, i, reason, state, decision, worksStance, decision.Reason);
+                    return worksStance > 0;
                 }
             }
 
             bool hasTarget = PostureTargets.TryResolve(s, t, i, side, state, order, decision.Target, out float x, out float z);
             if (!hasTarget && t.NavDeferred)
             {
-                PostureTelemetry.Group(s, i, reason, state, decision, 0, "nav-budget-deferred");
-                return false;
+                PostureTelemetry.Group(s, i, reason, state, decision, worksStance, "nav-budget-deferred");
+                return worksStance > 0;
             }
             string targetReason = hasTarget ? decision.Reason : "target-unresolved";
             if (hasTarget && holding && BattleRecon.HoldBlocks(decision.Target, holdX, holdZ, holdDirX, holdDirZ, x, z))
@@ -674,8 +685,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 bool avoidCovered = PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z);
                 if (PostureRoutes.Resolve(s, t, i, x, z, avoidCovered, out roadRoute, out columnWait) == PostureRoutes.Outcome.Deferred)
                 {
-                    PostureTelemetry.Group(s, i, reason, state, decision, 0, "road-route-deferred");
-                    return false;
+                    PostureTelemetry.Group(s, i, reason, state, decision, worksStance, "road-route-deferred");
+                    return worksStance > 0;
                 }
                 if (roadRoute.Use || columnWait) targetFormation = RoadRoutePlanner.ColumnGroupFormation;
                 if (columnWait) targetReason = "road-column-wait";
@@ -728,8 +739,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ViaX1 = roadRoute.ViaX1,
                 ViaZ1 = roadRoute.ViaZ1,
                 ColumnWait = columnWait,
+                StanceSubmitted = worksStance > 0,
             };
-            int submitted = PostureIntentPlan.Submit(sink, request);
+            int submitted = worksStance + PostureIntentPlan.Submit(sink, request);
             // BC11 decision 4: an EnvelopmentManeuver Turn faces the group at the enemy line end (the executor
             // wheels it out of combat, rotates its regiments in place in combat).
             if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&

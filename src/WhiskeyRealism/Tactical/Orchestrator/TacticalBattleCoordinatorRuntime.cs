@@ -1957,6 +1957,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         dReason = dDec.Reason;
                     }
 
+                    // BC14W: a group the works hold guard holds takes its stance from the posture executor; #45 writes none and keeps only the
+                    // charge demotion (the doctrine Deny of a hold, to stance 2, for a vanilla assault).
+                    if (doctrineAction == DoctrineConsumerAction.Deny && string.Equals(dReason, DoctrineConsumerDecisions.WorksHoldReason, StringComparison.Ordinal))
+                    {
+                        cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: true);
+                        continue;
+                    }
+
                     ChargeDenialDecision ifAssault = TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(
                         chargeDenialOn,
                         orchestratorArmyOn,
@@ -1999,6 +2007,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // 3) Ledger task stance.
                     if (macro != 3 && TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state))
                     {
+                        if (WorksHoldGuard.Holds(state.Task, state.Reason))
+                        {
+                            cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: false);
+                            continue;
+                        }
                         int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
                             state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector), sideStance);
                         // The ledger claims ownership whenever it resolves

@@ -130,7 +130,9 @@ internal static partial class CommanderOpportunityTests
         int decide = body.IndexOf("CommandPostureExecutor.Decide(", StringComparison.Ordinal);
         int submit = body.IndexOf("PostureIntentPlan.Submit(", StringComparison.Ordinal);
         AssertTrue(follow > 0 && decide > follow && submit > follow, "the follow early return precedes the decision and every submit");
-        string followBlock = body.Substring(follow, decide - follow);
+        int followReturn = body.IndexOf("return false;", follow, StringComparison.Ordinal);
+        AssertTrue(followReturn > follow && followReturn < decide, "the follower returns before the decision");
+        string followBlock = body.Substring(follow, followReturn - follow + "return false;".Length);
         AssertTrue(followBlock.Contains("return false;"), "the follower returns without submitting");
         AssertFalse(followBlock.Contains("sink.Submit") || followBlock.Contains("PostureIntentPlan."), "and the follower block submits nothing");
     }
@@ -139,7 +141,8 @@ internal static partial class CommanderOpportunityTests
     {
         string body = RunBody();
         AssertContains(body, "bool probe = recordTick && !exploit && ReconIntentProducer.TryProbe(", "no probe nomination for an exploit");
-        AssertContains(body, "hasCavalry && !probe && !exploit && TryCavalryFollow(", "no cavalry follow rewrite for an exploit");
+        AssertContains(body, "hasCavalry && !probe && !exploit &&", "no cavalry follow rewrite for an exploit");
+        AssertContains(body, "!exploit && !WorksHoldGuard.Holds(state.Task, state.Reason) &&", "nor for a group the works hold guard holds");
         AssertContains(body, "TacticalGrandTacticianReconDecision recon = exploit", "no GT recon rewrite for an exploit");
         AssertContains(body, "CommandTaskType overridden = exploit", "no army opportunity override for an exploit");
         AssertContains(body, "bool holding = recordTick && !probe && !exploit && ReconIntentProducer.TryHold(", "no probe hold for an exploit");
