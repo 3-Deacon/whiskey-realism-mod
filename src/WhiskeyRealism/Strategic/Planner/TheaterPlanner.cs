@@ -471,8 +471,9 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             // The record the main effort is on has the deadband, not whichever record of the objective scores best today.
             int index = KeptRecord(cands, current, state, anyEligibility: true);
-            for (int i = 0; i < cands.Count && index < 0; i++)
-                if (cands[i].ObjectiveId == current && cands[i].Force >= 0 && (index < 0 || cands[i].Score > cands[index].Score)) index = i;
+            if (index < 0)
+                for (int i = 0; i < cands.Count; i++)
+                    if (cands[i].ObjectiveId == current && cands[i].Force >= 0 && (index < 0 || cands[i].Score > cands[index].Score)) index = i;
             if (index < 0) return;
             var cand = cands[index];
             if (cand.Eligible)

@@ -39,6 +39,7 @@ internal static class ReconNeverTasksTests
             ("AnInterruptedLeadRestartsTheRecordWindow", AnInterruptedLeadRestartsTheRecordWindow),
             ("AnInvalidKeptRecordIsLeftAtOnce", AnInvalidKeptRecordIsLeftAtOnce),
             ("DifferentChallengersDoNotAddUp", DifferentChallengersDoNotAddUp),
+            ("RecordsThatDifferOnlyInZAreDistinctRecords", RecordsThatDifferOnlyInZAreDistinctRecords),
             ("ALeadWithinTheMarginBreaksTheRecordWindow", ALeadWithinTheMarginBreaksTheRecordWindow),
             ("TheKeptRecordHasTheOddsDeadband", TheKeptRecordHasTheOddsDeadband),
             ("TheScoutedLatchFollowsTheKeptRecord", TheScoutedLatchFollowsTheKeptRecord),
@@ -531,6 +532,26 @@ internal static class ReconNeverTasksTests
             var plan = PlanOf(s, state);
             AssertNear(400f, plan.MainObjectiveX, 0.5f, "day " + day + ": two records beat it in turn, neither for three reviews");
         }
+    }
+
+    // Two records at one x, 10 apart in z: the record is its position, both axes.
+    private static CampaignSnapshot SideBySide(float importanceA, float importanceB)
+    {
+        var s = Records(importanceA, 0.05f);
+        s.Objectives.Clear();
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceA });
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 10f, HolderAlliance = 1, Available = true, Importance01 = importanceB });
+        return s;
+    }
+
+    private static void RecordsThatDifferOnlyInZAreDistinctRecords()
+    {
+        var state = new PlannerState();
+        AssertNear(0f, PlanOf(SideBySide(1f, 0f), state).MainObjectiveZ, 0.5f, "day 1: the record on the line");
+        PlanOf(SideBySide(0f, 1f), state);
+        PlanOf(SideBySide(0f, 1f), state);
+        AssertNear(10f, PlanOf(SideBySide(0f, 1f), state).MainObjectiveZ, 0.5f, "day 4: the other record after three reviews");
+        AssertNear(10f, PlanOf(SideBySide(1f, 0f), state).MainObjectiveZ, 0.5f, "day 5: the first leads once, the kept one stays");
     }
 
     // A record that leads, but by no more than the margin, is not a challenger: it breaks the run of reviews.
