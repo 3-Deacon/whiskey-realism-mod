@@ -722,9 +722,15 @@ internal static class MainFlankGuardTests
         // the producer's walk host and ledger lookup are the ones above
         string producer = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/Producers/PostureIntentProducer.cs");
         string method = FlankResponseTests.Between(producer, "private static bool FormationWithdraws(", "// BR-M1: holds a Main-effort brigade");
-        FlankResponseTests.AssertPinned(method, "ApproachLine.Walk(s.Own, s.OwnCount, index, ref host, out _, out bool walked);", "the ancestor walk");
-        FlankResponseTests.AssertPinned(method, "ColumnDeployment.WithdrawalTask(state.Task)", "and the ledger's task of every group above");
-        FlankResponseTests.AssertPinned(method, "if (ColumnDeployment.WithdrawalTask(task)) return true;", "and the guard's own task");
+        UnitChurnTests.PinStatement(UnitChurnTests.Code(method),
+            "private static bool FormationWithdraws(BattleSnapshot s, PostureTick.State t, int index, CommandTaskType task, TacticalBattleOrchestrator side) { "
+            + "if (ColumnDeployment.WithdrawalTask(task)) return true; "
+            + "var host = new FacingPulseIntentProducer.GroupWalkHost(t.Groups, s.Own, OrderExecutor.ForAlliance(s.Alliance), s.DoctrineHours); "
+            + "ApproachLine.Walk(s.Own, s.OwnCount, index, ref host, out _, out bool walked); if (walked) return true; int a = s.Own[index].ParentIndex; "
+            + "for (int hops = 0; a >= 0 && a < s.OwnCount && hops < ApproachLine.MaxGroupHops; hops++, a = s.Own[a].ParentIndex) "
+            + "if (PostureLedger.TryResolveState(s.Own[a].InstanceId, side, out CommandNodeOperationalState state) && ColumnDeployment.WithdrawalTask(state.Task)) return true; "
+            + "return false; }",
+            "the guard's own task, the ancestor walk (the posture rows and the recent withdrawal moves) and the ledger's task of every group above, each used");
     }
 
     // A unit whose order ended (no path, no queued order, not moving) with its last waypoint still the post is not on its way: it is sent again, and the
