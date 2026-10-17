@@ -34,6 +34,7 @@ internal static partial class WlOrderFlowTests
         public readonly List<(int type, P62Outcome outcome)> P62 = new List<(int, P62Outcome)>();
         public readonly List<int> AcceptedTypes = new List<int>();
         public readonly List<int> CalledTypes = new List<int>();
+        public readonly List<float> CalledXs = new List<float>();
         public CourierEntry? Retreat;
         public CourierEntry? Release;
         public CourierEntry? FollowUp;
@@ -71,8 +72,17 @@ internal static partial class WlOrderFlowTests
 
         public bool UnitGone(in CourierEntry e) => GoneUnits.Contains(e.UnitId);
         public MoveState Move = MoveState.Executed;
+        // A carrier unit's own state, by instance id; Move answers for any carrier not listed.
+        public readonly Dictionary<int, MoveState> CarrierMoves = new Dictionary<int, MoveState>();
+        public readonly List<int> MoveAskedAbout = new List<int>();
+        public bool RecordAsks;
         public int MoveAsks;
-        public MoveState MoveOf(in CourierEntry e) { MoveAsks++; return Move; }
+        public MoveState MoveOf(in CourierEntry e)
+        {
+            MoveAsks++;
+            if (RecordAsks) MoveAskedAbout.Add(e.CarrierUnitId);
+            return CarrierMoves.TryGetValue(e.CarrierUnitId, out MoveState state) ? state : Move;
+        }
         public bool ReleaseStillDue(in CourierEntry e) => ReleaseDue;
         public void SetDelivering(bool on) => Delivering = on;
         public void ClearSlot() { SavedBeforeClear = Slot; Slot = null; }
@@ -83,6 +93,7 @@ internal static partial class WlOrderFlowTests
             AssertTrue(Delivering, "vanilla is called with the bypass set");
             Calls++;
             CalledTypes.Add(e.Type);
+            CalledXs.Add(e.X);
             switch (Vanilla)
             {
                 case VanillaMode.Accept:

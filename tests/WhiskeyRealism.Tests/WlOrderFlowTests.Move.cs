@@ -7,22 +7,24 @@ using static TestHarness;
 // The player is told of a move when the superior that carries it has it (2026-10-16 smoke: "I got an
 // order to move from 1st brigade, but then that brigade never moves"). The executor queued the brigade's
 // move behind 21 other orders on the army's order queue (processing time +0.43 h, vanilla's
-// AddToOrderQueue 124945-124955), while the player's order was timed from the brigade's headquarters
-// alone (+0.02 h), so the panel showed the move 0.41 h before the brigade carried it out. An order whose
-// unit still has a move in vanilla's queue waits for that move, then runs its own leg to the player.
+// AddToOrderQueue 124954-124966), while the player's order was timed from the brigade's headquarters
+// alone (+0.02 h), so the panel showed the move 0.41 h before the brigade carried it out. An executor
+// dispatch waits for the queued move that carries it (the ordered group's, or the latest child's when
+// a fan-out around the player's command ordered the children), then runs its own leg to the player.
 internal static partial class WlOrderFlowTests
 {
     private const double Leg = 0.02;
 
-    // An executor dispatch captured at `issued` while the brigade's move was still queued: due after the
-    // brigade-to-player leg alone, armed to wait for the move.
+    // An executor dispatch captured at `issued` while the move it accompanies was still queued: due after the
+    // brigade-to-player leg alone, armed to wait for the carrier unit's move (the ordered unit by default).
     private static void PutMoveOrder(WlOrderFlow flow, double issued, int unit = 1, int type = 1, float x = 0f,
-        OrderOrigin origin = OrderOrigin.Executor, bool armed = true)
+        OrderOrigin origin = OrderOrigin.Executor, bool armed = true, int carrier = 0)
     {
         CourierEntry e = QEntry(issuer: unit, type: type, origin: origin, x: x, issuedAt: issued, dueAt: issued + Leg);
         e.UnitId = unit;
         e.AwaitsMove = armed;
         e.LegHours = armed ? Leg : 0.0;
+        e.CarrierUnitId = armed ? (carrier != 0 ? carrier : unit) : 0;
         flow.Queue.TryEnqueue(in e, 0.0, out _);
     }
 
@@ -274,22 +276,171 @@ internal static partial class WlOrderFlowTests
         AssertTrue(move >= 0 && dispatch > move, "Emit comes after IssueMove in Execute");
     }
 
-    private static void MoveGateArmsOnlyMoveShapedOrders()
+    // A fan-out (the player's command is not detached from the brigade): the planner orders the brigade's
+    // children, the brigade itself has no queue entry, and the dispatch still goes out for the brigade. The
+    // children's moves ride the brigade's own queue; the gate asks about the carrier child, not the brigade.
+    private static void FanOutOrderWaitsForTheLatestChildMove()
     {
-        AssertTrue(WlOrderFlow.ArmsMoveGate(OrderOrigin.Executor, 1), "executor move");
-        AssertTrue(WlOrderFlow.ArmsMoveGate(OrderOrigin.Executor, 0), "executor attack");
-        AssertTrue(WlOrderFlow.ArmsMoveGate(OrderOrigin.Executor, 11), "executor reserve");
-        AssertTrue(WlOrderFlow.ArmsMoveGate(OrderOrigin.Executor, 12), "executor hold");
-        AssertFalse(WlOrderFlow.ArmsMoveGate(OrderOrigin.Executor, 13), "never engage at will");
-        AssertFalse(WlOrderFlow.ArmsMoveGate(OrderOrigin.Executor, 15), "never a retreat");
-        for (int t = 0; t <= 4; t++) AssertTrue(WlOrderFlow.ArmsMoveGate(OrderOrigin.Vanilla, t), "vanilla type " + t);
-        AssertTrue(WlOrderFlow.ArmsMoveGate(OrderOrigin.Vanilla, 12), "vanilla defend");
-        AssertFalse(WlOrderFlow.ArmsMoveGate(OrderOrigin.Vanilla, 11), "vanilla reserve is relayed to the unit it is linked to");
-        AssertFalse(WlOrderFlow.ArmsMoveGate(OrderOrigin.Vanilla, 13), "vanilla contact state");
-        AssertFalse(WlOrderFlow.ArmsMoveGate(OrderOrigin.Vanilla, 14), "vanilla vanguard state");
-        AssertFalse(WlOrderFlow.ArmsMoveGate(OrderOrigin.Vanilla, 15), "vanilla retreat");
-        foreach (OrderOrigin o in new[] { OrderOrigin.P62, OrderOrigin.Release, OrderOrigin.FollowUp, OrderOrigin.Retreat, OrderOrigin.CampaignBridge })
-            AssertFalse(WlOrderFlow.ArmsMoveGate(o, 1), o + " is not about a move of its unit");
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.Executed, RecordAsks = true };
+        host.CarrierMoves[7] = MoveState.InFlight;
+        var flow = NewFlow(host);
+        PutMoveOrder(flow, issued: 10.0, unit: 100, carrier: 7);
+        flow.RunPass();
+        AssertEqual(0, host.Calls, "the brigade (100) has no move of its own, its child (7) is still waiting");
+        AssertEqual("1:defer:move-in-flight", RowsOf(host), "held for the child's move");
+        AssertTrue(host.MoveAskedAbout.Count == 1 && host.MoveAskedAbout[0] == 7, "the gate asked about the carrier child, not the ordered unit");
+        host.Now = 10.9;
+        host.CarrierMoves[7] = MoveState.Executed;
+        flow.RunPass();
+        AssertEqual(0, host.Calls, "the child's move is carried out: the leg runs");
+        host.Now = 10.9 + Leg;
+        flow.RunPass();
+        AssertEqual(1, host.Calls, "then the player is told");
+    }
+
+    private static void MoveCarrierIsTheLatestEntryOfTheUnitsOrdered()
+    {
+        var carrier = default(WlMoveCarrier);
+        AssertFalse(carrier.Has, "a dispatch that moved nothing through the queue has no carrier");
+        carrier.Consider(5, 17.30f);
+        carrier.Consider(6, 17.50f);
+        carrier.Consider(7, 17.40f);
+        carrier.Consider(0, 99f);
+        AssertEqual(6, carrier.UnitId, "the child carried out last carries the player's order");
+        AssertNear(17.50f, carrier.ProcessingTime, 1e-4f, "with its processing time");
+        carrier.Consider(8, 17.50f);
+        AssertEqual(6, carrier.UnitId, "a tie keeps the first");
+    }
+
+    private static void OnlyTheCarryingEntryCounts()
+    {
+        AssertTrue(WlMoveState.Carries(1, 17.50f, 17.50f), "the recorded entry itself");
+        AssertTrue(WlMoveState.Carries(0, 17.60f, 17.50f), "a later entry of the unit (the recorded one was replaced)");
+        AssertFalse(WlMoveState.Carries(1, 17.40f, 17.50f), "an older move of the same unit is another order's");
+        AssertFalse(WlMoveState.Carries(2, 17.60f, 17.50f), "a stop entry is no move");
+        AssertFalse(WlMoveState.Carries(4, 17.60f, 17.50f), "nor is a stance entry");
+    }
+
+    // The player always ends up with the latest order the chain gave (the held order is superseded, not lost).
+    private static void LaterOrderDeliveredFirstSupersedesTheHeldOne()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.InFlight };
+        var flow = NewFlow(host);
+        PutMoveOrder(flow, issued: 10.0, unit: 1, type: 0, x: 0f);                          // A: held for its move
+        PutMoveOrder(flow, issued: 10.1, unit: 2, type: 0, x: 3000f, origin: OrderOrigin.P62, armed: false);  // B: later, unarmed
+        host.Now = 10.5;
+        flow.RunPass();
+        AssertEqual("3000", string.Join(",", host.CalledXs), "B is shown with its own timing");
+        AssertEqual(1, flow.Queue.Count, "A is still held");
+        host.Move = MoveState.Executed;
+        host.Now = 11.0;
+        flow.RunPass();
+        host.Now = 11.0 + Leg;
+        flow.RunPass();
+        AssertEqual("3000", string.Join(",", host.CalledXs), "A, older than B, is never shown");
+        AssertTrue(host.Rows.Contains("0:discard:superseded"), "and it is reported, not lost: " + RowsOf(host));
+        AssertEqual(0, flow.Queue.Count, "nothing is left queued");
+    }
+
+    private static void HeldOrdersReleasedTogetherArriveInIssueOrder()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.InFlight };
+        var flow = NewFlow(host);
+        PutMoveOrder(flow, issued: 10.0, unit: 1, type: 0, x: 0f, carrier: 9);
+        PutMoveOrder(flow, issued: 10.2, unit: 2, type: 0, x: 3000f, carrier: 9);
+        flow.RunPass();
+        host.Move = MoveState.Executed;
+        host.Now = 11.0;
+        flow.RunPass();
+        host.Now = 11.0 + Leg;
+        flow.RunPass();
+        AssertEqual("0,3000", string.Join(",", host.CalledXs), "both are shown, the later one last: the player ends with the latest");
+    }
+
+    private static void LatestHeldOrderWinsWhenItsMoveIsCarriedOutFirst()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.InFlight };
+        host.CarrierMoves[10] = MoveState.InFlight;
+        host.CarrierMoves[20] = MoveState.InFlight;
+        var flow = NewFlow(host);
+        PutMoveOrder(flow, issued: 10.0, unit: 1, type: 0, x: 0f, carrier: 10);
+        PutMoveOrder(flow, issued: 10.2, unit: 2, type: 0, x: 3000f, carrier: 20);
+        flow.RunPass();
+        host.CarrierMoves[20] = MoveState.Executed;
+        host.Now = 10.7;
+        flow.RunPass();
+        host.Now = 10.7 + Leg;
+        flow.RunPass();
+        AssertEqual("3000", string.Join(",", host.CalledXs), "the later order's move was carried out first: it is shown");
+        host.CarrierMoves[10] = MoveState.Executed;
+        host.Now = 11.2;
+        flow.RunPass();
+        host.Now = 11.2 + Leg;
+        flow.RunPass();
+        AssertEqual("3000", string.Join(",", host.CalledXs), "the earlier order arrives after it and is countermanded");
+        AssertTrue(host.Rows.Contains("0:discard:superseded"), "with a row: " + RowsOf(host));
+    }
+
+    private static void LostLatestMoveLeavesThePlayerWithTheLastOrderHeCan()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.InFlight };
+        host.CarrierMoves[10] = MoveState.Executed;
+        host.CarrierMoves[20] = MoveState.Lost;
+        var flow = NewFlow(host);
+        PutMoveOrder(flow, issued: 10.0, unit: 1, type: 0, x: 0f, carrier: 10);
+        PutMoveOrder(flow, issued: 10.2, unit: 2, type: 0, x: 3000f, carrier: 20);
+        flow.RunPass();
+        host.Now = 10.5 + Leg;
+        flow.RunPass();
+        AssertEqual("0", string.Join(",", host.CalledXs), "the move that was lost is not announced; the earlier one is");
+        AssertTrue(host.Rows.Contains("0:discard:move-lost"), "the lost one is reported: " + RowsOf(host));
+    }
+
+    // Property: whatever the issue order, the release times and the lost moves, every captured order ends in
+    // exactly one reported outcome, nothing stays queued, and the last order shown is the latest-issued one
+    // whose move was not lost.
+    private static void NoOrderIsSilentlyLostAndTheLatestIsShownLast()
+    {
+        var rng = new Random(20261016);
+        for (int trial = 0; trial < 400; trial++)
+        {
+            var host = new FakeHost { Now = 10.0, Slot = null, Move = MoveState.InFlight };
+            var flow = NewFlow(host);
+            int n = 2 + rng.Next(6);
+            var execAt = new double[n];
+            var lost = new bool[n];
+            var armed = new bool[n];
+            int latestKept = -1;
+            for (int i = 0; i < n; i++)
+            {
+                armed[i] = rng.Next(4) != 0;
+                lost[i] = armed[i] && rng.Next(5) == 0;
+                execAt[i] = 10.2 + rng.NextDouble() * 0.9;
+                // x apart by 500 m so no capture is a near-duplicate; one issuer per order so no cadence drop.
+                PutMoveOrder(flow, issued: 10.0 + 0.01 * i, unit: 1 + i, type: 0, x: 500f * i,
+                    origin: armed[i] ? OrderOrigin.Executor : OrderOrigin.P62, armed: armed[i], carrier: 100 + i);
+                if (!lost[i]) latestKept = i;
+            }
+            for (double t = 10.0; t < 13.0; t += 0.01)
+            {
+                host.Now = t;
+                for (int i = 0; i < n; i++)
+                {
+                    if (!armed[i]) continue;
+                    host.CarrierMoves[100 + i] = t >= execAt[i] ? (lost[i] ? MoveState.Lost : MoveState.Executed) : MoveState.InFlight;
+                }
+                flow.RunPass();
+            }
+            int terminal = 0;
+            foreach (string row in host.Rows)
+                if (row.EndsWith(":deliver:accepted") || row.Contains(":discard:")) terminal++;
+            AssertEqual(n, terminal, "trial " + trial + ": every order has exactly one reported outcome: " + RowsOf(host));
+            AssertEqual(0, flow.Queue.Count, "trial " + trial + ": nothing is left queued");
+            if (latestKept >= 0)
+                AssertEqual(500f * latestKept, host.CalledXs[host.CalledXs.Count - 1], "trial " + trial + ": the last order shown is the latest-issued one that was not lost");
+            for (int k = 1; k < host.CalledXs.Count; k++)
+                AssertTrue(host.CalledXs[k] > host.CalledXs[k - 1], "trial " + trial + ": orders are shown in issue order");
+        }
     }
 
     private static void MoveStateClassification()
@@ -300,22 +451,32 @@ internal static partial class WlOrderFlowTests
         AssertEqual(MoveState.Executed, WlMoveState.Classify(moveQueued: false, courierLost: true), "a deleted entry has no courier to lose");
     }
 
-    // The runtime arms the gate from vanilla's queue for exactly the orders ArmsMoveGate names, only while
-    // couriers are on, and only reads the queue.
-    private static void RuntimeArmsFromVanillasQueue()
+    // The executor notes the queued move of every unit it moved (not only the ordered group), the dispatch
+    // carries the one carried out last, and the flow arms an entry only from that carrier.
+    private static void RuntimeArmsFromTheExecutorsCarrier()
     {
+        string exec = Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs");
+        string body = BodyOf(exec, "internal static int Execute(");
+        int loop = body.IndexOf("for (int t = 0; t < plan.Targets.Count; t++)", StringComparison.Ordinal);
+        int issue = body.IndexOf("IssueMove(", StringComparison.Ordinal);
+        int note = body.IndexOf("carrier.Consider(", StringComparison.Ordinal);
+        int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
+        AssertTrue(loop >= 0 && issue > loop && note > issue && emit > note, "each moved target's queue entry is noted after its IssueMove, inside the target loop, before Emit");
+        AssertTrue(Regex.IsMatch(body, @"if \(WlMoveQueue\.TryPending\(unit,\s*out float queuedAt\)\)\s*carrier\.Consider\(own\[targetIndex\]\.InstanceId,\s*queuedAt\);"),
+            "the carrier candidate is the issued target (a child in a fan-out), with its pending entry's processing time");
+        AssertTrue(Regex.IsMatch(body, @"IntentKind\(winner\.Task\),\s*in carrier\)"), "and Emit receives it");
         string code = Code(FlowRuntime);
-        string make = BodyOf(code, "private static bool TryMakeEntry(");
-        Match arm = Regex.Match(make, @"if\s*\(\s*CouriersOn\(\)\s*&&\s*WlOrderFlow\.ArmsMoveGate\(origin,\s*type\)\s*&&\s*MoveStateOf\(unit\)\s*!=\s*MoveState\.Executed\s*\)\s*\{\s*entry\.AwaitsMove\s*=\s*true;\s*entry\.LegHours\s*=\s*delay;\s*\}");
-        AssertTrue(arm.Success, "TryMakeEntry arms the entry from the unit's queued move with the courier delay as its leg");
-        string queued = BodyOf(code, "private static MoveState MoveStateOf(");
-        AssertTrue(queued.Contains("entry.ordertype > 1") && queued.Contains("entry.advisedunit"), "the queue entry is a move (ordertype 0 or 1) of the unit");
-        AssertTrue(queued.Contains("parent.GetComponent<Regiment>()"), "SetWaypoint's queue owner: the scene parent (91461-91504)");
-        AssertTrue(queued.Contains("WlMoveState.Classify(queued, lost)"), "the verdict is the pure classification");
-        string lost = BodyOf(code, "private static bool CourierLost(");
-        AssertTrue(lost.Contains("line.type == 1") && lost.Contains("line.targetunit") && lost.Contains("line.courierref == null"),
+        AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.CarrierUnitId != 0 && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.CarrierUnitId = call\.CarrierUnitId;\s*entry\.CarrierTime = call\.CarrierTime;\s*\}"),
+            "Route arms an entry from the call's carrier and only while couriers are on");
+        AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "no other origin is armed: vanilla's own orders are timed as before");
+        AssertTrue(BodyOf(code, "public MoveState MoveOf(").Contains("WlMoveQueue.StateOf(carrier, e.CarrierTime)"), "the host asks about the carrier unit and its entry");
+        string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
+        AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.processingtime, carrierProcessingTime)"), "only an entry that carries the order counts");
+        AssertTrue(queue.Contains("line.type == 1") && queue.Contains("line.targetunit") && queue.Contains("line.courierref == null"),
             "lost is vanilla's own test (125281-125286) on the entry's primary mounted courier line");
-        AssertFalse(code.Contains("orderstate"), "the unit's shared orderstate is not evidence about one order");
-        AssertTrue(BodyOf(code, "public MoveState MoveOf(").Contains("MoveStateOf(unit)"), "the host answers from the queue");
+        AssertTrue(queue.Contains("unit.transform.parent"), "the scene parent is the queue owner");
+        AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs").Contains("SetWaypoint 91461-91504"),
+            "and the comment names the vanilla lines it mirrors (SetWaypoint 91461-91504)");
+        AssertFalse(queue.Contains("orderstate"), "the unit's shared orderstate is not evidence about one order");
     }
 }

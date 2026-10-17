@@ -176,6 +176,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             public bool Campaign;
             public PlayerOrderCandidate P62;
             public OrderIntentKind Kind;
+            // An executor dispatch's carrier: the unit whose queued move the order accompanies, and when that
+            // entry is carried out (WlMoveCarrier). Zero when the dispatch moved nothing through the queue.
+            public int CarrierUnitId;
+            public float CarrierTime;
         }
 
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
@@ -228,12 +232,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Whiskey's own emitters enqueue directly: the executor's ancestor dispatch (origin Executor).
         // True when the order went on a courier. With both order-flow switches off the call goes to vanilla
         // as it always did, and the result is whether vanilla showed a new order.
-        internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind)
+        internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind,
+            in WlMoveCarrier carrier)
         {
             var call = new OrderCall
             {
                 Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
                 Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin, Kind = kind,
+                CarrierUnitId = carrier.UnitId, CarrierTime = carrier.ProcessingTime,
             };
             return EnqueueCall(in call);
         }
@@ -334,6 +340,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return CaptureVerdict.Pass;
             entry.P62Candidate = call.P62;
             entry.Kind = call.Kind;
+            // The executor moved the unit (or its children) through the order queue: the player is told one
+            // leg after that move is carried out, not when it is queued (WlOrderFlow.ReleaseOnMove).
+            if (call.CarrierUnitId != 0 && CouriersOn())
+            {
+                entry.AwaitsMove = true;
+                entry.CarrierUnitId = call.CarrierUnitId;
+                entry.CarrierTime = call.CarrierTime;
+            }
 
             if (verdict == CaptureVerdict.Drop)
             {
@@ -450,55 +464,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 IssuedAt = now,
                 Legs = legs,
                 Meters = meters,
+                LegHours = delay,
             };
             entry.DueAt = WlOrderFlow.DueAt(now, delay, CouriersOn(), deferUntil);
-            // The unit's own move is still riding to it (the executor queues it before it dispatches, and
-            // vanilla calls SetWaypoint before CheckCurrentOrderUpdate): the player's order waits for it.
-            if (CouriersOn() && WlOrderFlow.ArmsMoveGate(origin, type) && MoveStateOf(unit) != MoveState.Executed)
-            {
-                entry.AwaitsMove = true;
-                entry.LegHours = delay;
-            }
             return true;
-        }
-
-        // Where the unit's own move stands in its superior's order queue: not queued (carried out), queued,
-        // or queued with its courier gone (lost). SetWaypoint queues it on the unit's scene parent, or on the
-        // unit itself under the "Units" root (91461-91504), so the scene parent is the question here and
-        // not the command tree: this reads the queue vanilla wrote. Reads only; allocation free.
-        private static MoveState MoveStateOf(Regiment unit)
-        {
-            Transform parent = unit.transform.parent;
-            Regiment owner = parent != null ? parent.GetComponent<Regiment>() : null;
-            if ((UnityEngine.Object)owner == null) owner = unit;
-            var queue = owner.orderqueue;
-            if (queue == null) return MoveState.Executed;
-            GameObject moved = unit.gameObject;
-            bool queued = false;
-            bool lost = false;
-            for (int i = 0; i < queue.Count; i++)
-            {
-                Regiment.OrderQueue entry = queue[i];
-                if (entry == null || entry.ordertype > 1 || (UnityEngine.Object)entry.advisedunit != (UnityEngine.Object)moved) continue;
-                queued = true;
-                lost |= CourierLost(entry, moved);
-            }
-            return WlMoveState.Classify(queued, lost);
-        }
-
-        // The entry's own line to the moved unit is a mounted courier line (type 1) whose courier is gone:
-        // vanilla's lost-order test (125281-125286). Secondary lines to the unit's regiments are not asked.
-        private static bool CourierLost(Regiment.OrderQueue entry, GameObject moved)
-        {
-            var lines = entry.courierline;
-            if (lines == null) return false;
-            for (int k = 0; k < lines.Count; k++)
-            {
-                Regiment.OrderQueue.CourierLine line = lines[k];
-                if (line != null && line.type == 1 && (UnityEngine.Object)line.targetunit == (UnityEngine.Object)moved
-                    && (UnityEngine.Object)line.courierref == null) return true;
-            }
-            return false;
         }
 
         // Fills Legs with the path from the issuing headquarters down to the player's command along the
@@ -859,9 +828,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             public MoveState MoveOf(in CourierEntry e)
             {
-                Regiment unit = ResolveUnit(e.UnitId);
-                // A unit that is gone has no move to wait for; Process has already discarded it.
-                return unit == null ? MoveState.Executed : MoveStateOf(unit);
+                // The unit whose queued move carries the order (the ordered group, or the latest child a fan-out
+                // ordered); one that is gone has no move to wait for.
+                Regiment carrier = ResolveUnit(e.CarrierUnitId);
+                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, e.CarrierTime);
             }
 
             // The release is stale when contact has resumed (or the hysteresis no longer holds) while its

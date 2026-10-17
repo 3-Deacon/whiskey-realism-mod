@@ -1,0 +1,93 @@
+using UnityEngine;
+
+namespace WhiskeyRealism.Tactical.PlayerOrders
+{
+    // Reads the move entries vanilla keeps in a superior's order queue, for the move gate of the W&L order
+    // flow (WlOrderFlow.ReleaseOnMove). Runtime only; excluded from the test csproj. Reads only: nothing
+    // here queues, edits or deletes an entry.
+    //
+    // Vanilla anchors (decompile, build 14703111):
+    //   BattleUnits.SetWaypoint 91461-91504: the order is queued on the ordered unit's scene parent
+    //     (`gameObject = reg.transform.parent.gameObject`; a parent named "Units" has no Regiment, and the
+    //     unit queues on itself, 91494-91504). transform.parent is therefore the question here, the queue
+    //     owner vanilla itself keys on, and not the command tree (the snapshot's parent map answers that).
+    //   AddToOrderQueue 124917: an entry is {advisedunit, ordertype, processingtime}; ordertype 0 is a path
+    //     append and 1 a new path; a unit with a move already in flight gets no second entry (SetWaypoint
+    //     91485, ordertypeactive).
+    //   OrderQueue constructor (109640): processingtime is never before the entry's creation.
+    //   ProcessOrders 125173-125425: an entry is carried out and deleted when every courier line has run out.
+    //   SetOrderStatus 125484-125508: carrying it out transmits all the paths the unit then holds.
+    internal static class WlMoveQueue
+    {
+        // The unit's pending move entry with the latest processing time, or false when it has none.
+        internal static bool TryPending(Regiment unit, out float processingTime)
+        {
+            processingTime = 0f;
+            Regiment.OrderQueue entry = Latest(unit);
+            if (entry == null) return false;
+            processingTime = entry.processingtime;
+            return true;
+        }
+
+        // Where the carrier unit's move stands: carried out (no entry that carries the order), queued, or
+        // queued with its courier gone. Only an entry that WlMoveState.Carries counts, so an older move of
+        // the same unit is another order's.
+        internal static MoveState StateOf(Regiment unit, float carrierProcessingTime)
+        {
+            var queue = OwnerQueue(unit);
+            if (queue == null) return MoveState.Executed;
+            GameObject moved = unit.gameObject;
+            bool queued = false;
+            bool lost = false;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                Regiment.OrderQueue entry = queue[i];
+                if (entry == null || (UnityEngine.Object)entry.advisedunit != (UnityEngine.Object)moved) continue;
+                if (!WlMoveState.Carries(entry.ordertype, entry.processingtime, carrierProcessingTime)) continue;
+                queued = true;
+                lost |= CourierLost(entry, moved);
+            }
+            return WlMoveState.Classify(queued, lost);
+        }
+
+        private static Regiment.OrderQueue Latest(Regiment unit)
+        {
+            var queue = OwnerQueue(unit);
+            if (queue == null) return null;
+            GameObject moved = unit.gameObject;
+            Regiment.OrderQueue latest = null;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                Regiment.OrderQueue entry = queue[i];
+                if (entry == null || entry.ordertype > 1 || (UnityEngine.Object)entry.advisedunit != (UnityEngine.Object)moved) continue;
+                if (latest == null || entry.processingtime > latest.processingtime) latest = entry;
+            }
+            return latest;
+        }
+
+        // SetWaypoint 91461: the unit's scene parent owns its queue; under the "Units" root the unit does.
+        private static System.Collections.Generic.List<Regiment.OrderQueue> OwnerQueue(Regiment unit)
+        {
+            if ((UnityEngine.Object)unit == null) return null;
+            Transform parent = unit.transform.parent;
+            Regiment owner = parent != null ? parent.GetComponent<Regiment>() : null;
+            if ((UnityEngine.Object)owner == null) owner = unit;
+            return owner.orderqueue;
+        }
+
+        // The entry's own line to the moved unit is a mounted courier line (type 1) whose courier is gone:
+        // vanilla's lost-order test (125281-125286). Secondary lines to the unit's regiments are not asked.
+        private static bool CourierLost(Regiment.OrderQueue entry, GameObject moved)
+        {
+            var lines = entry.courierline;
+            if (lines == null) return false;
+            for (int k = 0; k < lines.Count; k++)
+            {
+                Regiment.OrderQueue.CourierLine line = lines[k];
+                if (line != null && line.type == 1 && (UnityEngine.Object)line.targetunit == (UnityEngine.Object)moved
+                    && (UnityEngine.Object)line.courierref == null) return true;
+            }
+            return false;
+        }
+    }
+}

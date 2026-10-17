@@ -25,12 +25,16 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public PlayerOrderCandidate P62Candidate;
         // What the order is for, for the condition lines under vanilla's text (Whiskey origins).
         public OrderIntentKind Kind;
-        // The order names a unit whose own vanilla move was still on its way when the order was captured
-        // (WlOrderFlow.ArmsMoveGate): the superior has not got that order yet, so the player is not told until
-        // it has. LegHours is the delay from that superior to the player (DueAt - IssuedAt at capture), run
-        // from the moment the move executes. MoveHeld: the "move-in-flight" row was written.
+        // An executor dispatch made while the move it accompanies was still in its superior's order queue
+        // (WlMoveCarrier): the superior has not got that order yet, so the player is not told until it has.
+        // CarrierUnitId is the instance id of the unit whose queued move carries the order (the ordered unit
+        // itself, or the latest of the children a fan-out ordered) and CarrierTime that entry's processing
+        // time. LegHours is the delay from the superior to the player (courier delay), run from the moment the
+        // move is carried out. MoveHeld: the "move-in-flight" row was written.
         public bool AwaitsMove;
         public bool MoveHeld;
+        public int CarrierUnitId;
+        public float CarrierTime;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.

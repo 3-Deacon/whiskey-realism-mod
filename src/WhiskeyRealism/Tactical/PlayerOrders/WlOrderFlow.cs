@@ -66,16 +66,47 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // an order delay does not give the unit its path at once: it queues the order on the unit's scene
     // parent (91461-91504) and the path waits for the courier (AddOrderCourierline 125009-125171). A move
     // entry (ordertype 0 append, 1 new path) stays in that queue until ProcessOrders carries it out and
-    // deletes it (125425, DeleteOrderQueue 124844). A mounted courier line (type 1) whose courier is gone
-    // is vanilla's own test for a lost order (125281-125286, 125308-125320): it clears the untransmitted
-    // waypoints, so the move will not be made. The unit's orderstate says nothing about one order: it is
-    // shared by every order to the unit, and DeleteOrderQueue resets it to 0 (124849).
+    // deletes it (125425, DeleteOrderQueue 124844); carrying it out transmits every path the unit holds at
+    // that time (SetOrderStatus 125484-125508), so a path added while an entry is pending rides that entry,
+    // new or older. A mounted courier line (type 1) whose courier is gone is vanilla's own test for a lost
+    // order (125281-125286, 125308-125320): it clears the untransmitted waypoints, so the move will not be
+    // made. The unit's orderstate says nothing about one order: it is shared by every order to the unit,
+    // and carrying out an entry resets it to 0 (124849, 125506).
     internal static class WlMoveState
     {
         public static MoveState Classify(bool moveQueued, bool courierLost)
         {
             if (!moveQueued) return MoveState.Executed;
             return courierLost ? MoveState.Lost : MoveState.InFlight;
+        }
+
+        // Does a queue entry of the carrier unit carry the order? A move entry (ordertype 0 or 1) whose
+        // processing time is not before the carrier's: the entry the dispatch recorded, or a later one that
+        // replaced it. An older entry of the same unit (earlier processing time) is another move.
+        public static bool Carries(int orderType, float entryProcessingTime, float carrierProcessingTime)
+        {
+            return orderType >= 0 && orderType <= 1 && entryProcessingTime >= carrierProcessingTime;
+        }
+    }
+
+    // The queued move that carries an executor dispatch: among the units one dispatch moved (the ordered
+    // group, or the children a fan-out around the player's command ordered), the one whose entry is carried
+    // out last. The player is told one leg after that entry; the others are carried out earlier or with it.
+    internal struct WlMoveCarrier
+    {
+        public int UnitId;
+        public float ProcessingTime;
+
+        public bool Has => UnitId != 0;
+
+        public void Consider(int unitId, float processingTime)
+        {
+            if (unitId == 0) return;
+            if (UnitId == 0 || processingTime > ProcessingTime)
+            {
+                UnitId = unitId;
+                ProcessingTime = processingTime;
+            }
         }
     }
 
@@ -283,18 +314,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         public const string MoveInFlight = "move-in-flight";
         public const string MoveLost = "move-lost";
-
-        // Does an order wait for its unit's own move? Vanilla hands a group's move to the unit by courier
-        // through its superior's queue, while the player's share of that order is a bugle away from the
-        // unit: the unit is the issuer of the player's order only once it has the move. The orders that
-        // come with a move of the unit they name are the executor's dispatches (SetWaypoint, then Emit) and
-        // vanilla's own objective, assault, support, separated-enemy and contact orders (types 0-4, 12).
-        // The derived orders (release, follow-up, retreat) and #62's are not about a move of their unit.
-        public static bool ArmsMoveGate(OrderOrigin origin, int type)
-        {
-            if (origin == OrderOrigin.Executor) return type >= 0 && type <= 12;
-            return origin == OrderOrigin.Vanilla && ((type >= 0 && type <= 4) || type == 12);
-        }
 
         public static double DueAt(double issuedAt, double delayHours, bool couriersOn, double deferUntil)
         {
@@ -534,7 +553,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return Deliver(ref e, token, clear: action == ReadmitAction.AdmitWithClear, out requeue);
         }
 
-        // The move gate (see ArmsMoveGate). True when the move has been carried out and the entry's leg has
+        // The move gate (WlMoveCarrier). True when the move has been carried out and the entry's leg has
         // passed, so the pass goes on with it. False when the entry is finished (a lost move: reported) or
         // must wait: requeue says so, and an entry still waiting for its move or for its leg goes back.
         private bool ReleaseOnMove(ref CourierEntry e, out bool requeue)
