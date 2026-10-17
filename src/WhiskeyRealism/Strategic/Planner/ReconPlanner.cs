@@ -100,6 +100,14 @@ namespace WhiskeyRealism.Strategic.Planner
             Select(ctx, candidates, into);
         }
 
+        // The tasks that exist to see the staged main effort's objective: the probe, the advance guard and the main-axis screen. The other
+        // tasks watch approaches and beliefs; none of them is worth a sector's hold reserve (ForceAllocator.AssignRecon).
+        internal static bool ScoutsMainObjective(in ReconTask task)
+        {
+            return task.Kind == ReconKind.Probe || task.Kind == ReconKind.AdvanceGuard
+                || (task.Kind == ReconKind.Screen && string.Equals(task.Reason, ReasonMainAxis, StringComparison.Ordinal));
+        }
+
         public static int PickFormation(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, ReconMissionLedger missions,
                                         in ReconTask task, ICollection<int> taken, bool mainEffortHasScreen)
         {
@@ -498,6 +506,18 @@ namespace WhiskeyRealism.Strategic.Planner
             int n = 0;
             for (int i = 0; i < s.Own.Count; i++)
                 if (WlChainRules.MayMove(s.Own[i].Chain) && CanMove(s, s.Own[i], detachment: true)) n++;
+            return n;
+        }
+
+        // The formations the mass rule accepts and the scout pick refuses for one reason alone: they stand in a vanilla list the planner does not
+        // treat as busy for massing (unitsinoffensiveoperations, groupstodefendcapital). The [Recon] row's listed=, so a day of tasks and
+        // no scout says whether the body the plan massed is one of them.
+        internal static int ListedCount(CampaignSnapshot s)
+        {
+            const FormationFlags lists = FormationFlags.InOffensiveOps | FormationFlags.CapitalDefense;
+            int n = 0;
+            for (int i = 0; i < s.Own.Count; i++)
+                if ((s.Own[i].Flags & lists) != 0 && TheaterPlanner.Movable(s.Own[i]) && WlChainRules.MayMove(s.Own[i].Chain)) n++;
             return n;
         }
 

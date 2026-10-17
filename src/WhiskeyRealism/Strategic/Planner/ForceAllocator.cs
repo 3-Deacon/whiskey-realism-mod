@@ -87,6 +87,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // (0.05 when the home was only a historical hint; the department is now the planner's own stable assignment).
         public const float HomeDepartmentDiscount = 0.25f;
         public const float ReserveSurplusMargin = 1.3f;
+        // Smoke 2026-10-17: the most scouts a staged main effort draws from the sectors' hold reserves in one review. One pair of eyes
+        // answers its question (the picture of the objective); more would turn the presumption's hold into a screen.
+        internal const int MaxReserveScouts = 1;
 
         internal const string ReasonBusy = "busy";
         internal const string ReasonPlayerCommand = "player-command";
@@ -621,6 +624,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (_done[i] || _inMass[i]) takenAndMass.Add(_s.Own[i].InstanceId);
                 }
                 bool mainHasScreen = false;
+                int drawn = 0;
                 for (int t = 0; t < _recon.Count; t++)
                 {
                     var task = _recon[t];
@@ -649,18 +653,61 @@ namespace WhiskeyRealism.Strategic.Planner
                         int outsideIndex = outside >= 0 ? _s.IndexOfOwn(outside) : -1;
                         if (outsideIndex >= 0 && ReconTier(outsideIndex) <= ReconTier(pick)) pick = outsideIndex;
                     }
+                    // Smoke 2026-10-17: the main effort keeps its last body. The pick could only return the mass's own last free formation,
+                    // and a push with no formation left is not a push (the mover reports it undispatchable and the plan keeps naming it).
+                    // A cavalry group is the exception D7 made on purpose: it screens although the plan massed it (ReconTier 0).
+                    if (pick >= 0 && _inMass[pick] && ReconTier(pick) != 0 && FreeMassBodies() <= 1) pick = -1;
+                    // Smoke 2026-10-17: the formations nothing else claimed are the only ones the pick sees, and the hold reserve claims every
+                    // ready formation before it (ReserveRules.Hold takes the massable ones nearest the army a sector faces until its need is
+                    // met, and an unscouted sector needs the presumption), so a staged push had nobody to scout with and stayed staged for
+                    // good. It draws one scout from the hold reserve, and only for the tasks that see its own objective.
+                    bool fromReserve = false;
+                    if (pick < 0 && _plan.MainStaged && drawn < MaxReserveScouts && ReconPlanner.ScoutsMainObjective(task))
+                    {
+                        pick = DrawFromHoldReserve(task, taken, mainHasScreen);
+                        fromReserve = pick >= 0;
+                    }
                     if (skippedTaken != null)
                     {
                         for (int k = 0; k < skippedTaken.Count; k++) taken.Remove(skippedTaken[k]);
                         for (int k = 0; k < skippedMass.Count; k++) takenAndMass.Remove(skippedMass[k]);
                     }
-                    if (pick < 0 || _done[pick]) continue;
+                    if (pick < 0 || (_done[pick] && !fromReserve)) continue;
                     int pickedId = _s.Own[pick].InstanceId;
                     Assign(pick, FormationRole.Recon, task.SectorId, task.HoldX, task.HoldZ, task.Reason, true);
+                    if (fromReserve) drawn++;
                     taken.Add(pickedId);
                     takenAndMass.Add(pickedId);
                     if (task.Kind == ReconKind.Screen && task.SectorId == _plan.MainSectorId) mainHasScreen = true;
                 }
+            }
+
+            // The mass's members no role has claimed yet: the bodies a scout pick could still take from the main effort.
+            private int FreeMassBodies()
+            {
+                int n = 0;
+                for (int i = 0; i < _n; i++)
+                    if (_inMass[i] && !_done[i]) n++;
+                return n;
+            }
+
+            // A ready formation the hold reserve kept for its sector (not a garrison seat, a capital guard or a recover): the cheapest
+            // thing a scout can be drawn from, since the sector's hold is a standing need and the scout is a detachment.
+            private bool IsHoldReserve(int i)
+            {
+                return _done[i] && _role[i] == FormationRole.Hold && ReferenceEquals(_reason[i], ReasonHoldReserve) && WlChainRules.MayMove(_s.Own[i].Chain);
+            }
+
+            // ReconPlanner.PickFormation over the hold reserve alone (everything else stays taken), so its own ranking (cavalry, then the
+            // smallest group, nearest) and every minimum of the pick apply. -1 when no reserve formation qualifies. The sector it came from
+            // shows the loss as a shortfall (ListShortfalls) like any hold formation that leaves.
+            private int DrawFromHoldReserve(in ReconTask task, HashSet<int> taken, bool mainHasScreen)
+            {
+                var open = new HashSet<int>(taken);
+                for (int i = 0; i < _n; i++)
+                    if (IsHoldReserve(i) && !GaveUpAt(i, task.HoldX, task.HoldZ)) open.Remove(_s.Own[i].InstanceId);
+                int id = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, open, mainHasScreen);
+                return id >= 0 && IsHoldReserve(_s.IndexOfOwn(id)) ? _s.IndexOfOwn(id) : -1;
             }
 
             // ReconPlanner.PickFormation's own ranking: cavalry-majority, then other combat groups.

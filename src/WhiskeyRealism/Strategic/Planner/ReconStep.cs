@@ -10,19 +10,24 @@ namespace WhiskeyRealism.Strategic.Planner
     internal struct ReconCounts : IEquatable<ReconCounts>
     {
         public int Screens, Pickets, AdvanceGuards, Probes, Recalled, UnwatchedApproaches, OldestBeliefDays, Pool;
+        // The review's planned tasks, and those with no scout bound to them (smoke 2026-10-17: unwatchedApproaches=3 and every mission count
+        // 0 said tasks existed and nobody was sent, but not how many, so tasks= unfilled= and pool= now read together).
+        public int Tasks, Unfilled;
+        // Of the formations the plan may mass, those in a vanilla offensive-operations or capital-defence list (no scout pick takes them).
+        public int Listed;
 
         public bool Equals(ReconCounts other)
         {
             return Screens == other.Screens && Pickets == other.Pickets && AdvanceGuards == other.AdvanceGuards &&
                    Probes == other.Probes && Recalled == other.Recalled && UnwatchedApproaches == other.UnwatchedApproaches &&
-                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool;
+                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool && Tasks == other.Tasks && Unfilled == other.Unfilled && Listed == other.Listed;
         }
 
         public string Row(int alliance)
         {
             return "[Recon] alliance=" + alliance + " screens=" + Screens + " pickets=" + Pickets + " advanceGuards=" + AdvanceGuards +
                    " probes=" + Probes + " recalled=" + Recalled + " unwatchedApproaches=" + UnwatchedApproaches +
-                   " oldestBeliefDays=" + OldestBeliefDays + " pool=" + Pool;
+                   " oldestBeliefDays=" + OldestBeliefDays + " tasks=" + Tasks + " unfilled=" + Unfilled + " listed=" + Listed + " pool=" + Pool;
         }
     }
 
@@ -130,8 +135,10 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (tasks != null)
             {
+                counts.Tasks = tasks.Count;
                 for (int i = 0; i < tasks.Count; i++)
                 {
+                    if (!HasMission(missions, tasks[i])) counts.Unfilled++;
                     string reason = tasks[i].Reason;
                     if (reason == ReconPlanner.ReasonMainAxis || reason == ReconPlanner.ReasonCapitalApproach || reason == ReconPlanner.ReasonFrontApproach)
                         counts.UnwatchedApproaches++;
@@ -140,6 +147,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (s != null)
             {
                 counts.Pool = ReconPlanner.ScoutPool(s);
+                counts.Listed = ReconPlanner.ListedCount(s);
                 for (int i = 0; i < s.Beliefs.Count; i++)
                 {
                     if (s.Beliefs[i].Confidence01 <= 0f) continue;
@@ -147,6 +155,20 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             return counts;
+        }
+
+        // An active mission carries the task: the ledger pairs them by kind, hold point and reason (ReconMissionLedger.Bind copies all three).
+        private static bool HasMission(ReconMissionLedger missions, in ReconTask task)
+        {
+            if (missions == null) return false;
+            var list = missions.Missions;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var m = list[i];
+                if (ReconMissionLedger.IsActive(m.State) && m.Kind == task.Kind && m.HoldX == task.HoldX && m.HoldZ == task.HoldZ
+                    && string.Equals(m.Reason, task.Reason, StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         private static SectorPlan SectorPlanOf(TheaterPlan plan, int sectorId)

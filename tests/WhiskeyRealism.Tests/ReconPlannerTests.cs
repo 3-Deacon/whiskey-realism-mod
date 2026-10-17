@@ -1272,7 +1272,7 @@ internal static class ReconPlannerTests
         AssertEqual(0, counts.Recalled, "none recalled");
         AssertEqual(3, counts.UnwatchedApproaches, "the three approach tasks, not the belief or probe tasks");
         AssertEqual(12, counts.OldestBeliefDays, "the oldest live belief; the expired one does not count");
-        AssertEqual("[Recon] alliance=0 screens=1 pickets=1 advanceGuards=1 probes=1 recalled=0 unwatchedApproaches=3 oldestBeliefDays=12 pool=4", counts.Row(0), "the row text");
+        AssertEqual("[Recon] alliance=0 screens=1 pickets=1 advanceGuards=1 probes=1 recalled=0 unwatchedApproaches=3 oldestBeliefDays=12 tasks=5 unfilled=5 listed=0 pool=4", counts.Row(0), "the row text (no mission stands at any task's hold point, so none of the five tasks is filled)");
         AssertTrue(counts.Equals(ReconStep.CountsOf(s, ledger, tasks)), "the same review twice is the same row (rows on change)");
 
         ledger.OnProbeContact(4, ContactEvidenceLedger.Build(Evidence(friendly: 1000f, enemy: 9000f)), Today);
