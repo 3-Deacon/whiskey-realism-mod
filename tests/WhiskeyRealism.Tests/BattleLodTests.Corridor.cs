@@ -46,11 +46,14 @@ internal static partial class BattleLodTests
         grid.CorridorSignature(10, 1000f, 1000f, 1000f, 1800f, BattleLod.CorridorWidthMeters, out int count);
         AssertEqual(2, count, "self (10) is skipped; 11 stands 20 m ahead (inside CorridorMinForward); 12 and 13 count; 14 is 1 m past the end");
         AssertNear(30f, TacticalFriendlySpatialGrid.CorridorMinForward, 0f, "the runtime's own minimum forward distance");
+        grid.CorridorSignature(13, 1000f, 1000f, 1000f, 1800f, BattleLod.CorridorWidthMeters, out int withoutSelf);
+        AssertEqual(1, withoutSelf, "the group's own entry, 799 m up its corridor, is not traffic for itself (only 12 counts)");
     }
 
     private static void CorridorHashIsOrderFree()
     {
-        var units = new[] { (1, 1000f, 1400f), (2, 1050f, 1500f), (3, 950f, 1600f), (4, 1000f, 1700f) };
+        // Four units within one grid cell, so the fill order is the order the corridor walk meets them in.
+        var units = new[] { (1, 1000f, 1400f), (2, 1004f, 1405f), (3, 996f, 1410f), (4, 1002f, 1415f) };
         var forward = GridWith(units);
         var reversed = new TacticalFriendlySpatialGrid();
         for (int u = units.Length - 1; u >= 0; u--) reversed.Add(units[u].Item1, units[u].Item2, units[u].Item3);
@@ -59,7 +62,7 @@ internal static partial class BattleLodTests
         AssertEqual(ca, cb, "the same count");
         AssertEqual(a, b, "the same hash, whatever the fill order");
 
-        var other = GridWith((1, 1000f, 1400f), (2, 1050f, 1500f), (3, 950f, 1600f), (5, 1000f, 1700f));
+        var other = GridWith((1, 1000f, 1400f), (2, 1004f, 1405f), (3, 996f, 1410f), (5, 1002f, 1415f));
         int c = other.CorridorSignature(99, 1000f, 1000f, 1000f, 1800f, 250f, out int cc);
         AssertEqual(ca, cc, "one unit replaced by another: the same count");
         AssertTrue(a != c, "and a different hash");

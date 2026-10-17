@@ -65,8 +65,10 @@ internal static partial class BattleLodTests
         int classify = At(runtime, "BattleLod.Classify(");
         int consume = At(runtime, "BattlePerceptionProbe.ConsumeChangeLatch(", classify);
         int refusals = At(runtime, "executor.ClearRefusals();", classify);
-        int carry = At(runtime, "arbiter.CarryForward(", Math.Max(consume, refusals));
-        AssertTrue(classify < consume && classify < refusals && Math.Max(consume, refusals) < carry,
+        int carryCall = At(runtime, "CarryClaims(s, state, arbiter);", Math.Max(consume, refusals));
+        int report = At(runtime, "Report(s, state, nowHours);", carryCall);
+        int carry = At(runtime, "arbiter.CarryForward(", report);
+        AssertTrue(classify < consume && classify < refusals && Math.Max(consume, refusals) < carryCall && carryCall < report && report < carry,
             "the pass reads the latches and refusals, they are cleared, and only then are claims carried");
     }
 
@@ -105,7 +107,11 @@ internal static partial class BattleLodTests
         AssertFalse(ClassText(PostureFile, "FireControlIntentProducer").Contains(gate),
             "fire control is not tiered: it reads the posture record, which a carried group keeps");
         AssertTrue(Source("src/WhiskeyRealism/Tactical/Battle/Producers/GroupStanceIntentProducer.cs").Contains(gate), "the group stance gates");
-        AssertTrue(Source("src/WhiskeyRealism/Tactical/Battle/Producers/PlayIntentProducer.cs").Contains(gate), "the division play gates");
+        string play = Source("src/WhiskeyRealism/Tactical/Battle/Producers/PlayIntentProducer.cs");
+        AssertTrue(play.Contains(gate), "the division play gates");
+        AssertTrue(play.Contains("if (!BattleLodRuntime.IsDue(s, child.Index)) continue;"), "a child that is not due is not decided again");
+        AssertTrue(play.Contains("if (dueParent >= 0 && BattleLodRuntime.IsDue(s, i)) _parentHasDueChild[dueParent] = true;"), "a due child marks its parent");
+        AssertTrue(play.Contains("if (parent < 0 || !_parentHasDueChild[parent]) continue;"), "and a parent with no due child is skipped whole");
         string artillery = Source("src/WhiskeyRealism/Tactical/Battle/Producers/ArtilleryIntentProducer.cs");
         int watchdog = At(artillery, "if (_pointBlank)");
         int watchdogEnd = At(artillery, "continue;", watchdog);
@@ -150,6 +156,10 @@ internal static partial class BattleLodTests
         // The task is the one the pipeline decides from: opportunity override and stance guard, for a pool group's order and a leaf brigade's task.
         AssertTrue(runtime.Contains("TacticalOpportunityTaskOverride.Override(") && runtime.Contains("PostureStanceGuard.Task("), "the rewrites that change a task");
         AssertTrue(runtime.Contains("army.CurrentReinforcementOpportunity") && runtime.Contains("army.CurrentBattleStance"), "and the plan signature carries what they read");
+        int signature = At(runtime, "private static int PlanSignature(");
+        string signatureBody = runtime.Substring(signature, At(runtime, "internal static ReinforcementOpportunity ReadOpportunity(", signature) - signature);
+        AssertTrue(signatureBody.Contains("h = h * 31 + (int)ReadOpportunity(army);"), "the plan signature folds the reinforcement opportunity");
+        AssertTrue(signatureBody.Contains("h = h * 31 + (int)army.CurrentBattleStance;"), "and the battle stance");
         // The latches and maneuvers: Full-only.
         foreach (string needle in new[]
         {
@@ -180,6 +190,8 @@ internal static partial class BattleLodTests
         AssertTrue(runtime.IndexOf("state.Covers(s)", gate, StringComparison.Ordinal) > gate, "an unclassified snapshot is always due");
         AssertTrue(runtime.IndexOf("ExploitTable.ForAlliance(s.Alliance).IsExploiting(", gate, StringComparison.Ordinal) > gate &&
             runtime.IndexOf("DropCarried(", gate, StringComparison.Ordinal) > gate, "a group an exploit just launched on is woken in the same tick (decision 12)");
+        AssertTrue(Regex.IsMatch(runtime, @"if \(!state\.PromoteNow\(s, ownIndex, LodPromotion\.Target, s\.DoctrineHours\)\) return false;\s*OrderArbiter\.ForAlliance\(s\.Alliance\)\?\.DropCarried\("),
+            "the wake-up promotes through trigger (c) on the doctrine clock, then drops the carried cells");
     }
 
     private static void TelemetryIsWired()
@@ -191,6 +203,8 @@ internal static partial class BattleLodTests
         foreach (string reason in new[] { "observation", "parent", "target", "bearing", "corridor", "plan", "distance", "fire", "moving", "pending", "player-chain" })
             AssertTrue(runtime.Contains("\"" + reason + "\""), "promotion reason " + reason);
         AssertTrue(runtime.Contains("0.1"), "one row per 0.1 doctrine hours");
+        AssertTrue(Regex.IsMatch(runtime, @"EnableTacticalObserver\.Value\)\s*EmitRow\(a, state\);"), "the row is emitted under Enable Tactical Observer");
+        AssertTrue(Regex.IsMatch(runtime, @"finally\s*\{\s*state\.ClearPromotionCounts\(\);\s*\}"), "and the promotion counts restart for the next row's window");
         AssertTrue(runtime.Contains("OnceLog.Info(\"tactical-battle-core:lod-first-fire\""), "the first-fire line");
         AssertTrue(runtime.Contains("[BattleLod] first distant tier: alliance="), "with the checklist's text");
         string policy = Source("src/WhiskeyRealism/Telemetry/TelemetryTagPolicy.cs");
