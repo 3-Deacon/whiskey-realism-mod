@@ -309,7 +309,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         // requirement-enemy-picture: the samples linked singly at 150 units; beyond MaxEnemyBodies the weakest merge into the nearest kept body.
-        private static void BuildEnemyBodies(FeasibilityJob job, DefenderPicture d)
+        // BC14W builds them in the Attacker run too when works exist (the junctions of requirement-works-shape), into the same scratch.
+        internal static void BuildEnemyBodies(FeasibilityJob job, DefenderPicture d)
         {
             EnemyPicture enemy = job.Enemy;
             int count = enemy.Count;

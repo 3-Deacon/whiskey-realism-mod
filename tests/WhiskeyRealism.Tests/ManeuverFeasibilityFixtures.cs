@@ -202,6 +202,8 @@ internal static class ManeuverFeasibilityFixtures
         /// <summary>Enemy unit records that are not observations: units the side does not perceive.</summary>
         public readonly List<UnitRecord> HiddenEnemies = new List<UnitRecord>();
         public float AssumedEnemyLateral, AssumedEnemyDepth;
+        /// <summary>BC14W: the works points the side has perceived (null: none).</summary>
+        public IFortificationPoints WorksPoints;
 
         private static FeasField _flat;
 
@@ -273,12 +275,14 @@ internal static class ManeuverFeasibilityFixtures
         }
 
         public EnemyObservation AddEnemy(float lateral, float depth, float strength, float heading = 180f, float fireRange = 100f,
-            int unitTyp = TacticalUnitType.Infantry, ObservationState state = ObservationState.Visible, float confidence = 1f)
+            int unitTyp = TacticalUnitType.Infantry, ObservationState state = ObservationState.Visible, float confidence = 1f,
+            float cover = 0f, int coverObject = 0, bool standing = false)
         {
             var o = new EnemyObservation
             {
                 InstanceId = 5000 + Enemies.Count, UnitTyp = unitTyp, X = X(lateral), Z = Z(depth), Strength = strength, State = state,
                 Confidence01 = confidence, Heading = heading, FireRange = fireRange, Morale = 1f,
+                CoverValue = cover, CoverObject = coverObject, Standing = standing,
             };
             Enemies.Add(o);
             return o;
@@ -360,7 +364,7 @@ internal static class ManeuverFeasibilityFixtures
                 ChildIds = ChildIds.ToArray(), ChildCount = ChildIds.Count, DeployedReserve = DeployedReserve.ToArray(),
                 Candidates = plans, CandidateCount = plans.Length, ReachByUnitType = ShippedReachByType, HasAssumedEnemy = HasAssumedEnemy,
                 AssumedEnemyX = X(AssumedEnemyLateral), AssumedEnemyZ = Z(AssumedEnemyDepth),
-                Cache = new LegCostCache(),
+                Cache = new LegCostCache(), Works = WorksPoints,
             };
         }
 

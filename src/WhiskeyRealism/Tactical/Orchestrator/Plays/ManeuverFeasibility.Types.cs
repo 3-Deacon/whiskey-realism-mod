@@ -52,6 +52,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float Daylight, Detail, Contested, Approach, Exposure, Turn, Penalty;
         /// <summary>The reason literal when this body's penalty is largest (set with the verdict).</summary>
         public string Reason;
+        /// <summary>
+        /// BC14W (requirement-works-pricing): the body's strike point lies on held works. <see cref="AssaultsWorks"/> when the body attacks them
+        /// (an enveloping body, a single-body plan's main body, a focal assault's assault body): it is held to <see cref="BarUsed"/>, three times the
+        /// commander's bar. A fixing main body whose strike point lies on works holds there and assaults nothing (requirement-turn-first).
+        /// </summary>
+        public bool StrikeOnWorks, AssaultsWorks;
+        /// <summary>The bar the detail term was measured against (the commander's, or three times it for a works assault).</summary>
+        public float BarUsed;
+        /// <summary>A holding fix's enemy outside works (requirement-turn-first): the enemy against it counts only that; 0 for every other body.</summary>
+        public float EnemyOpen;
     }
 
     /// <summary>One candidate play with its evaluated side and verdict; its bodies are <c>BodyStart..BodyStart+BodyCount</c> in the ledger's body array.</summary>
@@ -213,5 +223,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool HasAssumedEnemy;
         public float AssumedEnemyX, AssumedEnemyZ;
         public LegCostCache Cache;
+        /// <summary>BC14W: the works points the side has perceived (the runtime's ObstacleLine pieces); null reads the works samples alone.</summary>
+        public IFortificationPoints Works;
     }
 }

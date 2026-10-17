@@ -18,6 +18,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private float[] _z = new float[64];
         private float[] _w = new float[64];
         private int[] _type = new int[64];
+        private bool[] _open = new bool[64];
 
         public int Count { get; private set; }
 
@@ -69,7 +70,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 sumMorale += (obs[i].Morale > 0f ? obs[i].Morale : 1f) * w;
             }
             P = sumW;
+            POpen = sumW;
             Morale = sumW > 0f ? sumMorale / sumW : 1f;
+            for (int i = 0; i < Count; i++) _open[i] = true;
             N = Math.Max(P, estimate) * (1f + ManeuverFeasibility.FogPremium(confidence, caution01));
             if (Count > 0)
             {
@@ -81,6 +84,49 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 MassX = hasAssumed ? assumedX : fallbackX;
                 MassZ = hasAssumed ? assumedZ : fallbackZ;
             }
+            OpenMassX = MassX;
+            OpenMassZ = MassZ;
+        }
+
+        /// <summary>BC14W (requirement-turn-first): the perceived strength standing outside held works, and the centroid of those samples.</summary>
+        public float POpen { get; private set; }
+
+        public float OpenMassX { get; private set; }
+
+        public float OpenMassZ { get; private set; }
+
+        /// <summary>
+        /// Marks the samples outside held works (BC14W). A holding fix against works fights only these: an enemy holding works gives up their value
+        /// to come out. With no works every sample is open.
+        /// </summary>
+        public void ClassifyOpen(IWorksQuery works)
+        {
+            float sumW = 0f, sumX = 0f, sumZ = 0f;
+            for (int i = 0; i < Count; i++)
+            {
+                bool open = works == null || !works.OnHeldWorks(_x[i], _z[i]);
+                _open[i] = open;
+                if (!open) continue;
+                sumW += _w[i];
+                sumX += _x[i] * _w[i];
+                sumZ += _z[i] * _w[i];
+            }
+            POpen = sumW;
+            OpenMassX = sumW > 0f ? sumX / sumW : MassX;
+            OpenMassZ = sumW > 0f ? sumZ / sumW : MassZ;
+        }
+
+        /// <summary>The sampled strength outside held works within <paramref name="radius"/> of a point (<see cref="ClassifyOpen"/> first).</summary>
+        public float NearOpen(float x, float z, float radius)
+        {
+            float sum = 0f, r2 = radius * radius;
+            for (int i = 0; i < Count; i++)
+            {
+                if (!_open[i]) continue;
+                float dx = _x[i] - x, dz = _z[i] - z;
+                if (dx * dx + dz * dz <= r2) sum += _w[i];
+            }
+            return sum;
         }
 
         /// <summary>The sampled strength within <paramref name="radius"/> of a point.</summary>
@@ -116,6 +162,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Array.Resize(ref _z, size);
             Array.Resize(ref _w, size);
             Array.Resize(ref _type, size);
+            Array.Resize(ref _open, size);
         }
     }
 
@@ -165,22 +212,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // ---- the evaluation's risk pass --------------------------------------------------------------------------
 
         // Called by EvaluateSide after the common plan: fills each body's risk terms. A Defender's candidates carry only the turning term (BC14's
-        // Defender pass), so the attacker's terms are skipped for them.
+        // Defender pass), so the attacker's terms are skipped for them. BC14W (requirement-works-pricing): a body whose strike point lies on held
+        // works pins at no less than WorksDefenseRatio, and one that attacks them (an enveloping body, a single-body plan's main body) is a works
+        // assault; a single-body plan gets a detail term only when it assaults works.
         private static void ComputeRisk(FeasibilityJob job, PlayTemplate template, CandidateScratch w)
         {
             if (job.Input.Stance == BattleStance.Defender) return;
             bool dividing = false;
             for (int b = 0; b < w.BodyCount; b++) if (w.Bodies[b].Envelops) dividing = true;
 
+            bool anyAssault = false;
             for (int b = 0; b < w.BodyCount; b++)
             {
                 ref BodyEstimate body = ref w.Bodies[b];
                 body.DefenseRatio = DefenseRatioAt(job, body.StrikeX, body.StrikeZ, body.TargetX, body.TargetZ);
+                if (job.WorksActive && job.Works.OnHeldWorks(body.StrikeX, body.StrikeZ))
+                {
+                    body.StrikeOnWorks = true;
+                    body.AssaultsWorks = body.Envelops || !dividing;
+                    anyAssault |= body.AssaultsWorks;
+                    if (body.DefenseRatio < WorksRules.WorksDefenseRatio) body.DefenseRatio = WorksRules.WorksDefenseRatio;
+                }
                 if (body.DesiredStrikeHours > job.Input.DaylightHours - DaylightMarginHours) body.Daylight = 1f;
                 body.Approach = ApproachOf(job, w, b);
                 if (body.Envelops) body.Exposure = ExposureOf(job, w, b);
             }
-            if (!dividing) return;
+            if (!dividing && !anyAssault) return;
             Span<float> strikeHours = stackalloc float[w.BodyCount];
             for (int b = 0; b < w.BodyCount; b++) strikeHours[b] = w.Bodies[b].DesiredStrikeHours;
             DetailRisk(new Span<BodyEstimate>(w.Bodies, 0, w.BodyCount), strikeHours, job, w, Bar(in job.Input.Army));
@@ -211,6 +268,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// Steps 1 to 6 of requirement-detail-risk for every body: the pinned enemy, the exposure window, the enemy against the body, the
         /// isolated odds against <paramref name="bar"/> and the detail penalty. The strike hours are an input (one per body): Evaluate passes the
         /// synchronized S*, a harness can pass each body's own T to measure a plan without the common release.
+        /// BC14W: a body that assaults held works is held to <see cref="WorksRules.WorksOddsFactor"/> times the bar, its window is the assault hour
+        /// in place of the support time, and its odds are an attacker's (own 1); a main body that only holds against held works keeps the bar and
+        /// meets only the enemy outside works (requirement-turn-first).
         /// </summary>
         internal static void DetailRisk(Span<BodyEstimate> bodies, ReadOnlySpan<float> strikeHours, FeasibilityJob job, CandidateScratch members, float bar)
         {
@@ -218,6 +278,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             for (int j = 0; j < bodies.Length; j++)
             {
                 ref BodyEstimate b = ref bodies[j];
+                bool assault = b.AssaultsWorks;
+                bool holdsAgainstWorks = b.StrikeOnWorks && !assault;
                 // 1. the pinned enemy: the other bodies that have struck by this body's strike (support out of earshot is not support).
                 float pin = 0f;
                 float latest = strikeHours[j];
@@ -229,27 +291,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
                 b.Pin = pin;
 
-                // 2. the exposure window: the wait for the last body plus the own support time.
-                float sigma = SupportHours(job, members, bodies, j);
+                // 2. the exposure window: the wait for the last body plus the own support time (a works assault: the assault hour).
+                float sigma = assault ? WorksRules.AssaultHours : SupportHours(job, members, bodies, j);
                 b.SupportHours = sigma;
                 b.ExposureWindowHours = Math.Max(0f, latest - strikeHours[j]) + sigma;
-                b.EnemyShiftHours = ShiftHours(job, in b);
+                b.EnemyShiftHours = ShiftHours(job, in b, holdsAgainstWorks);
 
-                // 3. the enemy against this body.
-                float local = enemy.P > 0f ? enemy.Near(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * (enemy.N / enemy.P)
-                    : enemy.N / (bodies.Length + 1);
+                // 3. the enemy against this body (a holding fix against works: the enemy outside works only).
+                float scale = enemy.P > 0f ? enemy.N / enemy.P : 0f;
+                float pool = enemy.N;
+                float local;
+                if (holdsAgainstWorks)
+                {
+                    pool = enemy.P > 0f ? enemy.N * enemy.POpen / enemy.P : 0f;
+                    local = enemy.NearOpen(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * scale;
+                    b.EnemyOpen = pool;
+                }
+                else local = enemy.P > 0f ? enemy.Near(b.StrikeX, b.StrikeZ, OddsRadiusMeters) * scale : enemy.N / (bodies.Length + 1);
                 b.LocalEnemy = local;
                 float share = ShiftShare(b.ExposureWindowHours, b.EnemyShiftHours);
-                b.EnemyAgainst = local + share * Math.Max(0f, enemy.N - pin - local);
+                b.EnemyAgainst = local + share * Math.Max(0f, pool - pin - local);
 
-                // 4. the isolated odds: the main body fights from its ground, a wing attacks.
-                b.OwnRatio = b.Main ? MainOwnRatio(job, in b) : 1f;
+                // 4. the isolated odds: the main body fights from its ground, a wing or a works assault attacks.
+                b.OwnRatio = b.Main && !assault ? MainOwnRatio(job, in b) : 1f;
                 b.IsolatedOdds = b.EnemyAgainst > 0f
                     ? b.Strength * b.Morale * b.OwnRatio / (b.EnemyAgainst * enemy.Morale)
                     : EnemyVisibleSector.MaxKnowableOdds;
 
                 // 5. and 6. the bar and the penalty.
-                b.Detail = DetailPenalty(b.IsolatedOdds, bar);
+                b.BarUsed = assault ? WorksRules.WorksOddsFactor * bar : bar;
+                b.Detail = DetailPenalty(b.IsolatedOdds, b.BarUsed);
             }
         }
 
@@ -295,12 +366,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         // requirement-shift-time: the enemy's courier plus its march (infantry, unfatigued, over the same crossing graph, an own-covered crossing
-        // costing time) from its mass, or from its line end on the side a strike point beyond that end lies, to the body's strike point.
-        private static float ShiftHours(FeasibilityJob job, in BodyEstimate b)
+        // costing time) from its mass, or from its line end on the side a strike point beyond that end lies, to the body's strike point. BC14W:
+        // for a holding fix against works the mass is that of the enemy outside works (<paramref name="fromOpenEnemy"/>).
+        private static float ShiftHours(FeasibilityJob job, in BodyEstimate b, bool fromOpenEnemy)
         {
             EnemyPicture enemy = job.Enemy;
             TacticalFrontAxis axis = job.Input.Axis;
-            float ox = enemy.MassX, oz = enemy.MassZ;
+            float ox = fromOpenEnemy ? enemy.OpenMassX : enemy.MassX, oz = fromOpenEnemy ? enemy.OpenMassZ : enemy.MassZ;
             if (axis.HasEnemyExtent)
             {
                 float lateral = axis.LateralOf(b.StrikeX, b.StrikeZ);

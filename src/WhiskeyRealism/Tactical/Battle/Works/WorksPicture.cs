@@ -481,10 +481,10 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        // The sum of strength x morale x (1 + cover) over the segment's holders within OddsRadiusMeters (BC13's 300, inclusive).
+        // The sum of strength x morale x (1 + cover) over the segment's holders within the odds radius of the point (BC13's, inclusive).
         private float HoldersValue(int segment, float x, float z)
         {
-            float r2 = WorksRules.FrontageReachMeters * WorksRules.FrontageReachMeters, sum = 0f;
+            float r2 = OpeningDetector.LocalEnemyValueRadiusMeters * OpeningDetector.LocalEnemyValueRadiusMeters, sum = 0f;
             for (int h = 0; h < _holderCount; h++)
             {
                 if (_hseg[h] != segment) continue;

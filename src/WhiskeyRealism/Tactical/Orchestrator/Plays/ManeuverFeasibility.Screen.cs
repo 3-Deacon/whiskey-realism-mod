@@ -242,7 +242,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             string reason = null;
             float largest = ReasonThreshold;
             if (b.Daylight > largest) { largest = b.Daylight; reason = "after-dark"; }
-            if (b.Detail > largest) { largest = b.Detail; reason = "detail"; }
+            if (b.Detail > largest) { largest = b.Detail; reason = b.AssaultsWorks ? "works" : "detail"; }
             if (0.6f * b.Contested > largest) { largest = 0.6f * b.Contested; reason = b.NoStrikePath && b.Contested >= b.StrikeContested ? "no-strike-crossing" : "contested"; }
             if (0.5f * b.Approach > largest) { largest = 0.5f * b.Approach; reason = "approach"; }
             if (0.4f * b.Exposure > largest) { reason = "exposure"; }

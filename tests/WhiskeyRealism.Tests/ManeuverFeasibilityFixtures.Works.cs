@@ -4,6 +4,7 @@ using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using static BattleMovementHonestyTests;
+using static ManeuverFeasibilityFixtures;
 
 // BC14W fixtures (no tests here): a works field in the spec's own frame (§ 6 scenarios 6-9), fake works points and the pure picture built
 // over them. Lateral is the right of the army's heading and depth is forward toward the enemy; the map is the 2,400-unit square of FeasField
@@ -88,5 +89,23 @@ internal static class WorksFixtures
     {
         BattleTerrainGrid grid = GridOf(Size, Size, (x, zi) => x < riverBelowX || x >= riverFromX ? River : Grass);
         return TerrainPictureTests.Build(grid, Size, TerrainPictureTests.Flat());
+    }
+
+    /// <summary>
+    /// § 6 scenario 6: 35,000 against 25,000, the enemy's left and centre clusters in earth parapets on a held segment from -600 to +150 at depth 600
+    /// (a perceived works point every 50), its left end on a river beyond -620, the right cluster in the open at +450.
+    /// </summary>
+    public static FeasField Scenario6(float enemy = 25000f)
+    {
+        BattleTerrainGrid grid = GridOf(Size, Size, (x, zi) => x < X(-620f) ? River : Grass);
+        var f = new FeasField(grid);
+        f.AddCorps(-300f, 0f, 12000f);
+        f.AddCorps(0f, 0f, 11000f);
+        f.AddCorps(300f, 0f, 12000f);
+        f.AddEnemy(-450f, 600f, enemy / 3f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(0f, 600f, enemy / 3f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(450f, 600f, enemy / 3f);
+        f.WorksPoints = new Points().Line(-600f, 150f, 50f, l => 600f);
+        return f;
     }
 }

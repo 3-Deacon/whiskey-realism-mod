@@ -77,6 +77,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private bool[] _ownExcluded = new bool[256];
         internal readonly CrossingGraphView Graph = new CrossingGraphView();
         internal readonly EnemyPicture Enemy = new EnemyPicture();
+        /// <summary>
+        /// BC14W: the works picture of this evaluation (the enemy's works for an Attacker or a Meeting side), built once in <see cref="Begin"/> under
+        /// Enable Enemy Works Doctrine; null with the flag off, so every works term reads "no works" and the core prices as before.
+        /// </summary>
+        internal readonly WorksPicture Works = new WorksPicture();
+        internal bool WorksActive;
         private readonly LegCostCache _ownCache = new LegCostCache();
 
         internal readonly ChildFact[] Children = new ChildFact[ManeuverFeasibility.MaxChildren];
@@ -171,6 +177,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Input.AssumedEnemyZ, EnemyX, EnemyZ);
             PrepareChildren();
             ManeuverFeasibility.BeginDefender(this);
+            ManeuverFeasibility.BuildWorks(this);
             WorkUnits = 0;
             MaxUnitCost = 0;
             ledger.BeginBack();
