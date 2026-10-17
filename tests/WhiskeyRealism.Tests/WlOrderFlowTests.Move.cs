@@ -548,6 +548,7 @@ internal static partial class WlOrderFlowTests
         AssertTrue(queue.Contains("if (latest == null || entry.processingtime > latest.processingtime) latest = entry;"), "the carrier entry of a unit is its latest pending move");
         AssertTrue(queue.Contains("processingTime = entry.processingtime;") && queue.Contains("stamp = entry.lastupdate;") && queue.Contains("orderType = entry.ordertype;"), "the carrier records the entry's processing time and its creation stamp");
         AssertTrue(queue.Contains("unit.transform.parent"), "the scene parent is the queue owner");
+        AssertFalse(queue.Contains("queue == null"), "the owner queue is never null (orderqueue is initialised at its declaration, 111866): no unreachable no-queue verdict");
         AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs").Contains("SetWaypoint 91461-91504"),
             "and the comment names the vanilla lines it mirrors (SetWaypoint 91461-91504)");
         AssertFalse(queue.Contains("orderstate"), "the unit's shared orderstate is not evidence about one order");

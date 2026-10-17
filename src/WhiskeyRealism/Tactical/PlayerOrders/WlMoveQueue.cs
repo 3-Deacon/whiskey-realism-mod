@@ -46,7 +46,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         internal static MoveState StateOf(Regiment unit, in WlMoveCarrier carrier)
         {
             var queue = OwnerQueue(unit);
-            if (queue == null) return MoveState.Executed;
             GameObject moved = unit.gameObject;
             bool queued = false;
             bool lost = false;
@@ -69,7 +68,6 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static Regiment.OrderQueue Latest(Regiment unit)
         {
             var queue = OwnerQueue(unit);
-            if (queue == null) return null;
             GameObject moved = unit.gameObject;
             Regiment.OrderQueue latest = null;
             for (int i = 0; i < queue.Count; i++)
@@ -81,10 +79,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return latest;
         }
 
-        // SetWaypoint 91461: the unit's scene parent owns its queue; under the "Units" root the unit does.
+        // SetWaypoint 91461: the unit's scene parent owns its queue; under the "Units" root the unit does. The
+        // queue is never null (`orderqueue` is initialised where it is declared, 111866), and both callers hold
+        // a live unit (the executor's issued target; the host's resolved carrier), so there is no "no queue" case.
         private static System.Collections.Generic.List<Regiment.OrderQueue> OwnerQueue(Regiment unit)
         {
-            if ((UnityEngine.Object)unit == null) return null;
             Transform parent = unit.transform.parent;
             Regiment owner = parent != null ? parent.GetComponent<Regiment>() : null;
             if ((UnityEngine.Object)owner == null) owner = unit;
