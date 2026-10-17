@@ -62,6 +62,17 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         Lost,     // vanilla will not carry the move out: its courier is gone, or the entry is gone and the path with it
     }
 
+    // Why a move whose queue entry is gone counts as carried out (WlMoveState.BasisAfterGone), written on the
+    // flow row (`gate`): the unit stands at the target (Arrived), holds a path that ends at it (Path), or
+    // stopped in contact near it (Contact). None: it was not carried out.
+    internal enum MoveBasis
+    {
+        None,
+        Arrived,
+        Path,
+        Contact,
+    }
+
     // What vanilla's own order queue says about a unit's move (decompile build 14703111). SetWaypoint with
     // an order delay does not give the unit its path at once: it queues the order on the unit's scene
     // parent (91461-91504) and the path waits for the courier (AddOrderCourierline 125009-125171). A move
@@ -82,11 +93,25 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // is in contact (vanilla's own CheckEnemyContact halts an AI group that meets the enemy, StopRegiment at
     // 117372-117383, and treats `combatstatussubordinates > 0` as a group busy with combat, 3593, 8090: a unit
     // that stopped to fight has done what the move was for), and as lost otherwise.
+    //
+    // Each of the three readings is tied to the TARGET (2026-10-17 smoke, order 6: a fall-back to a point 2 km
+    // to the rear was released because the brigade held a re-laid path and was later in contact, neither
+    // checked against the target). A held path counts when it ENDS at the target (the unit's last set
+    // waypoint, which vanilla stamps on every group move, 92067), a contact halt counts within ContactNearMeters
+    // of it, and standing within ArrivalMeters of it always counts.
     internal static class WlMoveState
     {
         // = OrderArbiter.DedupeMeters: the distance inside which the executor itself counts a unit as already
         // at a target (a waypoint 60 m from where it stands is not re-issued).
         public const float ArrivalMeters = 60f;
+
+        // A contact halt counts as the move carried out only this close to its target: a regiment's sight
+        // (unitprefs maximumlineofsight 200-250 m for the combat arms, docs/vanilla-vision-and-movement.md)
+        // plus the arrival distance. The unit halted where it met the enemy, so the enemy is within sight of
+        // the objective it was sent to; a halt farther off met the enemy somewhere else. Calibration, not a
+        // vanilla constant: smoke 2026-10-17 order 6 halted 2000 m short, a legitimate halt near the target
+        // is within a few hundred metres.
+        public const float ContactNearMeters = 310f;
 
         public static MoveState Classify(bool moveQueued, bool courierLost, bool carriedOutAfterGone)
         {
@@ -94,11 +119,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return carriedOutAfterGone ? MoveState.Executed : MoveState.Lost;
         }
 
-        // The verdict for an entry that is gone: carried out when the unit still holds its path, has arrived
-        // at the target, or stopped in contact; lost otherwise.
-        public static bool CarriedOutAfterGone(bool pathHeld, float distanceToTargetMeters, bool inContact)
+        // The verdict for an entry that is gone: why the move counts as carried out, or None (lost).
+        // pathEndMeters is the distance from the end of the unit's held path to the target; it is read only
+        // while a path is held.
+        public static MoveBasis BasisAfterGone(bool pathHeld, float pathEndMeters, float distanceToTargetMeters, bool inContact)
         {
-            return pathHeld || inContact || distanceToTargetMeters <= ArrivalMeters;
+            if (distanceToTargetMeters <= ArrivalMeters) return MoveBasis.Arrived;
+            if (pathHeld && pathEndMeters <= ArrivalMeters) return MoveBasis.Path;
+            if (inContact && distanceToTargetMeters <= ContactNearMeters) return MoveBasis.Contact;
+            return MoveBasis.None;
         }
 
         // Does a queue entry of the carrier unit carry the order? A move entry of the carrier's ordertype whose
@@ -120,7 +149,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // group, or the children a fan-out around the player's command ordered), the one whose entry is carried
     // out last (processing time). The player is told one leg after that entry; the others are carried out
     // earlier or with it. Stamp and OrderType identify that entry (WlMoveState.Carries); X and Z are the
-    // target the unit was given, the arrival test of an entry that is gone (WlMoveState.CarriedOutAfterGone).
+    // target the unit was given, the arrival test of an entry that is gone (WlMoveState.BasisAfterGone).
     internal struct WlMoveCarrier
     {
         public int UnitId;
@@ -176,7 +205,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         bool UnitGone(in CourierEntry e);
         // Where the move of the entry's unit stands in vanilla's order queue; asked only of an entry
         // captured with AwaitsMove.
-        MoveState MoveOf(in CourierEntry e);
+        // `basis` is why an executed move counts as carried out (None otherwise).
+        MoveState MoveOf(in CourierEntry e, out MoveBasis basis);
         bool ReleaseStillDue(in CourierEntry e);
         void SetDelivering(bool on);
         void ClearSlot();
@@ -595,7 +625,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private bool ReleaseOnMove(ref CourierEntry e, out bool requeue)
         {
             requeue = false;
-            switch (_host.MoveOf(in e))
+            MoveState state = _host.MoveOf(in e, out MoveBasis basis);
+            e.Gate = basis;
+            switch (state)
             {
                 case MoveState.Lost:
                     Queue.Discard(in e, MoveLost);

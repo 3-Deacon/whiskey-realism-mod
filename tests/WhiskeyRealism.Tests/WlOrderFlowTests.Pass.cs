@@ -77,9 +77,12 @@ internal static partial class WlOrderFlowTests
         public readonly List<int> MoveAskedAbout = new List<int>();
         public bool RecordAsks;
         public int MoveAsks;
-        public MoveState MoveOf(in CourierEntry e)
+        public MoveBasis Basis = MoveBasis.Path;
+        public MoveBasis GateOnLastRow;
+        public MoveState MoveOf(in CourierEntry e, out MoveBasis basis)
         {
             MoveAsks++;
+            basis = Basis;
             if (RecordAsks) MoveAskedAbout.Add(e.Carrier.UnitId);
             return CarrierMoves.TryGetValue(e.Carrier.UnitId, out MoveState state) ? state : Move;
         }
@@ -125,7 +128,7 @@ internal static partial class WlOrderFlowTests
         }
 
         public void Accepted(in CourierEntry e) => AcceptedTypes.Add(e.Type);
-        public void Row(in CourierEntry e, string action, string reason) => Rows.Add(e.Type + ":" + action + ":" + reason);
+        public void Row(in CourierEntry e, string action, string reason) { Rows.Add(e.Type + ":" + action + ":" + reason); GateOnLastRow = e.Gate; }
         public void NotifyP62(in CourierEntry e, P62Outcome outcome) => P62.Add((e.Type, outcome));
 
         public bool TryBuildRetreat(out CourierEntry entry)

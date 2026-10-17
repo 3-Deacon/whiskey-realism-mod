@@ -825,12 +825,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             public bool UnitGone(in CourierEntry e) => ResolveUnit(e.UnitId) == null;
 
-            public MoveState MoveOf(in CourierEntry e)
+            public MoveState MoveOf(in CourierEntry e, out MoveBasis basis)
             {
                 // The unit whose queued move carries the order (the ordered group, or the latest child a fan-out
                 // ordered); one that is gone has no move to wait for.
+                basis = MoveBasis.None;
                 Regiment carrier = ResolveUnit(e.Carrier.UnitId);
-                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, in e.Carrier);
+                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, in e.Carrier, out basis);
             }
 
             // The release is stale when contact has resumed (or the hysteresis no longer holds) while its

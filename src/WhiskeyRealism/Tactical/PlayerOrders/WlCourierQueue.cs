@@ -34,6 +34,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public bool AwaitsMove;
         public bool MoveHeld;
         public WlMoveCarrier Carrier;
+        // Why the move gate released the order (written on the flow row); None until the gate looked.
+        public MoveBasis Gate;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.
