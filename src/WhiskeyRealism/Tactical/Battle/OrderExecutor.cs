@@ -682,17 +682,19 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.X = x;
             plan.Z = z;
             if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
-            // 8. A move whose straight leg crosses a river takes a crossing the side knows, or is not made.
-            if (!immediate && Crossings != null && SubjectToCrossingGate(w))
+            // 8. A move with no via of its own (a planned or road via is kept: the plan chose its crossing) whose straight leg crosses a
+            //    river takes a chain of crossings the side knows, or is not made; a crossing the selected plan chose is not the gate's to refuse.
+            if (!immediate && Crossings != null && plan.ViaCount == 0 && SubjectToCrossingGate(w))
             {
-                CrossingVerdict crossing = Crossings.Check(s.Alliance, rec.X, rec.Z, x, z, out float crossX, out float crossZ);
+                CrossingVerdict crossing = Crossings.Check(s.Alliance, rec.X, rec.Z, x, z, out CrossingRoute route);
                 if (crossing == CrossingVerdict.NoKnownCrossing) { plan.Execute = false; plan.Skip = SkipReason.NoKnownCrossing; return plan; }
                 if (crossing == CrossingVerdict.ViaCrossing)
                 {
-                    // The crossing replaces any road via: the move goes start, crossing, target.
-                    plan.ViaCount = 1;
-                    plan.ViaX0 = crossX;
-                    plan.ViaZ0 = crossZ;
+                    plan.ViaCount = route.ViaCount;
+                    plan.ViaX0 = route.ViaX0;
+                    plan.ViaZ0 = route.ViaZ0;
+                    plan.ViaX1 = route.ViaX1;
+                    plan.ViaZ1 = route.ViaZ1;
                 }
             }
             plan.UseOrderDelay = UsesOrderDelay(w);

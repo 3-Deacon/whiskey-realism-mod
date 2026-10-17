@@ -29,6 +29,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public readonly LegCostCache Cache = new LegCostCache();
             public readonly ConfirmedLegs Legs = new ConfirmedLegs();
             public readonly ExploitLookup Exploits;
+            public readonly LedgerCrossingPicture GatePicture;
             public readonly MonitorWorld World;
             public readonly string[] ChildIds = new string[ManeuverFeasibility.MaxChildren];
             public readonly bool[] Deployed = new bool[ManeuverFeasibility.MaxChildren];
@@ -49,6 +50,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 Alliance = alliance;
                 Exploits = new ExploitLookup(alliance);
+                GatePicture = new LedgerCrossingPicture(Crossings, Ledger);
                 World = new MonitorWorld(this);
             }
 
@@ -299,11 +301,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
         }
 
-        /// <summary>How the side knows one link crossing now (RiverCrossingGateRuntime); Unknown for a side with no state.</summary>
-        internal static CrossingState LinkState(int alliance, int link)
+        /// <summary>
+        /// The side's picture for the crossing gate (RiverCrossingGateRuntime): BC14's regions with the side's own crossing watch and ledger, so
+        /// a refused move posts its look request into the same look mechanism and the selected plan's crossings are never refused. Null for a
+        /// side with no state, with the feasibility off, or before the regions are built (the gate then lets the leg through).
+        /// </summary>
+        internal static ICrossingPicture CrossingPicture(int alliance)
         {
             SideState st = StateOf(alliance);
-            return st != null ? st.Crossings.StateOf(link) : CrossingState.Unknown;
+            RiverRegions regions = RiverRegionsRuntime.Ready();
+            if (st == null || regions == null || !Plugin.ManeuverFeasibilityEnabled()) return null;
+            st.GatePicture.Bind(regions);
+            return st.GatePicture;
         }
 
         /// <summary>The crossing the maneuver's via sits on, as the side knows it now (the first-via OnceLog).</summary>

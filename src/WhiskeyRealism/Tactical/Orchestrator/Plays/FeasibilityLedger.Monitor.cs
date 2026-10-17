@@ -22,6 +22,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>The approach reason a committed plan did not act on at the last <see cref="Assess"/> (the row's <c>committed</c> suppression), else null.</summary>
         public string CommittedReason { get; private set; }
 
+        /// <summary>
+        /// The link is a crossing on a route of the selected plan, as it was evaluated when the army selected it. The crossing gate never refuses
+        /// a move over such a link (the plan chose it, whatever the side knows of it now; the monitor owns the plan's assumptions).
+        /// </summary>
+        public bool IsPlannedLink(int link)
+        {
+            if (!_hasSnapshot || _selected.ResultCount == 0) return false;
+            CandidateResult selected = _selected.Results[0];
+            for (int c = 0; c < selected.CrossingCount; c++)
+                if (_selected.Crossings[selected.CrossingStart + c].Link == link) return true;
+            return false;
+        }
+
         /// <summary>The monitor's re-evaluation of the selected plan (created on first use).</summary>
         internal FeasibilityLedger MonitorLedger => _monitor ?? (_monitor = new FeasibilityLedger { _isMonitor = true });
 
