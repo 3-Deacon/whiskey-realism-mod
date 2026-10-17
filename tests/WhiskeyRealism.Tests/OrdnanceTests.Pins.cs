@@ -107,6 +107,7 @@ internal static class OrdnancePinTests
         string runtime = Src("Strategic/Planner/OrdnanceRuntime.cs");
         AssertTrue(runtime.Contains("EnemyDetectionRuntime.BeliefsFor(alliance)"), "the runtime asks for the beliefs of the steering alliance");
         AssertTrue(runtime.Contains("BelievedQuality.Of("), "and reduces them with the pure mean");
+        AssertOnlyTheOwnAlliancesAveragesAreRead();
     }
 
     private static void PurchaseNeverForCicPlayersAlliance()
@@ -169,6 +170,7 @@ internal static class OrdnancePinTests
         string begin = BodyOf(runtime, "internal static Regiment[] BeginRearm(");
         string end = BodyOf(runtime, "internal static void EndRearm(");
         AssertTrue(begin.Contains("RearmPriority.ShouldReorder("), "the pure gate decides");
+        AssertTrue(begin.Contains("), isInitialization,"), "the new-campaign flag reaches the gate as the call gave it");
         AssertTrue(begin.Contains("CampaignWithholdView.TryFreshAllocation(alliance, out var allocation)"), "on the published plan the planner's patches read");
         AssertTrue(begin.Contains("StrategicCoordinator.WlVanillaJobMachinePaused()"), "and the live job-machine pause (11368)");
         AssertTrue(begin.Contains("RearmPriority.Reorder(list, ranks)"), "the order is applied in place to vanilla's own list object");
@@ -189,6 +191,8 @@ internal static class OrdnancePinTests
             AssertTrue(patch.Contains("TelemetryPerf.Scope(\"" + id + "\""), id + " has a scope");
             AssertTrue(HasLine(patch, "PatchFirstFire.Mark(\"" + id + "\");"), id + " has a first-fire mark");
         }
+        string closes = BodyOf(patch, "internal static void Finalizer()");
+        AssertTrue(HasLine(closes, "_open = false;"), "the Finalizer closes the scope, also when vanilla threw");
         string pick = BodyOf(patch, "internal static void Prefix(int alliance, ref int weaponid, int quantity)");
         AssertTrue(pick.Contains("OrdnanceRuntime.TryPick(alliance, weaponid, quantity, out int picked)"), "the pick is the runtime's");
         AssertTrue(pick.Contains("OrdnancePurchaseScopePatch.IsOpenFor(alliance)"), "acts only for the alliance whose purchase pass opened the scope");
@@ -207,10 +211,10 @@ internal static class OrdnancePinTests
         AssertTrue(tryPick.Contains("GameVars.alliance[alliance].weaponorders[j].quantity > 0"), "vanilla's open-order test (16296)");
     }
 
-    private static void OrdnanceRuntimeReadsOnlyTheOwnAlliancesAverages()
+    // Fog: G9 reads the steering alliance's OWN lane average (vanilla's candidate rule, 16295) and never another alliance's (vanilla's
+    // 16266-16282 loop over the alliances at war with it).
+    private static void AssertOnlyTheOwnAlliancesAveragesAreRead()
     {
-        // Fog: G9 reads the steering alliance's OWN lane average (vanilla's candidate rule, 16295) and never another alliance's
-        // (vanilla's 16266-16282 loop over the alliances at war with it).
         foreach (string file in new[] { "Strategic/Planner/OrdnanceRuntime.cs", "Patches/OrdnancePurchasePatch.cs", "Patches/RearmPriorityPatch.cs",
                                          "Strategic/Planner/OrdnancePicker.cs", "Strategic/Planner/EnemyWeaponQuality.cs", "Strategic/Planner/RearmPriority.cs" })
         {
@@ -226,6 +230,11 @@ internal static class OrdnancePinTests
         string runtime = Src("Strategic/Planner/OrdnanceRuntime.cs");
         AssertTrue(runtime.Contains("GameVars.alliance[alliance].averageweaponstrengthguns") && runtime.Contains("GameVars.alliance[alliance].averageweaponstrengthrifles"),
             "the own lane averages are read for the candidate rule");
+    }
+
+    private static void OrdnanceRuntimeReadsOnlyTheOwnAlliancesAverages()
+    {
+        AssertOnlyTheOwnAlliancesAveragesAreRead();
     }
 
     private static void OrdnanceCostAndDeliveryComeFromVanillasOwnFigures()

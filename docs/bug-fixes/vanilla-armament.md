@@ -70,7 +70,7 @@ Ids continue past the highest used on `main` (`BUG-AI-016`, `BUG-WL-015`, `BUG-B
   - Instead the Prefix on `CheckPurchaseWeapons` hides the ordering alliance from the research list (`techavailableforalliance`) of each model it researched but cannot order (`Patches/ArmsSwaps.cs` `ListMemberMask`). The Finalizer restores the lists.
   - Vanilla's candidate lists, coverage count (stock counts with or without research), random pick and `Count > 0` gates run unchanged over orderable models. Nothing is skipped.
   - Units still receive the project stock: `UpgradeWeaponForUnit` reads stock, not research (`GetBestWeapon` 16224).
-- **Reuse.** `WeaponOrderability` is shared with stage G's G9 purchase planner.
+- **Reuse.** `WeaponOrderability` is shared with stage G's G9 purchase pick (`OrdnancePicker`, #130), which applies `IsOrderable` to vanilla's own candidates and never re-fixes this bug: with `Enable AI Weapon Purchase Orderable Fix` on, vanilla's lists already lack the unorderable models; with it off, G9's pick still skips them (and leaves vanilla's pick when none is left).
 - **Flag.** `Campaign Bug Fixes / Enable AI Weapon Purchase Orderable Fix`.
 
 ## BUG-AI-018 — group weapon factor 0/0 = NaN
