@@ -16,6 +16,7 @@ internal static partial class FormationSlotTests
             ("bc16 RUNTIME the attribute's 14 argument types resolve SetGroupFormation on the real Assembly-CSharp, with the parameter names the Postfix binds", SignatureResolvesOnTheGame),
             ("bc16 RUNTIME the patch entry has its scope, its first-fire mark first, a flag gate and a campaign skip", EntryDiscipline),
             ("bc16 RUNTIME the observer reads the resolved facing and the placed position the way decision 9 says", ReadsWhatDecisionNineSays),
+            ("bc16 RUNTIME a brigade's depth is its level below the ordered group plus one, and the walk stops at three levels", DepthRule),
             ("bc16 RUNTIME the observer writes nothing into the battle", WritesNothing),
             ("bc16 RUNTIME the mirror row, the flip row and the field probe carry the plan's fields and texts", RowsCarryThePlansFields),
             ("bc16 RUNTIME a deployment placement is baseline for the flip count, not a flip", ImmediateIsNotCountable),
@@ -84,6 +85,16 @@ internal static partial class FormationSlotTests
         AssertTrue(code.Contains("permanentlydetached") && code.Contains("isrouted"), "vanilla never places a detached or routed unit (92101-92108)");
         AssertTrue(Regex.IsMatch(code, @"\.row\b") && Regex.IsMatch(code, @"\.column\b"), "the layout's own rows and columns (92546-92547)");
         AssertTrue(code.Contains("LayoutMirror.Classify(") && code.Contains("LayoutMirror.Lateral("), "the pure classifier and axis");
+    }
+
+    private static void DepthRule()
+    {
+        string code = Code(PatchFile);
+        // The ordered group is level 0; vanilla places three levels below it (the l, m and n loops, 92070-92125), the third at +offset.x.
+        AssertTrue(Regex.IsMatch(code, @"Classify\(node, layout, level \+ 1, facing, immediate\)"), "a brigade at level L has its regiments at level L + 1, which is the order's depth");
+        AssertTrue(Regex.IsMatch(code, @"if \(level >= LayoutMirrorCall\.MaxDepth - 1\) return;"), "a group at level 2 has no brigade within the three levels");
+        AssertTrue(Regex.IsMatch(code, @"Walk\(child, level \+ 1, facing, immediate\)"), "a child group is one level down");
+        AssertTrue(Regex.IsMatch(code, @"Walk\(ordered, 0, facing, immediate\)"), "the ordered group is level 0");
     }
 
     private static void WritesNothing()
