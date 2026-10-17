@@ -54,6 +54,31 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         }
     }
 
+    // Where the vanilla move of the unit an order names stands (WlMoveState.Classify).
+    internal enum MoveState
+    {
+        Executed, // no move of that unit is queued any more: its superior's order has been carried out
+        InFlight, // the move is still in its superior's order queue (courier riding or processing time not reached)
+        Lost,     // the move is still queued but its courier is gone: vanilla will clear the waypoints, not carry it out
+    }
+
+    // What vanilla's own order queue says about a unit's move (decompile build 14703111). SetWaypoint with
+    // an order delay does not give the unit its path at once: it queues the order on the unit's scene
+    // parent (91461-91504) and the path waits for the courier (AddOrderCourierline 125009-125171). A move
+    // entry (ordertype 0 append, 1 new path) stays in that queue until ProcessOrders carries it out and
+    // deletes it (125425, DeleteOrderQueue 124844). A mounted courier line (type 1) whose courier is gone
+    // is vanilla's own test for a lost order (125281-125286, 125308-125320): it clears the untransmitted
+    // waypoints, so the move will not be made. The unit's orderstate says nothing about one order: it is
+    // shared by every order to the unit, and DeleteOrderQueue resets it to 0 (124849).
+    internal static class WlMoveState
+    {
+        public static MoveState Classify(bool moveQueued, bool courierLost)
+        {
+            if (!moveQueued) return MoveState.Executed;
+            return courierLost ? MoveState.Lost : MoveState.InFlight;
+        }
+    }
+
     // One CheckCurrentOrderUpdate call, as the capture Prefix sees it.
     internal struct CaptureInput
     {
@@ -82,6 +107,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         int Session { get; }
         ActiveOrderView ReadActive();
         bool UnitGone(in CourierEntry e);
+        // Where the move of the entry's unit stands in vanilla's order queue; asked only of an entry
+        // captured with AwaitsMove.
+        MoveState MoveOf(in CourierEntry e);
         bool ReleaseStillDue(in CourierEntry e);
         void SetDelivering(bool on);
         void ClearSlot();
@@ -253,6 +281,21 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return origin == OrderOrigin.Release || origin == OrderOrigin.FollowUp;
         }
 
+        public const string MoveInFlight = "move-in-flight";
+        public const string MoveLost = "move-lost";
+
+        // Does an order wait for its unit's own move? Vanilla hands a group's move to the unit by courier
+        // through its superior's queue, while the player's share of that order is a bugle away from the
+        // unit: the unit is the issuer of the player's order only once it has the move. The orders that
+        // come with a move of the unit they name are the executor's dispatches (SetWaypoint, then Emit) and
+        // vanilla's own objective, assault, support, separated-enemy and contact orders (types 0-4, 12).
+        // The derived orders (release, follow-up, retreat) and #62's are not about a move of their unit.
+        public static bool ArmsMoveGate(OrderOrigin origin, int type)
+        {
+            if (origin == OrderOrigin.Executor) return type >= 0 && type <= 12;
+            return origin == OrderOrigin.Vanilla && ((type >= 0 && type <= 4) || type == 12);
+        }
+
         public static double DueAt(double issuedAt, double delayHours, bool couriersOn, double deferUntil)
         {
             double due = couriersOn ? issuedAt + delayHours : issuedAt;
@@ -422,6 +465,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             requeue = false;
             if (Queue.IsSuperseded(in e)) { Queue.Discard(in e, WlCourierQueue.Superseded); return false; }
             if (_host.UnitGone(in e)) { Queue.Discard(in e, "unit-gone"); return false; }
+            if (e.AwaitsMove && !ReleaseOnMove(ref e, out requeue)) return requeue;
             if (IsCrossScope(_host.SlotType)) { Queue.Discard(in e, "cross-scope"); return false; }
             if (e.Origin == OrderOrigin.Release && (_host.SlotType != 13 || !_host.ReleaseStillDue(in e)))
             {
@@ -488,6 +532,37 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return true;
             }
             return Deliver(ref e, token, clear: action == ReadmitAction.AdmitWithClear, out requeue);
+        }
+
+        // The move gate (see ArmsMoveGate). True when the move has been carried out and the entry's leg has
+        // passed, so the pass goes on with it. False when the entry is finished (a lost move: reported) or
+        // must wait: requeue says so, and an entry still waiting for its move or for its leg goes back.
+        private bool ReleaseOnMove(ref CourierEntry e, out bool requeue)
+        {
+            requeue = false;
+            switch (_host.MoveOf(in e))
+            {
+                case MoveState.Lost:
+                    Queue.Discard(in e, MoveLost);
+                    return false;
+                case MoveState.InFlight:
+                    if (!e.MoveHeld)
+                    {
+                        e.MoveHeld = true;
+                        _host.Row(in e, "defer", MoveInFlight);
+                    }
+                    requeue = true;
+                    return false;
+            }
+
+            // The superior has the move: the bugle from him to the player starts now. The original due time
+            // stays when it is later (a policy deferral).
+            double now = _host.NowHours;
+            e.AwaitsMove = false;
+            e.DueAt = Math.Max(e.DueAt, now + e.LegHours);
+            if (e.DueAt <= now) return true;
+            requeue = true;
+            return false;
         }
 
         private bool Deliver(ref CourierEntry e, object saved, bool clear, out bool requeue)

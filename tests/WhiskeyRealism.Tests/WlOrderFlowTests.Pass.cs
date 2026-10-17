@@ -70,6 +70,9 @@ internal static partial class WlOrderFlowTests
         }
 
         public bool UnitGone(in CourierEntry e) => GoneUnits.Contains(e.UnitId);
+        public MoveState Move = MoveState.Executed;
+        public int MoveAsks;
+        public MoveState MoveOf(in CourierEntry e) { MoveAsks++; return Move; }
         public bool ReleaseStillDue(in CourierEntry e) => ReleaseDue;
         public void SetDelivering(bool on) => Delivering = on;
         public void ClearSlot() { SavedBeforeClear = Slot; Slot = null; }
