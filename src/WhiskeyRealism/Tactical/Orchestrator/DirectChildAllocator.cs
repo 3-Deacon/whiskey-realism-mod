@@ -352,7 +352,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             GuardPoint[] guards = GuardScratch(snapshots.Count);
-            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards);
+            // The base allocation's Reserve children: only these can be released. A child the evidence tiers already gave a committed role is not
+            // released by it (the reserve-release producer moves a released child only, TacticalReserveCommitGate.TryReleasedDirectChild). The one pooled
+            // array (ReserveFlags) is read again below for the intents and handed to the release for its hysteresis: valid until the next ReserveFlags call.
+            bool[] heldByBase = ReserveFlags(roles);
+            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards, heldByBase);
 
             var intents = new DirectChildIntent[snapshots.Count];
             for (int i = 0; i < snapshots.Count; i++)
@@ -380,7 +384,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     perChildEnemyIntent[i],
                     fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec),
                     fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown,
-                    guards[i]);
+                    guards[i],
+                    releasedFromReserve: heldByBase[i] && role != DirectChildRole.Reserve && role != DirectChildRole.Unknown);
             }
             return intents;
         }
@@ -418,10 +423,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildRole[] roles,
             ReserveReleaseContext release,
             IReadOnlyList<DirectChildSnapshot> snapshots,
-            GuardPoint[] guards)
+            GuardPoint[] guards,
+            bool[] wasReserve = null)
         {
             var axisOverride = new int[roles.Length];
-            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride);
+            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride, wasReserve);
             return axisOverride;
         }
 
@@ -433,13 +439,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ReserveReleaseContext release,
             IReadOnlyList<DirectChildSnapshot> snapshots,
             GuardPoint[] guards,
-            int[] axisOverride)
+            int[] axisOverride,
+            bool[] baseReserve = null)
         {
             for (int i = 0; i < roles.Length; i++) axisOverride[i] = -1;
 
             bool exploit = plan.Phase == BattlePhase.Exploit;
             bool oddsReached = plan.ReserveCommitTriggerOdds > 0f && release.GlobalOdds >= plan.ReserveCommitTriggerOdds;
-            bool[] wasReserve = release.Hysteresis != null ? ReserveFlags(roles) : null;
+            // baseReserve: the caller's flags of the roles as they stand now (ReserveFlags), else computed here when the hysteresis needs them.
+            bool[] wasReserve = release.Hysteresis != null ? (baseReserve ?? ReserveFlags(roles)) : null;
 
             if (release.Staggered)
             {
@@ -996,6 +1004,44 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return result ?? intents;
         }
 
+        /// <summary>
+        /// The release marks of <paramref name="kept"/> (the intents the army acts on) re-derived from <paramref name="fresh"/>, this tick's allocation:
+        /// a child is marked when the fresh allocation released it from its base Reserve and the intent it keeps is a committed role. A mark is a fact about
+        /// the allocation that just ran, so it is never carried by an intent kept from an earlier tick: a pass that keeps an old intent (a role hold; the
+        /// main-role hysteresis) would otherwise keep its old mark after the release was taken back, and the reserve-release producer and #59 would
+        /// read a release that no longer exists. Returns <paramref name="kept"/> itself when no mark changes.
+        /// </summary>
+        public static IReadOnlyList<DirectChildIntent> RestampReleases(IReadOnlyList<DirectChildIntent> kept, IReadOnlyList<DirectChildIntent> fresh)
+        {
+            if (kept == null || fresh == null) return kept;
+            DirectChildIntent[] result = null;
+            for (int i = 0; i < kept.Count; i++)
+            {
+                DirectChildIntent k = kept[i];
+                bool mark = false;
+                if (k.Role != DirectChildRole.Reserve && k.Role != DirectChildRole.Unknown)
+                {
+                    int at = i < fresh.Count && string.Equals(fresh[i].ChildId, k.ChildId, StringComparison.Ordinal) ? i : IndexOfChild(fresh, k.ChildId);
+                    mark = at >= 0 && fresh[at].ReleasedFromReserve;
+                }
+                if (mark == k.ReleasedFromReserve) continue;
+                if (result == null)
+                {
+                    result = new DirectChildIntent[kept.Count];
+                    for (int j = 0; j < kept.Count; j++) result[j] = kept[j];
+                }
+                result[i] = k.WithReleasedFromReserve(mark);
+            }
+            return result ?? kept;
+        }
+
+        private static int IndexOfChild(IReadOnlyList<DirectChildIntent> intents, string childId)
+        {
+            for (int i = 0; i < intents.Count; i++)
+                if (string.Equals(intents[i].ChildId, childId, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
         private static void Accept(MainRoleHysteresisState state, string mainId)
         {
             state.IncumbentMainId = mainId ?? string.Empty;
@@ -1005,7 +1051,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen);
+                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen, x.ReleasedFromReserve);
 
         /// <summary>
         /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)
