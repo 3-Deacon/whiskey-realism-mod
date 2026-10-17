@@ -172,7 +172,13 @@ namespace WhiskeyRealism.Tactical.Battle
             route.RouteCost = scratch.G[goal];
             if (!(route.RouteCost <= RouteGainRatio * route.VanillaCost)) return route;
             ChooseVia(scratch, nodes, x0, z0, x1, z1, ref route, out int entryIndex, out int exitIndex);
-            if (route.ViaCount == MaxVia && crossings != null && crossings.Ready) RoadLinks(scratch, entryIndex, exitIndex, crossings, ref route);
+            if (route.ViaCount == MaxVia && crossings != null && crossings.Ready && !RoadLinks(scratch, entryIndex, exitIndex, crossings, ref route))
+            {
+                // The road changes land region more often than the two-via bound can carry across: it is no road route, and the move is gated leg by leg.
+                route.ViaCount = 0;
+                route.LinkCount = 0;
+                return route;
+            }
             route.Use = route.ViaCount > 0;
             return route;
         }
@@ -508,13 +514,15 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // The crossings the road takes between its vias: walk the path nodes from the entry to the exit; at each change of land region (a node on a bridge
-        // or ford is on no land and is skipped) the link joining the two regions that lies nearest the stretch of road between the last land node and the
+        // or ford is on no land and is skipped) the link joining the two regions that lies nearest the road's own stretch from the last land node to the
         // first node of the new region is the crossing, in road order. A road may leave a bank and come back to it: that is two changes, both recorded.
-        // More than MaxVia changes, or a change no link joins, records none.
-        internal static void RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
+        // A change no link joins records none (the gate then runs its full search). False when the stretch changes region more than MaxVia times: the
+        // road is not a route the gate can check link by link, and the caller does not use it.
+        internal static bool RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
         {
             route.LinkCount = 0;
-            int last = -1, lastK = -1, count = 0, first = 0, second = 0;
+            int last = -1, lastK = -1, changes = 0, first = 0, second = 0;
+            bool unjoined = false;
             for (int k = entry; k <= exit; k++)
             {
                 int node = s.PathNodes[k];
@@ -522,17 +530,24 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (region < 0) continue;
                 if (last >= 0 && region != last)
                 {
-                    int link = NearestJoining(s, crossings, last, region, lastK, k);
-                    if (link < 0 || count == MaxVia) return;
-                    if (count == 0) first = link; else second = link;
-                    count++;
+                    changes++;
+                    if (changes <= MaxVia && !unjoined)
+                    {
+                        int link = NearestJoining(s, crossings, last, region, lastK, k);
+                        if (link < 0) unjoined = true;
+                        else if (changes == 1) first = link;
+                        else second = link;
+                    }
                 }
                 last = region;
                 lastK = k;
             }
-            route.LinkCount = count;
+            if (changes > MaxVia) return false;
+            if (unjoined) return true;
+            route.LinkCount = changes;
             route.Link0 = first;
             route.Link1 = second;
+            return true;
         }
 
         // The link joining regions a and b that lies nearest the road's own stretch from path index fromK to toK (the last land node of a, the band
