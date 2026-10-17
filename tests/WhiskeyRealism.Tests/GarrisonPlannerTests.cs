@@ -1147,6 +1147,18 @@ internal static class GarrisonPlannerTests
         AssertEqual(FormationRole.Hold, holder.Role, "as a Hold formation of the same sector");
         AssertEqual(ForceAllocator.ReasonGarrisonPost, holder.Reason, "for the post");
 
+        // Both members of a two-formation post come back from the hold reserve, not only the first.
+        var two = Side();
+        two.Objectives.Add(Town(40, 500f));
+        two.Beliefs.Add(Seen(560f, 30000f));
+        two.Own.Add(Corps(1, 503f, 6000f));
+        two.Own.Add(Corps(2, 497f, 6000f));
+        two.Own.Add(Corps(3, 350f, 6000f));
+        var twoPlan = HandPlan(two);
+        twoPlan.Sectors.Add(new SectorPlan { SectorId = ExecutorFixtures.Sectors(two).SectorAt(500f, 0f), Posture = TheaterPosture.Hold, HoldNeed = 9000f });
+        var twoAlloc = Allocate(two, twoPlan, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1", "corps2:2") });
+        AssertEqual("1,2", string.Join(",", twoAlloc.Seats.Select(x => x.InstanceId).OrderBy(x => x)), "both members keep the post though the hold reserve claimed both");
+
         // Another sector's hold reserve is not reclaimed: the sector would be left short.
         var elsewhere = Side();
         elsewhere.Objectives.Add(Town(40, 500f));
