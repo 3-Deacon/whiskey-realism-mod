@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Battle;
 using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.Orchestrator.Plays
@@ -133,6 +134,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             SelectedMirrored = mirrored;
             HasSelection = plan != BattlePlanId.Unknown;
             _childFrontCount = HasSelection ? BuildChildTable(_front, _childFront) : 0;
+            RefreshWorks(null);
             BeginMonitoring();
         }
 
@@ -359,6 +361,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _childFront = _childBack;
             _childBack = tmp;
             _childFrontCount = BuildChildTable(_front, _childFront);
+            PublishFocal();
+            RefreshWorks(null);
             CrossingThreat[] swapThreats = _threatFront;
             _threatFront = _threatBack;
             _threatBack = swapThreats;

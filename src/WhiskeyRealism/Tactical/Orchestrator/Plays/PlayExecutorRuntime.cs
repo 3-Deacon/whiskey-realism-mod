@@ -79,12 +79,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int childCount,
             TacticalFrontAxis frontAxis,
             IReadOnlyList<string> directChildIds,
-            bool mirrored)
+            bool mirrored,
+            IFeasibilityLookup feasibility = null)
         {
             using (TelemetryPerf.Scope("tactical.play-executor.zone-assignments",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds, mirrored);
+                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds, mirrored, feasibility);
             }
         }
 
@@ -95,7 +96,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int childCount,
             TacticalFrontAxis frontAxis,
             IReadOnlyList<string> directChildIds,
-            bool mirrored)
+            bool mirrored,
+            IFeasibilityLookup feasibility)
         {
             try
             {
@@ -131,12 +133,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 PlayProjection.ComputeCentroid(ownXs, ownZs, out float armyX, out float armyZ, out int ownN);
                 if (ownN == 0) return null;
                 PlayAnchor.EnemyAnchor(snapshot, frontAxis, armyX, armyZ, out float enemyX, out float enemyZ);
+                // BC14W: a play faces its target (FocalAssault: the focal point of the works), through the frame the evaluation's layout takes.
+                FocalPoint focal = default(FocalPoint);
+                bool hasFocal = planId == BattlePlanId.FocalAssault && feasibility != null && feasibility.TryFocalPoint(out focal);
+                PlayAnchor.PlayFrame(planId, hasFocal, focal.X, focal.Z, enemyX, enemyZ, armyX, armyZ, ownXs, ownZs, out float targetX, out float targetZ,
+                    out float frontage);
 
                 // ---- Signature-skip ----
                 // Build a per-side signature from plan + bucketed centroids +
                 // bucketed corps positions. If unchanged since last call, return
                 // the cached result without recomputing projection/assignment.
-                string sig = BuildSignature(planId, mirrored, armyX, armyZ, enemyX, enemyZ, corpsPositions);
+                string sig = BuildSignature(planId, mirrored, armyX, armyZ, targetX, targetZ, corpsPositions);
                 string lastSig = _lastSignature[allianceId];
                 var cached = _lastResult[allianceId];
                 if (cached != null && string.Equals(sig, lastSig, StringComparison.Ordinal))
@@ -144,19 +151,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     return cached;
                 }
 
-                float dx = enemyX - armyX;
-                float dz = enemyZ - armyZ;
-                float dist = (float)Math.Sqrt(dx * dx + dz * dz);
-                float forwardX = dist > 0.001f ? dx / dist : 0f;
-                float forwardZ = dist > 0.001f ? dz / dist : 1f;
-
-                float frontage = PlayProjection.EstimateFrontage(ownXs, ownZs, forwardX, forwardZ);
-
                 // BC12: ReverseSlopeDefense is anchored to the crest the terrain picture found across the front.
                 TerrainLine crest = planId == BattlePlanId.ReverseSlopeDefense
                     ? ArmyEvidenceBuilder.CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), frontAxis)
                     : default(TerrainLine);
-                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest, mirrored);
+                var worldRects = PlayProjection.Project(template, armyX, armyZ, targetX, targetZ, frontage, in crest, mirrored);
 
                 // Objectives are not currently surfaced to this layer; pass
                 // empty so PlayCorpsAssignment falls back to closest-corps.

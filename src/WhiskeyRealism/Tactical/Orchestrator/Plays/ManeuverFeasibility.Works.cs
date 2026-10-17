@@ -16,6 +16,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         internal static void BuildWorks(FeasibilityJob job)
         {
             job.WorksActive = false;
+            job.HasFocal = false;
             job.Works.Clear();
             if (!Plugin.EnemyWorksDoctrineEnabled() || !job.FrameValid || job.Input.Stance == BattleStance.Defender) return;
             job.WorksActive = true;
@@ -24,6 +25,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             else bodies.BodyCount = 0;
             job.Works.BuildEnemy(job.Input.Snapshot, in job.Input.Axis, bodies.BodyX, bodies.BodyZ, bodies.BodyCount, job.Input.Works, job.Input.Picture);
             job.Enemy.ClassifyOpen(job.Works);
+            if (job.Works.TryFocal(out FocalPoint focal))
+            {
+                job.HasFocal = true;
+                job.Focal = focal;
+            }
+            else if (job.Target != null && job.Target.HasSelection && job.Target.SelectedPlan == BattlePlanId.FocalAssault && job.Target.TryFocalPoint(out focal))
+            {
+                job.HasFocal = true;
+                job.Focal = focal;
+            }
+        }
+
+        /// <summary>
+        /// requirement-focal-assault's feasibility, after the model has priced the assault: <c>turn-available</c> while another enveloping candidate is a
+        /// turn that can be made, <c>declined</c> when the commander's willingness is below <see cref="WorksRules.FocalWillingness"/>. Otherwise the
+        /// model's penalty stands, so a hopeless assault scores low and, if it still wins, is held by the works hold.
+        /// </summary>
+        private static void JudgeFocalAssault(FeasibilityJob job, CandidateScratch w)
+        {
+            if (w.Result.Verdict == FeasibilityVerdict.Impossible) return;
+            if (job.Target != null && job.Target.BackHasFeasibleTurn()) Finish(w, FeasibilityVerdict.Impossible, "turn-available");
+            else if (WorksRules.Willingness(in job.Input.Army) < WorksRules.FocalWillingness) Finish(w, FeasibilityVerdict.Impossible, "declined");
         }
     }
 }

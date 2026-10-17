@@ -108,4 +108,44 @@ internal static class WorksFixtures
         f.WorksPoints = new Points().Line(-600f, 150f, 50f, l => 600f);
         return f;
     }
+
+    /// <summary>
+    /// § 6 scenario 7: 51,000 against 25,000, three corps of 17,000, the enemy on one segment from -600 to +600 at depth 600, both ends on a river
+    /// (a river column beyond lateral +-620): bodies of 6,000 at -450, 5,000 at -150 and +150, 7,000 at +450, all in earth parapets, and 2,000 at
+    /// (0, 680) in a second parapet 80 behind them. The junction (-300, 600) is the focal point.
+    /// </summary>
+    public static FeasField Scenario7(OpportunityPersonality? army = null)
+    {
+        BattleTerrainGrid grid = GridOf(Size, Size, (x, zi) => x < X(-620f) || x > X(620f) ? River : Grass);
+        var f = new FeasField(grid);
+        if (army.HasValue) f.Army = army.Value;
+        f.AddCorps(-300f, 0f, 17000f);
+        f.AddCorps(0f, 0f, 17000f);
+        f.AddCorps(300f, 0f, 17000f);
+        f.AddEnemy(-450f, 600f, 6000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(-150f, 600f, 5000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(150f, 600f, 5000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(450f, 600f, 7000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(0f, 680f, 2000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.WorksPoints = new Points().Line(-600f, 600f, 50f, l => 600f);
+        return f;
+    }
+
+    /// <summary>§ 6 scenario 8: scenario 7's armies and anchored ends, but the works bulge to an apex at (0, 350).</summary>
+    public static FeasField Scenario8(OpportunityPersonality? army = null)
+    {
+        BattleTerrainGrid grid = GridOf(Size, Size, (x, zi) => x < X(-620f) || x > X(620f) ? River : Grass);
+        var f = new FeasField(grid);
+        if (army.HasValue) f.Army = army.Value;
+        f.AddCorps(-300f, 0f, 17000f);
+        f.AddCorps(0f, 0f, 17000f);
+        f.AddCorps(300f, 0f, 17000f);
+        f.AddEnemy(-450f, 600f, 7000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(-200f, 600f, 6000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(200f, 600f, 6000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(0f, 350f, 3000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.AddEnemy(450f, 600f, 3000f, cover: 0.40f, coverObject: 7, standing: true);
+        f.WorksPoints = new Points().Line(-600f, 600f, 50f, l => Math.Abs(l) < 250f ? 350f + Math.Abs(l) : 600f);
+        return f;
+    }
 }

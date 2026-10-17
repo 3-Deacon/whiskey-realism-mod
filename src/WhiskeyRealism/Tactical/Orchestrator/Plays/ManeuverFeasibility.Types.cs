@@ -172,6 +172,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// (requirement-crossing-look), most pressing first; the count written. A request ends when the crossing turns Clear, Watched or Held.
         /// </summary>
         int LookRequests(Span<float> xs, Span<float> zs);
+
+        /// <summary>BC14W: the focal point of the enemy works the published evaluation found (the point FocalAssault faces); false with none.</summary>
+        bool TryFocalPoint(out FocalPoint focal);
+
+        /// <summary>BC14W: the works hold of the selected plan (<c>hopeless-assault</c> or <c>turn-not-struck</c>); false, reason null, with none.</summary>
+        bool WorksHold(out string reason);
+
+        /// <summary>BC14W: the child is a member of a works-assaulting body of the selected plan.</summary>
+        bool AssaultsWorks(string childId);
+
+        /// <summary>BC14W: the child assaults works or, as a holding fix, faces them (requirement-turn-first).</summary>
+        bool FacesWorks(string childId);
+
+        /// <summary>BC14W: a hash of the works hold, its reason and the set of children that face works; a change forces a store of the stored orders.</summary>
+        int WorksHoldHash { get; }
     }
 
     /// <summary>

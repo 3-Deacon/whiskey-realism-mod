@@ -169,10 +169,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if (job.OfferedCount == 0) { Finish(w, FeasibilityVerdict.Unknown, "no-children"); return; }
             if (!MapKnown(job)) { Finish(w, FeasibilityVerdict.Unknown, "map-unknown"); return; }
 
-            // The hypothetical layout, exactly as ComputeZoneAssignments would project and assign it.
+            if (plan == BattlePlanId.FocalAssault && !job.HasFocal) { Finish(w, FeasibilityVerdict.Impossible, "no-focal"); return; }
+
+            // The hypothetical layout, exactly as ComputeZoneAssignments would project and assign it: through the same frame (PlayAnchor.PlayFrame).
             int rectCount = template.Rects.Count;
             WorldPlayRect[] rects = job.RectsFor(plan, rectCount);
-            PlayProjection.ProjectInto(template, job.ArmyX, job.ArmyZ, job.EnemyX, job.EnemyZ, job.Frontage, in job.Input.Crest, mirrored, rects);
+            job.FrameFor(plan, out float targetX, out float targetZ, out float frontage);
+            PlayProjection.ProjectInto(template, job.ArmyX, job.ArmyZ, targetX, targetZ, frontage, in job.Input.Crest, mirrored, rects);
             int assigned = PlayCorpsAssignment.AssignInto(rects, job.Offered, FeasibilityJob.NoObjectives, job.Assignments);
 
             for (int r = 0; r < rectCount; r++)
@@ -196,6 +199,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (target != null && target.CollectsThreats && plan == target.SelectedPlan && mirrored == target.SelectedMirrored) CaptureThreats(job);
             }
             Conclude(job, w);
+            if (plan == BattlePlanId.FocalAssault) JudgeFocalAssault(job, w);
             if (job.Graph.Searches - searches > job.MaxSearchesPerSide) job.MaxSearchesPerSide = job.Graph.Searches - searches;
         }
 
@@ -208,7 +212,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             for (int a = 0; a < assigned; a++)
             {
                 if (job.Assignments[a].Envelops) envelopers++;
-                else if (!IsReserveRect(job.Assignments[a].RectKind)) anyFixing = true;
+                else if (!IsReserveRect(job.Assignments[a].RectKind) && job.Assignments[a].RectKind != PlayRectKind.AssaultSupport) anyFixing = true;
             }
             // The bodies: each enveloping child on its own, then the main body last. A reserve member of a template without a fixing
             // member joins no body: a reserve strikes nothing and pins nothing.
@@ -219,15 +223,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
             bool mainNamed = false;
             int nextEnvelop = 0;
+            // BC14W: the AssaultSupport follows the AssaultColumn into its body (the column and the support are one assault body); assignments run
+            // by priority, so the column's body is known when the support is reached.
+            int assaultBody = -1;
             w.MemberCount = 0;
             for (int a = 0; a < assigned && w.MemberCount < w.Members.Length; a++)
             {
                 CorpsAssignment ca = job.Assignments[a];
                 int slot = job.SlotOfChild(ca.ChildId);
                 if (slot < 0) continue;
-                byte kind = ca.Envelops ? MemberEnvelops : (IsReserveRect(ca.RectKind) ? MemberOther : MemberFix);
-                int bodyIndex = kind == MemberEnvelops ? nextEnvelop++ : mainBody;
+                bool support = ca.RectKind == PlayRectKind.AssaultSupport;
+                byte kind = ca.Envelops ? MemberEnvelops : (IsReserveRect(ca.RectKind) || support ? MemberOther : MemberFix);
+                int bodyIndex = kind == MemberEnvelops ? nextEnvelop++ : (support ? assaultBody : mainBody);
                 if (bodyIndex < 0 || bodyIndex >= w.BodyCount) continue;
+                if (ca.RectKind == PlayRectKind.AssaultColumn) assaultBody = bodyIndex;
                 ChildFact child = job.Children[slot];
                 w.Members[w.MemberCount++] = new MemberEstimate
                 {

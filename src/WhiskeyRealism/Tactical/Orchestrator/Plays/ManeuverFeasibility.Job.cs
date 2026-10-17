@@ -83,6 +83,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         internal readonly WorksPicture Works = new WorksPicture();
         internal bool WorksActive;
+        /// <summary>
+        /// BC14W: the focal point FocalAssault faces, from this evaluation's works picture or, while FocalAssault is the selected plan and the works
+        /// are gone from view, the ledger's last published one (the column then strikes an empty point, an outcome the assault wanted).
+        /// </summary>
+        internal bool HasFocal;
+        internal FocalPoint Focal;
         private readonly LegCostCache _ownCache = new LegCostCache();
 
         internal readonly ChildFact[] Children = new ChildFact[ManeuverFeasibility.MaxChildren];
@@ -154,7 +160,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Input = input;
             Target = ledger;
             PlanCount = Math.Min(Math.Max(input.CandidateCount, 0), FeasibilityLedger.MaxCandidates);
-            for (int i = 0; i < PlanCount; i++) Plans[i] = input.Candidates[i];
+            // BC14W: FocalAssault is judged against the turns, so it is evaluated after them (the others keep their order).
+            int placed = 0;
+            for (int i = 0; i < PlanCount; i++) if (input.Candidates[i] != BattlePlanId.FocalAssault) Plans[placed++] = input.Candidates[i];
+            for (int i = 0; i < PlanCount; i++) if (input.Candidates[i] == BattlePlanId.FocalAssault) Plans[placed++] = input.Candidates[i];
             Array.Clear(SidesEvaluated, 0, SidesEvaluated.Length);
             MaxSearchesPerSide = 0;
             NextCandidate = 0;
@@ -210,6 +219,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 NextCandidate++;
                 doneThisCall++;
             }
+            ledger.SetFocalBack(HasFocal, in Focal);
             ledger.SetLooksBack(Defender.LookLinks, Defender.LookCount);     // the picture is candidate-independent: published with every evaluation
             ledger.Publish(Input.NowHours);
             Running = false;
@@ -237,13 +247,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             PlayProjection.ComputeCentroid(_xs, _zs, out ArmyX, out ArmyZ, out int n);
             if (n == 0) return;
             PlayAnchor.EnemyAnchor(s, Input.Axis, ArmyX, ArmyZ, out EnemyX, out EnemyZ);
-            float dx = EnemyX - ArmyX, dz = EnemyZ - ArmyZ;
-            float dist = (float)Math.Sqrt(dx * dx + dz * dz);
-            float forwardX = dist > 0.001f ? dx / dist : 0f;
-            float forwardZ = dist > 0.001f ? dz / dist : 1f;
-            Frontage = PlayProjection.EstimateFrontage(_xs, _zs, forwardX, forwardZ);
+            PlayAnchor.PlayFrame(BattlePlanId.Unknown, false, 0f, 0f, EnemyX, EnemyZ, ArmyX, ArmyZ, _xs, _zs, out _, out _, out Frontage);
             EnvelopmentManeuver.EnemyPressureSplit(s, Input.Axis, out PressureLeft, out PressureRight);
             FrameValid = true;
+        }
+
+        /// <summary>
+        /// The frame a play is projected in, as the executor's zone assignment takes it: the point the play faces and the frontage across the line to
+        /// it. Every play but FocalAssault faces the enemy anchor, whose frontage <see cref="PrepareFrame"/> took once.
+        /// </summary>
+        internal void FrameFor(BattlePlanId plan, out float targetX, out float targetZ, out float frontage)
+        {
+            if (plan != BattlePlanId.FocalAssault)
+            {
+                targetX = EnemyX;
+                targetZ = EnemyZ;
+                frontage = Frontage;
+                return;
+            }
+            PlayAnchor.PlayFrame(plan, HasFocal, Focal.X, Focal.Z, EnemyX, EnemyZ, ArmyX, ArmyZ, _xs, _zs, out targetX, out targetZ, out frontage);
         }
 
         private void PrepareChildren()

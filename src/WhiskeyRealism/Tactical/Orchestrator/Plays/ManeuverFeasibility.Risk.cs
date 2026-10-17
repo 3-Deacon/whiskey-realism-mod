@@ -226,7 +226,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 ref BodyEstimate body = ref w.Bodies[b];
                 body.DefenseRatio = DefenseRatioAt(job, body.StrikeX, body.StrikeZ, body.TargetX, body.TargetZ);
-                if (job.WorksActive && job.Works.OnHeldWorks(body.StrikeX, body.StrikeZ))
+                // A strike point on the works, or behind them (the enemy anchor of a salient stands a little behind its profile): the body crosses the works.
+                if (job.WorksActive && job.Works.InWorksBand(body.StrikeX, body.StrikeZ))
                 {
                     body.StrikeOnWorks = true;
                     body.AssaultsWorks = body.Envelops || !dividing;
@@ -418,7 +419,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 float difficulty = picture.ApproachDifficulty(b.StrikeX, b.StrikeZ, ax, az);
                 float ground = job.Enemy.Near(b.StrikeX, b.StrikeZ, OddsRadiusMeters) > 0f ? picture.TerrainStrength(b.StrikeX, b.StrikeZ, ax, az) : 0f;
                 float approach = 0.5f * difficulty + 0.5f * ground;
-                if (b.Envelops)
+                if (b.Envelops && b.Kind != PlayRectKind.AssaultColumn)
                 {
                     TacticalFrontAxis axis = job.Input.Axis;
                     bool right = EnvelopmentManeuver.RectIsRight(in axis, member.TargetX, member.TargetZ);

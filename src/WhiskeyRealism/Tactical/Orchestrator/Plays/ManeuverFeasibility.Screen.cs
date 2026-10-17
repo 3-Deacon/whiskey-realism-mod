@@ -100,7 +100,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 {
                     // The inward leg BC11 attacks along: the anchor to the enemy line end (a DeepRaid: its outflank point).
                     float sx, sz;
-                    if (deepRaid) { sx = outflankX; sz = outflankZ; }
+                    // BC14W: an assault column strikes the focal point of the works, not a line end.
+                    if (body.Kind == PlayRectKind.AssaultColumn) { sx = job.Focal.X; sz = job.Focal.Z; }
+                    else if (deepRaid) { sx = outflankX; sz = outflankZ; }
                     else
                     {
                         bool right = EnvelopmentManeuver.RectIsRight(in axis, ax, az);

@@ -250,6 +250,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.CavalryRaid:
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
+                case BattlePlanId.FocalAssault:
                     return PlaybookStance.Offensive;
                 // Defensive archetypes — only valid for a defender.
                 case BattlePlanId.PreparedDefense:

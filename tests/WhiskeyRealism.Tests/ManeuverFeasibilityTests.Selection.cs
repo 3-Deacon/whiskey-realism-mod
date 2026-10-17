@@ -38,6 +38,11 @@ internal static partial class ManeuverFeasibilityTests
         public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
 
         public string BrokenAssumption => null;
+        public bool TryFocalPoint(out FocalPoint focal) { focal = default(FocalPoint); return false; }
+        public bool WorksHold(out string reason) { reason = null; return false; }
+        public bool AssaultsWorks(string childId) => false;
+        public bool FacesWorks(string childId) => false;
+        public int WorksHoldHash => 0;
         public int ThreatCount => 0;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public double EvaluatedHours => 0.0;
@@ -188,7 +193,7 @@ internal static partial class ManeuverFeasibilityTests
 
         // The executor passes the plan's side to the projection (source pin: the runtime is not in the harness).
         string executor = File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Tactical/Orchestrator/Plays/PlayExecutorRuntime.cs"));
-        AssertContains(executor, "PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest, mirrored)", "the executor projects the plan's side");
+        AssertContains(executor, "PlayProjection.Project(template, armyX, armyZ, targetX, targetZ, frontage, in crest, mirrored)", "the executor projects the plan's side toward its target");
     }
 
     static void FeasRegress()

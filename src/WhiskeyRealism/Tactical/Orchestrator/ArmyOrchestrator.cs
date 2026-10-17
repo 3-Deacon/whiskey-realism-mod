@@ -317,8 +317,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 hasCrestLine: evidence.CrestLine.Has,
                 feasibility: withFeasibility ? _feasibility : null,
                 hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,
-                hysteresisMargin: Plays.ManeuverFeasibility.ReplanScoreMargin);
+                hysteresisMargin: Plays.ManeuverFeasibility.ReplanScoreMargin,
+                focalSector: FocalSectorOf(_feasibility),
+                hasFocalPoint: _feasibility != null && _feasibility.TryFocalPoint(out _));
             return ctx;
+        }
+
+        // BC14W: the front-axis band the ledger's focal point stands in; -1 with no focal point or no axis.
+        private int FocalSectorOf(Plays.IFeasibilityLookup feasibility)
+        {
+            if (feasibility == null || !_frontAxis.IsValid || !feasibility.TryFocalPoint(out WhiskeyRealism.Tactical.Battle.FocalPoint focal)) return -1;
+            return _frontAxis.SectorOf(focal.X, focal.Z);
         }
 
         /// <summary>
@@ -383,6 +392,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (!HasPlan) return false;
             if (decisiveSectorId < 0) return false;
+            // BC14W: a FocalAssault plan's main effort is the focal point's band, set at its pick.
+            if (_plan.PlanId == BattlePlanId.FocalAssault) return false;
             if (_plan.MainEffortSector == decisiveSectorId) return false;
             if (_plan.Phase == BattlePhase.Consolidate ||
                 _plan.Phase == BattlePhase.Withdraw)

@@ -67,7 +67,7 @@ internal static class TacticalPlaybookTests
             ("playbook catalog envelopment pressure biases lee over hood", PlaybookCatalogEnvelopmentPressureBiasesLeeOverHood),
             ("playbook catalog envelopment pressure off keeps frontal playbook fit", PlaybookCatalogEnvelopmentPressureOffKeepsFrontalFit),
             ("playbook catalog envelopment affinity ranking sanity", PlaybookCatalogEnvelopmentAffinityRankingSanity),
-            ("seed catalog registers all eighteen playbooks", SeedCatalogRegistersAllEighteenPlaybooks),
+            ("seed catalog registers all nineteen playbooks", SeedCatalogRegistersAllNineteenPlaybooks),
             ("buford screen delay playbook id and historical label", BufordScreenDelayPlaybookIdAndHistoricalLabel),
             ("forrest cavalry raid playbook id and historical label", ForrestCavalryRaidPlaybookIdAndHistoricalLabel),
             ("meeting engagement playbook id and historical label", MeetingEngagementPlaybookIdAndHistoricalLabel),
@@ -668,12 +668,12 @@ internal static class TacticalPlaybookTests
 
     // ---- 4 new playbooks (Buford screen, Forrest raid, Meeting, Johnston) ----
 
-    private static void SeedCatalogRegistersAllEighteenPlaybooks()
+    private static void SeedCatalogRegistersAllNineteenPlaybooks()
     {
-        // Seed catalog count must be exactly 18: 14 originals + 4 new (Buford
-        // screen-delay, Forrest raid, Meeting engagement, Johnston Fabian delay).
+        // Seed catalog count must be exactly 19: 14 originals + 4 new (Buford
+        // screen-delay, Forrest raid, Meeting engagement, Johnston Fabian delay) + BC14W's FocalAssault, appended last.
         var c = SeedCatalog.AllHistoricalAndGeneric();
-        AssertEqual(18, c.Count, "seed catalog has 18 playbooks after additions");
+        AssertEqual(19, c.Count, "seed catalog has 19 playbooks after additions");
     }
 
     private static void BufordScreenDelayPlaybookIdAndHistoricalLabel()

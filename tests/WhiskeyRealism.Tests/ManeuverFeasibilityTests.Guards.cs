@@ -96,6 +96,11 @@ internal static partial class ManeuverFeasibilityTests
 
         public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
         public string BrokenAssumption => null;
+        public bool TryFocalPoint(out FocalPoint focal) { focal = default(FocalPoint); return false; }
+        public bool WorksHold(out string reason) { reason = null; return false; }
+        public bool AssaultsWorks(string childId) => false;
+        public bool FacesWorks(string childId) => false;
+        public int WorksHoldHash => 0;
         public int ThreatCount => 1;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public double EvaluatedHours => 0.0;
