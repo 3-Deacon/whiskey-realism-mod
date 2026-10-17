@@ -82,8 +82,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 IReadOnlyList<DirectChildRole> cascadeChain,
                 IReadOnlyList<string> parentNameChain,
                 int topLevelChildIndex,
-                bool worksHeld = false)
+                bool worksHeld = false,
+                int flankPostMain = 0,
+                bool flankPostLeft = false)
             {
+                FlankPostMain = flankPostMain;
+                FlankPostLeft = flankPostLeft;
                 WorksHeld = worksHeld;
                 InstanceId = instanceId;
                 DisplayName = displayName ?? string.Empty;
@@ -94,14 +98,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 TopLevelChildIndex = topLevelChildIndex;
             }
 
-            /// <summary>The same leaf in another role (its task follows the role and the chain's last entry, the leaf's own, is replaced).</summary>
-            public LeafAssignment WithRole(DirectChildRole role)
+            /// <summary>
+            /// The same leaf as the flank guard of <paramref name="mainId"/> (its post is on the left or right of that Main, MainFlankGuard.PostOf), in the role
+            /// <paramref name="role"/>; mainId 0 leaves no post.
+            /// </summary>
+            public LeafAssignment WithFlankPost(DirectChildRole role, int mainId, bool left)
             {
                 var chain = new DirectChildRole[CascadeChain.Count];
                 for (int i = 0; i < chain.Length; i++) chain[i] = CascadeChain[i];
                 if (chain.Length > 0) chain[chain.Length - 1] = role;
-                return new LeafAssignment(InstanceId, DisplayName, role, TacticalRoleCascade.RoleToLeafTask(role), chain, ParentNameChain, TopLevelChildIndex, WorksHeld);
+                return new LeafAssignment(InstanceId, DisplayName, role, TacticalRoleCascade.RoleToLeafTask(role), chain, ParentNameChain, TopLevelChildIndex,
+                    WorksHeld, mainId, left);
             }
+
+            /// <summary>The instance id of the Main this leaf guards the flank of (0: none); the leaf is sent to the post and held there (FlankGuardLeaf).</summary>
+            public int FlankPostMain { get; }
+            public bool FlankPostLeft { get; }
+            public bool HasFlankPost => FlankPostMain != 0;
 
             public int InstanceId { get; }
             public string DisplayName { get; }
@@ -174,9 +187,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyDictionary<int, float> flankThreat = null,
             bool defenderReserve = false,
             List<DefenderReserveRecord> reserveReport = null,
-            IReadOnlyDictionary<int, DirectChildRole> released = null,
-            Func<float, float, float, float, bool> flankAnchored = null,
-            List<MainFlankGuard.GuardAssignment> flankReport = null)
+            IReadOnlyDictionary<int, DirectChildRole> released = null)
         {
             var result = new Dictionary<int, LeafAssignment>();
             if (tree == null || topLevelAssignments == null) return result;
@@ -218,33 +229,39 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     released);
             }
 
-            // A side that is not defending does not advance its main effort with an open flank: the exposed side is given a guard from the reserve
-            // (MainFlankGuard.AssignGuards); the posture producer holds the main while one stays open.
-            if (!defenderReserve) AssignMainFlankGuards(result, tree, frontAxis, flankAnchored, flankReport);
             return result;
         }
 
-        // Each leaf's place across the front and role, the guards assigned in place, the changed leaves written back. flankAnchored answers, for a flank end
-        // (x, z) and the direction outward from the line, whether it rests on impassable terrain (null: no terrain picture).
-        private static void AssignMainFlankGuards(
-            Dictionary<int, LeafAssignment> leaves,
+        /// <summary>
+        /// The overlay on a cascade map that a side that is not defending needs: a Main brigade does not advance with an open flank (MainFlankGuard), so each
+        /// exposed, unposted side is given a flank guard from the reserve or the support pool (<see cref="MainFlankGuard.AssignGuards"/>), whose leaf is sent to the
+        /// post at the main's flank (<see cref="LeafAssignment.FlankPostMain"/>, FlankGuardLeaf). The cascade's own roles are untouched: the overlay is
+        /// recomputed on its own clock from the cached cascade, and a unit that already holds a post keeps it (<paramref name="incumbents"/>, by instance id) so
+        /// the roles do not move with the geometry. A Defender's map is the cascade itself. <paramref name="flankAnchored"/> answers, for a flank end
+        /// (x, z) looking outward along (ox, oz), whether it rests on impassable terrain (null: no terrain picture). The report names the leaves by instance id.
+        /// </summary>
+        public static IReadOnlyDictionary<int, LeafAssignment> ApplyFlankGuards(
+            IReadOnlyDictionary<int, LeafAssignment> cascade,
             IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree,
             TacticalFrontAxis axis,
+            bool defender,
             Func<float, float, float, float, bool> flankAnchored,
+            IReadOnlyDictionary<int, MainFlankGuard.Post> incumbents,
             List<MainFlankGuard.GuardAssignment> report)
         {
-            if (leaves.Count < 2) return;
-            var ids = new List<int>(leaves.Keys);
+            if (defender || cascade == null || tree == null || cascade.Count < 2) return cascade;
+            var ids = new List<int>(cascade.Keys);
             ids.Sort();
             int n = ids.Count;
             var lateral = new float[n];
+            var depth = new float[n];
             var roles = new DirectChildRole[n];
             var x = new float[n];
             var z = new float[n];
             bool hasMain = false;
             for (int i = 0; i < n; i++)
             {
-                roles[i] = leaves[ids[i]].LeafRole;
+                roles[i] = cascade[ids[i]].LeafRole;
                 hasMain |= roles[i] == DirectChildRole.Main;
                 if (tree.TryGetValue(ids[i], out var node))
                 {
@@ -252,8 +269,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     z[i] = node.WorldZ;
                 }
                 lateral[i] = axis.IsValid ? axis.LateralOf(x[i], z[i]) : x[i];
+                depth[i] = axis.IsValid ? axis.DepthOf(x[i], z[i]) : z[i];
             }
-            if (!hasMain) return;
+            if (!hasMain) return cascade;
 
             Func<int, bool, bool> anchored = null;
             if (flankAnchored != null && axis.IsValid)
@@ -267,15 +285,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 };
             }
 
-            var before = (DirectChildRole[])roles.Clone();
-            var made = report ?? new List<MainFlankGuard.GuardAssignment>();
-            int first = made.Count;
-            if (MainFlankGuard.AssignGuards(lateral, roles, anchored, made) == 0) return;
-            for (int i = 0; i < n; i++)
-                if (roles[i] != before[i]) leaves[ids[i]] = leaves[ids[i]].WithRole(roles[i]);
-            // The report names leaves by instance id, not by index.
-            for (int k = first; k < made.Count; k++)
-                made[k] = new MainFlankGuard.GuardAssignment(ids[made[k].Main], ids[made[k].Guard], made[k].Left, made[k].From);
+            var made = new List<MainFlankGuard.GuardAssignment>();
+            if (MainFlankGuard.AssignGuards(ids, lateral, depth, roles, anchored, incumbents, made) == 0) return cascade;
+            var result = new Dictionary<int, LeafAssignment>(cascade);
+            for (int k = 0; k < made.Count; k++)
+            {
+                MainFlankGuard.GuardAssignment a = made[k];
+                result[ids[a.Guard]] = cascade[ids[a.Guard]].WithFlankPost(roles[a.Guard], ids[a.Main], a.Left);
+                report?.Add(new MainFlankGuard.GuardAssignment(ids[a.Main], ids[a.Guard], a.Left, a.From, a.Kept));
+            }
+            return result;
         }
 
         private readonly struct CascadeGeometry

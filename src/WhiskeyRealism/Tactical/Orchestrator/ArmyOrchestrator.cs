@@ -1219,8 +1219,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // iterate brigades nested inside divisions (the Union-AI-doesn't-move
         // case that motivated the cascade).
 
+        // The leaf map the producers read: the cascade (cached by signature) with the flank guards laid over it (ApplyFlankGuards, on its own clock).
         private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _leafBrigadeMap =
             new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _cascadeLeafMap =
+            new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private readonly Dictionary<int, MainFlankGuard.Post> _flankPosts = new Dictionary<int, MainFlankGuard.Post>();
+        private string _flankPostSignature = string.Empty;
         private string _leafBrigadeMapSignature = string.Empty;
         private double _leafBrigadeMapBuiltHours;
         private const double LeafMapRefreshHours = 5.0 / 60.0;
@@ -1374,6 +1379,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (tree == null)
             {
                 _leafBrigadeMap = new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+                _cascadeLeafMap = _leafBrigadeMap;
+                _flankPosts.Clear();
+                _flankPostSignature = string.Empty;
                 _leafBrigadeMapSignature = string.Empty;
                 return;
             }
@@ -1384,10 +1392,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             RefreshLeafRelease(releaseAggression01, live);
 
             string sig = ComputeLeafMapSignature(tree);
-            // The flank guards (MainFlankGuard) are given by where the brigades stand, which the signature does not carry: the map is built again every few
-            // doctrine minutes, and the same map comes out unless the geometry moved.
+            // The cascade is cached by signature as it always was. The flank guards (MainFlankGuard) are laid over it every few doctrine minutes, because they
+            // read where the brigades stand, which the signature does not carry; the cascade's own roles never move with the geometry.
             double builtAgo = HoursSource() - _leafBrigadeMapBuiltHours;
-            if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0 && !(builtAgo >= LeafMapRefreshHours)) return;
+            bool cascadeStale = !(sig == _leafBrigadeMapSignature && _cascadeLeafMap.Count > 0);
+            if (!cascadeStale)
+            {
+                if (builtAgo >= LeafMapRefreshHours) LayFlankGuards(tree, cascadeRebuilt: false);
+                return;
+            }
 
             var topAssignments = new List<TacticalLeafBrigadeMap.TopAssignment>(_directChildIntents.Count);
             var topChildIds = new List<string>(_directChildIntents.Count);
@@ -1432,20 +1445,38 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             _defenderReserveReport.Clear();
-            _flankGuardReport.Clear();
-            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
+            _cascadeLeafMap = TacticalLeafBrigadeMap.BuildMap(
                 tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat,
-                defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport, _leafRelease.Released,
-                flankAnchored: FlankAnchoredProbe(), flankReport: _flankGuardReport);
+                defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport, _leafRelease.Released);
             _leafBrigadeMapSignature = sig;
-            _leafBrigadeMapBuiltHours = HoursSource();
             EmitDefenderReserveTelemetry();
-            EmitFlankGuardTelemetry();
+            LayFlankGuards(tree, cascadeRebuilt: true);
         }
 
-        // The main efforts' open flanks the latest leaf map gave a guard (MainFlankGuard.AssignGuards), by instance id.
+        // The main efforts' open flanks the latest overlay gave a guard (MainFlankGuard.AssignGuards), by instance id.
         private readonly List<MainFlankGuard.GuardAssignment> _flankGuardReport = new List<MainFlankGuard.GuardAssignment>();
         private string _lastFlankGuardSig = string.Empty;
+
+        // The flank guards over the cached cascade: a unit that holds a post keeps it, the exposed sides without one are given a guard. The map the producers
+        // read changes only when the posts do, so the works-hold copy of it is not rebuilt for nothing.
+        private void LayFlankGuards(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree, bool cascadeRebuilt)
+        {
+            _flankGuardReport.Clear();
+            _leafBrigadeMapBuiltHours = HoursSource();
+            IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> overlay = TacticalLeafBrigadeMap.ApplyFlankGuards(
+                _cascadeLeafMap, tree, _frontAxis, _currentForceBalanceStance == BattleStance.Defender, FlankAnchoredProbe(), _flankPosts, _flankGuardReport);
+
+            var sb = new System.Text.StringBuilder();
+            foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in overlay)
+                if (pair.Value.HasFlankPost) sb.Append(pair.Key).Append('>').Append(pair.Value.FlankPostMain).Append(pair.Value.FlankPostLeft ? 'L' : 'R').Append(',');
+            string postSig = sb.ToString();
+            if (cascadeRebuilt || postSig != _flankPostSignature) _leafBrigadeMap = overlay;
+            _flankPosts.Clear();
+            foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in overlay)
+                if (pair.Value.HasFlankPost) _flankPosts[pair.Key] = new MainFlankGuard.Post(pair.Value.FlankPostMain, pair.Value.FlankPostLeft);
+            _flankPostSignature = postSig;
+            EmitFlankGuardTelemetry();
+        }
 
         // Whether a flank end (x, z), looking outward along (ox, oz), rests on a river (never a crest: a crest is cover, not a wall); null without a ready terrain picture.
         private static Func<float, float, float, float, bool> FlankAnchoredProbe()
@@ -1466,7 +1497,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     MainFlankGuard.GuardAssignment a = _flankGuardReport[i];
                     if (i > 0) sb.Append(',');
-                    sb.Append(a.Guard).Append("->").Append(a.Main).Append(a.Left ? ":left:" : ":right:").Append(a.From);
+                    sb.Append(a.Guard).Append("->").Append(a.Main).Append(a.Left ? ":left:" : ":right:").Append(a.Kept ? "kept" : a.From.ToString());
                 }
                 string sig = "side=" + AllianceId + "|" + sb;
                 if (string.Equals(sig, _lastFlankGuardSig, System.StringComparison.Ordinal)) return;

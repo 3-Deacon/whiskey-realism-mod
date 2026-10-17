@@ -357,6 +357,19 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
+
+            // A flank guard (the leaf map's overlay, MainFlankGuard) is sent to the post at its main's flank: GuardFlank is no movement task for the slot
+            // path, so the move is its own, through the same leaf Move intent.
+            if (leaf.HasFlankPost)
+            {
+                FlankGuardLeaf.GuardOutcome guardOutcome = FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, out BattleOrderIntent guardMove, out string guardWhy);
+                if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) sink.Submit(guardMove);
+                if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)
+                {
+                    PostureTelemetry.Leaf(s, i, leaf, task, guardWhy, guardOutcome == FlankGuardLeaf.GuardOutcome.Move);
+                    return;
+                }
+            }
             int slotParent = rec.ParentIndex;
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
             RefuseFlank parentRefuse = executor != null && slotParent >= 0 && slotParent < s.OwnCount
@@ -411,54 +424,17 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return resolved;
         }
 
-        // The Main brigade's flanks (MainFlankGuard): the friendly brigades beside it across the front axis, by the leaf map's roles, and whether either end
-        // of its line rests on a river. The hold has hysteresis on the doctrine clock; a change of the hold is one TacticalFlankGuardHold row.
+        // The Main brigade's flank hold (MainFlankGuard, FlankGuardLeaf.MainHolds) has hysteresis on the doctrine clock; a change of the hold is one
+        // TacticalFlankGuardHold row.
         private static readonly Dictionary<int, MainFlankGuard.HoldState> _flankHold = new Dictionary<int, MainFlankGuard.HoldState>();
         private static readonly List<MainFlankGuard.Neighbour> _flankNeighbours = new List<MainFlankGuard.Neighbour>(16);
 
         private static bool FlankHolding(BattleSnapshot s, int mainIndex, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap, out string reason)
         {
-            reason = null;
-            UnitRecord[] own = s.Own;
-            int id = own[mainIndex].InstanceId;
-            TacticalFrontAxis axis = s.FrontAxis;
-            if (!axis.IsValid || leafMap == null)
-            {
-                _flankHold.Remove(id);
-                return false;
-            }
-
-            float mx = own[mainIndex].X, mz = own[mainIndex].Z;
-            float mainLateral = axis.LateralOf(mx, mz);
-            _flankNeighbours.Clear();
-            for (int k = 0; k < s.OwnCount; k++)
-            {
-                if (k == mainIndex || own[k].UnitTyp != TacticalUnitType.BattleGroupBrigade) continue;
-                if ((own[k].Flags & UnitFlags.Alive) == 0 || PostureSense.Routed(own[k])) continue;
-                DirectChildRole role;
-                if (leafMap.TryGetValue(own[k].InstanceId, out TacticalLeafBrigadeMap.LeafAssignment la)) role = la.LeafRole;
-                else if ((own[k].Flags & UnitFlags.PlayerOwned) != 0) role = DirectChildRole.Fix; // a player-owned brigade on the line is a neighbour
-                else continue;
-                _flankNeighbours.Add(new MainFlankGuard.Neighbour(axis.LateralOf(own[k].X, own[k].Z) - mainLateral, role));
-            }
-
-            TerrainPicture picture = TerrainPicture.CurrentForPlanning();
-            bool leftAnchored = false, rightAnchored = false;
-            if (picture != null && picture.Ready)
-            {
-                float half = MainFlankGuard.FlankEndMeters;
-                leftAnchored = TacticalTerrainLinePlanner.FlankAnchored(picture, mx - axis.RightX * half, mz - axis.RightZ * half, -axis.RightX, -axis.RightZ, includeCrest: false);
-                rightAnchored = TacticalTerrainLinePlanner.FlankAnchored(picture, mx + axis.RightX * half, mz + axis.RightZ * half, axis.RightX, axis.RightZ, includeCrest: false);
-            }
-            MainFlankGuard.Cover cover = MainFlankGuard.Assess(_flankNeighbours, leftAnchored, rightAnchored);
-
-            _flankHold.TryGetValue(id, out MainFlankGuard.HoldState previous);
-            MainFlankGuard.HoldState next = MainFlankGuard.Step(previous, cover.Open, (float)s.DoctrineHours);
-            _flankHold[id] = next;
-            string change = MainFlankGuard.ChangeReason(previous, next, cover);
-            if (change != null) EmitFlankHold(s, id, next.Holding, change, cover);
-            if (next.Holding) reason = cover.HoldWhy;
-            return next.Holding;
+            bool holds = FlankGuardLeaf.MainHolds(s, mainIndex, leafMap, _flankHold, TerrainPicture.CurrentForPlanning(), _flankNeighbours,
+                out MainFlankGuard.Cover cover, out string change, out reason);
+            if (change != null) EmitFlankHold(s, s.Own[mainIndex].InstanceId, holds, change, cover);
+            return holds;
         }
 
         private static void EmitFlankHold(BattleSnapshot s, int id, bool holding, string reason, MainFlankGuard.Cover cover)

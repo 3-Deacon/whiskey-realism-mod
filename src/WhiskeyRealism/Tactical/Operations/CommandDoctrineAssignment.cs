@@ -39,8 +39,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 objectiveConfidence01: objective.Confidence01,
                 ownStrength: ownStrength,
                 enemyStrength: objective.EnemyStrength,
-                reserveFraction: reserveFraction,
-                otherNodeCount: nodes.Length - CountRole(nodes, CommandNodeRole.MainEffort)));
+                reserveFraction: reserveFraction));
             var orders = new List<CommandDoctrineOrder>(nodes.Length);
             // BC12: the line is planned once; an anchored end keeps the line task instead of guarding a flank.
             TacticalDefensiveLineAnchor anchor = objectiveMatched
@@ -164,7 +163,6 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 return new TacticalSopDecision(
                     TacticalSopAuthority.Attack,
-                    false,
                     true,
                     true,
                     Math.Min(sop.RiskBudget01, 0.45f),
@@ -177,7 +175,6 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 return new TacticalSopDecision(
                     TacticalSopAuthority.Attack,
-                    false,
                     true,
                     true,
                     Math.Min(sop.RiskBudget01, 0.40f),

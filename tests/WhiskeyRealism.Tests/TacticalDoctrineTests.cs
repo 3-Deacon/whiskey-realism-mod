@@ -286,7 +286,7 @@ internal static class TacticalDoctrineTests
             reserveFraction: 0.2f);
 
         AssertEqual(TacticalSopAuthority.Probe, sop.Authority, "authority");
-        AssertFalse(sop.AllowsMajorAttack, "probe cannot authorize a major attack");
+        AssertTrue(sop.Authority != TacticalSopAuthority.Attack && sop.Authority != TacticalSopAuthority.Assault, "probe cannot authorize a major attack");
         AssertTrue(sop.RequiresFallbackIfPressed, "probe should have a breakoff/fallback requirement");
         AssertTrue(sop.ReacquireSeconds <= 45f, "probe should reacquire quickly");
     }
@@ -332,7 +332,6 @@ internal static class TacticalDoctrineTests
             reserveFraction: 0.2f);
 
         AssertEqual(TacticalSopAuthority.Assault, orders[0].Sop.Authority, "authority");
-        AssertTrue(orders[0].Sop.AllowsMajorAttack, "assault should allow major attack");
         AssertTrue(orders[0].Sop.ReacquireSeconds <= 30f, "decisive assault should reacquire quickly");
     }
 
@@ -357,7 +356,6 @@ internal static class TacticalDoctrineTests
             reserveFraction: 0.2f);
 
         AssertEqual(TacticalSopAuthority.Attack, orders[0].Sop.Authority, "authority");
-        AssertFalse(orders[0].Sop.AllowsMajorAttack, "attack should wait for support");
         AssertTrue(orders[0].Sop.RequiresSupportBeforeMajorAttack, "support gate");
         AssertContains(orders[0].Sop.Reason, "massing-support", "reason");
     }

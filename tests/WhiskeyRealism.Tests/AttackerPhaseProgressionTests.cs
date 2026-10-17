@@ -24,8 +24,6 @@ internal static class AttackerPhaseProgressionTests
             ("attacker phase a replan to another plan keeps the phase too", AReplanToAnotherPlanKeepsThePhase),
             ("attacker phase a committed attacker in contact reaches the main effort and attacks with it", AnAttackerInContactReachesTheMainEffort),
             ("attacker phase attack tasks go to the main effort and flank guards only to flank guards", GuardFlankOnlyToFlankGuards),
-            ("attacker phase a main effort with nobody supporting it does not assault, whatever the odds, while the army has other nodes", ALoneMainEffortDoesNotAssault),
-            ("attacker phase a main effort supported by a neighbour may assault", ASupportedMainEffortMayAssault),
         });
     }
 
@@ -140,35 +138,5 @@ internal static class AttackerPhaseProgressionTests
         AssertEqual(CommandTaskType.FixEnemy, orders[2].Task, "the fixing force fixes");
         AssertEqual(CommandTaskType.ReserveWait, orders[3].Task, "the reserve waits");
         for (int i = 0; i < 4; i++) AssertTrue(orders[i].Task != CommandTaskType.GuardFlank, nodes[i].NodeId + " is no flank guard");
-    }
-
-    private static CommandDoctrineOrder[] BuildWith(params CommandNodeRole[] roles)
-    {
-        var nodes = new CommandNodeOperationalState[roles.Length];
-        for (int i = 0; i < roles.Length; i++)
-            nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.DivisionLike, roles[i], CommandTaskType.FormUp, i * 100f, 0f, 0f);
-        var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "enemy-line-0", 900f);
-        var picture = new BattlefieldPictureSnapshot(new[]
-        {
-            new BattlefieldObjectiveEstimate("enemy-line-0", TacticalObjectiveType.EnemyLine, 2200f, 0.9f, true, 0.4f, 1000f, 600f, 0f, 0f)
-        });
-        return CommandDoctrineAssignment.Build(nodes, operation, picture, 12000f, 100f, 0.3f, BattleStance.Attacker);
-    }
-
-    // 5.4 : 1, committed, the enemy line exposed and confidently seen.
-    private static void ALoneMainEffortDoesNotAssault()
-    {
-        CommandDoctrineOrder[] orders = BuildWith(CommandNodeRole.MainEffort, CommandNodeRole.Reserve, CommandNodeRole.ScreeningForce);
-        AssertEqual(CommandTaskType.AttackObjective, orders[0].Task, "it keeps its task");
-        AssertFalse(orders[0].Sop.AllowsMajorAttack, "but may not make the major attack alone");
-        AssertContains(orders[0].Sop.Reason, "support", "and says why");
-        CommandDoctrineOrder[] soloArmy = BuildWith(CommandNodeRole.MainEffort);
-        AssertTrue(soloArmy[0].Sop.AllowsMajorAttack, "an army of one node has nobody to support it");
-    }
-
-    private static void ASupportedMainEffortMayAssault()
-    {
-        CommandDoctrineOrder[] orders = BuildWith(CommandNodeRole.MainEffort, CommandNodeRole.SupportingAttack, CommandNodeRole.Reserve);
-        AssertTrue(orders[0].Sop.AllowsMajorAttack, "with a supporting attack beside it: the assault is on");
     }
 }

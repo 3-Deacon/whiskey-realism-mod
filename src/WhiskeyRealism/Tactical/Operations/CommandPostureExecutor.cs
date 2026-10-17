@@ -1256,7 +1256,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return false;
             }
             guarded = new TacticalLeafBrigadeMap.LeafAssignment(leaf.InstanceId, leaf.DisplayName, leaf.LeafRole, CommandTaskType.HoldObjective,
-                leaf.CascadeChain, leaf.ParentNameChain, leaf.TopLevelChildIndex, worksHeld: true);
+                leaf.CascadeChain, leaf.ParentNameChain, leaf.TopLevelChildIndex, worksHeld: true, flankPostMain: leaf.FlankPostMain, flankPostLeft: leaf.FlankPostLeft);
             return true;
         }
     }

@@ -22,7 +22,6 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public TacticalSopDecision(
             TacticalSopAuthority authority,
-            bool allowsMajorAttack,
             bool requiresSupportBeforeMajorAttack,
             bool requiresFallbackIfPressed,
             float riskBudget01,
@@ -30,7 +29,6 @@ namespace WhiskeyRealism.Tactical.Operations
             string reason)
         {
             Authority = authority;
-            AllowsMajorAttack = allowsMajorAttack;
             RequiresSupportBeforeMajorAttack = requiresSupportBeforeMajorAttack;
             RequiresFallbackIfPressed = requiresFallbackIfPressed;
             RiskBudget01 = Clamp01(riskBudget01);
@@ -39,7 +37,6 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         public TacticalSopAuthority Authority { get; }
-        public bool AllowsMajorAttack { get; }
         public bool RequiresSupportBeforeMajorAttack { get; }
         public bool RequiresFallbackIfPressed { get; }
         public float RiskBudget01 { get; }
@@ -47,42 +44,42 @@ namespace WhiskeyRealism.Tactical.Operations
         public string Reason { get; }
 
         public static TacticalSopDecision None =>
-            new TacticalSopDecision(TacticalSopAuthority.None, false, false, false, 0f, 120f, "sop-none");
+            new TacticalSopDecision(TacticalSopAuthority.None, false, false, 0f, 120f, "sop-none");
 
         internal static TacticalSopDecision ForAssignedTask(CommandNodeRole role, CommandTaskType task)
         {
             switch (task)
             {
                 case CommandTaskType.Scout:
-                    return new TacticalSopDecision(TacticalSopAuthority.Scout, false, false, true, 0.20f, 45f, "task-scout");
+                    return new TacticalSopDecision(TacticalSopAuthority.Scout, false, true, 0.20f, 45f, "task-scout");
                 case CommandTaskType.Probe:
-                    return new TacticalSopDecision(TacticalSopAuthority.Probe, false, false, true, 0.30f, 45f, "task-probe");
+                    return new TacticalSopDecision(TacticalSopAuthority.Probe, false, true, 0.30f, 45f, "task-probe");
                 case CommandTaskType.Screen:
                 case CommandTaskType.GuardFlank:
-                    return new TacticalSopDecision(TacticalSopAuthority.Screen, false, false, true, 0.25f, 60f, "task-screen");
+                    return new TacticalSopDecision(TacticalSopAuthority.Screen, false, true, 0.25f, 60f, "task-screen");
                 case CommandTaskType.AttackObjective:
-                    return new TacticalSopDecision(TacticalSopAuthority.Attack, true, false, false, 0.65f, 45f, "task-attack");
+                    return new TacticalSopDecision(TacticalSopAuthority.Attack, false, false, 0.65f, 45f, "task-attack");
                 case CommandTaskType.SupportAttack:
                 case CommandTaskType.FixEnemy:
-                    return new TacticalSopDecision(TacticalSopAuthority.Attack, true, false, true, 0.50f, 45f, "task-support");
+                    return new TacticalSopDecision(TacticalSopAuthority.Attack, false, true, 0.50f, 45f, "task-support");
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.Delay:
-                    return new TacticalSopDecision(TacticalSopAuthority.Fallback, false, false, true, 0.20f, 60f, "task-fallback");
+                    return new TacticalSopDecision(TacticalSopAuthority.Fallback, false, true, 0.20f, 60f, "task-fallback");
                 case CommandTaskType.ReserveWait:
                 case CommandTaskType.ReleaseReserve:
-                    return new TacticalSopDecision(TacticalSopAuthority.Reserve, false, false, false, 0.15f, 90f, "task-reserve");
+                    return new TacticalSopDecision(TacticalSopAuthority.Reserve, false, false, 0.15f, 90f, "task-reserve");
                 case CommandTaskType.HoldObjective:
                 case CommandTaskType.HoldChoke:
-                    return new TacticalSopDecision(TacticalSopAuthority.Hold, false, false, true, 0.25f, 90f, "task-hold");
+                    return new TacticalSopDecision(TacticalSopAuthority.Hold, false, true, 0.25f, 90f, "task-hold");
                 case CommandTaskType.Consolidate:
-                    return new TacticalSopDecision(TacticalSopAuthority.Consolidate, false, false, false, 0.20f, 120f, "task-consolidate");
+                    return new TacticalSopDecision(TacticalSopAuthority.Consolidate, false, false, 0.20f, 120f, "task-consolidate");
                 case CommandTaskType.FormUp:
                 case CommandTaskType.AdvanceToAssembly:
-                    return new TacticalSopDecision(TacticalSopAuthority.Defend, false, false, false, 0.20f, 90f, "task-form");
+                    return new TacticalSopDecision(TacticalSopAuthority.Defend, false, false, 0.20f, 90f, "task-form");
                 default:
                     return role == CommandNodeRole.Unknown
                         ? None
-                        : new TacticalSopDecision(TacticalSopAuthority.Stay, false, false, false, 0.10f, 120f, "task-stay");
+                        : new TacticalSopDecision(TacticalSopAuthority.Stay, false, false, 0.10f, 120f, "task-stay");
             }
         }
 
@@ -125,34 +122,33 @@ namespace WhiskeyRealism.Tactical.Operations
             switch (task)
             {
                 case CommandTaskType.Scout:
-                    return new TacticalSopDecision(TacticalSopAuthority.Scout, false, false, true, 0.20f, 45f, "scout-contact");
+                    return new TacticalSopDecision(TacticalSopAuthority.Scout, false, true, 0.20f, 45f, "scout-contact");
                 case CommandTaskType.Probe:
-                    return new TacticalSopDecision(TacticalSopAuthority.Probe, false, false, true, 0.30f, 45f, "probe-contact");
+                    return new TacticalSopDecision(TacticalSopAuthority.Probe, false, true, 0.30f, 45f, "probe-contact");
                 case CommandTaskType.Screen:
                 case CommandTaskType.GuardFlank:
-                    return new TacticalSopDecision(TacticalSopAuthority.Screen, false, false, true, 0.25f, 60f, "screen-contact");
+                    return new TacticalSopDecision(TacticalSopAuthority.Screen, false, true, 0.25f, 60f, "screen-contact");
                 case CommandTaskType.ReserveWait:
-                    return new TacticalSopDecision(TacticalSopAuthority.Reserve, false, false, false, 0.15f, 90f, "reserve-held");
+                    return new TacticalSopDecision(TacticalSopAuthority.Reserve, false, false, 0.15f, 90f, "reserve-held");
                 case CommandTaskType.ReleaseReserve:
-                    return new TacticalSopDecision(TacticalSopAuthority.Reserve, false, false, true, 0.35f, 45f, "reserve-release");
+                    return new TacticalSopDecision(TacticalSopAuthority.Reserve, false, true, 0.35f, 45f, "reserve-release");
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.Delay:
-                    return new TacticalSopDecision(TacticalSopAuthority.Fallback, false, false, true, 0.20f, 60f, "fallback");
+                    return new TacticalSopDecision(TacticalSopAuthority.Fallback, false, true, 0.20f, 60f, "fallback");
                 case CommandTaskType.HoldObjective:
                 case CommandTaskType.HoldChoke:
-                    return new TacticalSopDecision(TacticalSopAuthority.Hold, false, false, true, 0.25f, 90f, "hold");
+                    return new TacticalSopDecision(TacticalSopAuthority.Hold, false, true, 0.25f, 90f, "hold");
                 case CommandTaskType.FormUp:
                 case CommandTaskType.AdvanceToAssembly:
-                    return new TacticalSopDecision(TacticalSopAuthority.Defend, false, false, false, 0.20f, 90f, "form-before-commit");
+                    return new TacticalSopDecision(TacticalSopAuthority.Defend, false, false, 0.20f, 90f, "form-before-commit");
                 case CommandTaskType.Consolidate:
-                    return new TacticalSopDecision(TacticalSopAuthority.Consolidate, false, false, false, 0.20f, 120f, "consolidate");
+                    return new TacticalSopDecision(TacticalSopAuthority.Consolidate, false, false, 0.20f, 120f, "consolidate");
             }
 
             if (task == CommandTaskType.FixEnemy || task == CommandTaskType.SupportAttack)
             {
                 return new TacticalSopDecision(
                     TacticalSopAuthority.Attack,
-                    objective.MainLineExposed,
                     false,
                     true,
                     0.50f,
@@ -164,7 +160,7 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 if (!objective.MainLineExposed || objective.Confidence01 < 0.60f)
                 {
-                    return new TacticalSopDecision(TacticalSopAuthority.Probe, false, false, true, 0.30f, 45f, "attack-downgraded-to-probe");
+                    return new TacticalSopDecision(TacticalSopAuthority.Probe, false, true, 0.30f, 45f, "attack-downgraded-to-probe");
                 }
 
                 if (phase == TacticalOperationPhase.Committed &&
@@ -172,13 +168,12 @@ namespace WhiskeyRealism.Tactical.Operations
                     odds >= 1.65f &&
                     reserve >= 0.10f)
                 {
-                    return new TacticalSopDecision(TacticalSopAuthority.Assault, true, false, false, 0.75f, 30f, "decisive-assault");
+                    return new TacticalSopDecision(TacticalSopAuthority.Assault, false, false, 0.75f, 30f, "decisive-assault");
                 }
 
                 bool needsSupport = reserve < 0.10f || odds < 1.50f;
                 return new TacticalSopDecision(
                     TacticalSopAuthority.Attack,
-                    !needsSupport,
                     needsSupport,
                     needsSupport,
                     needsSupport ? 0.45f : 0.65f,
