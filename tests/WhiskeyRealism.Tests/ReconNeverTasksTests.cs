@@ -34,6 +34,15 @@ internal static class ReconNeverTasksTests
             ("TheReconRowCountsTasksAndUnfilled", TheReconRowCountsTasksAndUnfilled),
             ("AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted", AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted),
             ("ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget", ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget),
+            ("RecordsWhoseScoresAlternateStayOnOneRecord", RecordsWhoseScoresAlternateStayOnOneRecord),
+            ("ARecordChangesAfterTheMarginHoldsForThreeReviews", ARecordChangesAfterTheMarginHoldsForThreeReviews),
+            ("AnInterruptedLeadRestartsTheRecordWindow", AnInterruptedLeadRestartsTheRecordWindow),
+            ("AnInvalidKeptRecordIsLeftAtOnce", AnInvalidKeptRecordIsLeftAtOnce),
+            ("DifferentChallengersDoNotAddUp", DifferentChallengersDoNotAddUp),
+            ("ALeadWithinTheMarginBreaksTheRecordWindow", ALeadWithinTheMarginBreaksTheRecordWindow),
+            ("TheKeptRecordHasTheOddsDeadband", TheKeptRecordHasTheOddsDeadband),
+            ("TheScoutedLatchFollowsTheKeptRecord", TheScoutedLatchFollowsTheKeptRecord),
+            ("TheKeptRecordAndItsChallengerSurviveTheSidecar", TheKeptRecordAndItsChallengerSurviveTheSidecar),
             ("TheScoutedTargetSurvivesTheSidecarAndAnOldFileHasNone", TheScoutedTargetSurvivesTheSidecarAndAnOldFileHasNone),
             ("TheMoverRowNamesAStagedGatheringThatWaits", TheMoverRowNamesAStagedGatheringThatWaits),
             ("AZeroCountedFailureIsNotAFailureRow", AZeroCountedFailureIsNotAFailureRow),
@@ -397,6 +406,200 @@ internal static class ReconNeverTasksTests
         AssertFalse(day2.Plan.MainScouted, "but nobody has seen this ground");
         AssertFalse(day2.Plan.MainScoutLatched, "and the old record's picture is not carried over to it");
         AssertTrue(day2.Plan.MainStaged, "so the mass gathers and scouts first");
+    }
+
+    // ---- hysteresis between the records of one objective ----
+
+    // Objective 40 with two records, 400 (the West one) and 700; the importance of each sets its value term (0.30 x 0.5 x importance), so
+    // swapping the two importances swaps which record leads by more than SwitchMargin (0.12). Eight corps stand between them, in supply.
+    private static CampaignSnapshot Records(float importanceFirst, float importanceSecond, float beliefAtFirst = 0f)
+    {
+        var s = Base();
+        s.Objectives.Clear();
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceFirst });
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 700f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceSecond });
+        for (int i = 0; i < 8; i++) s.Own.Add(Corps(i + 1, 450f + 30f * i, 7000f));
+        if (beliefAtFirst > 0f) s.Beliefs.Add(ExecutorFixtures.Belief(410f, 0f, beliefAtFirst));
+        return s;
+    }
+
+    private const float Lean = 0.95f, Slight = 0.05f;   // the record that leads, the one that trails
+
+    private static TheaterPlan PlanOf(CampaignSnapshot s, PlannerState state)
+    {
+        return TheaterPlanner.Plan(s, ExecutorFixtures.Sectors(s), null, state, null, null, ExecutorFixtures.Speed(), out _);
+    }
+
+    private static float ScoreOf(CampaignSnapshot s, float x)
+    {
+        var inputs = new TheaterPlanner.Inputs { S = s, Sectors = ExecutorFixtures.Sectors(s), Speed = ExecutorFixtures.Speed() };
+        var list = new List<TheaterPlanner.Candidate>();
+        TheaterPlanner.Evaluate(inputs, list);
+        foreach (var c in list) if (Math.Abs(c.X - x) < 1f) return c.Score;
+        throw new Exception("no record at " + x);
+    }
+
+    private static void RecordsWhoseScoresAlternateStayOnOneRecord()
+    {
+        var state = new PlannerState();
+        var day1 = PlanOf(Records(Lean, Slight), state);
+        float first = day1.MainObjectiveX;
+        AssertNear(400f, first, 0.5f, "day 1: the record that leads");
+        int serial = state.DecisionSerial;
+        for (int day = 2; day <= 9; day++)
+        {
+            bool swapped = day % 2 == 0;
+            var s = swapped ? Records(Slight, Lean) : Records(Lean, Slight);
+            if (swapped)
+                AssertTrue(ScoreOf(s, 700f) - ScoreOf(s, 400f) > TheaterPlanner.SwitchMargin, "day " + day + ": the other record leads by more than the margin");
+            var plan = PlanOf(s, state);
+            AssertNear(first, plan.MainObjectiveX, 0.5f, "day " + day + ": the main effort stays on its record");
+            AssertEqual(40, plan.MainObjectiveId, "the same objective");
+            AssertEqual(serial, state.DecisionSerial, "and the same decision");
+            AssertEqual("hold", plan.SwitchReason, "switch=hold");
+        }
+    }
+
+    // The objective switch's own rule: the margin on SwitchDays consecutive reviews.
+    private static void ARecordChangesAfterTheMarginHoldsForThreeReviews()
+    {
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "day 1");
+        AssertNear(400f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "day 2: one review of lead");
+        AssertNear(400f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "day 3: two");
+        int serial = state.DecisionSerial;
+        var day4 = PlanOf(Records(Slight, Lean), state);
+        AssertNear(700f, day4.MainObjectiveX, 0.5f, "day 4: the third consecutive review of lead moves it");
+        AssertEqual(serial, state.DecisionSerial, "within the decision (the objective did not change)");
+        AssertNear(700f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "and the new record is kept in its turn (day 5: the old one leads once)");
+    }
+
+    private static void AnInterruptedLeadRestartsTheRecordWindow()
+    {
+        var state = new PlannerState();
+        PlanOf(Records(Lean, Slight), state);
+        PlanOf(Records(Slight, Lean), state);       // 1
+        PlanOf(Records(Slight, Lean), state);       // 2
+        AssertNear(400f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "a review where the kept record leads again");
+        PlanOf(Records(Slight, Lean), state);       // 1 again
+        AssertNear(400f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "two in a row after the interruption: still the kept record");
+        AssertNear(700f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "the third in a row moves it");
+    }
+
+    // Invalid at once: the kept record is held by an army the mass cannot beat (no longer eligible), or is gone (accomplished or unavailable).
+    private static void AnInvalidKeptRecordIsLeftAtOnce()
+    {
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "day 1");
+        int serial = state.DecisionSerial;
+        var beaten = Records(Lean, Slight, beliefAtFirst: 300000f);
+        var day2 = PlanOf(beaten, state);
+        AssertNear(700f, day2.MainObjectiveX, 0.5f, "day 2: the kept record is below its odds, so the other is taken the same review");
+        AssertEqual(serial, state.DecisionSerial, "same objective, same decision");
+
+        var state2 = new PlannerState();
+        PlanOf(Records(Lean, Slight), state2);
+        var gone = Records(Lean, Slight);
+        var rec = gone.Objectives[0];
+        rec.Accomplished = true;
+        gone.Objectives[0] = rec;
+        AssertNear(700f, PlanOf(gone, state2).MainObjectiveX, 0.5f, "an accomplished record is lost: the other at once");
+        var state3 = new PlannerState();
+        PlanOf(Records(Lean, Slight), state3);
+        var unavailable = Records(Lean, Slight);
+        rec = unavailable.Objectives[0];
+        rec.Available = false;
+        unavailable.Objectives[0] = rec;
+        AssertNear(700f, PlanOf(unavailable, state3).MainObjectiveX, 0.5f, "an unavailable one too");
+    }
+
+    // Three records: the kept one is beaten by the margin every review, but by B and C in turn: no record has three reviews in a row.
+    private static CampaignSnapshot ThreeRecords(float a, float b, float c)
+    {
+        var s = Records(a, b);
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = c });
+        return s;
+    }
+
+    private static void DifferentChallengersDoNotAddUp()
+    {
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(ThreeRecords(Lean, Slight, Slight), state).MainObjectiveX, 0.5f, "day 1: the first record");
+        for (int day = 2; day <= 8; day++)
+        {
+            var s = day % 2 == 0 ? ThreeRecords(Slight, Lean, 0.9f) : ThreeRecords(Slight, 0.9f, Lean);
+            var plan = PlanOf(s, state);
+            AssertNear(400f, plan.MainObjectiveX, 0.5f, "day " + day + ": two records beat it in turn, neither for three reviews");
+        }
+    }
+
+    // A record that leads, but by no more than the margin, is not a challenger: it breaks the run of reviews.
+    private static void ALeadWithinTheMarginBreaksTheRecordWindow()
+    {
+        float close = -1f;
+        for (float imp = 0.05f; imp <= 1f && close < 0f; imp += 0.05f)
+        {
+            var s = Records(0.5f, imp);
+            float lead = ScoreOf(s, 700f) - ScoreOf(s, 400f);
+            if (lead > 0.005f && lead < TheaterPlanner.SwitchMargin - 0.02f) close = imp;
+        }
+        AssertTrue(close > 0f, "a lead inside the margin exists for the fixture");
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "day 1");
+        PlanOf(Records(Slight, Lean), state);          // 1
+        PlanOf(Records(Slight, Lean), state);          // 2
+        AssertNear(400f, PlanOf(Records(0.5f, close), state).MainObjectiveX, 0.5f, "a lead inside the margin: stays, and the run is broken");
+        AssertNear(400f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "the run starts again at one");
+        AssertNear(400f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "two");
+        AssertNear(700f, PlanOf(Records(Slight, Lean), state).MainObjectiveX, 0.5f, "three");
+    }
+
+    // The kept record, not whichever record scores best today, carries the odds deadband (F1): within OddsDeadband below its required ratio it
+    // stays eligible for fewer than SwitchDays reviews, so a better-scoring record that has led for one review does not take the target.
+    private static void TheKeptRecordHasTheOddsDeadband()
+    {
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(Records(Lean, Slight), state).MainObjectiveX, 0.5f, "day 1");
+        var s = Records(Slight, Lean, beliefAtFirst: 46000f);   // 28000 against 46000: 0.61 against a required 0.65, inside the deadband
+        var plan = PlanOf(s, state);
+        AssertNear(400f, plan.MainObjectiveX, 0.5f, "day 2: the kept record is retained by the deadband");
+        AssertEqual(1, state.BelowOddsDays, "and the odds debt is counted");
+    }
+
+    // The latch follows the record kept: while the main effort stays on the scouted record the alternation of the other does not unscout it.
+    private static void TheScoutedLatchFollowsTheKeptRecord()
+    {
+        var state = new PlannerState();
+        var day1 = PlanOf(Records(Lean, Slight, beliefAtFirst: 800f), state);
+        AssertNear(400f, day1.MainObjectiveX, 0.5f, "the scouted record");
+        AssertTrue(day1.MainScouted && !day1.MainStaged, "scouted, not staged");
+        for (int day = 2; day <= 5; day++)
+        {
+            var plan = PlanOf(day % 2 == 0 ? Records(Slight, Lean, 800f) : Records(Lean, Slight, 800f), state);
+            AssertNear(400f, plan.MainObjectiveX, 0.5f, "day " + day + ": kept");
+            AssertTrue(plan.MainScouted && !plan.MainStaged, "day " + day + ": and still scouted");
+        }
+        // Moving to the other record starts unscouted (it has not been seen).
+        PlanOf(Records(Slight, Lean, 800f), state);
+        PlanOf(Records(Slight, Lean, 800f), state);
+        var moved = PlanOf(Records(Slight, Lean, 800f), state);
+        AssertNear(700f, moved.MainObjectiveX, 0.5f, "after the window");
+        AssertTrue(moved.MainStaged && !moved.MainScoutLatched, "the new record is staged until it is scouted");
+    }
+
+    private static void TheKeptRecordAndItsChallengerSurviveTheSidecar()
+    {
+        var state = new PlannerState();
+        state.Restore(40, -1, 0, 3, 77L, currentTargetX: 400.5f, currentTargetZ: -2f, recordChallengerX: 700f, recordChallengerZ: 0f, recordChallengerDays: 2);
+        var dto = SidecarDtoCodec.PlannerToDto(new PlannerSnapshot { State = state });
+        var back = SidecarDtoCodec.PlannerFromDto(Newtonsoft.Json.JsonConvert.DeserializeObject<PlannerStateDto>(Newtonsoft.Json.JsonConvert.SerializeObject(dto)));
+        AssertNear(400.5f, back.State.CurrentTargetX, 0.001f, "kept x");
+        AssertNear(-2f, back.State.CurrentTargetZ, 0.001f, "kept z");
+        AssertNear(700f, back.State.RecordChallengerX, 0.001f, "challenger x");
+        AssertNear(0f, back.State.RecordChallengerZ, 0.001f, "challenger z");
+        AssertEqual(2, back.State.RecordChallengerDays, "and its reviews");
+        var old = SidecarDtoCodec.PlannerFromDto(Newtonsoft.Json.JsonConvert.DeserializeObject<PlannerStateDto>("{\"currentMainObjective\":40}"));
+        AssertTrue(float.IsNaN(old.State.CurrentTargetX) && old.State.RecordChallengerDays == 0, "an older file keeps no record: the best one is taken");
     }
 
     private static void TheScoutedTargetSurvivesTheSidecarAndAnOldFileHasNone()
