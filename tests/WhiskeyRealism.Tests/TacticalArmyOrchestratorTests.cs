@@ -1773,7 +1773,7 @@ internal static class TacticalArmyOrchestratorTests
         var orch = new ArmyOrchestrator(1, SeedCatalog.AllHistoricalAndGeneric(), lee);
         var ownEvidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
         orch.PickInitialPlan(ownEvidence);
-        orch.AdvancePlanAge(70f);
+        orch.AdvancePlanAge(ArmyReplanTriggers.PlanCommitmentBattleSeconds + 70f); // past the commitment: an intent shift is no crisis
         var enemy = new EnemyVisibleState(
             new[]
             {

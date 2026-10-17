@@ -352,6 +352,12 @@ internal static partial class ManeuverFeasibilityTests
             army.Replan(evidence, new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null), hysteresis: true, "ManeuverAssumptionBroken");
             AssertTrue(ObjectiveLatch.ForAlliance(1).Has, "a kept plan keeps the latch");
             army.Replan(evidence, new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null), hysteresis: false, "OpportunityChange");
+            AssertTrue(ObjectiveLatch.ForAlliance(1).Has, "a re-pick that lands on the plan held is a kept plan too");
+            BattlePlanId held = army.CurrentPlan.PlanId;
+            army.SetPlanForTesting(new TacticalBattlePlan(held == BattlePlanId.GenericMethodical ? BattlePlanId.PreparedDefense : BattlePlanId.GenericMethodical,
+                BattlePhase.Probe, 2, null, null, 1.2f, 0f, 7));
+            army.Replan(evidence, new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null), hysteresis: false, "OpportunityChange");
+            AssertEqual(held, army.CurrentPlan.PlanId, "the catalog picked the plan it picks for this evidence");
             AssertFalse(ObjectiveLatch.ForAlliance(1).Has, "a re-picked plan clears it");
             ObjectiveLatch.ForAlliance(1).Set("A", 1f, 1f);
             TacticalBattleCoordinator.ReplanForNewBattleDay(army, evidence, new EnemyVisibleState(Array.Empty<EnemyVisibleSector>(), 0f, false, false));

@@ -689,7 +689,10 @@ internal static class TacticalEvidenceFixTests
         ArmyTickCycle.Reset();
         var orch = OrchestratorWithPlan(BattlePhase.MainEffort, mainSector: 2, aggression: 0.5f);
         Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 6000f, 5000f, false) }, 0.5f, true, false));
-        var trigger = Tick(orch, 1f, new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false));
+        // The band lost two thirds of its men and so did the army (a band that merely emptied into the next one is PlanCommitmentTests').
+        var trigger = ArmyTickCycle.MaybeReplan(orch, 1f, new ArmyEvidence(1f, TerrainKind.Open, 2),
+            new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false),
+            2600f, 1f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 600f);
         TestHarness.AssertEqual(ReplanTrigger.MainEffortSectorLoss, trigger, "main band lost two thirds of its strength");
     }
 
@@ -948,8 +951,10 @@ internal static class TacticalEvidenceFixTests
         var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
         var first = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.5f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 10f);
         TestHarness.AssertEqual(ReplanTrigger.CasualtyThreshold, first, "first replan");
-        var second = ArmyTickCycle.MaybeReplan(orch, 1f, ev, QuietFront, 6000f, 0.3f, 0.9f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 100f);
-        TestHarness.AssertEqual(ReplanTrigger.ReserveExhaustion, second, "100 battle-s later a configured 60 s cooldown has passed");
+        // A second crisis (the odds fall below the low line): a non-crisis trigger would be held by the plan commitment instead.
+        var odds = new ArmyEvidence(0.5f, TerrainKind.Open, 2);
+        var second = ArmyTickCycle.MaybeReplan(orch, 1f, odds, QuietFront, 6000f, 0.3f, 0.9f, 0f, 60, 0.2f, 0.9f, 0f, 0f, battleDeltaSeconds: 100f);
+        TestHarness.AssertEqual(ReplanTrigger.ForceImbalanceShift, second, "100 battle-s later a configured 60 s cooldown has passed");
     }
 
     private static ReplanTrigger DoctrineTick(ArmyOrchestrator orch, double doctrineNow)

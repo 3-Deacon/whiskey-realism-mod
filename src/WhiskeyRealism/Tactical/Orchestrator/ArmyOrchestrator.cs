@@ -45,8 +45,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             InferredIntent enemyIntent,
             int mainEffortSector,
             float mainEffortOwnStrength,
-            float mainEffortOdds)
+            float mainEffortOdds,
+            float ownArmyStrength = 0f)
         {
+            OwnArmyStrength = ownArmyStrength;
             Morale = morale;
             ReservesCommitted = reservesCommitted;
             ReinforcementShare = reinforcementShare;
@@ -67,10 +69,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float MainEffortOwnStrength { get; }
         public float MainEffortOdds { get; }
 
+        /// <summary>
+        /// The whole army's active strength when the main band's strength was taken. A band's strength is the men standing in a lateral band of the
+        /// front, so it falls when a wing marches into the next band; only the army total tells men lost from men moved (0: not taken).
+        /// </summary>
+        public float OwnArmyStrength { get; }
+
         public bool HasMainEffortSnapshot(int sector) => MainEffortSector == sector && MainEffortOwnStrength > 0f;
 
-        public ReplanBaseline WithMainEffort(int sector, float ownStrength, float odds) =>
-            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, sector, ownStrength, odds);
+        public ReplanBaseline WithMainEffort(int sector, float ownStrength, float odds, float ownArmyStrength) =>
+            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, sector, ownStrength, odds, ownArmyStrength);
+
+        public ReplanBaseline WithMainEffortOdds(float odds) =>
+            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, MainEffortSector, MainEffortOwnStrength, odds, OwnArmyStrength);
     }
 
     /// <summary>
@@ -190,7 +201,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (_feasibility != null && _feasibility.TryGet(pb.Id, out Plays.CandidateResult scored)) nextPlan = nextPlan.WithMirrored(scored.Mirrored);
             double now = TacticalDoctrineTime.NowBattleHours;
             double ledgerAge = _feasibility != null && _feasibility.HasEvaluation ? now - _feasibility.EvaluatedHours : double.PositiveInfinity;
-            bool kept = hysteresis && HasPlan && pb.Id == _plan.PlanId;
+            bool kept = HasPlan && pb.Id == _plan.PlanId && (hysteresis || nextPlan.Mirrored == _plan.Mirrored);
             Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now, _feasibility != null ? _feasibility.Willingness : -1f);
 
             // Envelopment-active tightening: commit reserves sooner when the
@@ -503,22 +514,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, string trigger) => Replan(evidence, enemyIntent, hysteresis: false, trigger);
 
         /// <summary>
-        /// Re-picks the plan. With <paramref name="hysteresis"/> (BC14's broken maneuver assumption) the catalog keeps the current plan unless
-        /// it is gone, impossible or beaten by <see cref="Plays.ManeuverFeasibility.ReplanScoreMargin"/>; a kept plan keeps its side, phase and
-        /// age and only refreshes the baselines the edge triggers compare with. Returns true when the plan was kept.
+        /// Re-picks the plan. With <paramref name="hysteresis"/> (a replan that is no crisis, and BC14's broken maneuver assumption) the catalog keeps
+        /// the current plan unless it is gone, impossible or beaten by <see cref="Plays.ManeuverFeasibility.ReplanScoreMargin"/>. A pick that lands
+        /// on the plan already held (same plan, same side), with or without the margin, is a kept plan: it keeps its side, phase and age, wipes none
+        /// of the release memory (the staggered release, the objective latch, the leaf releases: the old re-pick of the same plan cleared them and
+        /// every role they held reverted) and only refreshes the baselines the edge triggers compare with; it keeps its age unless <paramref name="restartAgeIfKept"/>
+        /// (a review of the plan, as against the maneuver monitor's finding). Returns true when the plan was kept.
         /// </summary>
-        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null)
+        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null, bool restartAgeIfKept = false)
         {
             if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), hysteresis, trigger ?? "replan", out var nextPlan))
             {
                 return false;
             }
 
-            if (hysteresis && HasPlan && nextPlan.PlanId == _plan.PlanId)
+            if (HasPlan && nextPlan.PlanId == _plan.PlanId && (hysteresis || nextPlan.Mirrored == _plan.Mirrored))
             {
                 _currentIntentModel = enemyIntent;
                 _historyGlobalOdds = evidence.CurrentOdds;
                 _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
+                // A review that reaffirms the plan starts its time over (the commitment and the deadline both run from the last review); a
+                // broken maneuver assumption is the monitor's finding, not a review of the plan, and leaves the age.
+                if (restartAgeIfKept) _planAgeSeconds = 0f;
                 _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
                 return true;
             }

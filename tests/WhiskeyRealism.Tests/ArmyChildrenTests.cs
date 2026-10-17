@@ -707,7 +707,12 @@ internal static class ArmyChildrenTests
         for (int k = 0; k < 4; k++) { h.Cascade(army); clock += 0.02; }
         AssertEqual(1, army.LeafRelease.Released.Count, "a reserve is out");
 
+        // A re-pick that lands on the plan already held changes nothing (PlanCommitmentTests); a different plan starts the releases over.
         army.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1));
+        AssertEqual(1, army.LeafRelease.Released.Count, "the same plan re-picked keeps the releases");
+        army.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.DelayingDefense, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
+        army.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1));
+        AssertTrue(army.CurrentPlan.PlanId != BattlePlanId.DelayingDefense, "the catalog picked another plan");
         AssertEqual(0, army.LeafRelease.Released.Count, "a new plan starts the releases over");
     }
 

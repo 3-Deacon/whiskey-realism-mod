@@ -546,7 +546,7 @@ internal static partial class ManeuverFeasibilityTests
         ArmyOrchestrator second = Army(new CaptureLookup(), evidence);
         ReplanOutcome preempted = Tick(second, evidence, 1000.0, "late", morale: 0.3f);
         AssertEqual(ReplanTrigger.CasualtyThreshold, preempted.Trigger, "the concrete trigger wins");
-        AssertTrue(preempted.Replanned, "and replans");
+        AssertTrue(preempted.Replanned || preempted.Kept, "and re-picks (landing on the plan it held, which is kept)");
         AssertEqual("preempted", preempted.Suppression, "the assumption is named preempted");
 
         // A supplied assumption that replans without suppression: the current plan is impossible.
@@ -607,11 +607,18 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(before.Mirrored, army.CurrentPlan.Mirrored, "on its side");
         AssertNear(120f, army.PlanAgeSeconds, 1e-3f, "and its age");
         AssertEqual(2, lookup.Captured.Count, "the selection snapshot was refreshed");
-        // Without the hysteresis a replan re-picks and resets the age.
+        // Without the hysteresis a re-pick that lands on the plan held is still a kept plan (nothing about it changes), and a re-pick that lands
+        // on another plan (the current one is impossible) starts the age over.
+        bool same = army.Replan(evidence, new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null), hysteresis: false);
+        AssertTrue(same, "an ordinary re-pick of the plan held is kept");
+        AssertNear(120f, army.PlanAgeSeconds, 1e-3f, "with its age");
+        AssertEqual(3, lookup.Captured.Count, "capturing the selection");
+        lookup.Results[plan] = new CandidateResult { Plan = plan, Verdict = FeasibilityVerdict.Impossible, Penalty = 1f, Reason = "no-crossing" };
         bool plain = army.Replan(evidence, new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null), hysteresis: false);
-        AssertFalse(plain, "an ordinary replan is never 'kept'");
+        AssertFalse(plain, "a replan to another plan is never 'kept'");
+        AssertTrue(army.CurrentPlan.PlanId != plan, "another plan");
         AssertNear(0f, army.PlanAgeSeconds, 1e-3f, "and starts the plan's age over");
-        AssertEqual(3, lookup.Captured.Count, "capturing the new selection");
+        AssertEqual(4, lookup.Captured.Count, "capturing the new selection");
     }
 
     static void ReplanTriggerOrder()
@@ -632,8 +639,8 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(3, CountOf(army, "_feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);"), "the first pick, a kept plan and a replan each capture the selection");
         FlankResponseTests.AssertPinned(army, "hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,", "the hysteresis names the plan being kept");
         string cycle = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyTickCycle.cs");
-        FlankResponseTests.AssertPinned(cycle, "bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption, trigger.ToString());", "only the broken assumption replans with hysteresis");
-        FlankResponseTests.AssertPinned(cycle, "assumptionReason: assumptionReason);", "the reason reaches the trigger input");
+        FlankResponseTests.AssertPinned(cycle, "bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption || !crisis, trigger.ToString(), restartAgeIfKept: !brokenAssumption);", "only a crisis (and not the broken assumption) re-picks without the margin");
+        FlankResponseTests.AssertPinned(cycle, "assumptionReason: assumptionReason,", "the reason reaches the trigger input");
         string coordinator = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
         FlankResponseTests.AssertPinned(coordinator, "assumptionReason: side.Army.Feasibility?.BrokenAssumption);", "the coordinator feeds the ledger's finding to the tick");
         string runtime = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
