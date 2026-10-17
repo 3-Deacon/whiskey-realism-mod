@@ -27,6 +27,12 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>The battle's regions once they are Ready, else null (every consumer then treats the map as unknown).</summary>
         internal static RiverRegions Ready() => _regions != null && _regions.Ready ? _regions : null;
 
+        /// <summary>
+        /// The build can still arrive: the feasibility is on, the build has not failed and the regions are not Ready yet. A crossing gate with no picture
+        /// waits for it (CrossingPictureWait) when the terrain has a river and lets the leg through otherwise.
+        /// </summary>
+        internal static bool Pending() => !_failed && Plugin.ManeuverFeasibilityEnabled() && (_regions == null || !_regions.Ready);
+
         internal static void Step(TerrainPicture picture)
         {
             if (_failed || picture == null || !picture.Ready) return;

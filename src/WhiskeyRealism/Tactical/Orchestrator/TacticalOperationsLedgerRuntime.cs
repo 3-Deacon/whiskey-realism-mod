@@ -52,6 +52,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public BattlefieldPictureSnapshot CurrentBattlefieldPicture => _currentBattlefieldPicture;
         public IReadOnlyList<CommandDoctrineOrder> CurrentDoctrineOrders => _currentDoctrineOrders;
 
+        /// <summary>Where the side's command nodes stand and what it knows of the rivers; null until the coordinator sets it (nodes are then unplaced and planned nowhere).</summary>
+        internal ICommandGround Ground { get; private set; }
+
+        internal void SetGround(ICommandGround ground)
+        {
+            Ground = ground;
+        }
+
         internal void Update(
             TacticalCommanderMode mode,
             IReadOnlyList<ObjectiveRecord> objectives,
@@ -186,7 +194,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _currentForce.ReserveFraction,
                     stance,
                     maneuvers,
-                    reverseSlope);
+                    reverseSlope,
+                    Ground?.Crossings,
+                    Ground != null ? Ground.HomeBank(commandStates) : -1);
             }
             NoteFirstTerrainLine(orders);
             StoreDoctrine(picture, orders);

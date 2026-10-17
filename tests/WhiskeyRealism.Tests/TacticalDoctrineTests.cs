@@ -1037,9 +1037,10 @@ internal static class TacticalDoctrineTests
 
     private static void DoctrineAssignmentUnknownRoleHasNoLegalIdle()
     {
+        // A placed node (the zeros are its position): an unplaced one gets no target, whatever its role (DefenderGroundTests).
         CommandNodeOperationalState[] nodes =
         {
-            default(CommandNodeOperationalState)
+            CommandNodeOperationalState.Create("node-unknown", CommandEchelonKind.Unknown, CommandNodeRole.Unknown, CommandTaskType.None, 0f, 0f, 0f)
         };
         OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
         BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]

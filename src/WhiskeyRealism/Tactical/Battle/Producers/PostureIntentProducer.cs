@@ -345,6 +345,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, t.Descendants[i]);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
+            // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
+            // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
             int slotParent = rec.ParentIndex;
@@ -366,6 +369,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (!move.Move) { PostureTelemetry.Leaf(s, i, leaf, task, move.Reason, false); return; }
 
             sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));
+            t.Groups[i].Submitted = true;
             PostureTelemetry.Leaf(s, i, leaf, task, "submitted", true);
         }
 
@@ -706,6 +710,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 g.State = state;
                 g.CloseEngaged = closeEngaged;
                 g.FlankRisk = flankRisk;
+                g.RouteColumn = false;
             }
 
             // BC11 decision 2: the refused flank. A group already doing its task (idle, formation right) used to
@@ -774,6 +779,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     return false;
                 }
                 if (roadRoute.Use || columnWait) targetFormation = RoadRoutePlanner.ColumnGroupFormation;
+                if (recordTick) t.Groups[i].RouteColumn = roadRoute.Use || columnWait;
                 if (columnWait) targetReason = "road-column-wait";
                 else if (roadRoute.Use) targetReason = "road-route";
             }
@@ -1836,10 +1842,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         {
             using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.facing-pulse.wake" : "tactical.producer.facing-pulse", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.EnableTacticalContactFacingPulse == null || !Plugin.EnableTacticalContactFacingPulse.Value) return;
+                bool pulseOn = Plugin.EnableTacticalContactFacingPulse != null && Plugin.EnableTacticalContactFacingPulse.Value;
+                bool deployOn = pulseOn && Plugin.EnableColumnDeployment != null && Plugin.EnableColumnDeployment.Value;
+                // The approach in line has its own flag and does not depend on the pulse or on the column deployment: the table is rebuilt here whenever it is on.
+                bool approachOn = Plugin.EnableApproachLineAdvance != null && Plugin.EnableApproachLineAdvance.Value;
+                if (!pulseOn && !approachOn) return;
                 PostureTick.State t = PostureTick.Current(s);
                 OrderExecutor executor = OrderExecutor.ForAlliance(s != null ? s.Alliance : -1);
                 if (t == null || executor == null || sink == null) return;
+
+                // Unit churn: a march column that is fired on or flanked deploys at once (ColumnDeployment), whether or not its brigade moved this tick,
+                // and the approach table is rebuilt. Both read the contact flags and the group intent the posture producer recorded, so they run ahead of
+                // the group loop below, not inside it.
+                if (deployOn || approachOn) SubmitColumnDeployments(s, t, executor, sink, deployOn, approachOn);
+                if (!pulseOn) return;
 
                 for (int i = 0; i < s.OwnCount; i++)
                 {
@@ -1898,6 +1914,107 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 for (int i = 0; i < s.OwnCount; i++)
                     if (t.Groups[i].Has && BattleLodRuntime.IsDue(s, i)) t.Records.Remember(t.Groups, i, s.Own[i].InstanceId);
             }
+        }
+
+        // Unit churn (2026-10-17): vanilla marches a regiment in column for any path over 60 m and deploys it only inside 100 m of an enemy, facing the way it
+        // was walking; the brigade-level formation correction follows groupformation, which stays Line. A column that is fired on, shot in the flank,
+        // outflanked, or whose brigade is in close contact stops and deploys facing the threat. A group the withdrawal doctrine or a fall back is walking away
+        // is left in column, as is a regiment inside the cooldown of its last deployment.
+        private static readonly double DeployCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(ColumnDeployment.CooldownRealSecondsAtOneX);
+        private const double WithdrawalWindowHours = 0.25;
+        private const int MaxDeploymentsPerTick = 16;
+        // Rifle fire comes from inside this; a threat bearing from further away is no bearing at all.
+        private const float DeployBearingReachMeters = 700f;
+
+        private static void SubmitColumnDeployments(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, IIntentSink sink, bool deployOn, bool approachOn)
+        {
+            UnitRecord[] own = s.Own;
+            int submitted = 0;
+            // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass while its flag is on. With the
+            // flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
+            if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
+            for (int u = 0; u < s.OwnCount; u++)
+            {
+                ref UnitRecord rec = ref own[u];
+                UnitFlags f = rec.Flags;
+                // The cheap rejects first: this loop visits every own unit every tick.
+                if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;
+                if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
+                if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
+                bool inColumn = rec.Formation == ColumnDeployment.RegimentMarchColumn;
+
+                // The group whose intent the regiment follows: the nearest group above it with a recorded posture (ApproachLine.Walk, the one ancestor walk).
+                var walk = new GroupWalkHost(t.Groups, own, executor, s.DoctrineHours);
+                ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);
+                bool withdrawing = (f & UnitFlags.OnRetreat) != 0 || walkWithdrawing;
+                bool recorded = group >= 0;
+                bool closeEngaged = false, flankRisk = false, routeColumn = false;
+                CommandTaskType groupTask = CommandTaskType.None;
+                int groupFormation = -1;
+                if (recorded)
+                {
+                    groupTask = t.Groups[group].State.Task;
+                    groupFormation = own[group].Formation;
+                    routeColumn = t.Groups[group].RouteColumn;
+                    closeEngaged = t.Groups[group].CloseEngaged;
+                    flankRisk = t.Groups[group].FlankRisk;
+                }
+
+                bool approaching = false;
+                if (approachOn && recorded)
+                {
+                    int enemy = s.ClosestVisibleEnemy(group, out float enemyDistance);
+                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, true));
+                    if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);
+                }
+                if (!deployOn || !inColumn || submitted >= MaxDeploymentsPerTick) continue;
+
+                bool recent = PostureIntentPlan.IssuedWithin(executor, rec.InstanceId, OrderChannel.Formation, IntentSource.FacingPulse, s.DoctrineHours, DeployCooldownHours);
+                ColumnDeployReason reason = ColumnDeployment.Decide(new ColumnDeployInput(true, false, rec.Formation, rec.ReceivedFire, rec.FireFromFlank, rec.Outflanked,
+                    flankRisk, closeEngaged, withdrawing, PostureSense.Routed(rec), recent, approaching));
+                if (reason == ColumnDeployReason.None) continue;
+
+                // Facing: the strongest perceived pressure on the front when the flank response is on (the brigade pulse's own rule), else the closest
+                // visible enemy within rifle reach; none keeps the regiment's facing.
+                float heading = -1f;
+                if (Plugin.FlankResponseEnabled() && FlankFacing.MostPressuredBearing(s, u, rec.RotationY, out float pressure, out _)) heading = pressure;
+                else
+                {
+                    int k = s.ClosestVisibleEnemy(u, out float distance);
+                    if (k >= 0 && distance <= (reason == ColumnDeployReason.Approaching ? ApproachLine.AssaultRangeMeters : DeployBearingReachMeters))
+                        heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
+                }
+                sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading, reason));
+                submitted++;
+            }
+        }
+
+        // ApproachLine.Walk over the posture table and the executor's outcomes; a struct, so the walk allocates nothing.
+        private readonly struct GroupWalkHost : IGroupWalkHost
+        {
+            private readonly GroupPosture[] _groups;
+            private readonly UnitRecord[] _own;
+            private readonly OrderExecutor _executor;
+            private readonly double _nowHours;
+
+            public GroupWalkHost(GroupPosture[] groups, UnitRecord[] own, OrderExecutor executor, double nowHours)
+            {
+                _groups = groups;
+                _own = own;
+                _executor = executor;
+                _nowHours = nowHours;
+            }
+
+            public bool HasPosture(int index) => _groups[index].Has;
+            public CommandTaskType TaskOf(int index) => _groups[index].State.Task;
+            public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);
+        }
+
+        internal static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
+        {
+            return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
+                last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&
+                nowHours - last.AtHours < WithdrawalWindowHours;
         }
 
         // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).

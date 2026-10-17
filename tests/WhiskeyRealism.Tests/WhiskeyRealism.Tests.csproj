@@ -243,6 +243,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalOperationSelectionModel.cs" Link="Operations\TacticalOperationSelectionModel.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalOperationsTelemetry.cs" Link="Operations\TacticalOperationsTelemetry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandNodeOperationalState.cs" Link="Operations\CommandNodeOperationalState.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandGround.cs" Link="Operations\CommandGround.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\CommandNodeTaskPlanner.cs" Link="Operations\CommandNodeTaskPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\TacticalCommandMonitor.cs" Link="Operations\TacticalCommandMonitor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Operations\DoctrineTargetPoint.cs" Link="Operations\DoctrineTargetPoint.cs" />
@@ -268,6 +269,9 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\RiverRegions.cs" Link="Battle\RiverRegions.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CrossingWatch.cs" Link="Battle\CrossingWatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\RiverCrossingRule.cs" Link="Battle\RiverCrossingRule.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CrossingPictureWait.cs" Link="Battle\CrossingPictureWait.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OrderIssueOrigin.cs" Link="Battle\OrderIssueOrigin.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\RowThrottle.cs" Link="Battle\RowThrottle.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SingleLinkClusters.cs" Link="Battle\SingleLinkClusters.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningTerrain.cs" Link="Battle\OpeningTerrain.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PerceivedGroundLattice.cs" Link="Battle\PerceivedGroundLattice.cs" />
@@ -296,6 +300,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleLod.cs" Link="Battle\BattleLod.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleLodState.cs" Link="Battle\BattleLodState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PostureRecords.cs" Link="Battle\PostureRecords.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ColumnDeployment.cs" Link="Battle\ColumnDeployment.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ApproachLine.cs" Link="Battle\ApproachLine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\LayoutMirror.cs" Link="Battle\LayoutMirror.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\FormationFlipDetector.cs" Link="Battle\FormationFlipDetector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleProducerRegistry.cs" Link="Battle\BattleProducerRegistry.cs" />
@@ -348,6 +354,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalLeafBrigadeMap.cs" Link="Orchestrator\TacticalLeafBrigadeMap.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\LeafReserveRelease.cs" Link="Orchestrator\LeafReserveRelease.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReleaseHysteresis.cs" Link="Orchestrator\ReleaseHysteresis.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ReserveReleasePacing.cs" Link="Orchestrator\ReserveReleasePacing.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\LeafReservePlanner.cs" Link="Battle\LeafReservePlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalForceBalanceEvidence.cs" Link="Orchestrator\TacticalForceBalanceEvidence.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\TacticalReinforcementOpportunityDoctrine.cs" Link="Orchestrator\TacticalReinforcementOpportunityDoctrine.cs" />

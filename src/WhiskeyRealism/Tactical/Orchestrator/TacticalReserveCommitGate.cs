@@ -91,14 +91,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// The reserve-release producer: <paramref name="held"/> (the resolution the
         /// gate acts on, ledger state first) still says Reserve while
         /// <paramref name="allocator"/> (the command-node intent the direct-child
-        /// allocator produced) has re-roled the group to a committed role.
+        /// allocator produced) has RELEASED the group to a committed role
+        /// (<see cref="CommandNodeIntent.ReleasedFromReserve"/>). A role the evidence tiers gave a group the ledger still holds is a disagreement the
+        /// ledger resolves, not a release (the rule of <see cref="TryReleasedDirectChild"/>): vanilla's reserve commit stays denied for it.
         /// </summary>
-        public static bool ReleasedByAllocator(CommandIntentResolution held, CommandIntentResolution allocator)
+        public static bool ReleasedByAllocator(CommandIntentResolution held, CommandIntentResolution allocator, bool defender)
         {
             if (!held.Found || held.Intent.Role != DirectChildRole.Reserve) return false;
             if (!allocator.Found) return false;
             DirectChildRole role = allocator.Intent.Role;
-            return role != DirectChildRole.Reserve && role != DirectChildRole.Unknown;
+            if (role == DirectChildRole.Reserve || role == DirectChildRole.Unknown || !allocator.Intent.ReleasedFromReserve) return false;
+            // On a Defender side Main and SupportMain are attack roles and never release a held reserve (the rule of TryReleasedDirectChild).
+            return !(defender && (role == DirectChildRole.Main || role == DirectChildRole.SupportMain));
         }
 
         /// <summary>CheckUseOfReserves 6084: vanilla returns for an inactive group or a regiment-level unit (unittyp &lt;= 13).</summary>
@@ -198,22 +202,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// The reserve-release producer's allocator view, without allocating: the
         /// direct child's intent (ArmyOrchestrator.CurrentDirectChildIntents; ids are
         /// "child-" / "synth-army-" + the group's GameObject instance id,
-        /// CommandIntentResolver) re-roled out of Reserve, and the band it was sent to,
-        /// DirectChildIntent.AxisSector (the crisis band or the main effort's band,
-        /// DirectChildAllocator.ReleaseReserves). The command-node intent carries only
-        /// the child's own band. Pair with a ledger state that HeldInReserve.
+        /// CommandIntentResolver) RELEASED out of Reserve by the allocation
+        /// (<see cref="DirectChildIntent.ReleasedFromReserve"/>: the base allocation held
+        /// it and a crisis, stagger, odds, flank or crossing release took it out), the
+        /// band it was sent to (DirectChildIntent.AxisSector, DirectChildAllocator.ReleaseReserves)
+        /// and the role it took, and whether it carries a crossing guard point (a release timed to the enemy's arrival). The command-node intent carries
+        /// only the child's own band.
+        /// Pair with a ledger state that HeldInReserve.
+        ///
+        /// A role the evidence tiers gave a child the ledger still holds (the base allocation
+        /// is not Reserve: Main, SupportMain or a refuse role from its own contact and
+        /// strength) is a disagreement between the allocator and the ledger, not a release,
+        /// and moves nothing: smoke 2026-10-17 queued 18 release orders for one brigade the
+        /// allocator re-roled every few seconds without ever releasing it. On a Defender side
+        /// Main and SupportMain are attack roles and never release a held reserve; a Defender's
+        /// releases are the crisis Fix and the refuse roles (flank, crossing guard).
         /// </summary>
-        public static bool TryReleasedDirectChild(IReadOnlyList<DirectChildIntent> intents, int instanceId, out int sector)
+        public static bool TryReleasedDirectChild(IReadOnlyList<DirectChildIntent> intents, int instanceId, bool defender,
+            out int sector, out DirectChildRole role, out bool guardPoint)
         {
             sector = 0;
+            role = DirectChildRole.Unknown;
+            guardPoint = false;
             if (intents == null || instanceId == 0) return false;
             for (int i = 0; i < intents.Count; i++)
             {
                 string id = intents[i].ChildId;
                 if (!SuffixIs(id, "child-", instanceId) && !SuffixIs(id, "synth-army-", instanceId)) continue;
-                DirectChildRole role = intents[i].Role;
-                if (role == DirectChildRole.Reserve || role == DirectChildRole.Unknown) return false;
+                DirectChildRole found = intents[i].Role;
+                if (found == DirectChildRole.Reserve || found == DirectChildRole.Unknown) return false;
+                if (!intents[i].ReleasedFromReserve) return false;
+                if (defender && (found == DirectChildRole.Main || found == DirectChildRole.SupportMain)) return false;
                 sector = intents[i].AxisSector;
+                role = found;
+                guardPoint = intents[i].HasGuardPoint;
                 return true;
             }
             return false;

@@ -153,6 +153,13 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool HasPurpose { get { return Role != CommandNodeRole.Unknown || Task != CommandTaskType.None; } }
         public bool AllowsIdle { get { return AllowedIdle != DoctrineAllowedIdleReason.None; } }
 
+        /// <summary>
+        /// The order of a node the ledger could not place (<see cref="TacticalBattleLinePlanner.NoPositionReason"/>): no post to go to. Its
+        /// movement tasks are no move; the executor must not substitute an objective stand-off from the node's live position (smoke
+        /// 2026-10-17: a Defender walked toward the enemy line that way).
+        /// </summary>
+        public bool HasNoPost { get { return string.Equals(Reason, TacticalBattleLinePlanner.NoPositionReason, System.StringComparison.Ordinal); } }
+
         public static CommandDoctrineOrder Create(
             string nodeId,
             CommandNodeRole role,
