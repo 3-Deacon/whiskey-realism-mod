@@ -19,6 +19,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w WORKS-PIN-FADED holders faded to memory 0.4 leave the fix pinned and post a look; the same segment with own regiments standing on it lifts the pin", WPinFaded),
         ("bc14w WORKS-PIN-EXPLOIT a non-breach exploit and its followers aimed at unbroken works hold stance 2 whatever the hold; a breach, a broken-in aim and a recall do not", WPinExploit),
         ("bc14w WORKS-PIN-HOLD a pinned exploit holds at the band's edge on its approach line, keeps its heading, and resumes the strike when the aim is broken in", WPinHold),
+        ("bc14w WORKS-PIN-HOLD-GAP with two works segments and a gap, a group inside the first band holds where it stands and is not sent into the second", WPinHoldGap),
         ("bc14w WORKS-PIN-LEDGER the holding fix of an unstruck turn is pinned, the wing is not; the pin lifts when its works are broken in and with the flag off", WPinLedger),
     };
 
@@ -386,5 +387,25 @@ internal static partial class ManeuverFeasibilityTests
         int held2 = run.IndexOf("bool worksHeld = WorksHoldGuard.Holds(state.Task, state.Reason)", StringComparison.Ordinal);
         AssertTrue(convert > 0 && held2 > convert, "the conversion precedes the hold's reading, so the converted asset is a held group");
         AssertTrue(run.Contains("&& order.PrimaryTarget.HasValue && army?.Feasibility?.HeldWorks != null"), "it needs the aim and the works");
+    }
+
+    // Two held segments with a gap of open ground between them (the verifier's geometry): the band is z >= 500 for x in [0, 300] and x in [600, 900]. Without
+    // the in-band guard the bisection of a group inside the first band, aiming at the second, would cross the gap and put its hold in the second band.
+    sealed class TwoSegments : IWorksQuery
+    {
+        public bool OnHeldWorks(float x, float z) => InWorksBand(x, z) && z >= 600f;
+        public bool InWorksBand(float x, float z) => z >= 500f && ((x >= 0f && x <= 300f) || (x >= 600f && x <= 900f));
+        public bool StrikeBrokenIn(float x, float z) => false;
+    }
+
+    static void WPinHoldGap()
+    {
+        var works = new TwoSegments();
+        MoveContest.PinHoldPoint(100f, 550f, 800f, 600f, works, out float hx, out float hz);
+        AssertNear(100f, hx, 0.01f, "a group in the first band holds where it stands (x)");
+        AssertNear(550f, hz, 0.01f, "and not in the second band (z)");
+        MoveContest.PinHoldPoint(100f, 200f, 100f, 600f, works, out hx, out hz);
+        AssertTrue(hz < 500f && hz > 495f, "control: from outside it goes up to the first band's edge on the approach line, got " + hz);
+        AssertNear(100f, hx, 0.01f, "straight ahead");
     }
 }
