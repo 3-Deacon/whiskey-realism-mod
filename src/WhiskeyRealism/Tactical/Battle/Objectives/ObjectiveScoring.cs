@@ -47,6 +47,16 @@ namespace WhiskeyRealism.Tactical.Battle
         public string Reason;
     }
 
+    /// <summary>
+    /// What the TacticalMainEffort row says of the table beside the pick: the highest-valued objective the side could take (a row whose penalty r is
+    /// below <see cref="ManeuverFeasibility.RiskyPenalty"/>) and the nearest one it does not hold, the choice vanilla's dynamic chain would make.
+    /// </summary>
+    public struct ObjectiveContrast
+    {
+        public string MaxFeasibleId, NearestId;
+        public float MaxFeasibleValue;
+    }
+
     /// <summary>A secondary objective the allocator may screen: where it stands, whether the side holds it, and its score (best first).</summary>
     public struct SecondaryObjective
     {
@@ -252,6 +262,34 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
             return n;
+        }
+
+        /// <summary>
+        /// The table's contrast for the main-effort row: the highest <c>Value</c> among feasible rows with r below <see cref="ManeuverFeasibility.RiskyPenalty"/>
+        /// (first wins a tie), and the row the side does not hold that is nearest the army's centre (<paramref name="fromX"/>, <paramref name="fromZ"/>).
+        /// The ids are null with no such row.
+        /// </summary>
+        public static ObjectiveContrast Contrast(IFeasibilityLookup ledger, float fromX, float fromZ)
+        {
+            var contrast = new ObjectiveContrast { MaxFeasibleValue = float.NegativeInfinity };
+            float nearest = float.PositiveInfinity;
+            for (int r = 0; ledger != null && r < ledger.ObjectiveCount; r++)
+            {
+                if (!ledger.TryObjective(r, out ObjectiveEstimate row)) continue;
+                if (row.Feasible && row.Penalty < ManeuverFeasibility.RiskyPenalty && row.Value > contrast.MaxFeasibleValue)
+                {
+                    contrast.MaxFeasibleValue = row.Value;
+                    contrast.MaxFeasibleId = row.Id;
+                }
+                float dx = row.X - fromX, dz = row.Z - fromZ, d2 = dx * dx + dz * dz;
+                if (!row.OwnHeld && d2 < nearest)
+                {
+                    nearest = d2;
+                    contrast.NearestId = row.Id;
+                }
+            }
+            if (contrast.MaxFeasibleId == null) contrast.MaxFeasibleValue = 0f;
+            return contrast;
         }
 
         /// <summary>The objective's feasibility penalty r: <c>1 - (1 - daylight)(1 - detail)(1 - ContestedWeight x contested)</c>.</summary>

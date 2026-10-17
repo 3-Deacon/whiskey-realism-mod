@@ -176,6 +176,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     FeasibilityTelemetry.EnemyWorks(army.AllianceId, st.Ledger, FortificationPointsRuntime.TableOf(army.AllianceId), now);
                     FeasibilityTelemetry.WorksHold(army.AllianceId, st.Ledger, army.WorksGuarded, now);
                 }
+                // BC14O: the victory clock's pressure and the main effort the director picked (the army's band and screens as the last allocation left them).
+                if (Plugin.ObjectiveDoctrineEnabled())
+                {
+                    FeasibilityTelemetry.ObjectivePressure(army.AllianceId, st.Ledger, now);
+                    if (!army.TryObjectiveSector(out int band)) band = -1;
+                    FeasibilityTelemetry.MainEffort(army.AllianceId, st.Ledger, army.CurrentObjectivePick, band, army.SecondaryScreens, now);
+                }
 
                 if (forced) return;
 

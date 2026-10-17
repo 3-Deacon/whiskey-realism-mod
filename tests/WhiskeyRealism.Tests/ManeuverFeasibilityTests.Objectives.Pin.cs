@@ -35,6 +35,7 @@ internal static partial class ManeuverFeasibilityTests
             "src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveScoring.cs",
             "src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveLatch.cs",
             "src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveChains.cs",
+            "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityTelemetry.Objectives.cs",
             "src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveRuntime.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Objectives.cs",
             "src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityLedger.Objectives.cs",

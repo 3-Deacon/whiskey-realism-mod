@@ -729,6 +729,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         // ---- BC14O economy of force ----
 
+        /// <summary>BC14O: the main-effort objective the last doctrine store picked (the TacticalMainEffort row's subject).</summary>
+        internal ObjectivePick CurrentObjectivePick { get; private set; }
+
         private readonly SecondaryObjective[] _secondaries = new SecondaryObjective[ObjectiveScoring.MaxSecondaryScreens];
         private bool[] _playerOwnedChildren = Array.Empty<bool>();
 
@@ -1716,6 +1719,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance, maneuverNodes,
                 feasibility: _feasibility, allianceId: AllianceId, reverseSlope: HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
+            CurrentObjectivePick = ledger.CurrentObjectivePick;
             _currentDoctrineOrders = FinishOrders(ledger.CurrentDoctrineOrders, worksHold);
         }
 

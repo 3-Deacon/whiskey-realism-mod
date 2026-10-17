@@ -9,7 +9,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     // TacticalManeuverBody, TacticalReplan, TacticalCrossingWatch, and the OnceLogs of the feasibility layer. Every row builds its strings only
     // after the router has said the profile wants it, and the per-candidate and per-body rows are throttled by what changed, so the stream
     // is bounded by the evaluation's own state changes.
-    internal static class FeasibilityTelemetry
+    internal static partial class FeasibilityTelemetry
     {
         private const double CandidateRowSpacingHours = 0.05, CrossingRowSpacingHours = 0.1, WorksRowSpacingHours = 0.1;
         private const float PenaltyBucket = 0.1f;
@@ -53,6 +53,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 EnemyWorksAt[a] = double.NegativeInfinity;
                 WorksHoldAt[a] = double.NegativeInfinity;
                 WorksHoldState[a] = 0;
+                ResetObjectives(a);
             }
         }
 

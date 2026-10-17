@@ -314,6 +314,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ConfirmedLegs.cs" Link="Orchestrator\Plays\ConfirmedLegs.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityTick.cs" Link="Orchestrator\Plays\FeasibilityTick.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityTelemetry.cs" Link="Orchestrator\Plays\FeasibilityTelemetry.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\FeasibilityTelemetry.Objectives.cs" Link="Orchestrator\Plays\FeasibilityTelemetry.Objectives.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Monitor.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Monitor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Defender.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Defender.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\ManeuverFeasibility.Works.cs" Link="Orchestrator\Plays\ManeuverFeasibility.Works.cs" />

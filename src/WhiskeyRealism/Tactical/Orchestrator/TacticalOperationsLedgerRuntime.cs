@@ -46,6 +46,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public IReadOnlyList<ObjectiveRecord> CurrentObjectives => _currentObjectives;
         public StrategicBattleIntentSnapshot CurrentStrategicBattleIntent => _currentStrategicBattleIntent;
         public OperationRecord CurrentOperation => _currentOperation;
+
+        /// <summary>BC14O: the main-effort objective the last doctrine store picked (<see cref="ObjectivePick.Has"/> false with the doctrine off or nothing feasible).</summary>
+        internal ObjectivePick CurrentObjectivePick { get; private set; }
         public BattlefieldPictureSnapshot CurrentBattlefieldPicture => _currentBattlefieldPicture;
         public IReadOnlyList<CommandDoctrineOrder> CurrentDoctrineOrders => _currentDoctrineOrders;
 
@@ -163,6 +166,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 .WithObjectiveDoctrine(latch != null ? feasibility : null, latch?.Id));
 
             _currentOperation = decision.Operation;
+            CurrentObjectivePick = decision.Pick;
             // BC14O: the latch follows the pick; nothing feasible (or an objective gone from the map) clears it, and the next pick starts with no margin.
             if (latch != null)
             {

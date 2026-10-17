@@ -641,12 +641,13 @@ namespace WhiskeyRealism.Tactical.Operations
             return new ObjectivePick(_pickMap[at], objectives[_pickMap[at]], hasRow, row, _pickTable[at].Score + _pickTerms[at], runnerUp, runnerUpTotal);
         }
 
-        // The ledger's row for a director objective, by the director's own id match.
+        // The ledger's row for a director objective. Both ids are the map capture's ObjectiveId (the ledger's fact and the director's observation read
+        // the same string), so the match is exact: the normalising match allocates two strings for every pair that differs, on a path that runs every tick.
         private static bool TryLedgerRow(IFeasibilityLookup ledger, string objectiveId, out ObjectiveEstimate row)
         {
             for (int r = 0; r < ledger.ObjectiveCount; r++)
             {
-                if (ledger.TryObjective(r, out row) && ObjectiveIdMatches(row.Id, objectiveId)) return true;
+                if (ledger.TryObjective(r, out row) && string.Equals(row.Id, objectiveId, StringComparison.Ordinal)) return true;
             }
             row = default(ObjectiveEstimate);
             return false;

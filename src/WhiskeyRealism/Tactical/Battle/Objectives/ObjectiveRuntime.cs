@@ -24,6 +24,9 @@ namespace WhiskeyRealism.Tactical.Battle
             BattleScope.Register("objective-runtime", Reset);
         }
 
+        // One delegate for the process: a method group converted at the call would allocate one per evaluation.
+        private static readonly Func<Objectives, string> IdOfObjective = TacticalStableSceneCache.IdOf;
+
         private static void Reset()
         {
             for (int i = 0; i < Facts.Length; i++)
@@ -69,7 +72,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 // The side's own designer chains, from its own AIBattle (never by array position or the feud instance): the due ones' next objectives.
                 if (ArmyEvidenceBuilder.TryResolveOwnAiBattle(bunits, alliance, out AIBattle own))
                 {
-                    input.DueChainCount = ObjectiveChains.CollectDue(own.objectivechain, GameVars.currenttimefromstart, TacticalStableSceneCache.IdOf, DueChains[alliance]);
+                    input.DueChainCount = ObjectiveChains.CollectDue(own.objectivechain, GameVars.currenttimefromstart, IdOfObjective, DueChains[alliance]);
                     input.DueChainObjectiveIds = DueChains[alliance];
                 }
             }
