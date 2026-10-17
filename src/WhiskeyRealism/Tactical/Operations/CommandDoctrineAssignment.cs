@@ -17,7 +17,8 @@ namespace WhiskeyRealism.Tactical.Operations
             BattleStance stance = BattleStance.Meeting,
             ManeuverNodeTable maneuvers = null,
             bool reverseSlope = false,
-            ICrossingPicture crossings = null)
+            ICrossingPicture crossings = null,
+            int homeBank = -1)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
 
@@ -47,8 +48,6 @@ namespace WhiskeyRealism.Tactical.Operations
             // A Defender whose objective is the enemy line stands on its own front, never on a line laid relative to the enemy's (smoke 2026-10-17).
             if (stance == BattleStance.Defender && objectiveMatched && objective.Type == TacticalObjectiveType.EnemyLine)
                 anchor = TacticalDefensiveLineAnchorPlanner.PlanOwnFront(objective, nodes, battlefront);
-
-            int sideBank = crossings != null ? OwnBank.SideBank(crossings, nodes) : -1;
 
             for (int i = 0; i < nodes.Length; i++)
             {
@@ -82,13 +81,13 @@ namespace WhiskeyRealism.Tactical.Operations
                     reserveFraction);
                 sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
-                // A position the ledger computes stays on a bank. A post (primary, support) keeps the side's bank for a Defender and the bank the
-                // node stands on for the rest, so an Attacker's bridgehead post stays where the plan put it; a task that goes to the enemy is the
-                // executor's crossing gate's, not the bank rule's. A fall back is home for every stance: the side's bank, as the target would be
-                // without the clamp (a crossed node's soft-abort post was clamped to the river edge on the enemy's bank). A maneuver's target
-                // replaces the primary below, after this.
+                // A position the ledger computes stays on a bank. A post (primary, support) keeps the home bank for a Defender (fixed for the
+                // battle, HomeBank) and the bank the node stands on for the rest, so an Attacker's bridgehead post stays where the plan put it; a
+                // task that goes to the enemy is the executor's crossing gate's, not the bank rule's. A fall back, for every stance, is the target as
+                // it would be without the clamp unless it lies off the home bank, and is never moved forward by the clamp (KeepFallBack). A
+                // maneuver's target replaces the primary below, after this.
                 bool keepBank = crossings != null && KeepsItsBank(task, stance);
-                int postBank = stance == BattleStance.Defender ? sideBank : -1;
+                int postBank = stance == BattleStance.Defender ? homeBank : -1;
                 CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
@@ -96,7 +95,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     objective.ObjectiveId,
                     keepBank ? KeepBank(crossings, postBank, nodes, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
                     keepBank ? KeepBank(crossings, postBank, nodes, node, linePlan.SupportTarget) : linePlan.SupportTarget,
-                    crossings != null ? KeepBank(crossings, sideBank, nodes, node, linePlan.FallbackTarget) : linePlan.FallbackTarget,
+                    crossings != null ? OwnBank.KeepFallBack(crossings, homeBank, nodes, node, linePlan.FallbackTarget, objective.X, objective.Z) : linePlan.FallbackTarget,
                     idle,
                     operation.MinimumCommitSeconds,
                     nowSeconds,
@@ -118,11 +117,11 @@ namespace WhiskeyRealism.Tactical.Operations
             return orders.ToArray();
         }
 
-        private static DoctrineTargetPoint KeepBank(ICrossingPicture crossings, int sideBank, CommandNodeOperationalState[] nodes,
+        private static DoctrineTargetPoint KeepBank(ICrossingPicture crossings, int homeBank, CommandNodeOperationalState[] nodes,
             in CommandNodeOperationalState node, DoctrineTargetPoint target)
         {
-            return sideBank >= 0
-                ? OwnBank.KeepOnSideBank(crossings, sideBank, nodes, node, target)
+            return homeBank >= 0
+                ? OwnBank.KeepOnBank(crossings, homeBank, nodes, node, target)
                 : OwnBank.Keep(crossings, node, target);
         }
 

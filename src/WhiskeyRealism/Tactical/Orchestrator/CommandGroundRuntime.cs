@@ -46,6 +46,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         public ICrossingPicture Crossings => FeasibilityRuntime.CrossingPicture(_alliance);
 
+        // The deployment zone's bank when the zone answers, else the bank of the placed nodes' centre; recorded once per battle (HomeBank).
+        public int HomeBank(CommandNodeOperationalState[] placedNodes)
+        {
+            return Operations.HomeBank.Settle(_alliance, Crossings, OwnDeploymentZoneRuntime.For(BattleCoreTick.ResolveBattleUnits(), _alliance), placedNodes);
+        }
+
         public bool TryPlace(string nodeId, out float x, out float z, out float facingDegrees)
         {
             x = z = facingDegrees = 0f;

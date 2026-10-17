@@ -6,6 +6,7 @@ using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
+using WhiskeyRealism.Util;
 using static TestHarness;
 
 // Smoke 2026-10-17 (CSA Defender, DelayingDefense, objective enemy-line-1): brigades were given reserve posts, assembly points and flank
@@ -38,10 +39,14 @@ internal static class DefenderGroundTests
             ("defender ground the ledger plans from the ground it was given", TheLedgerPlansFromItsGround),
             ("defender ground the coordinator gives each side's ledger its ground before the tick and the runtime reads the side's snapshot", TheCoordinatorWiresTheGround),
             ("defender ground a defender node that has already crossed is sent back: its reserve post, screen and fallback lie on the side's bank", ACrossedDefenderNodeIsSentBack),
-            ("defender ground the side's bank is where most placed nodes stand, and a crossed node is pulled back from the nearest bank node", TheSideBankIsWhereMostNodesStand),
+            ("defender ground the home bank is the deployment zone's, else the nodes' centre, recorded once and fixed when the force crosses", TheHomeBankIsFixedForTheBattle),
+            ("defender ground a majority-crossed attacker's nodes still at home fall back unclamped, not forward over the river", AMajorityCrossedAttackerKeepsItsHomeNodesHome),
+            ("defender ground a majority-crossed defender's crossed nodes are sent back to the home bank and the nodes at home keep theirs", AMajorityCrossedDefenderIsSentHome),
+            ("defender ground a fall back is never moved forward by the clamp", AFallBackIsNeverMovedForward),
+            ("defender ground a crossed meeting node's posts stay on the bank it stands on, not the home bank", ACrossedMeetingNodesPostsStayOnItsBank),
             ("defender ground a node with no position holds: its movement tasks are no move, its reserve idles, its fallback stays", ANodeWithNoPositionHolds),
             ("defender ground an attacker's screen keeps its target across the river like its attack", AnAttackersScreenKeepsItsTarget),
-            ("defender ground a maneuver's target across the river is left to the plan and the node's fallback stays on the bank", AManeuverTargetIsLeftToThePlan),
+            ("defender ground a maneuver's target across the river is left to the plan and the node's fall back is not moved forward", AManeuverTargetIsLeftToThePlan),
             ("defender ground the pull-back stops at the farthest point on the bank", ThePullBackStopsAtTheFarthestPointOnTheBank),
             ("defender ground an own front is kept for an enemy-line objective that has an approach avenue", TheOwnFrontOverridesAnAvenueAnchor),
             ("defender ground the position survives every copy of a state: nested division, works hold, stance guard, exploit overlay, role rewrite", ThePositionSurvivesEveryCopy),
@@ -90,11 +95,22 @@ internal static class DefenderGroundTests
 
     private static CommandDoctrineOrder[] Build(CommandNodeOperationalState[] nodes, BattleStance stance, BattlefieldPictureSnapshot picture = default,
         ICrossingPicture crossings = null, TacticalOperationShape shape = TacticalOperationShape.DefensiveNetwork,
-        TacticalOperationPhase phase = TacticalOperationPhase.Forming)
+        TacticalOperationPhase phase = TacticalOperationPhase.Forming, int home = AutoHome)
     {
         if (picture.Objectives == null) picture = EnemyLinePicture();
         var operation = new OperationRecord(shape, phase, "enemy-line-1", 900f);
-        return CommandDoctrineAssignment.Build(nodes, operation, picture, 20000f, 100f, 0.3f, stance, null, false, crossings);
+        // The home bank the ledger would have settled at the first tick: where the nodes' centre stands (not recorded), unless the test fixes it.
+        if (home == AutoHome) home = crossings != null ? HomeBank.Settle(-1, crossings, null, nodes) : -1;
+        return CommandDoctrineAssignment.Build(nodes, operation, picture, 20000f, 100f, 0.3f, stance, null, false, crossings, home);
+    }
+
+    private const int AutoHome = int.MinValue;
+
+    // The posts of an order (what the bank rule keeps on a bank); the fall back has its own rule.
+    private static IEnumerable<DoctrineTargetPoint> Posts(CommandDoctrineOrder o)
+    {
+        yield return o.PrimaryTarget;
+        yield return o.SupportTarget;
     }
 
     private static IEnumerable<DoctrineTargetPoint> Targets(CommandDoctrineOrder o)
@@ -149,6 +165,9 @@ internal static class DefenderGroundTests
     {
         internal readonly Dictionary<string, (float x, float z, float facing)> Nodes = new Dictionary<string, (float, float, float)>();
         public ICrossingPicture Crossings { get; set; }
+
+        public int HomeBank(CommandNodeOperationalState[] placedNodes)
+            => WhiskeyRealism.Tactical.Operations.HomeBank.Settle(-1, Crossings, null, placedNodes);
 
         public bool TryPlace(string nodeId, out float x, out float z, out float facingDegrees)
         {
@@ -338,10 +357,10 @@ internal static class DefenderGroundTests
         for (int i = 0; i < kept.Length; i++)
         {
             AssertEqual(CommandTaskType.FormUp, kept[i].Task, "node " + i + " forms up");
-            foreach (DoctrineTargetPoint t in Targets(kept[i]))
+            foreach (DoctrineTargetPoint t in Posts(kept[i]))
             {
                 if (!t.HasValue) continue;
-                AssertEqual(picture.RegionAt(nodes[i].X, nodes[i].Z), picture.RegionAt(t.X, t.Z), "node " + i + " keeps its bank (target x " + t.X + ")");
+                AssertEqual(picture.RegionAt(nodes[i].X, nodes[i].Z), picture.RegionAt(t.X, t.Z), "node " + i + " keeps its bank (post x " + t.X + ")");
             }
         }
     }
@@ -388,14 +407,18 @@ internal static class DefenderGroundTests
         var picture = new RiverCrossingTests.Picture();
         CommandNodeOperationalState[] nodes = RiverNodes();
         CommandDoctrineOrder[] orders = Build(nodes, BattleStance.Defender, EnemyLinePicture(700f, -1000f, exposed: false), picture);
+        int posts = 0;
         foreach (CommandDoctrineOrder o in orders)
         {
-            foreach (DoctrineTargetPoint t in Targets(o))
+            foreach (DoctrineTargetPoint t in Posts(o))
             {
                 if (!t.HasValue) continue;
+                posts++;
                 AssertEqual(2, picture.RegionAt(t.X, t.Z), o.NodeId + " " + o.Task + " stays on its bank (x " + t.X + ")");
             }
         }
+
+        AssertTrue(posts >= 3, "the Defender has posts to keep (" + posts + ")");
     }
 
     // ---- the ledger carries the ground to the doctrine build ----------------------------------------------------------------------------
@@ -429,7 +452,7 @@ internal static class DefenderGroundTests
         int posts = 0;
         foreach (CommandDoctrineOrder o in onBank.CurrentDoctrineOrders)
         {
-            foreach (DoctrineTargetPoint t in Targets(o))
+            foreach (DoctrineTargetPoint t in Posts(o))
             {
                 if (!t.HasValue) continue;
                 posts++;
@@ -461,6 +484,10 @@ internal static class DefenderGroundTests
         string ground = FlankResponseTests.SourceText("Tactical", "Orchestrator", "CommandGroundRuntime.cs");
         FlankResponseTests.AssertPinned(ground, "_snapshot.IndexOfOwn(TacticalBattleCoordinator.ParseCommandNodeInstanceId(nodeId))", "the node id is the group's GameObject id, the snapshot's key");
         FlankResponseTests.AssertPinned(ground, "public ICrossingPicture Crossings => FeasibilityRuntime.CrossingPicture(_alliance);", "the same picture the crossing gate asks");
+        FlankResponseTests.AssertPinned(ground, "Operations.HomeBank.Settle(_alliance, Crossings, OwnDeploymentZoneRuntime.For(BattleCoreTick.ResolveBattleUnits(), _alliance), placedNodes);",
+            "the home bank comes from the own deployment zone");
+        string ledger = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
+        FlankResponseTests.AssertPinned(ledger, "Ground?.Crossings, Ground != null ? Ground.HomeBank(commandStates) : -1);", "the ledger hands the doctrine build the side's home bank");
     }
 
     // ---- a node already across, a node with no position, and the copies ---------------------------------------------------------------
@@ -488,27 +515,150 @@ internal static class DefenderGroundTests
             CommandDoctrineOrder o = Build(nodes, BattleStance.Defender, enemy, picture)[crossed];
             AssertTrue(o.PrimaryTarget.HasValue, "node " + crossed + " has a post (" + o.Task + ")");
             AssertEqual(2, picture.RegionAt(o.PrimaryTarget.X, o.PrimaryTarget.Z), "node " + crossed + " " + o.Task + " post is back on the side's bank (x " + o.PrimaryTarget.X + ")");
-            foreach (DoctrineTargetPoint t in Targets(o))
-                if (t.HasValue) AssertEqual(2, picture.RegionAt(t.X, t.Z), "node " + crossed + " every target is on the side's bank (x " + t.X + ")");
+            foreach (DoctrineTargetPoint t in Posts(o))
+                if (t.HasValue) AssertEqual(2, picture.RegionAt(t.X, t.Z), "node " + crossed + " every post is on the side's bank (x " + t.X + ")");
         }
     }
 
-    private static void TheSideBankIsWhereMostNodesStand()
+    private static void TheHomeBankIsFixedForTheBattle()
+    {
+        BattleScope.ResetAll();
+        try
+        {
+            var picture = new RiverCrossingTests.Picture();
+            CommandNodeOperationalState[] home = CrossedAttackerNodes(CommandNodeRole.SupportingAttack);   // 2 of 5 across, centre in region 2
+            for (int i = 0; i < home.Length; i++) home[i] = home[i].WithPosition(1100f + 50f * i, -1000f, 270f);
+            AssertEqual(2, HomeBank.Settle(0, picture, null, home), "settled at the first tick from the nodes' centre: region 2");
+            // The force crosses: the centre now stands on region 1. The home bank does not move.
+            var across = new CommandNodeOperationalState[home.Length];
+            for (int i = 0; i < across.Length; i++) across[i] = home[i].WithPosition(700f + 40f * i, -1000f, 270f);
+            AssertEqual(2, HomeBank.Settle(0, picture, null, across), "the home bank stays region 2 when the whole force is across");
+            AssertEqual(1, HomeBank.Settle(1, picture, null, across), "the other alliance settles from its own nodes");
+            BattleScope.ResetAll();
+            AssertEqual(1, HomeBank.Settle(0, picture, null, across), "a new battle settles anew");
+
+            // The deployment zone wins over the centre: its nearest point to the centre is on region 1.
+            BattleScope.ResetAll();
+            AssertEqual(1, HomeBank.Settle(0, picture, new FixedZone(800f, -1000f), home), "the zone's bank, not the nodes' centre's");
+            // A zone with no answer, an unready picture, nothing placed, and a centre on the river.
+            BattleScope.ResetAll();
+            AssertEqual(2, HomeBank.Settle(0, picture, new FixedZone(float.NaN, 0f), home), "a zone that does not answer gives the centre's bank");
+            BattleScope.ResetAll();
+            AssertEqual(-1, HomeBank.Settle(0, new RiverCrossingTests.Picture { Ready = false }, null, home), "an unready picture settles nothing");
+            AssertEqual(-1, HomeBank.Settle(0, picture, null, EvidenceNodes(placed: false)), "no placed node settles nothing");
+            AssertEqual(2, HomeBank.Settle(0, picture, null, home), "and nothing was recorded by those");
+            BattleScope.ResetAll();
+            var river = new[]
+            {
+                CommandNodeOperationalState.Create("a", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, -100f, -1000f, 0f),
+                CommandNodeOperationalState.Create("b", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 700f, -1000f, 0f),
+            };
+            AssertEqual(0, HomeBank.Settle(0, picture, null, river), "the centre's bank");
+        }
+        finally { BattleScope.ResetAll(); }
+    }
+
+    private sealed class FixedZone : IOwnDeploymentZone
+    {
+        private readonly float _x, _z;
+        internal FixedZone(float x, float z) { _x = x; _z = z; }
+        public bool Active => true;
+        public bool TryClamp(float fromX, float fromZ, ref float x, ref float z)
+        {
+            if (float.IsNaN(_x)) return false;
+            x = _x;
+            z = _z;
+            return true;
+        }
+    }
+
+    // The verify probe: 3 of 5 Attacker nodes are across (region 1, toward the enemy at x 300, region 0), n3 and n4 still on the start bank (region 2).
+    private static CommandNodeOperationalState[] MajorityCrossedNodes(CommandNodeRole role)
+    {
+        float[] xs = { 800f, 850f, 900f, 1250f, 1350f };
+        var nodes = new CommandNodeOperationalState[xs.Length];
+        for (int i = 0; i < xs.Length; i++)
+            nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.BrigadeLike, role, CommandTaskType.FormUp, xs[i], -1000f + 60f * i, 270f);
+        return nodes;
+    }
+
+    private static void AMajorityCrossedAttackerKeepsItsHomeNodesHome()
     {
         var picture = new RiverCrossingTests.Picture();
-        CommandNodeOperationalState[] nodes = NodesWithOneCrossed(1, out _);
-        AssertEqual(2, OwnBank.SideBank(picture, nodes), "four of five stand in region 2");
-        AssertEqual(2, OwnBank.SideBank(picture, NodesWithOneCrossed(0, out _)), "the first node being the crossed one does not make its bank the side's");
-        AssertEqual(-1, OwnBank.SideBank(null, nodes), "no picture, no bank");
-        AssertEqual(-1, OwnBank.SideBank(new RiverCrossingTests.Picture { Ready = false }, nodes), "an unready picture, no bank");
-        AssertEqual(-1, OwnBank.SideBank(picture, EvidenceNodes(placed: false)), "no placed node, no bank");
-        // The crossed node's target across the river is pulled from the nearest bank node, never from the crossed node itself.
-        DoctrineTargetPoint across = DoctrineTargetPoint.From(700f, -940f);
-        DoctrineTargetPoint kept = OwnBank.KeepOnSideBank(picture, 2, nodes, nodes[1], across);
-        AssertEqual(2, picture.RegionAt(kept.X, kept.Z), "back on the bank (x " + kept.X + ")");
-        DoctrineTargetPoint onBank = DoctrineTargetPoint.From(1400f, -900f);
-        AssertEqual(1400f, OwnBank.KeepOnSideBank(picture, 2, nodes, nodes[1], onBank).X, "a target on the bank is kept");
-        AssertEqual(700f, OwnBank.KeepOnSideBank(picture, -1, nodes, nodes[1], across).X, "with no bank nothing is judged");
+        CommandNodeOperationalState[] nodes = MajorityCrossedNodes(CommandNodeRole.FallbackGuard);
+        BattlefieldPictureSnapshot enemy = EnemyLinePicture(300f, -1000f);
+        foreach (BattleStance stance in new[] { BattleStance.Attacker, BattleStance.Meeting })
+        {
+            CommandDoctrineOrder[] free = Build(nodes, stance, enemy, null, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort);
+            CommandDoctrineOrder[] kept = Build(nodes, stance, enemy, picture, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort, home: 2);
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                AssertEqual(CommandTaskType.FallBackToLine, kept[i].Task, stance + " n" + i + " falls back");
+                bool atHome = picture.RegionAt(nodes[i].X, nodes[i].Z) == 2;
+                if (atHome)
+                {
+                    AssertNear(free[i].FallbackTarget.X, kept[i].FallbackTarget.X, 0.01f, stance + " n" + i + " (at home) falls back unclamped, behind it, x " + kept[i].FallbackTarget.X);
+                    AssertTrue(kept[i].FallbackTarget.X > nodes[i].X, stance + " n" + i + " (at home) does not fall back forward over the river");
+                }
+                else
+                {
+                    AssertEqual(2, picture.RegionAt(kept[i].FallbackTarget.X, kept[i].FallbackTarget.Z), stance + " n" + i + " (across) falls back home (x " + kept[i].FallbackTarget.X + ")");
+                }
+            }
+        }
+    }
+
+    private static void AMajorityCrossedDefenderIsSentHome()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        CommandNodeOperationalState[] nodes = MajorityCrossedNodes(CommandNodeRole.Reserve);
+        nodes[1] = CommandNodeOperationalState.Create("n1", CommandEchelonKind.BrigadeLike, CommandNodeRole.ScreeningForce, CommandTaskType.FormUp, nodes[1].X, nodes[1].Z, 270f);
+        CommandDoctrineOrder[] orders = Build(nodes, BattleStance.Defender, EnemyLinePicture(300f, -1000f, exposed: false), picture, home: 2);
+        int posts = 0;
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            foreach (DoctrineTargetPoint t in Posts(orders[i]))
+            {
+                if (!t.HasValue) continue;
+                posts++;
+                AssertEqual(2, picture.RegionAt(t.X, t.Z), "n" + i + " " + orders[i].Task + " post is on the home bank even though most of the force is across (x " + t.X + ")");
+            }
+        }
+
+        AssertTrue(posts >= 4, "the Defender has posts (" + posts + ")");
+    }
+
+    private static void AFallBackIsNeverMovedForward()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        var node = CommandNodeOperationalState.Create("n", CommandEchelonKind.BrigadeLike, CommandNodeRole.FallbackGuard, CommandTaskType.FallBackToLine, 1200f, -1000f, 270f);
+        var nodes = new[] { node };
+        // Enemy to the west (x 300). A fall back east, off the home bank (region 3): the clamp would pull it west, toward the enemy: unclamped.
+        DoctrineTargetPoint behind = DoctrineTargetPoint.From(1600f, -1000f);
+        DoctrineTargetPoint kept = OwnBank.KeepFallBack(picture, 2, nodes, node, behind, 300f, -1000f);
+        AssertNear(1600f, kept.X, 0.01f, "a clamp that would move the fall back toward the enemy is dropped");
+        // A fall back that lies forward of the node, across the river (a plan's fall back toward the enemy bank): the clamp moves it back toward the
+        // node, away from the enemy, so the clamped target is kept.
+        DoctrineTargetPoint forward = DoctrineTargetPoint.From(900f, -1000f);
+        DoctrineTargetPoint homeward = OwnBank.KeepFallBack(picture, 2, nodes, node, forward, 300f, -1000f);
+        AssertEqual(2, picture.RegionAt(homeward.X, homeward.Z), "a fall back off the home bank is pulled onto it when that does not move it forward (x " + homeward.X + ")");
+        AssertTrue(homeward.X > forward.X, "and the pull is away from the enemy");
+        // On the home bank, an unknown home bank, no enemy distance: unchanged.
+        AssertNear(1300f, OwnBank.KeepFallBack(picture, 2, nodes, node, DoctrineTargetPoint.From(1300f, -1000f), 300f, -1000f).X, 0.01f, "on the home bank: unchanged");
+        AssertNear(1600f, OwnBank.KeepFallBack(picture, -1, nodes, node, behind, 300f, -1000f).X, 0.01f, "an unknown home bank judges nothing");
+        AssertFalse(OwnBank.KeepFallBack(picture, 2, nodes, node, DoctrineTargetPoint.None, 300f, -1000f).HasValue, "no target stays none");
+    }
+
+    private static void ACrossedMeetingNodesPostsStayOnItsBank()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        CommandNodeOperationalState[] nodes = CrossedAttackerNodes(CommandNodeRole.SupportingAttack);
+        foreach (BattleStance stance in new[] { BattleStance.Meeting, BattleStance.Attacker })
+        {
+            CommandDoctrineOrder[] orders = Build(nodes, stance, EnemyLinePicture(300f, -1000f, exposed: false), picture, TacticalOperationShape.SingleMainEffort, home: 2);
+            for (int i = 0; i < 2; i++)
+                AssertEqual(1, picture.RegionAt(orders[i].PrimaryTarget.X, orders[i].PrimaryTarget.Z), stance + " n" + i + " post stays on the bank it stands on (x " + orders[i].PrimaryTarget.X + ")");
+        }
     }
 
     private static void ANodeWithNoPositionHolds()
@@ -568,11 +718,10 @@ internal static class DefenderGroundTests
         var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-7", turn, 1f, 0f) }, new[] { FlankResponseTests.NodeIntent("node-7", "node-7") });
         var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "enemy-line-1", 900f);
         CommandDoctrineOrder o = CommandDoctrineAssignment.Build(nodes, operation, EnemyLinePicture(500f, -1000f, exposed: false), 20000f, 100f, 0.3f,
-            BattleStance.Meeting, table, false, picture)[0];
+            BattleStance.Meeting, table, false, picture, 2)[0];
         AssertEqual(270f, o.ManeuverHeading, "the maneuver reached the order");
         AssertNear(700f, o.PrimaryTarget.X, 0.01f, "its target across the river is the order's primary");
-        if (o.FallbackTarget.HasValue)
-            AssertEqual(2, picture.RegionAt(o.FallbackTarget.X, o.FallbackTarget.Z), "while the node's fallback stays on its bank");
+        AssertTrue(!o.FallbackTarget.HasValue || o.FallbackTarget.X >= nodes[0].X, "while the node's fall back is behind it, never forward over the river (x " + o.FallbackTarget.X + ")");
     }
 
     private static void ThePullBackStopsAtTheFarthestPointOnTheBank()
@@ -696,7 +845,7 @@ internal static class DefenderGroundTests
         foreach (BattleStance stance in new[] { BattleStance.Attacker, BattleStance.Meeting, BattleStance.Defender })
         {
             CommandDoctrineOrder[] free = Build(nodes, stance, enemy, null, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort);
-            CommandDoctrineOrder[] kept = Build(nodes, stance, enemy, picture, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort);
+            CommandDoctrineOrder[] kept = Build(nodes, stance, enemy, picture, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort, home: 2);
             for (int i = 0; i < 2; i++)
             {
                 AssertEqual(CommandTaskType.FallBackToLine, kept[i].Task, stance + " n" + i + " falls back");
@@ -738,7 +887,7 @@ internal static class DefenderGroundTests
         var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-0", support, 1f, 0f) }, new[] { FlankResponseTests.NodeIntent("n0", "child-0") });
         var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "enemy-line-1", 900f);
         CommandDoctrineOrder o = CommandDoctrineAssignment.Build(nodes, operation, EnemyLinePicture(300f, -1000f, exposed: false), 20000f, 100f, 0.3f,
-            BattleStance.Attacker, table, false, picture)[0];
+            BattleStance.Attacker, table, false, picture, 2)[0];
         AssertEqual(CommandTaskType.SupportAttack, o.Task, "the maneuver's task");
         AssertTrue(o.SupportTarget.HasValue, "a support post");
         AssertEqual(0, picture.RegionAt(o.SupportTarget.X, o.SupportTarget.Z), "the support post stays across the river (x " + o.SupportTarget.X + ")");

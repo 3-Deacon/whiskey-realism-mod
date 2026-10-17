@@ -195,7 +195,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     stance,
                     maneuvers,
                     reverseSlope,
-                    Ground?.Crossings);
+                    Ground?.Crossings,
+                    Ground != null ? Ground.HomeBank(commandStates) : -1);
             }
             NoteFirstTerrainLine(orders);
             StoreDoctrine(picture, orders);
