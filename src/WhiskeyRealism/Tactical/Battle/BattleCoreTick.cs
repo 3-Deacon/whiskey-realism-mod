@@ -240,6 +240,10 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
 
+            // A group that carries an order is not re-tasked, so its producers stand still and its stance hold
+            // would lapse into vanilla's own stance write: keep the holds of such groups alive.
+            TacticalStanceWriter.RenewWhileOrdered(bunits, snapshot);
+
             stats.EmitIfDue(alliance);
         }
 

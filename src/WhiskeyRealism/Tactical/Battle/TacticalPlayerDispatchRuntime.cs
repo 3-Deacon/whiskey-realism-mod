@@ -76,8 +76,11 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // True when the order went onto a courier (or, with the flow off, vanilla showed a new order).
-        // Deduped, refused and dropped orders return false.
-        internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind)
+        // Deduped, refused and dropped orders return false. `carrier` is the queued move the order
+        // accompanies (the executor's Move through SetWaypoint's order queue); with one, the order is shown
+        // one leg after that move is carried out.
+        internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind,
+            in WlMoveCarrier carrier)
         {
             using (TelemetryPerf.Scope("tactical.dispatch.emit", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
@@ -85,7 +88,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0
                         || !TacticalWriteGuard.ModeAllowsWrites()) return false;
-                    return WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin, kind);
+                    return WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin, kind, in carrier);
                 }
                 catch (Exception ex)
                 {

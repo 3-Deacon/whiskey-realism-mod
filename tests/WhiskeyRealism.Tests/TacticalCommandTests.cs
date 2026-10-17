@@ -686,8 +686,6 @@ internal static class TacticalCommandTests
         AssertPostureTarget(PostureExecutionTarget.FallbackLine, false, DecidePosture(CommandTaskType.FallBackToLine));
         AssertPostureDecision(PostureExecutionAction.ReleaseReserve, "release-reserve", DecidePosture(CommandTaskType.ReleaseReserve));
         AssertPostureTarget(PostureExecutionTarget.ReleasePoint, false, DecidePosture(CommandTaskType.ReleaseReserve));
-        AssertPostureDecision(PostureExecutionAction.RecoverInterruptedOrder, "recover-stuck-order", DecidePosture(CommandTaskType.RecoverStuckOrder));
-        AssertPostureTarget(PostureExecutionTarget.RecoveryPath, true, DecidePosture(CommandTaskType.RecoverStuckOrder));
         AssertPostureDecision(PostureExecutionAction.NoWrite, "missing-ledger-assignment", DecidePosture(CommandTaskType.None));
     }
 

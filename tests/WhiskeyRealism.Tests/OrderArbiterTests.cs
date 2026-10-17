@@ -16,7 +16,8 @@ internal static class OrderArbiterTests
             ("battle-core HigherPriorityWinsPerChannel", HigherPriorityWinsPerChannel),
             ("battle-core ChannelsResolveIndependently", ChannelsResolveIndependently),
             ("battle-core TieKeepsPreviousWinner", TieKeepsPreviousWinner),
-            ("battle-core StanceBeforeMoveBeforeFormationOrder", StanceBeforeMoveBeforeFormationOrder),
+            ("battle-core MoveBeforeStanceBeforeFormationOrder", MoveBeforeStanceBeforeFormationOrder),
+            ("battle-core EveryMoveComesBeforeAnyStanceAcrossGroups", EveryMoveComesBeforeAnyStanceAcrossGroups),
             ("battle-core InlineIntentRefusedUnderHigherClaim", InlineIntentRefusedUnderHigherClaim),
             ("battle-core ArbiterResolveAllocatesNothingAfterWarmup", ArbiterResolveAllocatesNothingAfterWarmup),
             ("battle-core ArbiterForAllianceBoundsChecked", ArbiterForAllianceBoundsChecked),
@@ -116,7 +117,7 @@ internal static class OrderArbiterTests
         AssertEqual(IntentSource.ArtilleryPointBlank, winners[0].Source, "hysteresis never beats a higher priority");
     }
 
-    private static void StanceBeforeMoveBeforeFormationOrder()
+    private static void MoveBeforeStanceBeforeFormationOrder()
     {
         var arbiter = new OrderArbiter();
         arbiter.BeginTick();
@@ -128,11 +129,35 @@ internal static class OrderArbiterTests
         var winners = new BattleOrderIntent[8];
         int n = arbiter.Resolve(winners);
         AssertEqual(5, n, "five channels");
-        AssertEqual(OrderChannel.Stance, winners[0].Channel, "stance first (#61 L768-774)");
-        AssertEqual(OrderChannel.Move, winners[1].Channel, "move before formation (#61 L976-988)");
-        AssertEqual(OrderChannel.Formation, winners[2].Channel, "formation third");
+        AssertEqual(OrderChannel.Move, winners[0].Channel, "move first: a stance order queued ahead of it would delay it (AddToOrderQueue 124954-124966)");
+        AssertEqual(OrderChannel.Stance, winners[1].Channel, "stance after the move");
+        AssertEqual(OrderChannel.Formation, winners[2].Channel, "formation after the stance (#61 L976-988: after the move)");
         AssertEqual(OrderChannel.Facing, winners[3].Channel, "facing after formation");
         AssertEqual(OrderChannel.CombatBehavior, winners[4].Channel, "combat behavior last");
+    }
+
+    private static void EveryMoveComesBeforeAnyStanceAcrossGroups()
+    {
+        // The smoke: stance orders of eight brigades went out before the first brigade's move. Whatever the
+        // groups, no stance winner precedes a move winner, and a stop precedes the move of its group.
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        for (int g = 1; g <= 8; g++) arbiter.Submit(Stance(g, 2, IntentPriority.Scorer, IntentSource.GroupStanceScorer));
+        arbiter.Submit(Move(1, 100f, -100f, IntentPriority.Executor, IntentSource.PostureExecutor));
+        arbiter.Submit(Move(5, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor));
+        arbiter.Submit(new BattleOrderIntent { GroupId = 5, Channel = OrderChannel.Stop, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test" });
+        var winners = new BattleOrderIntent[16];
+        int n = arbiter.Resolve(winners);
+        AssertEqual(11, n, "eight stances, two moves, one stop");
+        int lastMove = -1, firstStance = int.MaxValue, stop = -1, moveOf5 = -1;
+        for (int i = 0; i < n; i++)
+        {
+            if (winners[i].Channel == OrderChannel.Move) { lastMove = i; if (winners[i].GroupId == 5) moveOf5 = i; }
+            if (winners[i].Channel == OrderChannel.Stance && i < firstStance) firstStance = i;
+            if (winners[i].Channel == OrderChannel.Stop) stop = i;
+        }
+        AssertTrue(lastMove < firstStance, "the last move (" + lastMove + ") comes before the first stance (" + firstStance + ")");
+        AssertTrue(stop >= 0 && stop < moveOf5, "a stop still comes before the move of its group");
     }
 
     private static void InlineIntentRefusedUnderHigherClaim()

@@ -54,6 +54,98 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         }
     }
 
+    // Where the vanilla move of the unit an order names stands (WlMoveState.Classify).
+    internal enum MoveState
+    {
+        Executed, // the entry is gone and the unit holds the path: its superior's order has been carried out
+        InFlight, // the move is still in its superior's order queue (courier riding or processing time not reached)
+        Lost,     // vanilla will not carry the move out: its courier is gone, or the entry is gone and the path with it
+    }
+
+    // What vanilla's own order queue says about a unit's move (decompile build 14703111). SetWaypoint with
+    // an order delay does not give the unit its path at once: it queues the order on the unit's scene
+    // parent (91461-91504) and the path waits for the courier (AddOrderCourierline 125009-125171). A move
+    // entry (ordertype 0 append, 1 new path) stays in that queue until ProcessOrders carries it out and
+    // deletes it (125425, DeleteOrderQueue 124844); carrying it out transmits every path the unit holds at
+    // that time (SetOrderStatus 125484-125508), so a path added while an entry is pending rides that entry,
+    // new or older.
+    //
+    // A lost order is mostly gone from the queue before anyone looks. A mounted courier line (type 1) that is
+    // still active and has no courier is vanilla's lost-order test (125282-125286, 125308-125320): it zeroes
+    // the line, sets orderstate 3 and clears the untransmitted waypoints (125282, 125286), and the entry is
+    // carried out and deleted one or two ProcessOrders passes later (125425), which resets orderstate (124857).
+    // Neither the line nor orderstate outlives that. What does is the unit: a carried-out move leaves it
+    // holding its transmitted path until it arrives, a lost one leaves it with none. The delivery pass runs at
+    // most once per 30 AI frames (4970, 5684), so a unit with no path may also be a unit that carried the move
+    // out and finished it between two passes. An entry that is gone and a unit with no path therefore read as
+    // carried out when the unit stands within ArrivalMeters of the target the move was given (it arrived), or
+    // is in contact (vanilla's own CheckEnemyContact halts an AI group that meets the enemy, StopRegiment at
+    // 117372-117383, and treats `combatstatussubordinates > 0` as a group busy with combat, 3593, 8090: a unit
+    // that stopped to fight has done what the move was for), and as lost otherwise.
+    internal static class WlMoveState
+    {
+        // = OrderArbiter.DedupeMeters: the distance inside which the executor itself counts a unit as already
+        // at a target (a waypoint 60 m from where it stands is not re-issued).
+        public const float ArrivalMeters = 60f;
+
+        public static MoveState Classify(bool moveQueued, bool courierLost, bool carriedOutAfterGone)
+        {
+            if (moveQueued) return courierLost ? MoveState.Lost : MoveState.InFlight;
+            return carriedOutAfterGone ? MoveState.Executed : MoveState.Lost;
+        }
+
+        // The verdict for an entry that is gone: carried out when the unit still holds its path, has arrived
+        // at the target, or stopped in contact; lost otherwise.
+        public static bool CarriedOutAfterGone(bool pathHeld, float distanceToTargetMeters, bool inContact)
+        {
+            return pathHeld || inContact || distanceToTargetMeters <= ArrivalMeters;
+        }
+
+        // Does a queue entry of the carrier unit carry the order? A move entry of the carrier's ordertype whose
+        // creation stamp is not before the carrier's: the entry the dispatch recorded (its stamp only grows,
+        // ProcessOrders 125331) or one that replaced it. A replacement is not later in processing time: a
+        // permanently detached pool brigade's second SetWaypoint deletes the old entry and adds the new one
+        // without the 0.02 h standard time (124929-124931, 124966); its creation stamp does not go backwards.
+        // The ordertype is what keeps an older entry out: two entries of one unit and one ordertype cannot
+        // coexist (AddToOrderQueue replaces the first, 124929-124933), so an older entry of the same unit is of
+        // the other move ordertype, and its stamp is rewritten on every pass once it is due (125331), which
+        // would otherwise let it match a stamp taken from the newer entry.
+        public static bool Carries(int orderType, float entryStamp, in WlMoveCarrier carrier)
+        {
+            return orderType >= 0 && orderType <= 1 && orderType == carrier.OrderType && entryStamp >= carrier.Stamp;
+        }
+    }
+
+    // The queued move that carries an executor dispatch: among the units one dispatch moved (the ordered
+    // group, or the children a fan-out around the player's command ordered), the one whose entry is carried
+    // out last (processing time). The player is told one leg after that entry; the others are carried out
+    // earlier or with it. Stamp and OrderType identify that entry (WlMoveState.Carries); X and Z are the
+    // target the unit was given, the arrival test of an entry that is gone (WlMoveState.CarriedOutAfterGone).
+    internal struct WlMoveCarrier
+    {
+        public int UnitId;
+        public float ProcessingTime;
+        public float Stamp;
+        public int OrderType;
+        public float X, Z;
+
+        public bool Has => UnitId != 0;
+
+        public void Consider(int unitId, float processingTime, float stamp, int orderType, float x, float z)
+        {
+            if (unitId == 0) return;
+            if (UnitId == 0 || processingTime > ProcessingTime)
+            {
+                UnitId = unitId;
+                ProcessingTime = processingTime;
+                Stamp = stamp;
+                OrderType = orderType;
+                X = x;
+                Z = z;
+            }
+        }
+    }
+
     // One CheckCurrentOrderUpdate call, as the capture Prefix sees it.
     internal struct CaptureInput
     {
@@ -82,6 +174,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         int Session { get; }
         ActiveOrderView ReadActive();
         bool UnitGone(in CourierEntry e);
+        // Where the move of the entry's unit stands in vanilla's order queue; asked only of an entry
+        // captured with AwaitsMove.
+        MoveState MoveOf(in CourierEntry e);
         bool ReleaseStillDue(in CourierEntry e);
         void SetDelivering(bool on);
         void ClearSlot();
@@ -253,6 +348,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return origin == OrderOrigin.Release || origin == OrderOrigin.FollowUp;
         }
 
+        public const string MoveInFlight = "move-in-flight";
+        public const string MoveLost = "move-lost";
+
         public static double DueAt(double issuedAt, double delayHours, bool couriersOn, double deferUntil)
         {
             double due = couriersOn ? issuedAt + delayHours : issuedAt;
@@ -422,6 +520,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             requeue = false;
             if (Queue.IsSuperseded(in e)) { Queue.Discard(in e, WlCourierQueue.Superseded); return false; }
             if (_host.UnitGone(in e)) { Queue.Discard(in e, "unit-gone"); return false; }
+            if (e.AwaitsMove && !ReleaseOnMove(ref e, out requeue)) return requeue;
             if (IsCrossScope(_host.SlotType)) { Queue.Discard(in e, "cross-scope"); return false; }
             if (e.Origin == OrderOrigin.Release && (_host.SlotType != 13 || !_host.ReleaseStillDue(in e)))
             {
@@ -488,6 +587,37 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return true;
             }
             return Deliver(ref e, token, clear: action == ReadmitAction.AdmitWithClear, out requeue);
+        }
+
+        // The move gate (WlMoveCarrier). True when the move has been carried out and the entry's leg has
+        // passed, so the pass goes on with it. False when the entry is finished (a lost move: reported) or
+        // must wait: requeue says so, and an entry still waiting for its move or for its leg goes back.
+        private bool ReleaseOnMove(ref CourierEntry e, out bool requeue)
+        {
+            requeue = false;
+            switch (_host.MoveOf(in e))
+            {
+                case MoveState.Lost:
+                    Queue.Discard(in e, MoveLost);
+                    return false;
+                case MoveState.InFlight:
+                    if (!e.MoveHeld)
+                    {
+                        e.MoveHeld = true;
+                        _host.Row(in e, "defer", MoveInFlight);
+                    }
+                    requeue = true;
+                    return false;
+            }
+
+            // The superior has the move: the bugle from him to the player starts now. The original due time
+            // stays when it is later (a policy deferral).
+            double now = _host.NowHours;
+            e.AwaitsMove = false;
+            e.DueAt = Math.Max(e.DueAt, now + e.LegHours);
+            if (e.DueAt <= now) return true;
+            requeue = true;
+            return false;
         }
 
         private bool Deliver(ref CourierEntry e, object saved, bool clear, out bool requeue)

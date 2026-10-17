@@ -71,7 +71,6 @@ namespace WhiskeyRealism.Tactical
                 case CommandTaskType.ReserveWait:
                 case CommandTaskType.ReleaseReserve:
                 case CommandTaskType.Delay:
-                case CommandTaskType.RecoverStuckOrder:
                     return StanceDefend;
 
                 case CommandTaskType.None:

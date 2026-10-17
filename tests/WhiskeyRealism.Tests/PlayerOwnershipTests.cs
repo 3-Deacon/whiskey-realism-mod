@@ -450,8 +450,7 @@ internal static class PlayerOwnershipTests
         // Deploy to engage (1081/1199): the movement lanes all read as a 1, not the campaign "Redeploy" a 5 was.
         foreach (var task in new[] { CommandTaskType.Scout, CommandTaskType.FormUp, CommandTaskType.AdvanceToAssembly })
             AssertEqual(1, TacticalDispatchTypeMapper.Map(task, false, false), "deploy to engage for " + task);
-        foreach (var task in new[] { CommandTaskType.None, CommandTaskType.Delay, CommandTaskType.Consolidate,
-                     CommandTaskType.RecoverStuckOrder })
+        foreach (var task in new[] { CommandTaskType.None, CommandTaskType.Delay, CommandTaskType.Consolidate })
             AssertEqual(None, TacticalDispatchTypeMapper.Map(task, true, false), "no dispatch for " + task);
     }
 

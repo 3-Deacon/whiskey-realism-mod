@@ -149,6 +149,8 @@ namespace WhiskeyRealism.Tactical.Battle
             int waypoints = 0;
             int pathsBefore = 0, pathsAfter = 0;
             bool viaBlockedOrder = false;
+            // The queued moves this dispatch accompanies: the one carried out last carries the player's order.
+            var carrier = default(WlMoveCarrier);
             if (_issued.Length < plan.Targets.Count) _issued = new IssuedTarget[Math.Max(plan.Targets.Count, _issued.Length * 2)];
             float sizeX = 0f, sizeZ = 0f;
             if (plan.Targets.FannedOut) WaypointValidatorRuntime.TryMapSize(out sizeX, out sizeZ);
@@ -184,6 +186,8 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (wrote)
                     {
                         _issued[issued++] = new IssuedTarget { InstanceId = own[targetIndex].InstanceId, X = x, Z = z };
+                        if (unit.regimentpaths > 0 && WlMoveQueue.TryPending(unit, out float queuedAt, out float stamp, out int orderType))
+                            carrier.Consider(own[targetIndex].InstanceId, queuedAt, stamp, orderType, x, z);
                         pathsBefore += before;
                         pathsAfter += MovingUnits(unit);
                         if (blocked) viaBlockedOrder = true;
@@ -231,7 +235,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 Regiment ancestor = BattleSnapshotBuilder.UnitAt(view, groupIndex, enemy: false);
                 if ((UnityEngine.Object)ancestor != null)
                     TacticalPlayerDispatchRuntime.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading,
-                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task));
+                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task), in carrier);
             }
 
             return executed;
