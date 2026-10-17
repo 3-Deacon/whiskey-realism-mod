@@ -170,6 +170,8 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Garrison", TelemetryCategory.State);
             AddCampaign("GarrisonPost", TelemetryCategory.Write);
             AddCampaign("RailroadSteer", TelemetryCategory.Write);
+            AddCampaign("Ordnance", TelemetryCategory.Decision);
+            AddCampaign("OrdnancePurchase", TelemetryCategory.Write);
             AddCampaign("CapitalFloor", TelemetryCategory.Write);
             AddCampaign("ReplacementFlow", TelemetryCategory.Write);
             AddCampaign("Succession", TelemetryCategory.Decision);

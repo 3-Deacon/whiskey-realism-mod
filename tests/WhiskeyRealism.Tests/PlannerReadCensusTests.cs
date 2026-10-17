@@ -823,6 +823,8 @@ internal static class CensusRows
         "Flag:EnableSupplyDepotSteering | P/DepotSteeringRuntime.cs | G5c DepotSteeringRuntime",
         "Flag:EnableFortSteering | X/FortConstructionGovernorPatch.cs | G5c FortConstructionGovernorPatch (#27)",
         "Flag:EnableRailroadSteering | X/RailroadLineSteeringPatch.cs | G5c RailroadLineSteeringPatch",
+        "Flag:EnableRearmPriority | P/OrdnanceRuntime.cs | G9 OrdnanceRuntime.BeginRearm (RearmPriorityPatch)",
+        "Flag:EnableOrdnancePurchaseSteering | P/OrdnanceRuntime.cs | G9 OrdnanceRuntime.PurchaseScopeOpens (OrdnancePurchasePatch)",
         "Flag:EnableGarrisonManning | P/GarrisonRuntime.cs | G8 GarrisonRuntime.PlanPosts",
         "Flag:EnableWlCareerTransferFix | X/WlCareerTransferFixPatch.cs | G5b WlCareerTransferFixPatch",
     };
