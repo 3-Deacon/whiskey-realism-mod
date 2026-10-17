@@ -794,8 +794,10 @@ namespace WhiskeyRealism
                 true,
                 "Default ON. A doctrine move (posture Screen and Probe, the leaf slots, division-play, the reserve release) whose straight " +
                 "leg crosses a river is made through a crossing the side knows (perceived clear or watched, BC14's crossing picture) or is not " +
-                "made; a withdrawal, a fallback, a deployment placement and a scout's look are not gated. Needs Enable Maneuver Feasibility " +
-                "(the river map); with no river map the gate lets every move through. Off: moves are checked for water at their target as before.");
+                "made; a withdrawal, a fallback, a deployment placement and a scout's look are not gated. A leg end on open river or a ford takes the " +
+                "bank the leg reaches or leaves it by. Needs Enable Maneuver Feasibility (the river map): while the map is still being built on " +
+                "a terrain with fords a gated move waits (at most 72 battle seconds); with the feasibility off, the build failed or no ford on " +
+                "the map the gate lets every move through. Off: moves are checked for water at their target as before.");
             EnableVanillaArtilleryChainSideFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Artillery Chain Side Fix",
