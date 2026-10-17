@@ -54,7 +54,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public const float WorksBandMeters = 100f;
 
         /// <summary>
-        /// A strike point is broken in (<see cref="WorksPicture.StrikeBrokenIn"/>) when this share of the holders' strength within
+        /// A strike point is broken in (<see cref="WorksPicture.StrikeBrokenIn"/>) when this share of the perceived holders' strength within
         /// <see cref="FrontageReachMeters"/> of it stands below this morale: the opening detector's shaken line (<c>OpeningRules.ShakenMorale</c>
         /// 0.45, <c>OpeningDetector.ShakenShareMin</c> 0.4), restated here because the works picture is pure and reads no opening rules.
         /// </summary>

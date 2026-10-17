@@ -43,22 +43,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int LookRequests(Span<float> xs, Span<float> zs)
         {
             int cap = Math.Min(Math.Min(xs.Length, zs.Length), ManeuverFeasibility.MaxLookRequests);
+            if (cap <= 0) return 0;
             CrossingWatch watch = _job.Input.Crossings;
             RiverRegions regions = _job.Input.Regions;
-            if (cap <= 0 || watch == null || regions == null || !regions.Ready) return 0;
+            bool rivers = watch != null && regions != null && regions.Ready;
 
             int n = 0;
-            // 1. the selected plan's chosen routes, in the order the members march them.
-            if (HasSelection && TryGet(SelectedPlan, out CandidateResult selected)) n = AddRouteLooks(in selected, watch, regions, xs, zs, n, cap);
-
-            // 2. the crossing a refused move is waiting on.
-            if (_gateLink >= 0)
+            if (rivers)
             {
-                if (_gateLink < regions.LinkCount && GateLookPending()) n = AddLook(_gateLink, watch, regions, xs, zs, n, cap);
-                else _gateLink = -1;
+                // 1. the selected plan's chosen routes, in the order the members march them.
+                if (HasSelection && TryGet(SelectedPlan, out CandidateResult selected)) n = AddRouteLooks(in selected, watch, regions, xs, zs, n, cap);
+
+                // 2. the crossing a refused move is waiting on.
+                if (_gateLink >= 0)
+                {
+                    if (_gateLink < regions.LinkCount && GateLookPending()) n = AddLook(_gateLink, watch, regions, xs, zs, n, cap);
+                    else _gateLink = -1;
+                }
             }
 
-            // 3. the routes of the best-scored other candidates (the evaluation's candidate order is the catalog's score order).
+            // 3. the works a pinned fix rests on, whose holders have faded from perception (BC14W requirement-works-pin): a pin lifts only on evidence.
+            for (int k = 0; k < _worksLookCount && n < cap; k++)
+            {
+                xs[n] = _worksLookX[k];
+                zs[n] = _worksLookZ[k];
+                n++;
+            }
+
+            if (!rivers) return n;
+
+            // 4. the routes of the best-scored other candidates (the evaluation's candidate order is the catalog's score order).
             int rank = 0;
             for (int r = 0; r < _front.ResultCount && n < cap && rank < ManeuverFeasibility.ConfirmCandidates; r++, rank++)
             {
@@ -67,7 +81,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 n = AddRouteLooks(in candidate, watch, regions, xs, zs, n, cap);
             }
 
-            // 4. for a Defender, the crossings the perceived enemy reaches before dark, earliest arrival first: the front's as well as the flank's
+            // 5. for a Defender, the crossings the perceived enemy reaches before dark, earliest arrival first: the front's as well as the flank's
             // (the threat list carries the flank's only, because those are the ones a reserve can answer).
             for (int t = 0; t < _lookFrontCount && n < cap; t++)
                 n = AddLook(_lookFront[t], watch, regions, xs, zs, n, cap);
