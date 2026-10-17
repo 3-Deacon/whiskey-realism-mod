@@ -199,9 +199,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float aggression01 = (orchestrator.CommanderPersonality.Aggression + 1f) * 0.5f;
             if (aggression01 < 0f) aggression01 = 0f;
             if (aggression01 > 1f) aggression01 = 1f;
-            float enemyStrengthForReadiness = ownMainEffortStrength > 0f && ownEvidence.CurrentOdds > 0.01f
-                ? ownMainEffortStrength / ownEvidence.CurrentOdds
-                : ownMainEffortStrength;
+            // Odds are the blend from "unknown" (1.0) toward the observed ratio by the intel confidence, and own / 1.0 is an enemy as strong as the
+            // army. Priced against that phantom the army's effective strength (fatigue x ammo x morale, below 1) never reaches the required ratio,
+            // so a cautious commander "held fatigued" at the end of the probe budget and consolidated a fresh army that had not yet met the enemy
+            // (smoke 2026-10-17, the Union at 12.6 h). An enemy not yet found has no strength to price against: readiness then reads the army's own
+            // health alone (the doctrine's "enemy gone, push freely" sentinel is enemy strength 0).
+            bool enemyKnown = enemyVisible.IntelConfidence01 >= TacticalPhaseProgressionDoctrine.ProbeCommitMinIntelConfidence;
+            float enemyStrengthForReadiness = !enemyKnown
+                ? 0f
+                : ownMainEffortStrength > 0f && ownEvidence.CurrentOdds > 0.01f
+                    ? ownMainEffortStrength / ownEvidence.CurrentOdds
+                    : ownMainEffortStrength;
             var readinessInput = new TacticalSectorReadinessDoctrine.Input(
                 ownRawStrength: ownMainEffortStrength,
                 avgFatigue01: ownAvgFatigue01,

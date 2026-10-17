@@ -21,6 +21,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>The longest a role is held: the plan's own commitment (<see cref="ArmyReplanTriggers.PlanCommitmentBattleSeconds"/>) in doctrine hours.</summary>
         public const double HoldHours = ArmyReplanTriggers.PlanCommitmentBattleSeconds / 3600.0;
 
+        /// <summary>
+        /// A held Fix, RefuseLeft or RefuseRight is a response to contact or to an outflanked wing, not an organisation of the line: it is re-evaluated after
+        /// this long (a quarter hour), so a flank guard does not outlive its threat by an hour. (Without it a wing marked outflanked for one tick
+        /// guarded for the full hold, and a whole army's tasks drifted to GuardFlank.)
+        /// </summary>
+        public const double CrisisRoleHoldHours = 0.25;
+
         private DirectChildIntent[] _held = new DirectChildIntent[0];
         private double[] _since = new double[0];
         private int _count;
@@ -61,7 +68,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 {
                     DirectChildIntent h = _held[at];
                     since = _since[at];
-                    accept = f.Role == h.Role || Forced(h, f) || nowHours - since >= HoldHours || nowHours < since;
+                    double hold = IsCrisisRole(h.Role) ? CrisisRoleHoldHours : HoldHours;
+                    accept = f.Role == h.Role || Forced(h, f) || nowHours - since >= hold || nowHours < since;
                     if (accept && f.Role == h.Role) since = _since[at];
                     else if (accept) since = nowHours;
                 }
@@ -95,6 +103,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 if (string.Equals(_held[i].ChildId, childId, StringComparison.Ordinal)) return i;
             return -1;
         }
+
+        private static bool IsCrisisRole(DirectChildRole role)
+            => role == DirectChildRole.Fix || role == DirectChildRole.RefuseLeft || role == DirectChildRole.RefuseRight;
 
         private static bool Forced(in DirectChildIntent held, in DirectChildIntent fresh)
         {

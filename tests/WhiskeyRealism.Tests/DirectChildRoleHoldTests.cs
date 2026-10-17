@@ -17,6 +17,7 @@ internal static class DirectChildRoleHoldTests
             ("role hold the hold ends after an hour of the doctrine clock", TheHoldEndsAfterAnHour),
             ("role hold fallback is a crisis in both directions", FallbackIsACrisisBothWays),
             ("role hold contact and flank escalation pass at once and de-escalation waits", EscalationPassesDeEscalationWaits),
+            ("role hold a flank guard or a fix is re-evaluated after a quarter hour, not an hour", ACrisisRoleOutlivesItsThreatByAQuarterHour),
             ("role hold a guard point or a screen target passes at once and its end does too", GuardAndScreenPass),
             ("role hold a lost Main is replaced by the fresh Main", ALostMainIsReplaced),
             ("role hold a new child is accepted and a vanished child is forgotten", NewAndVanishedChildren),
@@ -92,6 +93,15 @@ internal static class DirectChildRoleHoldTests
         AssertEqual(DirectChildRole.Fix, RoleOf(down, "a"), "the contact flag dropping for a moment does not release the fix");
         AssertEqual(DirectChildRole.RefuseLeft, RoleOf(down, "b"), "nor the refused flank");
         AssertEqual(DirectChildRole.RefuseRight, RoleOf(down, "c"), "");
+    }
+
+    private static void ACrisisRoleOutlivesItsThreatByAQuarterHour()
+    {
+        var hold = new DirectChildRoleHold();
+        hold.Apply(Set(DI("a", DirectChildRole.Reserve)), 1, 5.0);
+        hold.Apply(Set(DI("a", DirectChildRole.RefuseLeft)), 1, 5.01);
+        AssertEqual(DirectChildRole.RefuseLeft, RoleOf(hold.Apply(Set(DI("a", DirectChildRole.Reserve)), 1, 5.2), "a"), "a flank guard is kept through a quiet moment");
+        AssertEqual(DirectChildRole.Reserve, RoleOf(hold.Apply(Set(DI("a", DirectChildRole.Reserve)), 1, 5.27), "a"), "but not for the hour: the threat is re-read after a quarter hour");
     }
 
     private static void GuardAndScreenPass()
