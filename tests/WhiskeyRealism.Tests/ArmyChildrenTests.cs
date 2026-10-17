@@ -23,6 +23,8 @@ internal static class ArmyChildrenTests
             ("army children csa two armies find all their detached brigades", CsaTwoArmiesFindAllTheirDetachedBrigades),
             ("army children stance order detaching a brigade keeps it a child", StanceOrderDetachingABrigadeKeepsItAChild),
             ("army children routed and skirmisher companies stay out", RoutedAndSkirmisherCompaniesStayOut),
+            ("army children a group not yet on the field is not a child", AGroupNotYetOnTheFieldIsNotAChild),
+            ("army children skirmisher and scout companies are not children", SkirmisherAndScoutCompaniesAreNotChildren),
             ("army children player owned detached command stays out", PlayerOwnedDetachedCommandStaysOut),
             ("army children w and l depth keeps the player's ai brigade, division and army", WlDepthKeepsThePlayersAiBrigadeDivisionAndArmy),
             ("army children vanilla depth finds corps under the army", VanillaDepthFindsCorpsUnderTheArmy),
@@ -115,6 +117,39 @@ internal static class ArmyChildrenTests
         var children = b.Discover(-1);
         AssertEqual(1, children.Count, "the routed brigade is not a child");
         AssertEqual("child-12", children[0].ChildId, "the detached, unrouted brigade is");
+    }
+
+    // includenonactiveunits:false (119857): a reinforcement group that has not arrived (its object is
+    // inactive) is not on the field, so it holds no role until it is; a detached one is the same.
+    private static void AGroupNotYetOnTheFieldIsNotAChild()
+    {
+        var b = new Hierarchy();
+        b.Add(1, 16, UnitFlags.None, 11, 12, 20, 21);
+        b.Add(11, 14, UnitFlags.PermanentlyDetached, 20);
+        b.Add(12, 14, UnitFlags.PermanentlyDetached, 21);
+        b.Add(20, TacticalUnitType.Infantry, UnitFlags.None);
+        b.Add(21, TacticalUnitType.Infantry, UnitFlags.None);
+        b.ClearFlag(12, UnitFlags.Active);
+        b.Assemble();
+        var children = b.Discover(-1);
+        AssertEqual(1, children.Count, "the inactive brigade is not offered");
+        AssertEqual("child-11", children[0].ChildId, "the one on the field is");
+    }
+
+    private static void SkirmisherAndScoutCompaniesAreNotChildren()
+    {
+        var b = new Hierarchy();
+        b.Add(1, 16, UnitFlags.None, 11, 12, 20, 21);
+        b.Add(11, 14, UnitFlags.None, 20);
+        b.Add(20, TacticalUnitType.Skirmisher, UnitFlags.None);
+        b.Add(21, TacticalUnitType.Scout, UnitFlags.None);
+        b.Add(12, 14, UnitFlags.None);
+        b.Assemble();
+        var probes = new List<DirectChildDiscovery.RegimentProbe>();
+        BattleSnapshotAssembler.ToRegimentProbes(b.Snapshot, null, -1, false, probes);
+        AssertFalse(probes.Find(p => p.InstanceId == 20).IsDirectChild, "a skirmisher company is not a direct child");
+        AssertFalse(probes.Find(p => p.InstanceId == 21).IsDirectChild, "a scout company is not a direct child");
+        AssertTrue(probes.Find(p => p.InstanceId == 11).IsDirectChild, "its brigade is");
     }
 
     private static void PlayerOwnedDetachedCommandStaysOut()
@@ -273,6 +308,16 @@ internal static class ArmyChildrenTests
             var probes = new List<TacticalCommandTreeProbe.ExtendedProbe>();
             BattleSnapshotAssembler.ToExtendedProbes(_snapshot, null, -1, probes);
             army.UpdateLeafBrigadeMap(TacticalCommandTreeProbe.BuildTree(probes, -1));
+        }
+
+        internal BattleSnapshot Snapshot => _snapshot;
+
+        internal void ClearFlag(int id, UnitFlags flag)
+        {
+            int i = _records.FindIndex(r => r.InstanceId == id);
+            var r = _records[i];
+            r.Flags &= ~flag;
+            _records[i] = r;
         }
 
         internal void SetFlag(int id, UnitFlags flag)
