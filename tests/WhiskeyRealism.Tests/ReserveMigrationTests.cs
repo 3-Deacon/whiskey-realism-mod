@@ -322,15 +322,16 @@ internal static class ReserveMigrationTests
             ChildIntent("child-" + LeftLine, DirectChildRole.Main, primarySector: 0, axisSector: 0),
             ChildIntent("child-" + Reserve, DirectChildRole.Fix, primarySector: 2, axisSector: leftSector),
         };
-        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, out int band), "found");
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve, defender: false, out int band, out DirectChildRole bandRole), "found");
         AssertEqual(leftSector, band, "crisis band");
-        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, out _), "unknown child");
+        AssertEqual(DirectChildRole.Fix, bandRole, "the role the release gave");
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, Reserve + 1000, false, out _, out _), "unknown child");
         AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve, DirectChildRole.Reserve, 0, 1) },
-            Reserve, out _), "allocator still holds it in reserve");
+            Reserve, false, out _, out _), "allocator still holds it in reserve");
         AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("child-" + Reserve + "0", DirectChildRole.Fix, 0, 1) },
-            Reserve, out _), "prefix of a longer id is not a match");
+            Reserve, false, out _, out _), "prefix of a longer id is not a match");
         AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(new[] { ChildIntent("synth-army--" + Reserve, DirectChildRole.Fix, 0, 3) },
-            -Reserve, out int synth) && synth == 3, "synthetic army id, negative instance id");
+            -Reserve, false, out int synth, out _) && synth == 3, "synthetic army id, negative instance id");
 
         BattleSnapshot owned = ArmySnapshot(reserveFlags: UnitFlags.PlayerOwned);
         AssertFalse(TacticalReserveCommitGate.TryPlanRelease(owned, owned.IndexOfOwn(Reserve), leftSector, out _), "player-owned reserve");
@@ -497,10 +498,11 @@ internal static class ReserveMigrationTests
             new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0), "test");
     }
 
-    private static DirectChildIntent ChildIntent(string childId, DirectChildRole role, int primarySector, int axisSector)
+    // released: the allocation's own release (DirectChildIntent.ReleasedFromReserve); false is a role the evidence tiers gave.
+    private static DirectChildIntent ChildIntent(string childId, DirectChildRole role, int primarySector, int axisSector, bool released = true)
     {
         return new DirectChildIntent(childId, 15, 15, "test", primarySector, role, DirectChildAxis.SectorAxis, axisSector, 0.5f,
-            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()));
+            new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, Array.Empty<EvidenceTag>()), releasedFromReserve: released);
     }
 
     private static CommandDoctrineOrder FallbackOrder(float x, float z)

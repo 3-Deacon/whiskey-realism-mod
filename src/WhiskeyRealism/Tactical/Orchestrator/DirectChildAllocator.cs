@@ -352,6 +352,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             GuardPoint[] guards = GuardScratch(snapshots.Count);
+            // The base allocation's Reserve children: only these can be released. A child the evidence tiers already gave a committed role is not
+            // released by it (the reserve-release producer moves a released child only, TacticalReserveCommitGate.TryReleasedDirectChild).
+            var heldByBase = new bool[roles.Length];
+            for (int i = 0; i < roles.Length; i++) heldByBase[i] = roles[i] == DirectChildRole.Reserve;
             var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards);
 
             var intents = new DirectChildIntent[snapshots.Count];
@@ -380,7 +384,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     perChildEnemyIntent[i],
                     fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec),
                     fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown,
-                    guards[i]);
+                    guards[i],
+                    releasedFromReserve: heldByBase[i] && role != DirectChildRole.Reserve && role != DirectChildRole.Unknown);
             }
             return intents;
         }
@@ -1005,7 +1010,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen);
+                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen, x.ReleasedFromReserve);
 
         /// <summary>
         /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)

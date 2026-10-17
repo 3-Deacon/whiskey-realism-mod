@@ -178,8 +178,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec maneuver = default(WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec),
             WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown,
             GuardPoint guardPoint = default(GuardPoint),
-            ScreenTarget screenTarget = default(ScreenTarget))
+            ScreenTarget screenTarget = default(ScreenTarget),
+            bool releasedFromReserve = false)
         {
+            ReleasedFromReserve = releasedFromReserve;
             Screen = screenTarget;
             Guard = guardPoint;
             Maneuver = maneuver;
@@ -206,6 +208,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int AxisSector { get; }
         public float SupportPriority01 { get; }
         public TacticalIntentModel EnemyIntent { get; }
+
+        /// <summary>
+        /// The allocation's own release: the base allocation held the child in Reserve and a release (crisis, stagger or odds, flank, crossing guard,
+        /// after the release hysteresis) took it out. A child whose base role was already a committed one (the evidence tiers gave it Main, SupportMain
+        /// or a refuse role) is not released from anything and reads false: the reserve-release producer moves only a released child.
+        /// </summary>
+        public bool ReleasedFromReserve { get; }
 
         /// <summary>
         /// BC11 decision 4: the maneuver the child's zone assignment carries (an enveloping rect, or a wing rect with a
@@ -238,7 +247,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>The same intent screening a secondary objective at (<paramref name="x"/>, <paramref name="z"/>); every other field is carried.</summary>
         public DirectChildIntent WithScreenTarget(float x, float z, float heading = 0f)
             => new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector, SupportPriority01, EnemyIntent,
-                Maneuver, ZoneRectKind, Guard, new ScreenTarget(x, z, heading));
+                Maneuver, ZoneRectKind, Guard, new ScreenTarget(x, z, heading), ReleasedFromReserve);
 
         private static float Clamp01(float v)
         {
