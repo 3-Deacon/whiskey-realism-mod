@@ -201,7 +201,8 @@ internal static class PlanCommitmentTests
         AssertTrue(c.Replanned || c.Kept, "a replan happened with the main band empty");
         Step(orch, 600f, morale: 1f, enemy: emptyBand, total: 6000f);
         // The band fills with a corps of 2000: that is where the army stands, not a loss.
-        ReplanOutcome filled = Step(orch, 4000f, enemy: new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false), total: 6000f);
+        // (The army has lost most of its men elsewhere meanwhile, which would pass the old baseline's loss test: 6000 "in the band" down to 2000.)
+        ReplanOutcome filled = Step(orch, 4000f, enemy: new EnemyVisibleState(new[] { new EnemyVisibleSector(2, 2000f, 5000f, false) }, 0.5f, true, false), total: 2400f);
         AssertTrue(filled.Trigger != ReplanTrigger.MainEffortSectorLoss, "the first sighting of a band is a baseline, not a loss: " + filled.Trigger);
     }
 }
