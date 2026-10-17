@@ -134,6 +134,12 @@ internal static partial class WlOrderFlowTests
             ("wl order dispatch task changed is structural", TaskChangedIsStructuralForP62),
             ("wl order pin maintenance moves are not dispatched", MaintenanceMovesAreNotDispatched),
             ("wl order pin dispatch runtime applies the memory", DispatchRuntimeAppliesTheMemory),
+            ("wl order vanilla carrier that abandoned the move is discarded", VanillaOrderWhoseCarrierAbandonedTheMoveIsDiscarded),
+            ("wl order vanilla carrier that pursues is delivered", VanillaOrderWhoseCarrierPursuesIsDeliveredWithItsDueTime),
+            ("wl order vanilla pursuit is checked at delivery", PursuitIsCheckedAtDeliveryNotAtCapture),
+            ("wl order vanilla armed order is never waited for", AnArmedVanillaOrderIsNeverWaitedFor),
+            ("wl order vanilla only the waypoint types are armed", OnlyTheWaypointTypesAreArmed),
+            ("wl order pin runtime arms vanilla orders from the called unit", RuntimeArmsVanillaOrdersFromTheCalledUnit),
             ("wl order pin executor voids the groups old orders before queueing the new one", ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne),
             // follow-up
             ("wl order followup over reached attack admits with clear", FollowUpOverReachedAttackAdmitsWithClear),

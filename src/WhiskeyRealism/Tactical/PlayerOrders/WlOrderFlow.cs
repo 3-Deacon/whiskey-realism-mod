@@ -119,6 +119,16 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return carriedOutAfterGone ? MoveState.Executed : MoveState.Lost;
         }
 
+        // The vanilla order types whose caller sets the called unit's waypoint just before the call, so the order says
+        // where the chain is going: the objective take (0, UpdateMovingTargets 6970-6998), march to the sound of
+        // guns (2, 3759-3766), an assault on an isolated target (3, 8185-8210) and an assault move (4, 3640-3646).
+        // The others describe no move of the called unit: engage (1, 117383) is the halt itself, defend (12) and
+        // reserve (11) hold, 13-15 are the player's contact state and retreat.
+        public static bool VanillaFollowsAWaypoint(int type)
+        {
+            return type == 0 || type == 2 || type == 3 || type == 4;
+        }
+
         // The verdict for an entry that is gone: why the move counts as carried out, or None (lost).
         // pathEndMeters is the distance from the end of the unit's held path to the target; it is read only
         // while a path is held.
@@ -157,6 +167,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public float Stamp;
         public int OrderType;
         public float X, Z;
+
+        // OrderType of a carrier that waits for no queue entry (a vanilla order's called unit): WlMoveState.Carries
+        // matches none, so the unit's path, position and contact decide.
+        public const int NoQueueEntry = -1;
 
         public bool Has => UnitId != 0;
 
@@ -386,6 +400,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         public const string MoveInFlight = "move-in-flight";
         public const string MoveLost = "move-lost";
+        // A vanilla order whose called unit no longer pursues the point its caller sent it to.
+        public const string ChainAbandoned = "chain-abandoned";
         public const string TaskChanged = "task-changed";
         public const string TaskHold = "task-hold";
 
@@ -559,6 +575,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (Queue.IsSuperseded(in e)) { Queue.Discard(in e, WlCourierQueue.Superseded); return false; }
             if (_host.UnitGone(in e)) { Queue.Discard(in e, "unit-gone"); return false; }
             if (e.AwaitsMove && !ReleaseOnMove(ref e, out requeue)) return requeue;
+            if (e.Pursuit && !StillPursued(ref e)) return false;
             if (e.DispatchTask != 0 && !TaskStillHolds(ref e, out requeue)) return requeue;
             if (IsCrossScope(_host.SlotType)) { Queue.Discard(in e, "cross-scope"); return false; }
             if (e.Origin == OrderOrigin.Release && (_host.SlotType != 13 || !_host.ReleaseStillDue(in e)))
@@ -658,6 +675,20 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             e.DueAt = Math.Max(e.DueAt, now + e.LegHours);
             if (e.DueAt <= now) return true;
             requeue = true;
+            return false;
+        }
+
+        // A vanilla order armed with its called unit (CourierEntry.Pursuit) is shown only if that unit still pursues the point
+        // its caller sent it to when the order is due: it holds a path that ends there, stands there, or halted in contact near it
+        // (WlMoveState.BasisAfterGone). Otherwise the chain abandoned the move (a contact halt far from the point, a retask) and
+        // the order would tell the player of a move nobody is making: chain-abandoned. A queue-only discard: vanilla's own call
+        // has already been made and is not skipped.
+        private bool StillPursued(ref CourierEntry e)
+        {
+            MoveState state = _host.MoveOf(in e, out MoveBasis basis);
+            e.Gate = basis;
+            if (state != MoveState.Lost) return true;
+            Queue.Discard(in e, ChainAbandoned);
             return false;
         }
 

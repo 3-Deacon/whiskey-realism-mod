@@ -378,6 +378,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 entry.AwaitsMove = true;
                 entry.Carrier = call.Carrier;
             }
+            else if (call.Origin == OrderOrigin.Vanilla && CouriersOn() && TryPursuit(unit, type, out WlMoveCarrier pursuit))
+            {
+                entry.Pursuit = true;
+                entry.Carrier = pursuit;
+            }
 
             if (verdict == CaptureVerdict.Drop)
             {
@@ -388,6 +393,22 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             queued = Flow.Enqueue(in entry, PlayerOrderReadmitPolicy.MinHoldBattleHours);
             if (queued) OnceLog.Info("wl-order:first-capture", "[W&LOrder] first courier queued type=" + type + " origin=" + call.Origin);
             return verdict;
+        }
+
+        // A vanilla order of a type whose caller has just set the called unit on a waypoint (WlMoveState.VanillaFollowsAWaypoint)
+        // arms the delivery check "does the chain still pursue the point" when the unit holds a path now. The point is the unit's
+        // last set waypoint, not the order's position: the callers move the unit to a point they adjust (UpdateMovingTargets
+        // 70 m off the objective, CheckForSimilarPositions) and the order names the objective or the enemy. Some callers set
+        // the waypoint only for units that are not under the player's command (6958, 8185), the call is outside that test:
+        // a unit with no path was not sent, and the order is not armed.
+        private static bool TryPursuit(Regiment unit, int type, out WlMoveCarrier pursuit)
+        {
+            pursuit = default(WlMoveCarrier);
+            if (!WlMoveState.VanillaFollowsAWaypoint(type) || (UnityEngine.Object)unit == null || unit.regimentpaths <= 0) return false;
+            Vector3 last = unit.lastsetwaypointposition;
+            if (last.x == 0f && last.z == 0f) return false;
+            pursuit = new WlMoveCarrier { UnitId = unit.gameObject.GetInstanceID(), OrderType = WlMoveCarrier.NoQueueEntry, X = last.x, Z = last.z };
+            return true;
         }
 
         // A vanilla campaign call (calledfromcampaign: true): vanilla's gate (8366) first, with the

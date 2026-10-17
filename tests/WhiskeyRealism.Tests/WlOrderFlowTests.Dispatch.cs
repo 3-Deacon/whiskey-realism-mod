@@ -125,4 +125,82 @@ internal static partial class WlOrderFlowTests
         AssertTrue(Regex.IsMatch(exec, @"if \(executed > 0 && winner\.Task != CommandTaskType\.None\)\s*TacticalPlayerDispatchRuntime\.NoteTask\(winner\.GroupId, winner\.Task, nowHours\);"),
             "every executed write of a group notes the group's task");
     }
+
+    // Vanilla's orders that say where the chain is going (smoke 2026-10-17 orders 2, 4, 10: a support order to a zone the
+    // brigade never reached, or was halted from by 4th Division's CheckEnemyContact 117379-117381).
+    private static void PutPursuit(WlOrderFlow flow, double issued, int unit = 1, int type = 2, float x = 0f)
+    {
+        CourierEntry e = QEntry(issuer: unit, type: type, origin: OrderOrigin.Vanilla, x: x, issuedAt: issued, dueAt: issued + Leg);
+        e.UnitId = unit;
+        e.Pursuit = true;
+        e.Carrier = new WlMoveCarrier { UnitId = unit, OrderType = WlMoveCarrier.NoQueueEntry, X = x };
+        flow.Queue.TryEnqueue(in e, 0.0, out _);
+    }
+
+    private static void VanillaOrderWhoseCarrierAbandonedTheMoveIsDiscarded()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.Lost };
+        var flow = NewFlow(host);
+        PutPursuit(flow, issued: 10.0);
+        flow.RunPass();
+        AssertEqual(0, host.Calls, "the brigade no longer pursues the point: the player is not told to support there");
+        AssertEqual("2:discard:chain-abandoned", RowsOf(host), "with the reason");
+        AssertEqual(0, flow.Queue.Count, "and it is gone");
+    }
+
+    private static void VanillaOrderWhoseCarrierPursuesIsDeliveredWithItsDueTime()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.Executed, Basis = MoveBasis.Path };
+        var flow = NewFlow(host);
+        PutPursuit(flow, issued: 10.0);
+        flow.RunPass();
+        AssertEqual(1, host.Calls, "the carrier holds a path that ends at the point: delivered, on the courier's own time");
+        AssertEqual(MoveBasis.Path, host.GateOnLastRow, "the verdict rides on the row");
+    }
+
+    private static void PursuitIsCheckedAtDeliveryNotAtCapture()
+    {
+        var host = new FakeHost { Now = 10.0, Slot = null, Move = MoveState.Lost };
+        var flow = NewFlow(host);
+        PutPursuit(flow, issued: 10.0);
+        flow.RunPass();
+        AssertEqual(0, host.MoveAsks, "an order that is not yet due is not looked at: its courier is still riding");
+        AssertEqual(1, flow.Queue.Count, "it stays queued");
+        host.Now = 10.0 + Leg;
+        flow.RunPass();
+        AssertEqual(1, host.MoveAsks, "asked once, when it is due");
+    }
+
+    private static void AnArmedVanillaOrderIsNeverWaitedFor()
+    {
+        // Unlike an executor dispatch, no queue entry is waited for: the order is due when its courier arrives, however long the
+        // carrier's own move takes.
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.InFlight };
+        var flow = NewFlow(host);
+        PutPursuit(flow, issued: 10.0);
+        flow.RunPass();
+        AssertEqual(1, host.Calls, "a carrier still on its way is a carrier pursuing: InFlight is not asked to hold the order");
+    }
+
+    private static void OnlyTheWaypointTypesAreArmed()
+    {
+        AssertTrue(WlMoveState.VanillaFollowsAWaypoint(0), "take objective");
+        AssertTrue(WlMoveState.VanillaFollowsAWaypoint(2), "support");
+        AssertTrue(WlMoveState.VanillaFollowsAWaypoint(3), "attack isolated target");
+        AssertTrue(WlMoveState.VanillaFollowsAWaypoint(4), "assault");
+        foreach (int t in new[] { 1, 5, 11, 12, 13, 14, 15 })
+            AssertFalse(WlMoveState.VanillaFollowsAWaypoint(t), "type " + t + " describes no move of the called unit (engage is the halt itself, 117383)");
+    }
+
+    private static void RuntimeArmsVanillaOrdersFromTheCalledUnit()
+    {
+        string code = Code(FlowRuntime);
+        string route = BodyOf(code, "private static CaptureVerdict Route(");
+        AssertTrue(Regex.IsMatch(route, @"else if \(call\.Origin == OrderOrigin\.Vanilla && CouriersOn\(\) && TryPursuit\(unit, type, out WlMoveCarrier pursuit\)\)\s*\{\s*entry\.Pursuit = true;\s*entry\.Carrier = pursuit;\s*\}"),
+            "Route arms only a vanilla-origin order, only while couriers are on");
+        string pursuit = BodyOf(code, "private static bool TryPursuit(");
+        AssertTrue(pursuit.Contains("unit.regimentpaths <= 0") && pursuit.Contains("unit.lastsetwaypointposition") && pursuit.Contains("WlMoveCarrier.NoQueueEntry"),
+            "the called unit must hold a path now; its target is its last set waypoint, not the order's position; no queue entry is waited for");
+        AssertTrue(pursuit.Contains("unit.gameObject.GetInstanceID()"), "the carrier is the called unit itself");
+    }
 }

@@ -39,6 +39,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // An executor dispatch: the group's CommandTaskType (as an int; 0 = none) the order was made for. Delivered
         // only while the group is still under it (WlOrderFlow.TaskStillHolds).
         public int DispatchTask;
+        // A vanilla order that describes a move its caller has just set the called unit on (types 0, 2, 3 and 4,
+        // WlMoveState.VanillaFollowsAWaypoint): Carrier is that unit, its OrderType -1 (no queue entry is waited
+        // for: those SetWaypoint calls pass useorderdelay false, or are queued behind the order's own delay) and
+        // X/Z the waypoint it was sent to. At delivery the order is discarded (chain-abandoned) when the unit no
+        // longer pursues that point.
+        public bool Pursuit;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.

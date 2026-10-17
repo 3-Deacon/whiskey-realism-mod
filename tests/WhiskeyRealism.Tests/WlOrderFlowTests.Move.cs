@@ -583,7 +583,7 @@ internal static partial class WlOrderFlowTests
         string code = Code(FlowRuntime);
         AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.Carrier\.Has && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.Carrier = call\.Carrier;\s*\}"),
             "Route arms an entry from the call's carrier and only while couriers are on");
-        AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "no other origin is armed: vanilla's own orders are timed as before");
+        AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "TryMakeEntry arms nothing: the executor carrier and the vanilla pursuit are armed in Route");
         string moveOf = BodyOf(code, "public MoveState MoveOf(");
         AssertTrue(moveOf.Contains("Regiment carrier = ResolveUnit(e.Carrier.UnitId);") && moveOf.Contains("WlMoveQueue.StateOf(carrier, in e.Carrier, out basis)"),
             "the host asks about the carrier unit (not the ordered unit) and its entry");
