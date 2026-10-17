@@ -35,6 +35,8 @@ internal static class RiverCrossingTests
             ("river crossing a leg after a via gets its crossing within the two-via bound, else the move is refused", ALegAfterAViaGetsItsCrossingOrTheMoveIsRefused),
             ("river crossing the link graph is battle state and goes with the battle", TheLinkGraphGoesWithTheBattle),
             ("river crossing a road march takes its own crossing: Clear or Watched goes, Held only for an attack, Unknown is refused with a look", ARoadMarchTakesItsOwnCrossing),
+            ("river crossing a road march is checked at the crossing the road takes, not at the nearest one", ARoadMarchIsCheckedAtItsOwnCrossing),
+            ("river crossing a road flag on a move with one via is ignored", ARoadFlagOnOneViaIsIgnored),
             ("river crossing the road legs around a road route are gated and get vias within the bound; the route's flag comes from the posture request", TheLegsAroundARoadRouteAreGated),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
@@ -63,7 +65,7 @@ internal static class RiverCrossingTests
     internal sealed class Gate : ICrossingGate
     {
         internal readonly Picture Picture = new Picture();
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route)
             => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, road, out route);
     }
 
@@ -326,12 +328,18 @@ internal static class RiverCrossingTests
         watched.Picture.Links.Add((500f, -200f, CrossingState.Watched, 0, 1));
         AssertTrue(Executor(watched).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true), 1.0).Execute, "a Watched bridge goes too");
 
+        // A Held bridge goes only for an attack-stance task whose selected plan chose that crossing, the rule of a move off the road.
         var held = new Gate();
         held.Picture.Links.Add((500f, -200f, CrossingState.Held, 0, 1));
-        ExecutionPlan screen = Executor(held).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true, CommandTaskType.Screen), 1.0);
-        AssertEqual(SkipReason.NoKnownCrossing, screen.Skip, "a Screen march over a Held bridge is refused");
+        foreach (CommandTaskType task in new[] { CommandTaskType.Screen, CommandTaskType.AdvanceToAssembly, CommandTaskType.AttackObjective })
+            AssertEqual(SkipReason.NoKnownCrossing, Executor(held).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true, task), 1.0).Skip,
+                task + " over a Held bridge the plan did not choose is refused");
+        held.Picture.Planned.Add(0);
+        foreach (CommandTaskType task in new[] { CommandTaskType.Screen, CommandTaskType.AdvanceToAssembly })
+            AssertEqual(SkipReason.NoKnownCrossing, Executor(held).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true, task), 1.0).Skip,
+                task + " over a Held bridge the plan chose is refused too");
         ExecutionPlan assault = Executor(held).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true, CommandTaskType.AttackObjective), 1.0);
-        AssertTrue(assault.Execute, "an attack march over it goes: " + assault.Skip);
+        AssertTrue(assault.Execute, "an attack march over the Held bridge the plan chose goes: " + assault.Skip);
         AssertEqual(2, assault.ViaCount, "on the road's vias");
         AssertEqual(0, held.Picture.Looks.Count, "a Held bridge is no look");
 
@@ -346,6 +354,48 @@ internal static class RiverCrossingTests
 
         // Road vias on one bank: no crossing to check.
         AssertTrue(Executor(new Gate()).Plan(new View(100f, 100f), RoadMarch(200f, 400f, 450f, roadFlag: true), 1.0).Execute, "a road march on one bank is not touched");
+    }
+
+    // verify landing r2 #3: a nearer Unknown ford off the road does not refuse a march over the Clear bridge the road takes.
+    private static void ARoadMarchIsCheckedAtItsOwnCrossing()
+    {
+        var gate = new Gate();
+        gate.Picture.Links.Add((500f, -900f, CrossingState.Clear, 0, 1));      // the bridge: far from the vias' line, on the road
+        gate.Picture.Links.Add((500f, -200f, CrossingState.Unknown, 0, 1));    // an unseen ford beside the straight line, off the road
+        BattleOrderIntent onTheRoad = RoadMarch(300f, 800f, 900f, roadFlag: true);
+        onTheRoad.RoadLinkCount = 1;
+        onTheRoad.RoadLink0 = 0;
+        ExecutionPlan ok = Executor(gate).Plan(new View(100f, 100f), onTheRoad, 1.0);
+        AssertTrue(ok.Execute, "the march goes: the road takes the Clear bridge, not the ford: " + ok.Skip);
+        AssertEqual(0, gate.Picture.Looks.Count, "and the ford off the road is not asked about");
+        // Without the road's links the crossing is taken to be the best route over every link: the nearer, Unknown ford.
+        ExecutionPlan guess = Executor(gate).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, guess.Skip, "(control) with no road links the nearest crossing is what is checked");
+        AssertEqual(1, gate.Picture.Looks[0], "and it is the ford that is asked about");
+        // The road's own crossing unseen: refused, with the look at that one.
+        var blind = new Gate();
+        blind.Picture.Links.Add((500f, -900f, CrossingState.Unknown, 0, 1));
+        blind.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        BattleOrderIntent roadUnseen = RoadMarch(300f, 800f, 900f, roadFlag: true);
+        roadUnseen.RoadLinkCount = 1;
+        roadUnseen.RoadLink0 = 0;
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(blind).Plan(new View(100f, 100f), roadUnseen, 1.0).Skip, "a road over a bridge nobody has seen is refused though a ford is Clear");
+        AssertEqual(0, blind.Picture.Looks[0], "with the look at the road's bridge");
+    }
+
+    // verify landing r2 #2: the flag means a road route only with the road's two vias.
+    private static void ARoadFlagOnOneViaIsIgnored()
+    {
+        var ford = new Gate();
+        ford.Picture.Links.Add((500f, -300f, CrossingState.Clear, 0, 1));
+        BattleOrderIntent oneVia = Move(900f, 100f, IntentSource.PostureExecutor, CommandTaskType.AdvanceToAssembly, IntentFlags.RoadRoute);
+        oneVia.ViaCount = 1;
+        oneVia.ViaX0 = 300f;
+        oneVia.ViaZ0 = -200f;
+        ExecutionPlan plan = Executor(ford).Plan(new View(100f, 100f), oneVia, 1.0);
+        AssertTrue(plan.Execute, "made: " + plan.Skip);
+        AssertEqual(2, plan.ViaCount, "the leg after the one via gets its ford as for any move");
+        AssertEqual(500f, plan.ViaX1, "the ford");
     }
 
     private static void TheLegsAroundARoadRouteAreGated()
@@ -367,9 +417,10 @@ internal static class RiverCrossingTests
         PostureIntentPlan.Submit(sink, new PostureIntentRequest
         {
             GroupId = 10, Action = PostureExecutionAction.SetWaypoint, Task = CommandTaskType.AdvanceToAssembly, HasTarget = true, TargetX = 900f, TargetZ = -100f,
-            ViaCount = 2, ViaX0 = 300f, ViaZ0 = -200f, ViaX1 = 800f, ViaZ1 = -200f, RoadRoute = true, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "t",
+            ViaCount = 2, ViaX0 = 300f, ViaZ0 = -200f, ViaX1 = 800f, ViaZ1 = -200f, RoadRoute = true, RoadLinkCount = 1, RoadLink0 = 7, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "t",
         });
         AssertTrue(sink.Moves.Count == 1 && (sink.Moves[0].Flags & IntentFlags.RoadRoute) != 0, "a road route's move carries the road flag");
+        AssertTrue(sink.Moves[0].RoadLinkCount == 1 && sink.Moves[0].RoadLink0 == 7, "and the crossings the road takes");
         var plain = new FlagSink();
         PostureIntentPlan.Submit(plain, new PostureIntentRequest
         {

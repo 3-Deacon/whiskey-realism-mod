@@ -1147,6 +1147,7 @@ namespace WhiskeyRealism.Tactical.Operations
         public int ViaCount;
         /// <summary>The vias are a BC10 road route (flag <see cref="IntentFlags.RoadRoute"/> on the move).</summary>
         public bool RoadRoute;
+        public int RoadLinkCount, RoadLink0, RoadLink1;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public bool ColumnWait;
     }
@@ -1390,7 +1391,13 @@ namespace WhiskeyRealism.Tactical.Operations
             if (r.ViaCount > 0)
             {
                 move.ViaCount = Math.Min(r.ViaCount, 2);
-                if (r.RoadRoute) move.Flags |= IntentFlags.RoadRoute;
+                if (r.RoadRoute)
+                {
+                    move.Flags |= IntentFlags.RoadRoute;
+                    move.RoadLinkCount = r.RoadLinkCount;
+                    move.RoadLink0 = r.RoadLink0;
+                    move.RoadLink1 = r.RoadLink1;
+                }
                 move.ViaX0 = r.ViaX0;
                 move.ViaZ0 = r.ViaZ0;
                 move.ViaX1 = r.ViaX1;

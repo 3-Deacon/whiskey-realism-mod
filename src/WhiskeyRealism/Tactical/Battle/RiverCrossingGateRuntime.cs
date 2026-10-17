@@ -20,7 +20,7 @@ namespace WhiskeyRealism.Tactical.Battle
             BattleScope.Register("river-crossing-gate", () => { _firstBlockLogged = false; _firstViaLogged = false; });
         }
 
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route)
         {
             route = default;
             ICrossingPicture picture = FeasibilityRuntime.CrossingPicture(alliance);

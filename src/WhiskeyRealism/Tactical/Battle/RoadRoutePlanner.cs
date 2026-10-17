@@ -9,6 +9,12 @@ namespace WhiskeyRealism.Tactical.Battle
         public int ViaCount;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public float RouteCost, VanillaCost;
+        /// <summary>
+        /// With two vias and a river picture: the BC14 crossing links whose crossing point lies on the road between the vias (first on the road first;
+        /// <see cref="RoadRoutePlanner.RoadLinkToleranceMeters"/> from a path node), at most two. The crossing gate checks these, the crossings the road
+        /// actually takes, and not the shortest path over the links.
+        /// </summary>
+        public int LinkCount, Link0, Link1;
     }
 
     /// <summary>
@@ -129,6 +135,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public const int ColumnGroupFormation = 4; // March Column (5883); regiments take formation 3 (91909-91917)
         public const int MaxCells = 6000;
         public const int MaxVia = 2;
+        /// <summary>How near a crossing link's point must lie to a node of the road between the vias for the road to take that crossing.</summary>
+        public const float RoadLinkToleranceMeters = 60f;
 
         private const float StraightSampleMeters = 10f;
         private const float CellSampleStep = 5f;
@@ -139,7 +147,8 @@ namespace WhiskeyRealism.Tactical.Battle
         /// pathfinder takes (the probe's filter path); with none, nothing is planned.
         /// </summary>
         public static RoadRoute Plan(BattleTerrainGrid g, float x0, float z0, float x1, float z1,
-            ReadOnlySpan<float> vanillaPathX, ReadOnlySpan<float> vanillaPathZ, int vanillaCorners, RoadRouteScratch scratch)
+            ReadOnlySpan<float> vanillaPathX, ReadOnlySpan<float> vanillaPathZ, int vanillaCorners, RoadRouteScratch scratch,
+            ICrossingPicture crossings = null)
         {
             var route = new RoadRoute();
             if (g == null || scratch == null || !Wanted(g, x0, z0, x1, z1)) return route;
@@ -163,7 +172,8 @@ namespace WhiskeyRealism.Tactical.Battle
 
             route.RouteCost = scratch.G[goal];
             if (!(route.RouteCost <= RouteGainRatio * route.VanillaCost)) return route;
-            ChooseVia(scratch, nodes, x0, z0, x1, z1, ref route);
+            ChooseVia(scratch, nodes, x0, z0, x1, z1, ref route, out int entryIndex, out int exitIndex);
+            if (route.ViaCount == MaxVia && crossings != null && crossings.Ready) RoadLinks(scratch, entryIndex, exitIndex, crossings, ref route);
             route.Use = route.ViaCount > 0;
             return route;
         }
@@ -464,8 +474,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // The route's first road entry and last road exit that are at least 60 m from the start,
         // the target and each other, and not within the last 250 m (vanilla skips roads there,
         // 131163-131166, so a via point in that stretch would pull the group off nothing).
-        private static void ChooseVia(RoadRouteScratch s, int count, float x0, float z0, float x1, float z1, ref RoadRoute route)
+        private static void ChooseVia(RoadRouteScratch s, int count, float x0, float z0, float x1, float z1, ref RoadRoute route, out int entryIndex, out int exitIndex)
         {
+            entryIndex = exitIndex = -1;
             int entry = -1;
             for (int k = 0; k < count && entry < 0; k++)
             {
@@ -476,6 +487,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     entry = k;
             }
             if (entry < 0) return;
+            entryIndex = entry;
 
             int entryNode = s.PathNodes[entry];
             route.ViaX0 = s.SnapX[entryNode];
@@ -491,8 +503,38 @@ namespace WhiskeyRealism.Tactical.Battle
                 route.ViaX1 = s.SnapX[node];
                 route.ViaZ1 = s.SnapZ[node];
                 route.ViaCount = MaxVia;
+                exitIndex = k;
                 break;
             }
+        }
+
+        // The crossings the road takes between its vias: the BC14 links whose crossing point lies within RoadLinkToleranceMeters of a node of the path from
+        // the entry to the exit, in the order the road meets them, at most two.
+        private static void RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
+        {
+            route.LinkCount = 0;
+            int firstAt0 = int.MaxValue, firstAt1 = int.MaxValue;
+            for (int link = 0; link < crossings.LinkCount; link++)
+            {
+                crossings.LinkPoint(link, out float lx, out float lz);
+                int at = -1;
+                for (int k = entry; k <= exit && at < 0; k++)
+                {
+                    int node = s.PathNodes[k];
+                    if (Distance(s.SnapX[node], s.SnapZ[node], lx, lz) <= RoadLinkToleranceMeters) at = k;
+                }
+                if (at < 0) continue;
+                if (at < firstAt0)
+                {
+                    firstAt1 = firstAt0; route.Link1 = route.Link0;
+                    firstAt0 = at; route.Link0 = link;
+                }
+                else if (at < firstAt1)
+                {
+                    firstAt1 = at; route.Link1 = link;
+                }
+            }
+            route.LinkCount = (firstAt0 != int.MaxValue ? 1 : 0) + (firstAt1 != int.MaxValue ? 1 : 0);
         }
 
         private static float Distance(float ax, float az, float bx, float bz)

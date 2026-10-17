@@ -137,6 +137,39 @@ internal static partial class BattleMovementHonestyTests
         AssertFalse(Route(Make(false), pathX: vx, pathZ: vz).Use, "an unfrozen river across the whole corridor cannot be crossed");
     }
 
+    // verify landing r2 #3: with a river picture the route names the crossings the road takes between its vias.
+    private static void RouteNamesTheCrossingsTheRoadTakes()
+    {
+        var ids = new int[1201, 1201];
+        for (int x = 0; x <= 1200; x++)
+            for (int zi = 0; zi <= 1200; zi++)
+            {
+                float z = zi - 1200f;
+                int id = Grass;
+                if (x >= 300 && x < 900 && z >= -700f && z < -500f) id = Forest;
+                if (x >= 200 && x <= 1000 && Math.Abs(z + 400f) <= 3f) id = Road;
+                if (x >= 600 && x < 620 && z >= -950f && z <= -250f) id = Math.Abs(z + 400f) <= 3f ? Bridge : River;
+                ids[x, zi] = id;
+            }
+        var g = new BattleTerrainGrid(ids, 1200f, 1200f, ShippedSpeedCost, false, null, null, null, 0);
+        float[] vx = { 100f, 600f, 1100f };
+        float[] vz = { -600f, -400f, -600f };
+        var picture = new RiverCrossingTests.Picture();
+        picture.Links.Add((610f, -650f, CrossingState.Unknown, 0, 1));   // a ford beside the river's middle, 250 m off the road
+        picture.Links.Add((610f, -400f, CrossingState.Clear, 0, 1));     // the bridge on the road
+        picture.Links.Add((610f, -900f, CrossingState.Unknown, 0, 1));   // another far ford
+        RoadRoute with = RoadRoutePlanner.Plan(g, 100f, -600f, 1100f, -600f, vx, vz, vx.Length, new RoadRouteScratch(), picture);
+        AssertTrue(with.Use && with.ViaCount == 2, "(fixture) a two-via road route over the bridge");
+        AssertEqual(1, with.LinkCount, "the road takes one crossing");
+        AssertEqual(1, with.Link0, "the bridge on the road, not the ford beside it");
+        RoadRoute without = RoadRoutePlanner.Plan(g, 100f, -600f, 1100f, -600f, vx, vz, vx.Length, new RoadRouteScratch());
+        AssertEqual(0, without.LinkCount, "with no river picture it names none");
+        var offRoad = new RiverCrossingTests.Picture();
+        offRoad.Links.Add((610f, -650f, CrossingState.Unknown, 0, 1));
+        AssertEqual(0, RoadRoutePlanner.Plan(g, 100f, -600f, 1100f, -600f, vx, vz, vx.Length, new RoadRouteScratch(), offRoad).LinkCount,
+            "a crossing 250 m from the road is not the road's");
+    }
+
     private static void RouteCorridorShrinksToFit6000CellsElseNotPlanned()
     {
         AssertTrue(RoadRoutePlanner.Corridor(1000f, out int rows, out int columns), "1 km");

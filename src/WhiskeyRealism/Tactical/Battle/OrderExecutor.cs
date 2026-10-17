@@ -701,7 +701,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     float toX = leg < existing ? (leg == 0 ? plan.ViaX0 : plan.ViaX1) : x;
                     float toZ = leg < existing ? (leg == 0 ? plan.ViaZ0 : plan.ViaZ1) : z;
-                    CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack, roadRoute && leg == 1, out CrossingRoute route);
+                    CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack,
+                        roadRoute && leg == 1 ? new RoadLeg(w.RoadLinkCount, w.RoadLink0, w.RoadLink1) : default(RoadLeg), out CrossingRoute route);
                     bool tooMany = false;
                     if (crossing == CrossingVerdict.ViaCrossing)
                     {

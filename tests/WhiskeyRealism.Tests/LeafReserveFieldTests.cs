@@ -75,7 +75,7 @@ internal static class LeafReserveFieldTests
     {
         public readonly Bank Picture;
         public BankGate(Bank picture) { Picture = picture; }
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route)
             => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, road, out route);
     }
 

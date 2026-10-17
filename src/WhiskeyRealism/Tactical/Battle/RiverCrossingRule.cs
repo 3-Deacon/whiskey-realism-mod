@@ -38,6 +38,26 @@ namespace WhiskeyRealism.Tactical.Battle
         NoKnownCrossing,
     }
 
+    /// <summary>
+    /// A leg between the two vias of a BC10 road route: the road follows the terrain's roads and takes its own crossing(s). <see cref="Links"/> are the
+    /// BC14 links the road takes (RoadRoute.Link0 / Link1); with none known the crossing is taken to be the best route over every link.
+    /// </summary>
+    public readonly struct RoadLeg
+    {
+        public RoadLeg(int linkCount, int link0, int link1)
+        {
+            Is = true;
+            LinkCount = linkCount;
+            Link0 = link0;
+            Link1 = link1;
+        }
+
+        public bool Is { get; }
+        public int LinkCount { get; }
+        public int Link0 { get; }
+        public int Link1 { get; }
+    }
+
     /// <summary>The gate's answer for one leg: the vias to take (at most two, the executor's bound), and the link a refused leg wants looked at.</summary>
     public struct CrossingRoute
     {
@@ -73,14 +93,15 @@ namespace WhiskeyRealism.Tactical.Battle
         /// crossing the selected plan chose; a Screen, a Probe or any other move never crosses a Held one.
         /// </summary>
         public static CrossingVerdict Decide(ICrossingPicture picture, float x0, float z0, float x1, float z1, bool attack, out CrossingRoute route)
-            => Decide(picture, x0, z0, x1, z1, attack, road: false, out route);
+            => Decide(picture, x0, z0, x1, z1, attack, default(RoadLeg), out route);
 
         /// <summary>
-        /// <paramref name="road"/>: the leg lies between the two vias of a BC10 road route. The road follows the terrain's roads and takes its own
-        /// crossing, so no via is inserted; the crossing the leg passes (the best route over every link) is only checked: Clear or Watched lets it
-        /// through, Held only for an attack, Unknown refuses it and posts the look (a crossing the selected plan chose is not refused).
+        /// <paramref name="road"/> (<see cref="RoadLeg.Is"/>): the leg lies between the two vias of a BC10 road route. The road follows the terrain's roads and
+        /// takes its own crossing, so no via is inserted; the crossings the road takes (its links, else the best route over every link) are only checked,
+        /// by the rule of every other move: Clear or Watched goes; a crossing the selected plan chose goes unless it is Held, and a Held one goes for an
+        /// attack-stance task only; anything else is refused, and an Unknown one posts the look.
         /// </summary>
-        public static CrossingVerdict Decide(ICrossingPicture picture, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+        public static CrossingVerdict Decide(ICrossingPicture picture, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route)
         {
             route = new CrossingRoute { LookLink = -1 };
             if (picture == null || !picture.Ready) return CrossingVerdict.SameBank;
@@ -92,7 +113,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (graph == null) return CrossingVerdict.NoKnownCrossing;   // two banks and no crossing at all
             Span<int> path = stackalloc int[MaxLinks];
             Span<bool> admit = stackalloc bool[MaxLinks];
-            if (road) return DecideRoadLeg(picture, graph, x0, z0, x1, z1, from, to, attack, admit, path, ref route);
+            if (road.Is) return DecideRoadLeg(picture, graph, x0, z0, x1, z1, from, to, attack, road, admit, path, ref route);
             for (int i = 0; i < graph.Links; i++) admit[i] = Admitted(picture, i, attack);
             int count = Search(graph, picture, admit, x0, z0, x1, z1, from, to, path);
             if (count > 0)
@@ -117,21 +138,33 @@ namespace WhiskeyRealism.Tactical.Battle
             return CrossingVerdict.NoKnownCrossing;
         }
 
-        // The crossing(s) a road leg passes are the best route over every link; each must be one the side may use.
+        // The crossings a road leg takes: the road's own links when the planner found them, else the best route over every link. Each must be one
+        // the move may take (Admitted: the rule of a move off the road).
         private static CrossingVerdict DecideRoadLeg(ICrossingPicture picture, Graph graph, float x0, float z0, float x1, float z1, int from, int to, bool attack,
-            Span<bool> admit, Span<int> path, ref CrossingRoute route)
+            in RoadLeg road, Span<bool> admit, Span<int> path, ref CrossingRoute route)
         {
-            for (int i = 0; i < graph.Links; i++) admit[i] = true;
-            int count = Search(graph, picture, admit, x0, z0, x1, z1, from, to, path);
-            if (count == 0) return CrossingVerdict.NoKnownCrossing;      // no crossing joins the banks at all: nothing to look at
+            int count;
+            if (road.LinkCount > 0)
+            {
+                count = Math.Min(road.LinkCount, 2);
+                path[0] = road.Link0;
+                if (count > 1) path[1] = road.Link1;
+                for (int k = 0; k < count; k++)
+                    if (path[k] < 0 || path[k] >= graph.Links) return CrossingVerdict.NoKnownCrossing;
+            }
+            else
+            {
+                for (int i = 0; i < graph.Links; i++) admit[i] = true;
+                count = Search(graph, picture, admit, x0, z0, x1, z1, from, to, path);
+                if (count == 0) return CrossingVerdict.NoKnownCrossing;      // no crossing joins the banks at all: nothing to look at
+            }
             route.Crossings = count;
             bool refused = false;
             for (int k = 0; k < count; k++)
             {
-                CrossingState state = picture.StateOf(path[k]);
-                if (IsKnown(state) || (state == CrossingState.Held && attack) || (picture.IsPlanned(path[k]) && state != CrossingState.Held)) continue;
+                if (Admitted(picture, path[k], attack)) continue;
                 refused = true;
-                if (state == CrossingState.Unknown && route.LookLink < 0)
+                if (picture.StateOf(path[k]) == CrossingState.Unknown && route.LookLink < 0)
                 {
                     route.LookLink = path[k];
                     picture.RequestLook(path[k]);
@@ -281,6 +314,6 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         /// <param name="attack">The move is an attack task: only an attack may cross a Held crossing the plan chose.</param>
         /// <param name="road">The leg lies between the two vias of a BC10 road route: the road takes its own crossing, which is only checked.</param>
-        CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route);
+        CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, in RoadLeg road, out CrossingRoute route);
     }
 }

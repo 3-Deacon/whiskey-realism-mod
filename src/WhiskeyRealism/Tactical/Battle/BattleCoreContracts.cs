@@ -273,6 +273,8 @@ namespace WhiskeyRealism.Tactical.Battle
         // group through before the target (RoadRoutePlanner). ViaCount 0 = a plain move.
         public int ViaCount;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
+        // With IntentFlags.RoadRoute: the BC14 crossing links the road takes between its two vias (RoadRoute.LinkCount / Link0 / Link1); 0 = unknown.
+        public int RoadLinkCount, RoadLink0, RoadLink1;
         // BC13: the live exploit (ExploitEntry.Id, 1 and up) an intent carries out; 0 = none. The arbiter tick counts the
         // PlayerOwned skips and the player-child fan-out exclusions of such an intent against that exploit (playerSkips).
         public int ExploitId;

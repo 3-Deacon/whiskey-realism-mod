@@ -7,6 +7,7 @@ using UnityEngine.AI;
 using WhiskeyRealism.Patches;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -716,6 +717,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 Reason = reason,
                 ViaCount = roadRoute.Use ? roadRoute.ViaCount : (maneuverVia ? 1 : 0),
                 RoadRoute = roadRoute.Use,
+                RoadLinkCount = roadRoute.Use ? roadRoute.LinkCount : 0,
+                RoadLink0 = roadRoute.Link0,
+                RoadLink1 = roadRoute.Link1,
                 ViaX0 = roadRoute.Use ? roadRoute.ViaX0 : maneuverViaX,
                 ViaZ0 = roadRoute.Use ? roadRoute.ViaZ0 : maneuverViaZ,
                 ViaX1 = roadRoute.ViaX1,
@@ -967,6 +971,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (!TryPlan(s, t, grid, i, move.TargetX, move.TargetZ, out RoadRoute planned) || !planned.Use) return;
             move.ViaCount = planned.ViaCount;
             move.Flags |= IntentFlags.RoadRoute;
+            move.RoadLinkCount = planned.LinkCount;
+            move.RoadLink0 = planned.Link0;
+            move.RoadLink1 = planned.Link1;
             move.ViaX0 = planned.ViaX0;
             move.ViaZ0 = planned.ViaZ0;
             move.ViaX1 = planned.ViaX1;
@@ -1017,7 +1024,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                             _pathX[c] = corners[c].x;
                             _pathZ[c] = corners[c].z;
                         }
-                        route = RoadRoutePlanner.Plan(grid, rec.X, rec.Z, x, z, _pathX, _pathZ, count, t.RouteScratch);
+                        route = RoadRoutePlanner.Plan(grid, rec.X, rec.Z, x, z, _pathX, _pathZ, count, t.RouteScratch, FeasibilityRuntime.CrossingPicture(s.Alliance));
                     }
                 }
                 catch (Exception ex)
