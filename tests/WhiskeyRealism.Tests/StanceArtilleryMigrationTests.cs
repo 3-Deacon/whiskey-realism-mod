@@ -667,7 +667,8 @@ internal static class StanceArtilleryMigrationTests
     {
         string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ArtilleryIntentProducer.cs");
         FlankResponseTests.AssertPinned(producer, "BattleWriterPolicy.RestartedAfterOwnCancel(", "the producer reads the executor's last outcome through the policy");
-        FlankResponseTests.AssertPinned(producer, "state.RestartedAfterOurCancel", "and hands it to the doctrine");
+        FlankResponseTests.AssertPinned(producer, "state.RestartedAfterOurCancel = executor != null &&\n                        executor.TryGetLastOutcome(own[i].InstanceId, OrderChannel.CombatBehavior, out OrderOutcome lastBehavior) &&\n                        BattleWriterPolicy.RestartedAfterOwnCancel(lastBehavior, now);",
+            "and hands the whole expression to the doctrine, on the battery's combat behavior channel");
         FlankResponseTests.AssertPinned(producer, "out bool cancelAccepted", "and learns when a cancel was accepted away");
         FlankResponseTests.AssertPinned(producer, "TacticalArtilleryRestartAccepted", "which is a bounded telemetry row");
         string policy = FlankResponseTests.SourceText("Tactical", "BattleWriterPolicy.cs");
