@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Battle
 {
@@ -125,7 +126,15 @@ namespace WhiskeyRealism.Tactical.Battle
             public float[] X, Z, Weight;
         }
 
+        // One graph, built from the first picture asked and kept while the same map (Topology) is asked about. It is battle state: a new battle has
+        // new RiverRegions, which would never match, but the old regions would stay referenced until the next map was asked about, so the battle's end
+        // drops it.
         private static Graph _graph;
+
+        static RiverCrossingRule()
+        {
+            BattleScope.Register("river-crossing-graph", () => _graph = null);
+        }
 
         private static Graph GraphOf(ICrossingPicture p)
         {

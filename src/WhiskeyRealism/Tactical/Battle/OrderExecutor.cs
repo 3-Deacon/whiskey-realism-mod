@@ -683,30 +683,54 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.Z = z;
             if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
             // 8. Every leg of a doctrine move (start, vias, target) that crosses a river takes a chain of crossings the side knows, or the move is not
-            //    made. A via the move already has (a planned or road via) is kept; the leg after it is still checked. A crossing the selected plan chose
-            //    is not refused for an attack (a Screen or Probe never crosses a Held one).
+            //    made. A via the move already has (a planned or road via) is kept, and a leg that needs a crossing gets it ahead of that via: the vias
+            //    become the legs' crossings and the mover's own, in order, within the executor's bound (RoadRoutePlanner.MaxVia); a move that would need
+            //    more is refused too. A crossing the selected plan chose is not refused for an attack (a Screen or Probe never crosses a Held one).
             if (!immediate && Crossings != null && SubjectToCrossingGate(w))
             {
                 bool attack = IsCrossingAttackTask(w.Task);
-                bool insertable = plan.ViaCount == 0;
-                int legs = plan.ViaCount + 1;
+                int existing = plan.ViaCount;
+                int count = 0;
+                Span<float> viaX = stackalloc float[RoadRoutePlanner.MaxVia];
+                Span<float> viaZ = stackalloc float[RoadRoutePlanner.MaxVia];
                 float fromX = rec.X, fromZ = rec.Z;
-                for (int leg = 0; leg < legs; leg++)
+                for (int leg = 0; leg <= existing; leg++)
                 {
-                    float toX = leg < plan.ViaCount ? (leg == 0 ? plan.ViaX0 : plan.ViaX1) : x;
-                    float toZ = leg < plan.ViaCount ? (leg == 0 ? plan.ViaZ0 : plan.ViaZ1) : z;
+                    float toX = leg < existing ? (leg == 0 ? plan.ViaX0 : plan.ViaX1) : x;
+                    float toZ = leg < existing ? (leg == 0 ? plan.ViaZ0 : plan.ViaZ1) : z;
                     CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack, out CrossingRoute route);
-                    if (crossing == CrossingVerdict.NoKnownCrossing) { plan.Execute = false; plan.Skip = SkipReason.NoKnownCrossing; return plan; }
-                    if (crossing == CrossingVerdict.ViaCrossing && insertable)
+                    bool tooMany = false;
+                    if (crossing == CrossingVerdict.ViaCrossing)
                     {
-                        plan.ViaCount = route.ViaCount;
-                        plan.ViaX0 = route.ViaX0;
-                        plan.ViaZ0 = route.ViaZ0;
-                        plan.ViaX1 = route.ViaX1;
-                        plan.ViaZ1 = route.ViaZ1;
+                        for (int k = 0; k < route.ViaCount; k++)
+                        {
+                            if (count == viaX.Length) { tooMany = true; break; }
+                            viaX[count] = k == 0 ? route.ViaX0 : route.ViaX1;
+                            viaZ[count] = k == 0 ? route.ViaZ0 : route.ViaZ1;
+                            count++;
+                        }
+                    }
+                    if (leg < existing && !tooMany)
+                    {
+                        if (count == viaX.Length) tooMany = true;
+                        else { viaX[count] = toX; viaZ[count] = toZ; count++; }
+                    }
+                    if (crossing == CrossingVerdict.NoKnownCrossing || tooMany)
+                    {
+                        // No crossing the side knows, or more vias than the executor can carry: the move is not made.
+                        plan.Execute = false;
+                        plan.Skip = SkipReason.NoKnownCrossing;
+                        return plan;
                     }
                     fromX = toX;
                     fromZ = toZ;
+                }
+                if (count > 0)
+                {
+                    plan.ViaCount = count;
+                    plan.ViaX0 = viaX[0];
+                    plan.ViaZ0 = viaZ[0];
+                    if (count > 1) { plan.ViaX1 = viaX[1]; plan.ViaZ1 = viaZ[1]; }
                 }
             }
             plan.UseOrderDelay = UsesOrderDelay(w);

@@ -32,6 +32,8 @@ internal static class RiverCrossingTests
             ("river crossing every leg of a move with a via is gated", EveryLegOfAMoveWithAViaIsGated),
             ("river crossing the search over 252 links is bounded", TheSearchOver252LinksIsBounded),
             ("river crossing two maps with the same number of links do not share a link graph", TwoMapsDoNotShareALinkGraph),
+            ("river crossing a leg after a via gets its crossing within the two-via bound, else the move is refused", ALegAfterAViaGetsItsCrossingOrTheMoveIsRefused),
+            ("river crossing the link graph is battle state and goes with the battle", TheLinkGraphGoesWithTheBattle),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
             ("river crossing no gate leaves the move as validated", NoGateLeavesTheMove),
@@ -214,8 +216,9 @@ internal static class RiverCrossingTests
         ford.Picture.Links.Add((500f, 600f, CrossingState.Clear, 0, 1));
         ExecutionPlan kept = Executor(ford).Plan(new View(100f, 100f), WithVia(300f, -200f, 700f), 1.0);
         AssertTrue(kept.Execute, "with a known ford the leg after the via is crossable");
-        AssertEqual(1, kept.ViaCount, "the via the mover chose stays");
-        AssertEqual(300f, kept.ViaX0, "as it was");
+        AssertEqual(2, kept.ViaCount, "the via the mover chose stays and the leg after it gets its crossing");
+        AssertEqual(300f, kept.ViaX0, "the mover's via first, as it was");
+        AssertEqual(500f, kept.ViaX1, "then the ford the second leg needs");
     }
 
     // Four banks joined by 63 parallel links each (252 links), every link Clear: the worst the rule meets on a real map is far smaller (verify r2: 2 links).
@@ -248,6 +251,61 @@ internal static class RiverCrossingTests
         other.Links.Add((500f, 100f, CrossingState.Clear, 0, 2));
         AssertEqual(CrossingVerdict.NoKnownCrossing, Decide(other, 100f, 100f, 700f, 100f), "the second map's one link joins other regions: no crossing, whatever the first map's graph said");
         AssertEqual(CrossingVerdict.ViaCrossing, Decide(joined, 100f, 100f, 700f, 100f), "and the first map still answers for itself");
+    }
+
+    // Open item of verify r3: a leg after a via was checked but never given its crossing.
+    private static void ALegAfterAViaGetsItsCrossingOrTheMoveIsRefused()
+    {
+        BattleOrderIntent WithVia(float vx, float tx)
+        {
+            BattleOrderIntent m = Move(tx, 100f, IntentSource.PostureExecutor, CommandTaskType.Screen);
+            m.ViaCount = 1;
+            m.ViaX0 = vx;
+            m.ViaZ0 = -200f;
+            return m;
+        }
+        var ford = new Gate();
+        ford.Picture.Links.Add((500f, -300f, CrossingState.Clear, 0, 1));
+        // The via is across the river: the first leg needs the ford, ahead of the via; the second leg is on the far bank.
+        ExecutionPlan a = Executor(ford).Plan(new View(100f, 100f), WithVia(700f, 900f), 1.0);
+        AssertTrue(a.Execute, "made: " + a.Skip);
+        AssertEqual(2, a.ViaCount, "the ford and the mover's via");
+        AssertEqual(500f, a.ViaX0, "the ford first (the leg before the via needs it)");
+        AssertEqual(700f, a.ViaX1, "then the mover's via");
+        AssertEqual(900f, a.X, "to the target");
+
+        // Out and back over the same ford is three vias: more than the executor carries, so the move is refused.
+        ExecutionPlan b = Executor(ford).Plan(new View(100f, 100f), WithVia(700f, 400f), 1.0);
+        AssertFalse(b.Execute, "a move that would need three vias is not made");
+        AssertEqual(SkipReason.NoKnownCrossing, b.Skip, "and says no crossing it can route");
+
+        // A via and a leg over two rivers: also three.
+        var two = new Gate();
+        two.Picture.Links.Add((500f, -300f, CrossingState.Clear, 0, 1));
+        two.Picture.Links.Add((1000f, -300f, CrossingState.Clear, 1, 2));
+        ExecutionPlan c = Executor(two).Plan(new View(100f, 100f), WithVia(300f, 1200f), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, c.Skip, "a mover's via plus two crossings is refused");
+        // Without the via the same leg takes both crossings.
+        ExecutionPlan d = Executor(two).Plan(new View(100f, 100f), Move(1200f, 100f, IntentSource.PostureExecutor, CommandTaskType.Screen), 1.0);
+        AssertEqual(2, d.ViaCount, "(and without a via the same leg is two vias)");
+        // A via that needs nothing is kept alone.
+        ExecutionPlan e = Executor(ford).Plan(new View(100f, 100f), WithVia(300f, 400f), 1.0);
+        AssertEqual(1, e.ViaCount, "a via on a leg that crosses nothing stays the only one");
+        AssertEqual(300f, e.ViaX0, "as it was");
+    }
+
+    // The link graph is built from the first map asked and kept; it goes with the battle (BattleScope) so the old map's regions are not held.
+    private static void TheLinkGraphGoesWithTheBattle()
+    {
+        var p = new Picture();
+        p.Links.Add((500f, 100f, CrossingState.Clear, 0, 1));
+        Decide(p, 100f, 100f, 700f, 100f);
+        var field = typeof(RiverCrossingRule).GetField("_graph", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        AssertTrue(field != null, "the graph cache exists");
+        AssertTrue(field.GetValue(null) != null, "built by the first question");
+        WhiskeyRealism.Util.BattleScope.ResetAll();
+        AssertTrue(field.GetValue(null) == null, "dropped with the battle");
+        AssertEqual(CrossingVerdict.ViaCrossing, Decide(p, 100f, 100f, 700f, 100f), "and built again when the next battle asks");
     }
 
     private static void TheSearchOver252LinksIsBounded()
@@ -363,9 +421,10 @@ internal static class RiverCrossingTests
         withVia.ViaZ0 = -200f;
         ExecutionPlan plan = Executor(gate).Plan(new View(100f, 100f), withVia, 1.0);
         AssertTrue(plan.Execute, "the move is made");
-        AssertEqual(1, plan.ViaCount, "with its own via");
-        AssertEqual(300f, plan.ViaX0, "which is the intent's, not the gate's crossing");
-        AssertEqual(-200f, plan.ViaZ0, "which is the intent's, not the gate's crossing");
+        AssertEqual(2, plan.ViaCount, "with its own via and the crossing its second leg needs");
+        AssertEqual(300f, plan.ViaX0, "the first is the intent's, not the gate's crossing");
+        AssertEqual(-200f, plan.ViaZ0, "the first is the intent's, not the gate's crossing");
+        AssertEqual(500f, plan.ViaX1, "the second is the ford");
         AssertEqual(0, gate.Picture.Looks.Count, "and nothing asked for");
         var none = new Gate();
         AssertEqual(SkipReason.NoKnownCrossing, Executor(none).Plan(new View(100f, 100f), withVia, 1.0).Skip,
