@@ -6,12 +6,13 @@ using static TestFixtures;
 // BC16 (docs/superpowers/plans/2026-10-15-battle-core.md § BC16): formations, slots and lanes. This file holds step 0 only, the record-only
 // observers (decision 9 and decision 2's tug-of-war row); steps 1 and 2 add their tests here after step 0's in-game results are in.
 //   (this file)  LayoutMirror (the corps-level mirror classifier, its per-call tally and row budget) and FormationFlipDetector
+//   .Jq          the verdict program tools/bc16-mirror-verdict.jq over the synthetic sidecars in data/bc16-mirror
 //   .Runtime     source pins for LayoutObserverPatch, the telemetry routes and the flag text
 internal static partial class FormationSlotTests
 {
     public static void Run()
     {
-        RunAll(Join(MirrorTests(), FlipTests(), RuntimeTests()));
+        RunAll(Join(MirrorTests(), FlipTests(), JqTests(), RuntimeTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)

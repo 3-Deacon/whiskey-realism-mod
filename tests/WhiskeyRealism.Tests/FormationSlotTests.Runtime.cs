@@ -17,6 +17,7 @@ internal static partial class FormationSlotTests
             ("bc16 RUNTIME the patch entry has its scope, its first-fire mark first, a flag gate and a campaign skip", EntryDiscipline),
             ("bc16 RUNTIME the observer reads the resolved facing and the placed position the way decision 9 says", ReadsWhatDecisionNineSays),
             ("bc16 RUNTIME a brigade's depth is its level below the ordered group plus one, and the walk stops at three levels", DepthRule),
+            ("bc16 RUNTIME the Postfix-only lines: the row budget is taken, a detached or routed unit is skipped, the probe waits for a real order", PostfixOnlyLines),
             ("bc16 RUNTIME the observer writes nothing into the battle", WritesNothing),
             ("bc16 RUNTIME the mirror row, the flip row and the field probe carry the plan's fields and texts", RowsCarryThePlansFields),
             ("bc16 RUNTIME a deployment placement is baseline for the flip count, not a flip", ImmediateIsNotCountable),
@@ -95,6 +96,20 @@ internal static partial class FormationSlotTests
         AssertTrue(Regex.IsMatch(code, @"if \(level >= LayoutMirrorCall\.MaxDepth - 1\) return;"), "a group at level 2 has no brigade within the three levels");
         AssertTrue(Regex.IsMatch(code, @"Walk\(child, level \+ 1, facing, immediate\)"), "a child group is one level down");
         AssertTrue(Regex.IsMatch(code, @"Walk\(ordered, 0, facing, immediate\)"), "the ordered group is level 0");
+    }
+
+    // Lines that run only inside the Postfix, so no behaviour test reaches them: pinned at the source (the plants M10-M12 of the step 0 review).
+    private static void PostfixOnlyLines()
+    {
+        string code = Code(PatchFile);
+        AssertTrue(Regex.IsMatch(code, @"if \(Call\.Brigades\(depth\) == 0 \|\| !MirrorRows\.TryTake\(depth\)\) continue;"),
+            "a row is written only for a depth that has brigades and still has budget (128 rows a depth)");
+        AssertTrue(Regex.IsMatch(code, @"child\.unittyp <= TacticalUnitType\.MaxCombat \|\| child\.permanentlydetached \|\| child\.isrouted\) continue;"),
+            "the walk skips a detached or routed child group: vanilla never lays it out (92101-92108), its layout is stale");
+        AssertTrue(Regex.IsMatch(code, @"unit\.unittyp > TacticalUnitType\.MaxCombat \|\| unit\.permanentlydetached \|\| unit\.isrouted\) continue;"),
+            "and a detached or routed regiment, or a sub-group, is never classified");
+        AssertTrue(Regex.IsMatch(code, @"if \(!_probed && !immediateplacement\)\s*\{\s*_probed = true;\s*ProbeFormationFields\(\);"),
+            "the field probe waits for the first order that is not a deployment placement, and fires once");
     }
 
     private static void WritesNothing()

@@ -1,5 +1,10 @@
 # BC16 decision 9: reads TacticalLayoutMirror rows; prints the per-depth totals and the verdict.
-[.[] | select(.event=="TacticalLayoutMirror") | .fields] as $r
+#   jq -s -f tools/bc16-mirror-verdict.jq SESSION/tactical*.jsonl                     every row
+#   jq -s --arg immediate false -f tools/bc16-mirror-verdict.jq SESSION/tactical*.jsonl   path rows only (immediate=false)
+#   jq -s --arg immediate true  -f tools/bc16-mirror-verdict.jq SESSION/tactical*.jsonl   deployment rows only
+# FormationSlotTests runs this file over tests/WhiskeyRealism.Tests/data/bc16-mirror/*.jsonl.
+[.[] | select(.event=="TacticalLayoutMirror") | .fields
+   | select(($ARGS.named.immediate // "") == "" or (.immediate | tostring) == $ARGS.named.immediate)] as $r
 | def tot(f): (map(select(f)) | {rows: length, brigades: (map(.brigades) | add // 0), agree: (map(.agree) | add // 0), reversed: (map(.reversed) | add // 0)});
   ($r | tot(.depth==1)) as $d1 | ($r | tot(.depth==2)) as $d2 | ($r | tot(.depth==3)) as $d3 | ($r | tot(.depth==1 or .depth==2)) as $d12
 | def share(a; b): if b == 0 then 0 else a / b end;
