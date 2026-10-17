@@ -218,6 +218,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>BC14O: the pressure of the victory clock at the published evaluation (U and H are the selection's urgency and hold bias).</summary>
         ObjectivePressure Pressure { get; }
 
+        /// <summary>BC14O: the child holds player-owned strength at the published evaluation (it is never drawn to screen a secondary objective).</summary>
+        bool HoldsPlayerOwned(string childId);
+
         /// <summary>BC14O: the rows of the objective table.</summary>
         int ObjectiveCount { get; }
 
@@ -282,5 +285,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>BC14O: the victory clock; <see cref="HasClock"/> false means no pressure (U = H = 0).</summary>
         public VictoryClock Clock;
         public bool HasClock;
+        /// <summary>BC14O: the children that had a screen target at the previous allocation (their strength screens a secondary objective, not the main effort's).</summary>
+        public string[] ScreenChildIds;
+        public int ScreenChildCount;
     }
 }

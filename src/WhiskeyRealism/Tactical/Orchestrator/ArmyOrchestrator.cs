@@ -720,10 +720,41 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
                     perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext()),
                 _mainHysteresis);
+            ScreenSecondaryObjectives();
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
             EmitStaggeredReleaseTelemetry();
             EmitDirectChildIntentTelemetry();
+        }
+
+        // ---- BC14O economy of force ----
+
+        private readonly SecondaryObjective[] _secondaries = new SecondaryObjective[ObjectiveScoring.MaxSecondaryScreens];
+        private bool[] _playerOwnedChildren = Array.Empty<bool>();
+
+        /// <summary>BC14O: the secondary objectives the last allocation drew a screen for (the TacticalMainEffort row's <c>secondaryScreens</c>).</summary>
+        internal int SecondaryScreens
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < _directChildIntents.Count; i++) if (_directChildIntents[i].HasScreenTarget) n++;
+                return n;
+            }
+        }
+
+        // The ledger's secondary objectives (every feasible enemy-held or threatened objective but the main effort, best score first) each draw a
+        // Screen-role child the play already holds, at most MaxSecondaryScreens of them.
+        private void ScreenSecondaryObjectives()
+        {
+            if (_feasibility == null || !HasPlan || !_frontAxis.IsValid || !Plugin.ObjectiveDoctrineEnabled()) return;
+            ObjectiveLatch latch = ObjectiveLatch.ForAlliance(AllianceId);
+            int count = ObjectiveScoring.Secondaries(_feasibility, latch?.Id, _secondaries);
+            if (count == 0) return;
+            if (_playerOwnedChildren.Length < _directChildIntents.Count) _playerOwnedChildren = new bool[_directChildIntents.Count];
+            for (int i = 0; i < _directChildIntents.Count; i++) _playerOwnedChildren[i] = _feasibility.HoldsPlayerOwned(_directChildIntents[i].ChildId);
+            _directChildIntents = DirectChildAllocator.ScreenSecondaryObjectives(
+                _directChildIntents, _secondaries, count, _frontAxis, _plan.PlanId, _playerOwnedChildren);
         }
 
         // ---- BC13 staggered reserve release ----

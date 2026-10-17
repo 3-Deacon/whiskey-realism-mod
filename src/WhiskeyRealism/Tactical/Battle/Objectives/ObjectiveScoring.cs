@@ -39,9 +39,20 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         public string Id;
         public float V, Value, Penalty, Prior, Hold, Score;
+        /// <summary>Where the objective stands and whose it is (the allocator screens a secondary one at its place).</summary>
+        public float X, Z;
+        public bool OwnHeld, EnemyHeld, Threatened;
         public bool Feasible;
         /// <summary>A static literal: why the objective is infeasible, or the largest penalty term; null with none.</summary>
         public string Reason;
+    }
+
+    /// <summary>A secondary objective the allocator may screen: where it stands, whether the side holds it, and its score (best first).</summary>
+    public struct SecondaryObjective
+    {
+        public string Id;
+        public float X, Z, Score;
+        public bool OwnHeld;
     }
 
     /// <summary>
@@ -73,6 +84,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>How much of an objective's strike-leg state value enters its penalty.</summary>
         public const float ContestedWeight = 0.6f;
+
+        /// <summary>The most objectives that draw a screen: economy of force, the main effort goes to one.</summary>
+        public const int MaxSecondaryScreens = 2;
 
         /// <summary>The most direct children whose routes price an objective: the same member bound as a candidate play's.</summary>
         public const int MaxObjectiveMembers = 5;
@@ -207,6 +221,34 @@ namespace WhiskeyRealism.Tactical.Battle
             }
             if (current >= 0 && best != current && bestTotal < currentTotal + ObjectiveSwitchMargin) return current;
             return best;
+        }
+
+        /// <summary>
+        /// The secondary objectives from the ledger's table: every feasible row that is enemy-held or an own-held one under threat, other than the main
+        /// effort (<paramref name="mainId"/>), best score first, at most <paramref name="into"/>.Length. Returns how many.
+        /// </summary>
+        public static int Secondaries(IFeasibilityLookup ledger, string mainId, SecondaryObjective[] into)
+        {
+            if (into == null || into.Length == 0) return 0;
+            int n = 0;
+            for (int r = 0; ledger != null && r < ledger.ObjectiveCount; r++)
+            {
+                if (!ledger.TryObjective(r, out ObjectiveEstimate row) || !row.Feasible) continue;
+                if (!row.EnemyHeld && !(row.OwnHeld && row.Threatened)) continue;
+                if (mainId != null && string.Equals(row.Id, mainId, StringComparison.Ordinal)) continue;
+                var s = new SecondaryObjective { Id = row.Id, X = row.X, Z = row.Z, Score = row.Score, OwnHeld = row.OwnHeld };
+                if (n == into.Length && s.Score <= into[n - 1].Score) continue;   // no better than the worst kept
+                int at = n < into.Length ? n++ : n - 1;
+                into[at] = s;
+                while (at > 0 && into[at - 1].Score < into[at].Score)
+                {
+                    SecondaryObjective t = into[at - 1];
+                    into[at - 1] = into[at];
+                    into[at] = t;
+                    at--;
+                }
+            }
+            return n;
         }
 
         /// <summary>The objective's feasibility penalty r: <c>1 - (1 - daylight)(1 - detail)(1 - ContestedWeight x contested)</c>.</summary>

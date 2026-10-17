@@ -969,6 +969,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             var table = new ManeuverNodeTable();
             if (nodeIntents == null) return table;
             AddGuards(table, directChildIntents, nodeIntents);
+            AddScreens(table, directChildIntents, nodeIntents);
             if (maneuvers == null) return table;
             for (int m = 0; m < maneuvers.Count; m++)
             {
@@ -1026,6 +1027,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
                     table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, station ? CommandTaskType.ReserveWait : CommandTaskType.GuardFlank, true,
                         children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, station ? "station-works" : "guard-crossing", isGuard: true));
+                }
+            }
+        }
+
+        // BC14O requirement-main-effort-objective: a Screen-role child drawn to screen a secondary objective stands at its screen target facing the
+        // enemy, task Screen, through the same maneuver override as a guard. A BC11 maneuver on the same node (added after) takes precedence.
+        private static void AddScreens(ManeuverNodeTable table, System.Collections.Generic.IReadOnlyList<DirectChildIntent> children,
+            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
+        {
+            if (children == null) return;
+            for (int c = 0; c < children.Count; c++)
+            {
+                if (!children[c].HasScreenTarget) continue;
+                string source = NodeIdOfChild(children[c].ChildId);
+                if (source.Length == 0) continue;
+                for (int i = 0; i < nodeIntents.Count; i++)
+                {
+                    if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
+                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, CommandTaskType.Screen, true,
+                        children[c].ScreenX, children[c].ScreenZ, children[c].ScreenHeading, "screen-secondary", isGuard: true));
                 }
             }
         }

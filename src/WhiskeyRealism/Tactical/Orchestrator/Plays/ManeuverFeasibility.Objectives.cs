@@ -61,6 +61,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 {
                     Id = facts[i].Id, V = v, Value = ObjectiveScoring.Value(v, facts[i].OwnHeld),
                     Hold = facts[i].OwnHeld ? ObjectiveScoring.HoldWeight * w.Pressure.H : 0f,
+                    X = facts[i].X, Z = facts[i].Z, OwnHeld = facts[i].OwnHeld, EnemyHeld = facts[i].EnemyHeld, Threatened = facts[i].Threatened,
                 };
                 w.FactOf[w.Count++] = i;
             }
@@ -82,6 +83,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ChildFact child = job.Children[c];
                 if (!child.Offered || child.DeployedReserve || child.HasPlayerOwned) continue;
                 if (job.Target != null && job.Target.BackIsReserveRect(child.Id)) continue;
+                if (IsScreenChild(job, child.Id)) continue;
                 strength += child.Strength;
                 moraleSum += child.Morale * child.Strength;
                 // Keep the strongest MaxObjectiveMembers by insertion.
@@ -97,6 +99,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             w.BodyStrength = strength;
             w.BodyMorale = strength > 0f ? moraleSum / strength : 0f;
+        }
+
+        // A child with a screen target at the previous allocation is screening a secondary objective: the main body leaves it out, as the crossing cover
+        // test leaves out a bound guard.
+        private static bool IsScreenChild(FeasibilityJob job, string childId)
+        {
+            string[] ids = job.Input.ScreenChildIds;
+            for (int i = 0; ids != null && i < job.Input.ScreenChildCount && i < ids.Length; i++)
+                if (string.Equals(ids[i], childId, StringComparison.Ordinal)) return true;
+            return false;
         }
 
         /// <summary>Prices the next row of the table. One unit of work: at most one route search per member and one for the enemy's shift.</summary>

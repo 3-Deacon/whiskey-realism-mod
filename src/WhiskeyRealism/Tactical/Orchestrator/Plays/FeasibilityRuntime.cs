@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public readonly bool[] Deployed = new bool[ManeuverFeasibility.MaxChildren];
             public readonly bool[] Moving = new bool[ManeuverFeasibility.MaxChildren];
             public readonly string[] BoundGuards = new string[ManeuverFeasibility.MaxChildren];
+            public readonly string[] ScreenChildren = new string[ManeuverFeasibility.MaxChildren];
             public readonly BattlePlanId[] Candidates = new BattlePlanId[FeasibilityLedger.MaxCandidates];
             public int ArmyCommanderIndex = -1;
             public double LastStartHours = double.NegativeInfinity;
@@ -69,6 +70,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ArmyCommanderIndex = -1;
                 Array.Clear(ChildIds, 0, ChildIds.Length);
                 Array.Clear(BoundGuards, 0, BoundGuards.Length);
+                Array.Clear(ScreenChildren, 0, ScreenChildren.Length);
             }
         }
 
@@ -387,7 +389,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 HasAssumedEnemy = assumed, AssumedEnemyX = assumedX, AssumedEnemyZ = assumedZ, Cache = st.Cache, Works = works,
             };
             // BC14O: the live objectives and the victory clock, once per evaluation (the monitor's one-candidate run prices no objectives).
-            if (withCandidates) ObjectiveRuntime.Fill(bunits, st.Alliance, snapshot, (float)input.DaylightHours, ref input);
+            if (withCandidates)
+            {
+                // The children that screen a secondary objective at the previous allocation are not in the main body the objectives are priced for.
+                var intents = army.CurrentDirectChildIntents;
+                int screens = 0;
+                for (int c = 0; c < intents.Count && screens < st.ScreenChildren.Length; c++)
+                    if (intents[c].HasScreenTarget) st.ScreenChildren[screens++] = intents[c].ChildId;
+                input.ScreenChildIds = st.ScreenChildren;
+                input.ScreenChildCount = screens;
+                ObjectiveRuntime.Fill(bunits, st.Alliance, snapshot, (float)input.DaylightHours, ref input);
+            }
         }
 
         // The direct children in the army's own order (the order the allocator, the threats' per-child times and the ledger's rows share).

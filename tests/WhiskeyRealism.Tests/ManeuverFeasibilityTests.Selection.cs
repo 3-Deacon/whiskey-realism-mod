@@ -52,6 +52,7 @@ internal static partial class ManeuverFeasibilityTests
         public WhiskeyRealism.Tactical.Battle.ObjectivePressure PressureValue;
         public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => PressureValue;
         public int ObjectiveCount => 0;
+        public bool HoldsPlayerOwned(string childId) => false;
         public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate) { estimate = default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate); return false; }
         public int ThreatCount => 0;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;

@@ -207,6 +207,8 @@ internal static class ManeuverFeasibilityFixtures
         /// <summary>BC14O: the live objectives in the scenario frame and the victory clock (null: no clock, so no pressure).</summary>
         public readonly List<ObjectiveFact> Objectives = new List<ObjectiveFact>();
         public VictoryClock? Clock;
+        /// <summary>BC14O: the children that screen a secondary objective at the previous allocation.</summary>
+        public readonly List<string> ScreenChildren = new List<string>();
 
         private static FeasField _flat;
 
@@ -384,6 +386,7 @@ internal static class ManeuverFeasibilityFixtures
                 AssumedEnemyX = X(AssumedEnemyLateral), AssumedEnemyZ = Z(AssumedEnemyDepth),
                 Cache = new LegCostCache(), Works = WorksPoints,
                 Objectives = Objectives.ToArray(), ObjectiveCount = Objectives.Count, Clock = Clock ?? default(VictoryClock), HasClock = Clock.HasValue,
+                ScreenChildIds = ScreenChildren.ToArray(), ScreenChildCount = ScreenChildren.Count,
             };
         }
 

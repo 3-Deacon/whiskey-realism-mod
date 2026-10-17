@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -800,7 +801,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
-        /// A hash of the guard points the allocation gave (child, role, the place to 50 units, the heading to 5 degrees). A station keeps its child's role,
+        /// A hash of the guard points and screen targets the allocation gave (child, role, the place to 50 units, the heading to 5 degrees). A station keeps its child's role,
         /// so the command-node intents do not change when it appears, moves or ends: the operations ledger's change gate reads this as well.
         /// </summary>
         internal static int GuardHash(IReadOnlyList<DirectChildIntent> intents)
@@ -811,6 +812,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int h = 17;
                 for (int i = 0; i < intents.Count; i++)
                 {
+                    // BC14O: a screen target is a place a child is sent to as a guard point is, and re-stores the orders the same way.
+                    if (intents[i].HasScreenTarget)
+                    {
+                        h = h * 31 + (intents[i].ChildId?.GetHashCode() ?? 0);
+                        h = h * 31 + (int)(intents[i].ScreenX / 50f);
+                        h = h * 31 + (int)(intents[i].ScreenZ / 50f);
+                    }
                     if (!intents[i].HasGuardPoint) continue;
                     h = h * 31 + (intents[i].ChildId?.GetHashCode() ?? 0);
                     h = h * 31 + (int)intents[i].Role;
@@ -925,6 +933,57 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return held;
         }
 
+        /// <summary>
+        /// BC14O requirement-main-effort-objective: economy of force. Each secondary objective, best score first and at most
+        /// <see cref="ObjectiveScoring.MaxSecondaryScreens"/>, is screened by the Screen-role child nearest to it laterally (by the middle of the child's
+        /// band), which gets a screen target: the objective itself when own-held, else the point <see cref="WorksRules.ReserveStationMeters"/> short of it
+        /// on the own side. One child per objective and one objective per child. Only a child the play already holds in the Screen role is drawn, never a
+        /// Main, Fix, Support or Reserve child, one holding player-owned strength, or a FocalAssault demonstration (it pins for the assault). A play with no
+        /// Screen child screens nothing.
+        /// </summary>
+        internal static IReadOnlyList<DirectChildIntent> ScreenSecondaryObjectives(
+            IReadOnlyList<DirectChildIntent> intents,
+            SecondaryObjective[] secondaries,
+            int secondaryCount,
+            in TacticalFrontAxis axis,
+            BattlePlanId plan,
+            bool[] playerOwned)
+        {
+            if (intents == null || secondaries == null || secondaryCount <= 0 || !axis.IsValid) return intents;
+            DirectChildIntent[] result = null;
+            int screened = 0;
+            for (int s = 0; s < secondaryCount && screened < ObjectiveScoring.MaxSecondaryScreens; s++)
+            {
+                SecondaryObjective objective = secondaries[s];
+                float objectiveLateral = axis.LateralOf(objective.X, objective.Z);
+                int pick = -1;
+                float nearest = float.MaxValue;
+                for (int i = 0; i < intents.Count; i++)
+                {
+                    DirectChildIntent child = result != null ? result[i] : intents[i];
+                    if (child.Role != DirectChildRole.Screen || child.HasScreenTarget) continue;
+                    if (playerOwned != null && i < playerOwned.Length && playerOwned[i]) continue;
+                    if (plan == BattlePlanId.FocalAssault && child.ZoneRectKind == PlayRectKind.Demonstration) continue;
+                    float distance = Math.Abs(axis.CenterLateralOfSector(child.PrimarySector) - objectiveLateral);
+                    if (distance < nearest)
+                    {
+                        nearest = distance;
+                        pick = i;
+                    }
+                }
+                if (pick < 0) break;
+                float standoff = objective.OwnHeld ? 0f : WorksRules.ReserveStationMeters;
+                if (result == null)
+                {
+                    result = new DirectChildIntent[intents.Count];
+                    for (int i = 0; i < result.Length; i++) result[i] = intents[i];
+                }
+                result[pick] = result[pick].WithScreenTarget(objective.X - axis.ForwardX * standoff, objective.Z - axis.ForwardZ * standoff, axis.HeadingDegrees);
+                screened++;
+            }
+            return result ?? intents;
+        }
+
         private static void Accept(MainRoleHysteresisState state, string mainId)
         {
             state.IncumbentMainId = mainId ?? string.Empty;
@@ -934,7 +993,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard);
+                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen);
 
         /// <summary>
         /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)

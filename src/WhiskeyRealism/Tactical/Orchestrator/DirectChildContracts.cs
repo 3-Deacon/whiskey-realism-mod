@@ -138,6 +138,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
+    /// BC14O requirement-main-effort-objective: where a Screen-role child stands to screen a secondary objective (the objective itself when own-held,
+    /// else the point short of it on the own side). HasValue false is none.
+    /// </summary>
+    public readonly struct ScreenTarget
+    {
+        public ScreenTarget(float x, float z, float heading = 0f)
+        {
+            HasValue = true;
+            X = x;
+            Z = z;
+            Heading = heading;
+        }
+
+        public bool HasValue { get; }
+        public float X { get; }
+        public float Z { get; }
+        /// <summary>The heading the child faces there, degrees: toward the enemy along the own front axis.</summary>
+        public float Heading { get; }
+    }
+
+    /// <summary>
     /// Per-direct-child intent produced by DirectChildAllocator (ArmyOrchestrator.CurrentDirectChildIntents).
     /// Cascaded to consumers (#42 gate, future O4 division attach).
     /// </summary>
@@ -156,8 +177,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalIntentModel enemyIntent,
             WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec maneuver = default(WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec),
             WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown,
-            GuardPoint guardPoint = default(GuardPoint))
+            GuardPoint guardPoint = default(GuardPoint),
+            ScreenTarget screenTarget = default(ScreenTarget))
         {
+            Screen = screenTarget;
             Guard = guardPoint;
             Maneuver = maneuver;
             ZoneRectKind = zoneRectKind;
@@ -203,6 +226,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float GuardX => Guard.X;
         public float GuardZ => Guard.Z;
         public float GuardHeading => Guard.Heading;
+
+        /// <summary>BC14O: the secondary objective this Screen-role child screens (none for every other child).</summary>
+        public ScreenTarget Screen { get; }
+
+        public bool HasScreenTarget => Screen.HasValue;
+        public float ScreenX => Screen.X;
+        public float ScreenZ => Screen.Z;
+        public float ScreenHeading => Screen.Heading;
+
+        /// <summary>The same intent screening a secondary objective at (<paramref name="x"/>, <paramref name="z"/>); every other field is carried.</summary>
+        public DirectChildIntent WithScreenTarget(float x, float z, float heading = 0f)
+            => new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector, SupportPriority01, EnemyIntent,
+                Maneuver, ZoneRectKind, Guard, new ScreenTarget(x, z, heading));
 
         private static float Clamp01(float v)
         {

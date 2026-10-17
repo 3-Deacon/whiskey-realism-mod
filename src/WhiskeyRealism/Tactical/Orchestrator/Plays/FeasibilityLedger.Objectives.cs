@@ -28,6 +28,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return true;
         }
 
+        /// <summary>The child held player-owned strength when the published evaluation was made (false for a child the evaluation did not know).</summary>
+        public bool HoldsPlayerOwned(string childId)
+        {
+            int slot = _job.SlotOfChild(childId);
+            return slot >= 0 && _job.Children[slot].HasPlayerOwned;
+        }
+
         internal void SetObjectivesBack(ObjectiveEstimate[] table, int count, in ObjectivePressure pressure)
         {
             _objectivesBackCount = Math.Min(count, _objectivesBack.Length);
