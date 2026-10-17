@@ -579,19 +579,27 @@ namespace WhiskeyRealism.Tactical.Battle
         /// (ChainNoTargets) when nothing else is left. EndTickClaims clears them so
         /// inline plans between ticks (#42, #56) see none.
         /// </summary>
-        public void BeginTickClaims(IBattleUnitView s, BattleOrderIntent[] winners, int count)
+        public void BeginTickClaims(IBattleUnitView s, BattleOrderIntent[] winners, int count,
+            BattleOrderIntent[] carried = null, int carriedCount = 0)
         {
             EndTickClaims();
             if (s == null || winners == null) return;
             int own = s.OwnCount;
             EnsureCapacity(own);
             _moveClaimCount = own;
-            for (int i = 0; i < count && i < winners.Length; i++)
+            RaiseMoveClaims(s, winners, count, own);
+            // BC15: a Distant group that is not due carries its Move claim; the chain planner shields it exactly as it would a submitted one.
+            if (carried != null) RaiseMoveClaims(s, carried, carriedCount, own);
+        }
+
+        private void RaiseMoveClaims(IBattleUnitView s, BattleOrderIntent[] claims, int count, int own)
+        {
+            for (int i = 0; i < count && i < claims.Length; i++)
             {
-                if (winners[i].Channel != OrderChannel.Move) continue;
-                int idx = s.IndexOfOwn(winners[i].GroupId);
+                if (claims[i].Channel != OrderChannel.Move) continue;
+                int idx = s.IndexOfOwn(claims[i].GroupId);
                 if (idx < 0 || idx >= own) continue;
-                int priority = (int)winners[i].Priority;
+                int priority = (int)claims[i].Priority;
                 if (priority > _moveClaim[idx]) _moveClaim[idx] = priority;
                 if (priority > _moveClaimMax) _moveClaimMax = priority;
             }

@@ -29,6 +29,14 @@ namespace WhiskeyRealism.Tactical.Battle
     // through TryGetClaim (D4: inline executor calls are refused under a higher
     // claim). Patches never submit.
     //
+    // BC15 carried claims: a Distant group that is not due this tick (BattleLod) submits nothing, so CarryForward copies the claims it published
+    // last tick into this tick's table, marked carried. Resolve treats a carried cell like a submitted intent of the same priority and source:
+    // another producer's intent beats or loses to it by the usual rule, a tie keeps the carried source (the hysteresis, which reads the same
+    // published cell), and a fresh intent of the carried source replaces it (fresh data over the old). A carried cell is published as this
+    // tick's claim (D4 refusals, the tie hysteresis and the retry test read it) and is never written to the winners: it was executed when it
+    // was submitted, and the executor would plan it as a Duplicate again. It lives until the group is due or promoted; there is no carry
+    // count, so uneven tick spacing never leaves a non-due tick without its claim.
+    //
     // Allocation: the intent buffer and the per-slot tables grow only when the
     // roster or the intent count exceeds every earlier tick; Clear() keeps the
     // dictionary buckets, so a steady battle allocates nothing per tick.
@@ -63,6 +71,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // swapped at the end of Resolve.
         private ClaimTable _working = new ClaimTable();
         private ClaimTable _published = new ClaimTable();
+
+        private BattleOrderIntent[] _carriedOut = new BattleOrderIntent[64];
+        private int _carriedOutCount;
 
         public int IntentCount => _intentCount;
 
@@ -118,6 +129,13 @@ namespace WhiskeyRealism.Tactical.Battle
                     continue;
                 }
 
+                // A fresh intent of the carried cell's own source is that producer's new answer: it replaces the old one.
+                if (candidate.Priority == current.Priority && candidate.Source == current.Source && _working.Carried[cell])
+                {
+                    _working.Set(cell, candidate);
+                    continue;
+                }
+
                 if (candidate.Priority == current.Priority &&
                     candidate.Source != current.Source &&
                     _published.TryGet(candidate.GroupId, candidate.Channel, out BattleOrderIntent previous) &&
@@ -127,13 +145,23 @@ namespace WhiskeyRealism.Tactical.Battle
 
             int written = 0;
             int capacity = winners != null ? winners.Length : 0;
+            _carriedOutCount = 0;
             for (int c = 0; c < ExecutionOrder.Length; c++)
             {
                 int channel = (int)ExecutionOrder[c];
-                for (int slot = 0; slot < _working.SlotCount && written < capacity; slot++)
+                for (int slot = 0; slot < _working.SlotCount; slot++)
                 {
                     int cell = slot * OrderChannels.Count + channel;
-                    if (_working.Has[cell]) winners[written++] = _working.Winners[cell];
+                    if (!_working.Has[cell]) continue;
+                    if (_working.Carried[cell])
+                    {
+                        if (_carriedOutCount == _carriedOut.Length) System.Array.Resize(ref _carriedOut, _carriedOut.Length * 2);
+                        _carriedOut[_carriedOutCount++] = _working.Winners[cell];
+                    }
+                    else if (written < capacity)
+                    {
+                        winners[written++] = _working.Winners[cell];
+                    }
                 }
             }
 
@@ -141,6 +169,46 @@ namespace WhiskeyRealism.Tactical.Battle
             _working = _published;
             _published = resolved;
             return written;
+        }
+
+        /// <summary>
+        /// BC15: copies the claims group <paramref name="groupId"/> published last tick into this tick's table as carried cells, for the sources
+        /// of the tiered producers only (<see cref="BattleLod.IsCarriedSource"/>: the others run every tick and resubmit). Call after
+        /// <see cref="BeginTick"/> and before any producer. Returns the number of cells carried.
+        /// </summary>
+        public int CarryForward(int groupId)
+        {
+            int carried = 0;
+            for (int c = 0; c < OrderChannels.Count; c++)
+            {
+                var channel = (OrderChannel)c;
+                if (!_published.TryGet(groupId, channel, out BattleOrderIntent claim) || !BattleLod.IsCarriedSource(claim.Source)) continue;
+                int cell = _working.CellFor(groupId, channel);
+                if (_working.Has[cell]) continue;
+                _working.SetCarried(cell, claim);
+                carried++;
+            }
+            return carried;
+        }
+
+        /// <summary>
+        /// BC15: a group's carried cells end (its producers are about to run after all, a late wake-up this tick). Submitted intents are not
+        /// in the working table until <see cref="Resolve"/>, so before it every cell of the group is a carried one. Returns the number dropped.
+        /// </summary>
+        public int DropCarried(int groupId)
+        {
+            return _working.DropCarried(groupId);
+        }
+
+        /// <summary>
+        /// BC15: this tick's carried cells, after <see cref="Resolve"/>, in execution-channel order. They are claims (published) and are not
+        /// winners; the executor reads their Move cells for the chain planner's shield (OrderExecutor.BeginTickClaims).
+        /// </summary>
+        public int CarriedWinners(BattleOrderIntent[] into)
+        {
+            int n = into != null ? System.Math.Min(_carriedOutCount, into.Length) : 0;
+            for (int i = 0; i < n; i++) into[i] = _carriedOut[i];
+            return n;
         }
 
         /// <summary>The last resolved winner on (group, channel). Read-only for patches (D4).</summary>
@@ -157,6 +225,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public void ClearClaims()
         {
             _intentCount = 0;
+            _carriedOutCount = 0;
             _working.Clear();
             _published.Clear();
         }
@@ -172,12 +241,15 @@ namespace WhiskeyRealism.Tactical.Battle
             private readonly Dictionary<int, int> _slotByGroup = new Dictionary<int, int>(256);
             public BattleOrderIntent[] Winners = new BattleOrderIntent[64 * OrderChannels.Count];
             public bool[] Has = new bool[64 * OrderChannels.Count];
+            // BC15: the cell was copied from last tick's published claim for a Distant group that is not due, not submitted this tick.
+            public bool[] Carried = new bool[64 * OrderChannels.Count];
             public int SlotCount;
 
             public void Clear()
             {
                 _slotByGroup.Clear();
                 System.Array.Clear(Has, 0, SlotCount * OrderChannels.Count);
+                System.Array.Clear(Carried, 0, SlotCount * OrderChannels.Count);
                 SlotCount = 0;
             }
 
@@ -190,6 +262,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     {
                         System.Array.Resize(ref Winners, Winners.Length * 2);
                         System.Array.Resize(ref Has, Has.Length * 2);
+                        System.Array.Resize(ref Carried, Carried.Length * 2);
                     }
                     _slotByGroup.Add(groupId, slot);
                 }
@@ -200,6 +273,29 @@ namespace WhiskeyRealism.Tactical.Battle
             {
                 Winners[cell] = intent;
                 Has[cell] = true;
+                Carried[cell] = false;
+            }
+
+            public void SetCarried(int cell, in BattleOrderIntent intent)
+            {
+                Winners[cell] = intent;
+                Has[cell] = true;
+                Carried[cell] = true;
+            }
+
+            public int DropCarried(int groupId)
+            {
+                if (!_slotByGroup.TryGetValue(groupId, out int slot)) return 0;
+                int dropped = 0;
+                for (int c = 0; c < OrderChannels.Count; c++)
+                {
+                    int cell = slot * OrderChannels.Count + c;
+                    if (!Has[cell]) continue;
+                    Has[cell] = false;
+                    Carried[cell] = false;
+                    dropped++;
+                }
+                return dropped;
             }
 
             public bool TryGet(int groupId, OrderChannel channel, out BattleOrderIntent intent)

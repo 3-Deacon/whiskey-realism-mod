@@ -146,6 +146,27 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
+        /// The claims a Distant group that is not due keeps are the ones the tiered producers published: the posture producer (and the fire
+        /// control and facing pulse that read its record), the division play, the #45 group stance scorer and the artillery doctrine. Every other
+        /// source comes from a producer that runs on every tick and resubmits.
+        /// </summary>
+        public static bool IsCarriedSource(IntentSource source)
+        {
+            switch (source)
+            {
+                case IntentSource.PostureExecutor:
+                case IntentSource.FacingPulse:
+                case IntentSource.FireControl:
+                case IntentSource.DivisionPlay:
+                case IntentSource.GroupStanceScorer:
+                case IntentSource.ArtilleryDoctrine:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
         /// The tier pass, once per arbiter tick on that tick's snapshot and before any producer: sets every own unit's tier, whether its
         /// producers run this tick and, for a group promoted from Distant, why. Allocation-free once the state's buffers fit. The caller clears
         /// the observation latches after it (BattlePerception.ClearChangeLatch) and the executor's refusal set (OrderExecutor.ClearRefusals).
