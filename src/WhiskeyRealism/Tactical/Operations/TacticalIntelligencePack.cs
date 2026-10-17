@@ -184,7 +184,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float objectiveConfidence01,
             float ownStrength,
             float enemyStrength,
-            float reserveFraction)
+            float reserveFraction,
+            int otherNodeCount = 0)
             : this(
                 operationPhase,
                 mainEffortCount,
@@ -201,7 +202,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     canHold: true,
                     canFallback: true,
                     needsRelief: false,
-                    reason: "endurance-ready"))
+                    reason: "endurance-ready"),
+                otherNodeCount)
         {
         }
 
@@ -216,8 +218,10 @@ namespace WhiskeyRealism.Tactical.Operations
             float ownStrength,
             float enemyStrength,
             float reserveFraction,
-            TacticalEnduranceDecision endurance)
+            TacticalEnduranceDecision endurance,
+            int otherNodeCount = 0)
         {
+            OtherNodeCount = Math.Max(0, otherNodeCount);
             OperationPhase = operationPhase;
             MainEffortCount = Math.Max(0, mainEffortCount);
             SupportCount = Math.Max(0, supportCount);
@@ -232,6 +236,12 @@ namespace WhiskeyRealism.Tactical.Operations
         }
 
         public TacticalOperationPhase OperationPhase { get; }
+
+        /// <summary>
+        /// How many command nodes are not the main effort. With any, a main effort with no supporting attack does not assault whatever the odds: a brigade that
+        /// attacked alone at 5 : 1 was shot in the flank (smoke 2026-10-17). With none (a single-node army) there is nobody to support it.
+        /// </summary>
+        public int OtherNodeCount { get; }
         public int MainEffortCount { get; }
         public int SupportCount { get; }
         public int ReserveCount { get; }
@@ -286,7 +296,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new TacticalMassingDecision(TacticalMassingPhase.FormLine, false, "no-main-effort");
 
             float odds = input.OwnStrength / Math.Max(1f, input.EnemyStrength);
-            if (input.SupportCount <= 0 && odds < 1.65f)
+            if (input.SupportCount <= 0 && (odds < 1.65f || input.OtherNodeCount > 0))
                 return new TacticalMassingDecision(TacticalMassingPhase.MassSupport, false, "support-not-ready");
 
             if (input.ReserveFraction < 0.10f && input.ReserveCount <= 0)

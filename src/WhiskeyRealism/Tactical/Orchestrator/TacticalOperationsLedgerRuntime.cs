@@ -104,7 +104,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _currentPersonality = personality;
             StoreDoctrine(new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>()), Array.Empty<CommandDoctrineOrder>());
 
-            if (!IsCommittedOrPostCommitOperation(_currentOperation.Phase))
+            // A Forming operation on the enemy line the side perceives is held for its own commit window (the director sets it to selection time + 900 s).
+            // It used to reset to Planning on the first objective here, so it lasted one update, and the enemy line exists only while the side sees the
+            // enemy: one tick without a glimpse and a side in contact "had not met the enemy" again (smoke 2026-10-17: Forming, Scouting, Scouting,
+            // Scouting, SoftAbort in 3 minutes). A map objective does not vanish with the fog, so a Forming operation on one is reselected as before
+            // (it may retarget to a live objective before it commits), a Scouting operation is selected afresh every update, and past its window the
+            // held operation is too.
+            bool formingHeld = _currentOperation.Phase == TacticalOperationPhase.Forming && _currentTimeSeconds < _currentOperation.MinimumCommitSeconds &&
+                !string.IsNullOrEmpty(_currentOperation.PrimaryObjectiveId) &&
+                _currentOperation.PrimaryObjectiveId.StartsWith("enemy-line-", StringComparison.Ordinal);
+            if (!IsCommittedOrPostCommitOperation(_currentOperation.Phase) && !formingHeld)
             {
                 var first = _currentObjectives.Count > 0 ? _currentObjectives[0] : default(ObjectiveRecord);
                 var second = _currentObjectives.Count > 1 ? _currentObjectives[1] : default(ObjectiveRecord);

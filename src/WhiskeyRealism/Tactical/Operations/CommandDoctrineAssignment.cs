@@ -39,7 +39,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 objectiveConfidence01: objective.Confidence01,
                 ownStrength: ownStrength,
                 enemyStrength: objective.EnemyStrength,
-                reserveFraction: reserveFraction));
+                reserveFraction: reserveFraction,
+                otherNodeCount: nodes.Length - CountRole(nodes, CommandNodeRole.MainEffort)));
             var orders = new List<CommandDoctrineOrder>(nodes.Length);
             // BC12: the line is planned once; an anchored end keeps the line task instead of guarding a flank.
             TacticalDefensiveLineAnchor anchor = objectiveMatched
