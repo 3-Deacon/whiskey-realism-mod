@@ -126,6 +126,14 @@ internal static partial class ManeuverFeasibilityTests
         AssertFalse(intents[2].HasGuardPoint, "an exploit asset is not stationed");
         AssertTrue(intents[1].HasGuardPoint, "the next nearest is");
 
+        // A stationed child that comes to hold player-owned strength (its time turns NaN) loses the station at once, to the next nearest.
+        var held = new ReserveReleaseState();
+        StationAllocate(ev, held, 10.0, station, new[] { 9f, 0.4f, 0.2f, 0.9f });
+        AssertEqual("c2", held.Station.ChildId, "c2 is stationed");
+        intents = StationAllocate(ev, held, 10.05, station, new[] { 9f, 0.4f, float.NaN, 0.9f });
+        AssertFalse(intents[2].HasGuardPoint, "the player's child is relieved");
+        AssertEqual("c1", held.Station.ChildId, "the next nearest takes the station");
+
         // No eligible reserve: no station, no binding.
         var empty = new ReserveReleaseState();
         intents = StationAllocate(ev, empty, 10.0, station, new[] { 9f, float.NaN, float.NaN, float.NaN });
@@ -190,6 +198,12 @@ internal static partial class ManeuverFeasibilityTests
         StationPoint other = StationAt(-300f, 400f, 0.2f, x: -250f, z: 150f, heading: 315f);
         int moved = DirectChildAllocator.GuardHash(StationAllocate(ev, state, 10.1, other, new[] { 9f, 0.4f, 0.2f, 0.9f }));
         AssertTrue(moved != stationed, "a station that moves to another place or child changes it");
+        // The same child stationed at another place (the focal point's arrival is earlier by the margin, and it is still the quickest): the hash follows the place.
+        var sameChild = new ReserveReleaseState();
+        StationAllocate(ev, sameChild, 10.0, first, new[] { 9f, 0.4f, 0.2f, 0.9f });
+        int here = DirectChildAllocator.GuardHash(StationAllocate(ev, sameChild, 10.01, first, new[] { 9f, 0.4f, 0.2f, 0.9f }));
+        int there = DirectChildAllocator.GuardHash(StationAllocate(ev, sameChild, 10.02, StationAt(-300f, 400f, 0.2f, x: -250f, z: 150f, heading: 45f), new[] { 9f, 0.4f, 0.1f, 0.9f }));
+        AssertTrue(here != there, "the same child at another place is another hash");
         int ended = DirectChildAllocator.GuardHash(StationAllocate(ev, state, 10.2, default(StationPoint), new[] { 9f, 0.4f, 0.2f, 0.9f }));
         AssertEqual(none, ended, "a station that ends is the hash of none");
         string runtime = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");

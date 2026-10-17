@@ -125,6 +125,22 @@ internal static partial class ManeuverFeasibilityTests
         for (int i = 0; i < table2.Count; i++) if (!table2.Perceived(i)) newOne = true;
         AssertTrue(newOne, "and is not perceived until probed");
 
+        // The stamp follows the piece, not its place in the read: with only the first sixteen perceived, a re-read in the opposite order keeps exactly those
+        // sixteen perceived, whichever position each now has.
+        var table3 = new WorksPointTable();
+        table3.Merge(pieces, X(0f), Z(0f));
+        table3.ProbeStep(perceivedAll, 16);
+        var backwards = new WorksPiece[pieces.Length];
+        for (int i = 0; i < pieces.Length; i++) backwards[i] = pieces[pieces.Length - 1 - i];
+        table3.Merge(backwards, X(0f), Z(0f));
+        AssertEqual(39, table3.Count, "the same 39 pieces, read the other way round");
+        for (int i = 0; i < table3.Count; i++)
+        {
+            table3.Get(i, out float px, out _);
+            int n = (int)Math.Round((px - X(0f)) / 10f);
+            AssertEqual(n <= 16 && n != 3, table3.Perceived(i), "piece " + n + " keeps its own stamp at position " + i);
+        }
+
         // Past 2,048 pieces the farthest from the own centroid are dropped and counted.
         var many = new WorksPiece[WorksRules.MaxWorksPoints + 10];
         for (int i = 0; i < many.Length; i++) many[i] = new WorksPiece { InstanceId = 1000 + i, X = X(0f) + i, Z = Z(0f), Completion = 1f };

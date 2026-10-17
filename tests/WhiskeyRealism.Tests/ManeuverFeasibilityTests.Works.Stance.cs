@@ -20,8 +20,8 @@ internal static partial class ManeuverFeasibilityTests
     };
 
     static StanceWriteInput StanceInput(int ordered, int vanilla, bool worksHold, int macro = 1, StanceHoldRecord record = default(StanceHoldRecord),
-        StanceWriteSource source = StanceWriteSource.Executor, float now = 1f)
-        => new StanceWriteInput(true, 2, ordered, macro, now, record, source, vanilla, now, worksHold);
+        StanceWriteSource source = StanceWriteSource.Executor, float now = 1f, int target = 2)
+        => new StanceWriteInput(true, target, ordered, macro, now, record, source, vanilla, now, worksHold);
 
     static void WStanceRules()
     {
@@ -33,6 +33,12 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(StanceWriteAction.Write, held.Action, "the works hold replaces it");
         // Against vanilla's attack stance 3 the hold is written too.
         AssertEqual(StanceWriteAction.Write, TacticalStanceOwnership.Decide(StanceInput(ordered: 3, vanilla: 3, worksHold: true)).Action, "and stance 3");
+        // The yield step is not reached for a flagged intent at all: even a stance the escalation yield would swallow (vanilla's assault against an attack
+        // target) is written for the works hold, and still yielded to without it.
+        AssertEqual(StanceWriteAction.Write, TacticalStanceOwnership.Decide(StanceInput(ordered: 4, vanilla: 4, worksHold: true, target: 3)).Action,
+            "a flagged intent skips the escalation yield");
+        AssertEqual(StanceWriteAction.Yield, TacticalStanceOwnership.Decide(StanceInput(ordered: 4, vanilla: 4, worksHold: false, target: 3)).Action,
+            "control: the same intent unflagged is yielded");
         // Vanilla's weak-group screen still wins: the group is handed back to vanilla.
         StanceWriteDecision screen = TacticalStanceOwnership.Decide(StanceInput(ordered: 3, vanilla: 1, worksHold: true));
         AssertEqual(StanceWriteAction.Yield, screen.Action, "vanilla's weak-group screen is yielded to");
@@ -132,6 +138,9 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(guard > 0 && stance > guard, "the works-hold stance follows the Defender stance guard, after every rewrite");
         AssertTrue(decide > stance, "and precedes the posture decision, whatever it returns");
         AssertTrue(flat.Contains("worksHeld && recordTick ? PostureIntentPlan.SubmitWorksHoldStance("), "only the posture producer's own pass submits it");
+        FlankResponseTests.AssertPinned(run, "int worksStance = worksHeld && recordTick", "and its count is the one every later exit reads");
+        FlankResponseTests.AssertPinned(run, "bool worksHeld = WorksHoldGuard.Holds(state.Task, state.Reason) || (hasOrder && WorksHoldGuard.Holds(order.Task, order.Reason));",
+            "a group is held when its state or its order carries the guard");
         AssertTrue(cavalry > 0 && flat.Substring(Math.Max(0, cavalry - 140), 140).Contains("!WorksHoldGuard.Holds(state.Task, state.Reason)"), "the cavalry follow leaves a guarded group alone");
         FlankResponseTests.AssertPinned(run, "TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, WorksHoldGuard.Holds(state.Task, state.Reason), out overrideReason)",
             "the opportunity override is told of the hold (the node path and the no-order path)");

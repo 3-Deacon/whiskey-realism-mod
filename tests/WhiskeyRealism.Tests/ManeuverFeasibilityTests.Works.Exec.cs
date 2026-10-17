@@ -211,6 +211,8 @@ internal static partial class ManeuverFeasibilityTests
         FlankResponseTests.AssertPinned(build, "input.HasFocal", "its focal point reaches BC11");
         FlankResponseTests.AssertPinned(build, "input.GroupFormation = child.Formation;", "the group's formation comes from the snapshot");
         FlankResponseTests.AssertPinned(build, "PreparationTable.ForAlliance(", "the preparation floor comes from the table");
+        FlankResponseTests.AssertPinned(build, "input.HasPreparationFloor = true;", "and is set when the table has one");
+        FlankResponseTests.AssertPinned(build, "input.PreparationFloorHours = floor;", "to the table's hour");
         FlankResponseTests.AssertPinned(build, "EnvelopmentManeuver.FollowerReleaseHours(", "the followers' release is the column's");
         // The inward leg: anchor to the focal point (the corridor, the river sub-legs).
         int focal = build.IndexOf("input.HasFocal", StringComparison.Ordinal);
