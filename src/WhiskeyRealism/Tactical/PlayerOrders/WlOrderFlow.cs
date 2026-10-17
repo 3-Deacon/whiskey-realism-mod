@@ -374,7 +374,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 case "cross-scope":
                 case "release-stale":
                 case "relay-took-slot":
-                case "eod-clear":
+                case EodClear:
                 case "command-change":
                 case "battle-end":
                     return true;
@@ -499,13 +499,24 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _wasCic = isCic;
         }
 
+        public const string EodClear = "eod-clear";
+
+        // The coordinator saw the battle enter its end-of-day sequence (EndOfDayPhase.Suspended): vanilla clears the
+        // order slot there (47985), so every order still on the way is void. The delivery pass clears the queue too
+        // when it happens to run during the sequence, but vanilla's order pass is not guaranteed to (the 2026-10-17
+        // smoke saw no eod-clear row and an order captured on day one reached the panel after the night).
+        public void ClearForEndOfDay()
+        {
+            if (Queue.Count > 0) Queue.Clear(EodClear);
+        }
+
         // One delivery pass (D8a).
         public void RunPass()
         {
             // The end-of-day cycle clears the order (47985) and nothing is delivered meanwhile.
             if (_host.EodCycle)
             {
-                Queue.Clear("eod-clear");
+                Queue.Clear(EodClear);
                 return;
             }
 

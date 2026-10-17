@@ -246,6 +246,20 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return EnqueueCall(in call);
         }
 
+        // The coordinator's end-of-day phase change (battle start of the night sequence): the order flow's queue is void.
+        // Reads and edits the courier queue only. Safe to call every tick of the sequence.
+        internal static void OnEndOfDay()
+        {
+            try
+            {
+                Flow.ClearForEndOfDay();
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-order:eod-clear", "[W&LOrder] clearing the queue at the end of day failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
         // The executor issued a newer move for `groupId` (instance id): that group's queued executor orders describe a
         // move it replaced, so they are discarded (`superseded-intent`, one row each) before the new move's own
         // order is queued. Reads and edits the courier queue only; it never touches a unit.

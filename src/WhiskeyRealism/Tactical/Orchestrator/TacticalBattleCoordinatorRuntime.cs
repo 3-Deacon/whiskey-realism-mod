@@ -350,6 +350,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     SampleDoctrineClock();
                     if (dayPhase == EndOfDayPhase.Suspended)
                     {
+                        // Orders on their way to the W&L player's panel are void: vanilla clears the slot (47985).
+                        PlayerOrders.WlOrderFlowRuntime.OnEndOfDay();
                         MarkSideStatCycleProcessed(battleKey, vanillaLastSideStat);
                         return;
                     }

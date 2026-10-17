@@ -59,6 +59,8 @@ internal static partial class WlOrderFlowTests
             ("wl order pass paying origins untouched", PayingOriginsUntouched),
             ("wl order pass command change clears queue", CommandChangeClearsQueue),
             ("wl order pass eod clears battle queue", EodClearsBattleQueue),
+            ("wl order pass end of day phase change clears the queue without a pass", EndOfDayPhaseChangeClearsTheQueueWithoutAPass),
+            ("wl order pin end of day clear is wired to the coordinator phase", EndOfDayClearIsWiredToTheCoordinatorsPhase),
             ("wl order pass cross scope entry discarded", CrossScopeEntryDiscarded),
             ("wl order pass delivery writes nothing when slot changed since read", DeliveryWritesNothingWhenSlotChangedSinceRead),
             ("wl order capture delivering flag bypasses capture", DeliveringFlagBypassesCapture),
