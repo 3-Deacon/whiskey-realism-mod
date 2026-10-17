@@ -410,6 +410,32 @@ namespace WhiskeyRealism.Tactical
             return carryingOrder && record.HasValue && record.Stance == currentOrderedStance;
         }
 
+        // How long renewals alone may hold a stance: from the first renewal after a producer's last claim.
+        // Past it the hold lapses and vanilla resumes, so a march that never settles (a stuck order: nothing
+        // assigns a recovery task, and the interrupted-path recovery acts only on an idle group) cannot keep a
+        // Whiskey stance for ever. 1.5 doctrine hours is three times the smoke's march (1000 m, about 0.5 h).
+        public const float RenewalBoundHours = 1.5f;
+
+        // Which snapshot groups may have their hold renewed: AI groups (never a player-owned one, whose stance
+        // the writer's CanWrite refuses anyway) that carry an order, a path or an order in the queue.
+        public static bool IsRenewalCandidate(bool isGroup, bool playerOwned, int regimentPaths, int queuedOrders)
+        {
+            return isGroup && !playerOwned && CarriesOrder(regimentPaths, queuedOrders);
+        }
+
+        public static bool CarriesOrder(int regimentPaths, int queuedOrders)
+        {
+            return regimentPaths > 0 || queuedOrders > 0;
+        }
+
+        // Renewals started at sinceHours may continue at nowHours (doctrine clock; a clock that went backwards
+        // ends them).
+        public static bool RenewalLive(float sinceHours, float nowHours)
+        {
+            float age = nowHours - sinceHours;
+            return age >= 0f && age < RenewalBoundHours;
+        }
+
         public static bool ReleasesVanillaHold(in StanceWriteDecision decision)
         {
             return decision.Action == StanceWriteAction.Yield;

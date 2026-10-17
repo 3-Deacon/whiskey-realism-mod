@@ -53,6 +53,9 @@ namespace WhiskeyRealism.Util
         }
 
         private static readonly Dictionary<int, StanceHoldRecord> _records = new Dictionary<int, StanceHoldRecord>();
+        // Group id -> doctrine hour of the first renewal since a producer last claimed it (the renewal bound).
+        private static readonly Dictionary<int, float> _renewSince = new Dictionary<int, float>();
+        internal const string RenewTag = "hold-renew";
         private static Func<AIBattle, Regiment, bool, bool, bool, bool, float> _groupStrength;
         private static bool _groupStrengthTried;
 
@@ -71,6 +74,8 @@ namespace WhiskeyRealism.Util
                 float now = (float)TacticalDoctrineTime.NowBattleHours;
                 float vanillaNow = GameVars.currenttimefromstart;
                 _records.TryGetValue(id, out StanceHoldRecord record);
+                // A producer's own claim or write restarts the renewal bound; a renewal does not.
+                if (!ReferenceEquals(contextTag, RenewTag)) _renewSince.Remove(id);
 
                 // Cheap steady-state path: our record is fresh, nothing moved and
                 // vanilla's raw-clock stamp still holds (see SteadyStateHolds).
@@ -162,9 +167,10 @@ namespace WhiskeyRealism.Util
         // producers go quiet while a group marches or waits for its order, and a hold nobody renews lapses
         // after HoldHours, when vanilla's AdjustGroupAIStance writes its own stance over Whiskey's. Runs once
         // per arbiter tick after the winners were issued, so a producer's own claim has already refreshed its
-        // record and the cheap path below returns at once. Each renewal is the group's own record through the
-        // full decision (the vanilla weak-group carve-out, the army retreat). Reads the snapshot; writes only
-        // what EnsureStance writes.
+        // record (and restarted the bound) and the cheap path below returns at once. Each renewal is the
+        // group's own record through the full decision (the vanilla weak-group carve-out, the army retreat).
+        // Renewals alone last RenewalBoundHours; then the hold lapses. Reads the snapshot; writes only what
+        // EnsureStance writes.
         public static int RenewWhileOrdered(BattleUnits bunits, BattleSnapshot snapshot)
         {
             if (bunits == null || snapshot == null || _records.Count == 0) return 0;
@@ -172,16 +178,19 @@ namespace WhiskeyRealism.Util
             try
             {
                 UnitRecord[] own = snapshot.Own;
+                float now = (float)TacticalDoctrineTime.NowBattleHours;
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {
-                    if ((own[i].Flags & UnitFlags.IsGroup) == 0 || (own[i].Flags & UnitFlags.PlayerOwned) != 0) continue;
-                    bool carrying = own[i].RegimentPaths > 0 || own[i].QueuedOrders > 0;
-                    if (!carrying) continue;
+                    if (!TacticalStanceOwnership.IsRenewalCandidate((own[i].Flags & UnitFlags.IsGroup) != 0,
+                            (own[i].Flags & UnitFlags.PlayerOwned) != 0, own[i].RegimentPaths, own[i].QueuedOrders)) continue;
                     Regiment group = BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
                     if ((UnityEngine.Object)group == null) continue;
-                    if (!_records.TryGetValue(group.GetInstanceID(), out StanceHoldRecord record)) continue;
-                    if (!TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carrying)) continue;
-                    EnsureStance(bunits, group, record.Stance, "hold-renew", record.Source);
+                    int id = group.GetInstanceID();
+                    if (!_records.TryGetValue(id, out StanceHoldRecord record)) continue;
+                    if (!TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carryingOrder: true)) continue;
+                    if (!_renewSince.TryGetValue(id, out float since)) _renewSince[id] = since = now;
+                    if (!TacticalStanceOwnership.RenewalLive(since, now)) continue;
+                    EnsureStance(bunits, group, record.Stance, RenewTag, record.Source);
                     renewed++;
                 }
             }
@@ -200,6 +209,7 @@ namespace WhiskeyRealism.Util
         // are left alone (no vanilla-state write in MonitorOnly).
         private static void Yield(Regiment group, int id, float vanillaNow)
         {
+            _renewSince.Remove(id);
             if (!_records.Remove(id)) return;
             float release = TacticalStanceOwnership.ReleaseStamp(vanillaNow);
             if (group.lastaistancechangetime > release) group.lastaistancechangetime = release;
@@ -291,6 +301,7 @@ namespace WhiskeyRealism.Util
         public static void ResetForBattleEnd()
         {
             _records.Clear();
+            _renewSince.Clear();
         }
 
         private static AIBattle FindOwningAiBattle(BattleUnits bunits, Regiment group)

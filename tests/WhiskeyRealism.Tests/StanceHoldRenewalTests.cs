@@ -21,6 +21,8 @@ internal static class StanceHoldRenewalTests
             ("stance renewal control: without it the hold lapses at 0.25 h as in the smoke", WithoutRenewalTheHoldLapsesAtTheSmokeTime),
             ("stance renewal stops when the group settles and its producers are silent", RenewalStopsWhenTheGroupSettles),
             ("stance renewal does not outlive a vanilla weak-group yield", RenewalStillYieldsToVanillaWeakGroup),
+            ("stance renewal candidates are AI groups that carry an order", CandidatesAreAiGroupsThatCarryAnOrder),
+            ("stance renewal is bounded on the doctrine clock", RenewalIsBounded),
             ("stance renewal pin wired after the winners and through the writer", RenewalIsWiredAfterTheWinnersAndThroughTheWriter),
         });
     }
@@ -116,6 +118,47 @@ internal static class StanceHoldRenewalTests
         AssertFalse(record.HasValue, "and the record is dropped");
     }
 
+    // Both arms of every test RenewWhileOrdered makes before it renews (the verify round's surviving plants).
+    private static void CandidatesAreAiGroupsThatCarryAnOrder()
+    {
+        AssertTrue(TacticalStanceOwnership.IsRenewalCandidate(true, false, 1, 0), "a group with a path");
+        AssertTrue(TacticalStanceOwnership.IsRenewalCandidate(true, false, 0, 1), "a group with an order in the queue");
+        AssertTrue(TacticalStanceOwnership.IsRenewalCandidate(true, false, 3, 2), "both");
+        AssertFalse(TacticalStanceOwnership.IsRenewalCandidate(true, false, 0, 0), "a settled group is its producers'");
+        AssertFalse(TacticalStanceOwnership.IsRenewalCandidate(true, true, 1, 1), "never a player-owned group, however it marches");
+        AssertFalse(TacticalStanceOwnership.IsRenewalCandidate(false, false, 1, 1), "a regiment has no group stance");
+        AssertTrue(TacticalStanceOwnership.CarriesOrder(1, 0) && TacticalStanceOwnership.CarriesOrder(0, 1), "a path or a queued order");
+        AssertFalse(TacticalStanceOwnership.CarriesOrder(0, 0), "neither");
+        AssertFalse(TacticalStanceOwnership.CarriesOrder(-1, 0), "a negative path count is no path");
+    }
+
+    // A march that never settles (nothing assigns a recovery task; the interrupted-path recovery acts on an
+    // idle group only) cannot keep a stance for ever: renewals alone end after RenewalBoundHours.
+    private static void RenewalIsBounded()
+    {
+        AssertTrue(TacticalStanceOwnership.RenewalLive(10f, 10f), "the first renewal");
+        AssertTrue(TacticalStanceOwnership.RenewalLive(10f, 10f + TacticalStanceOwnership.RenewalBoundHours - 0.01f), "just inside the bound");
+        AssertFalse(TacticalStanceOwnership.RenewalLive(10f, 10f + TacticalStanceOwnership.RenewalBoundHours), "at the bound");
+        AssertFalse(TacticalStanceOwnership.RenewalLive(10f, 9.9f), "a clock that went backwards ends them");
+        AssertTrue(TacticalStanceOwnership.RenewalBoundHours > 3f * 0.5f - 1e-4f,
+            "the bound is at least three times the smoke's march (1000 m, about 0.5 h)");
+        // Past the bound the hold lapses 0.25 h later and vanilla re-decides the group (the control above).
+        var first = Input(default(StanceHoldRecord), Written, ordered: 3);
+        StanceWriteDecision write = TacticalStanceOwnership.Decide(first);
+        StanceHoldRecord record = TacticalStanceOwnership.Next(write, first);
+        float stamp = TacticalStanceOwnership.VanillaHoldStamp(first, Reset);
+        float lapse = -1f;
+        for (float now = Written + Cycle; now < Written + 4.0f; now += Cycle)
+        {
+            if (TacticalStanceOwnership.RenewalLive(Written + Cycle, now) &&
+                TacticalStanceOwnership.RenewsWhileOrdered(record, Scout, carryingOrder: true))
+                stamp = Renew(ref record, stamp, now);
+            if (VanillaRedecides(stamp, now)) { lapse = now - Written; break; }
+        }
+        AssertTrue(lapse > TacticalStanceOwnership.RenewalBoundHours && lapse < TacticalStanceOwnership.RenewalBoundHours + 0.5f,
+            "vanilla resumes " + lapse.ToString("0.00") + " h after the write: the bound plus one hold");
+    }
+
     private static void RenewalIsWiredAfterTheWinnersAndThroughTheWriter()
     {
         string tick = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/BattleCoreTick.cs");
@@ -127,9 +170,13 @@ internal static class StanceHoldRenewalTests
         int at = writer.IndexOf("public static int RenewWhileOrdered(", StringComparison.Ordinal);
         AssertTrue(at >= 0, "the renewal exists");
         string body = writer.Substring(at, writer.IndexOf("// Hand one group back to vanilla", at, StringComparison.Ordinal) - at);
-        AssertTrue(body.Contains("UnitFlags.PlayerOwned"), "never a player-owned group");
-        AssertTrue(body.Contains("TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carrying)"), "the pure predicate decides");
-        AssertTrue(Regex.IsMatch(body, @"EnsureStance\(bunits, group, record\.Stance, ""hold-renew"", record\.Source\)"), "through EnsureStance with the record's own stance and source");
+        AssertTrue(Regex.IsMatch(body, @"IsRenewalCandidate\(\(own\[i\]\.Flags & UnitFlags\.IsGroup\) != 0,\s*\(own\[i\]\.Flags & UnitFlags\.PlayerOwned\) != 0, own\[i\]\.RegimentPaths, own\[i\]\.QueuedOrders\)\) continue;"),
+            "the pure candidate test decides (group, not player-owned, path or queued order), from the snapshot record");
+        AssertTrue(body.Contains("TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carryingOrder: true)"), "the pure predicate decides");
+        AssertTrue(Regex.IsMatch(body, @"if \(!TacticalStanceOwnership\.RenewalLive\(since, now\)\) continue;"), "bounded");
+        AssertTrue(Regex.IsMatch(body, @"EnsureStance\(bunits, group, record\.Stance, RenewTag, record\.Source\)"), "through EnsureStance with the record's own stance and source");
+        string ensure = writer.Substring(writer.IndexOf("public static bool EnsureStance(", StringComparison.Ordinal));
+        AssertTrue(ensure.Contains("if (!ReferenceEquals(contextTag, RenewTag)) _renewSince.Remove(id);"), "a producer's claim restarts the bound; a renewal does not");
         AssertFalse(body.Contains("ChangeStance("), "the renewal itself never writes a stance order (EnsureStance owns that)");
     }
 }
