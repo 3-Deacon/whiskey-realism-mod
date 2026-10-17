@@ -144,16 +144,15 @@ namespace WhiskeyRealism.Tactical.Battle
             in RoadLeg road, Span<bool> admit, Span<int> path, ref CrossingRoute route)
         {
             int count;
-            if (road.LinkCount > 0)
+            if (road.LinkCount > 0 && Chains(graph, from, to, road))
             {
                 count = Math.Min(road.LinkCount, 2);
                 path[0] = road.Link0;
                 if (count > 1) path[1] = road.Link1;
-                for (int k = 0; k < count; k++)
-                    if (path[k] < 0 || path[k] >= graph.Links) return CrossingVerdict.NoKnownCrossing;
             }
             else
             {
+                // No links recorded, or they do not chain from the leg's start region to its target region: the full search decides.
                 for (int i = 0; i < graph.Links; i++) admit[i] = true;
                 count = Search(graph, picture, admit, x0, z0, x1, z1, from, to, path);
                 if (count == 0) return CrossingVerdict.NoKnownCrossing;      // no crossing joins the banks at all: nothing to look at
@@ -171,6 +170,23 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
             return refused ? CrossingVerdict.NoKnownCrossing : CrossingVerdict.RoadCrossing;
+        }
+
+        // The recorded links are the road's crossings only if they chain from the leg's start region to its target region: one link joins both; two links,
+        // in road order, the first touching the start region, the second the target region, and sharing a region that is neither.
+        private static bool Chains(Graph g, int from, int to, in RoadLeg road)
+        {
+            int count = Math.Min(road.LinkCount, 2);
+            if (road.Link0 < 0 || road.Link0 >= g.Links) return false;
+            if (count == 1) return Touches(g, road.Link0, from) && Touches(g, road.Link0, to);
+            if (road.Link1 < 0 || road.Link1 >= g.Links) return false;
+            if (!Touches(g, road.Link0, from) || !Touches(g, road.Link1, to)) return false;
+            for (int k = 0; k < g.RegionCount[road.Link0]; k++)
+            {
+                int middle = g.Regions[road.Link0 * MaxRegionsPerLink + k];
+                if (middle != from && middle != to && Touches(g, road.Link1, middle)) return true;
+            }
+            return false;
         }
 
         private static bool IsKnown(CrossingState state) => state == CrossingState.Clear || state == CrossingState.Watched;

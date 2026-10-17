@@ -10,9 +10,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public float RouteCost, VanillaCost;
         /// <summary>
-        /// With two vias and a river picture: the BC14 crossing links whose crossing point lies on the road between the vias (first on the road first;
-        /// <see cref="RoadRoutePlanner.RoadLinkToleranceMeters"/> from a path node), at most two. The crossing gate checks these, the crossings the road
-        /// actually takes, and not the shortest path over the links.
+        /// With two vias and a river picture: one BC14 crossing link per river the road crosses between the vias, in road order, at most two. Each is the
+        /// link joining the two land regions on either side of the road's change of region that lies nearest the transition point. None is recorded
+        /// when the road crosses more than two rivers or a change of region has no link joining it, so the gate runs its full search. The crossing
+        /// gate checks these (when they chain from the leg's start region to its target region), not the shortest path over the links.
         /// </summary>
         public int LinkCount, Link0, Link1;
     }
@@ -135,8 +136,6 @@ namespace WhiskeyRealism.Tactical.Battle
         public const int ColumnGroupFormation = 4; // March Column (5883); regiments take formation 3 (91909-91917)
         public const int MaxCells = 6000;
         public const int MaxVia = 2;
-        /// <summary>How near a crossing link's point must lie to a node of the road between the vias for the road to take that crossing.</summary>
-        public const float RoadLinkToleranceMeters = 60f;
 
         private const float StraightSampleMeters = 10f;
         private const float CellSampleStep = 5f;
@@ -508,33 +507,58 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        // The crossings the road takes between its vias: the BC14 links whose crossing point lies within RoadLinkToleranceMeters of a node of the path from
-        // the entry to the exit, in the order the road meets them, at most two.
+        // The crossings the road takes between its vias: walk the path nodes from the entry to the exit; at each change of land region (a node on a bridge
+        // or ford is on no land and is skipped) the link joining the two regions that lies nearest the change is the crossing, in road order. More than
+        // MaxVia changes, or a change no link joins, records none.
         private static void RoadLinks(RoadRouteScratch s, int entry, int exit, ICrossingPicture crossings, ref RoadRoute route)
         {
             route.LinkCount = 0;
-            int firstAt0 = int.MaxValue, firstAt1 = int.MaxValue;
+            int last = -1, count = 0, first = 0, second = 0;
+            float lastX = 0f, lastZ = 0f;
+            for (int k = entry; k <= exit; k++)
+            {
+                int node = s.PathNodes[k];
+                float x = s.SnapX[node], z = s.SnapZ[node];
+                int region = crossings.RegionAt(x, z);
+                if (region < 0) continue;
+                if (last >= 0 && region != last)
+                {
+                    int link = NearestJoining(crossings, last, region, (lastX + x) * 0.5f, (lastZ + z) * 0.5f);
+                    if (link < 0 || count == MaxVia) return;
+                    if (count == 0) first = link; else second = link;
+                    count++;
+                }
+                last = region;
+                lastX = x;
+                lastZ = z;
+            }
+            route.LinkCount = count;
+            route.Link0 = first;
+            route.Link1 = second;
+        }
+
+        // The link joining the two regions whose crossing point lies nearest (x, z); -1 when none joins them.
+        private static int NearestJoining(ICrossingPicture crossings, int a, int b, float x, float z)
+        {
+            Span<int> regions = stackalloc int[4];
+            int best = -1;
+            float bestSq = float.MaxValue;
             for (int link = 0; link < crossings.LinkCount; link++)
             {
+                int n = Math.Min(crossings.RegionsOfLink(link, regions), regions.Length);
+                bool hasA = false, hasB = false;
+                for (int r = 0; r < n; r++)
+                {
+                    if (regions[r] == a) hasA = true;
+                    if (regions[r] == b) hasB = true;
+                }
+                if (!hasA || !hasB) continue;
                 crossings.LinkPoint(link, out float lx, out float lz);
-                int at = -1;
-                for (int k = entry; k <= exit && at < 0; k++)
-                {
-                    int node = s.PathNodes[k];
-                    if (Distance(s.SnapX[node], s.SnapZ[node], lx, lz) <= RoadLinkToleranceMeters) at = k;
-                }
-                if (at < 0) continue;
-                if (at < firstAt0)
-                {
-                    firstAt1 = firstAt0; route.Link1 = route.Link0;
-                    firstAt0 = at; route.Link0 = link;
-                }
-                else if (at < firstAt1)
-                {
-                    firstAt1 = at; route.Link1 = link;
-                }
+                float dx = lx - x, dz = lz - z;
+                float sq = dx * dx + dz * dz;
+                if (sq < bestSq) { bestSq = sq; best = link; }
             }
-            route.LinkCount = (firstAt0 != int.MaxValue ? 1 : 0) + (firstAt1 != int.MaxValue ? 1 : 0);
+            return best;
         }
 
         private static float Distance(float ax, float az, float bx, float bz)

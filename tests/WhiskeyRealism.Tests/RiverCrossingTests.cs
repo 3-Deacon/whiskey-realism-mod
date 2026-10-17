@@ -37,6 +37,7 @@ internal static class RiverCrossingTests
             ("river crossing a road march takes its own crossing: Clear or Watched goes, Held only for an attack, Unknown is refused with a look", ARoadMarchTakesItsOwnCrossing),
             ("river crossing a road march is checked at the crossing the road takes, not at the nearest one", ARoadMarchIsCheckedAtItsOwnCrossing),
             ("river crossing a road flag on a move with one via is ignored", ARoadFlagOnOneViaIsIgnored),
+            ("river crossing recorded road links are used only when they chain from the leg's start region to its target region, else the full search decides", RecordedRoadLinksMustChain),
             ("river crossing the road legs around a road route are gated and get vias within the bound; the route's flag comes from the posture request", TheLegsAroundARoadRouteAreGated),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
@@ -381,6 +382,70 @@ internal static class RiverCrossingTests
         roadUnseen.RoadLink0 = 0;
         AssertEqual(SkipReason.NoKnownCrossing, Executor(blind).Plan(new View(100f, 100f), roadUnseen, 1.0).Skip, "a road over a bridge nobody has seen is refused though a ford is Clear");
         AssertEqual(0, blind.Picture.Looks[0], "with the look at the road's bridge");
+    }
+
+    private static BattleOrderIntent RoadMarchWith(float entryX, float exitX, float targetX, params int[] links)
+    {
+        BattleOrderIntent m = RoadMarch(entryX, exitX, targetX, roadFlag: true);
+        m.RoadLinkCount = links.Length;
+        if (links.Length > 0) m.RoadLink0 = links[0];
+        if (links.Length > 1) m.RoadLink1 = links[1];
+        return m;
+    }
+
+    // verify landing r3 F11: the road leg's recorded links are the road's crossings only if they chain from the leg's start region to its
+    // target region. Banks: region 0 below x 500, 1 below 1000, 2 below 1500. The road leg here runs from the vias at 300 (region 0) to 1200 (region 2).
+    private static void RecordedRoadLinksMustChain()
+    {
+        // A road over two rivers with only the first crossing recorded: the record does not reach the target, so the full search decides, and
+        // it finds the second river's crossing unseen.
+        var half = new Gate();
+        half.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        half.Picture.Links.Add((1000f, -200f, CrossingState.Unknown, 1, 2));
+        ExecutionPlan one = Executor(half).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 0), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, one.Skip, "one crossing recorded for a two-river road leg falls back: the unseen second crossing refuses it");
+        AssertEqual(1, half.Picture.Looks.Count, "and asks about it");
+        AssertEqual(1, half.Picture.Looks[0], "the second river's crossing");
+
+        // The same road with both crossings seen goes, recorded in road order or not recorded at all.
+        var both = new Gate();
+        both.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        both.Picture.Links.Add((1000f, -200f, CrossingState.Watched, 1, 2));
+        AssertTrue(Executor(both).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 0, 1), 1.0).Execute, "two crossings in road order go");
+        AssertTrue(Executor(both).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f), 1.0).Execute, "and with none recorded the search finds them");
+
+        // A stray recorded link that joins other regions is not the road's crossing: the real bridge, unseen, still refuses the march.
+        var stray = new Gate();
+        stray.Picture.Links.Add((1200f, -200f, CrossingState.Clear, 2, 3));     // a ford far down the river, joins other banks
+        stray.Picture.Links.Add((500f, -900f, CrossingState.Unknown, 0, 1));    // the bridge the road really takes
+        stray.Picture.Links.Add((1000f, -900f, CrossingState.Clear, 1, 2));
+        ExecutionPlan used = Executor(stray).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 0), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, used.Skip, "a recorded link that joins other regions is not used in place of the bridge");
+        AssertEqual(1, stray.Picture.Looks.Count, "the look is at the bridge");
+        AssertEqual(1, stray.Picture.Looks[0], "not the stray");
+
+        // Reverse order is not a chain: the first recorded link must touch the start region. Both rivers unseen, so the look says which came first.
+        var unseen = new Gate();
+        unseen.Picture.Links.Add((500f, -200f, CrossingState.Unknown, 0, 1));
+        unseen.Picture.Links.Add((1000f, -200f, CrossingState.Unknown, 1, 2));
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(unseen).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 1, 0), 1.0).Skip, "reversed links refuse (unseen)");
+        AssertEqual(0, unseen.Picture.Looks[0], "and the look is at the first river met, the full search's order, not the record's");
+        var inOrder = new Gate();
+        inOrder.Picture.Links.AddRange(unseen.Picture.Links);
+        Executor(inOrder).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 0, 1), 1.0);
+        AssertEqual(0, inOrder.Picture.Looks[0], "(control) in order the look is at the first river too");
+
+        // Two links that do not share a middle region are no chain (0-1 then 2-3 for a 0 to 2 leg).
+        var gap = new Gate();
+        gap.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        gap.Picture.Links.Add((1500f, -200f, CrossingState.Clear, 2, 3));
+        gap.Picture.Links.Add((1000f, -200f, CrossingState.Unknown, 1, 2));
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(gap).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 0, 1), 1.0).Skip,
+            "links that do not meet are no chain: the full search finds the unseen link between the banks");
+        AssertEqual(2, gap.Picture.Looks[0], "and looks at it");
+
+        // An out-of-range recorded link is no chain.
+        AssertTrue(Executor(both).Plan(new View(100f, 100f), RoadMarchWith(300f, 1200f, 1300f, 9), 1.0).Execute, "a recorded link the map does not have falls back to the search");
     }
 
     // verify landing r2 #2: the flag means a road route only with the road's two vias.
