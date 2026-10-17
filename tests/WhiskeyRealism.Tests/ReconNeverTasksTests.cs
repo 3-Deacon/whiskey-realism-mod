@@ -26,6 +26,11 @@ internal static class ReconNeverTasksTests
             ("AScoutedMainEffortDrawsNothing", AScoutedMainEffortDrawsNothing),
             ("TheLastMassBodyIsNeverSpentOnScouting", TheLastMassBodyIsNeverSpentOnScouting),
             ("TheDrawnScoutKeepsItsPostTheNextReview", TheDrawnScoutKeepsItsPostTheNextReview),
+            ("AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn", AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn),
+            ("TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks", TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks),
+            ("ASecessionGarrisonIsNeverDrawnAsAScout", ASecessionGarrisonIsNeverDrawnAsAScout),
+            ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
+            ("TheUnfilledCountMatchesTasksByKindPointAndReason", TheUnfilledCountMatchesTasksByKindPointAndReason),
             ("TheReconRowCountsTasksAndUnfilled", TheReconRowCountsTasksAndUnfilled),
             ("AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted", AScoutDrawnFromTheReserveReturnsWhenTheObjectiveIsScouted),
             ("ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget", ARetargetWithinTheObjectiveIsNotScoutedByTheOldTarget),
@@ -224,6 +229,98 @@ internal static class ReconNeverTasksTests
         AssertEqual(mission, day2.Ledger.Missions[0].MissionId, "the mission was kept, not re-opened");
     }
 
+    // The tracker gave up on sending the reserve formation to this task's post (two misses): the next candidate is tried, and nobody here.
+    private static void AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn()
+    {
+        var s = SmokeUnion();
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        var tasks = new List<ReconTask>();
+        ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), tasks);
+        var gaveUp = new List<GaveUpMove>();
+        foreach (var task in tasks) gaveUp.Add(new GaveUpMove { InstanceId = 2, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
+        AssertEqual(0, Roles(alloc, FormationRole.Recon), "the formation that gave up on every post is not drawn for any of them");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "it keeps holding");
+    }
+
+    // The draw is for the push's own eyes. A higher-priority task of another kind (a screen posture, a belief) comes first in the list and
+    // must not take the one formation the reserve can spare.
+    private static void TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks()
+    {
+        var s = SmokeUnion();
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        AssertTrue(plan.MainStaged, "staged");
+        var tasks = new List<ReconTask>
+        {
+            new ReconTask { Kind = ReconKind.Screen, SectorId = plan.MainSectorId, FromX = 100f, FromZ = 0f, HoldX = 200f, HoldZ = 0f, Priority = 5f, Reason = "screen-posture" },
+            new ReconTask { Kind = ReconKind.Screen, SectorId = plan.MainSectorId, FromX = 100f, FromZ = 0f, HoldX = 210f, HoldZ = 0f, Priority = 2.5f, Reason = "belief" },
+            new ReconTask { Kind = ReconKind.Probe, SectorId = plan.MainSectorId, FromX = 100f, FromZ = 0f, HoldX = 250f, HoldZ = 0f, Priority = 4.2f, Reason = "probe" },
+        };
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger());
+        AssertEqual(FormationRole.Recon, Of(alloc, 2).Role, "the reserve formation scouts");
+        AssertEqual("probe", Of(alloc, 2).Reason, "for the probe, not for the posture or the belief that precede it");
+    }
+
+    // A Union garrison inside a live secession state (Kentucky, D8) holds where it stands, withheld; the draw takes only a hold reserve.
+    private static void ASecessionGarrisonIsNeverDrawnAsAScout()
+    {
+        var s = SmokeUnion(withReserve: false);
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 15, StateId = 14, X = 500f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 0.3f });
+        s.Secessions.Add(new SecessionRecord { ObjectiveId = 15, StateId = 14, StateAlliance = 0, Live = true, HasTown = true, TownX = 500f, TownZ = 0f });
+        var garrison = Corps(20, 480f, 4000f);
+        garrison.StateId = 14;
+        s.Own.Add(garrison);
+        s.Own.Add(Corps(21, 470f, 9500f, 3, FormationFlags.InBattle));   // holds the state's sector (9000), so no hold reserve takes the garrison first
+        // The body is nearer the West objective than the garrison and big enough alone: the garrison is not in the mass.
+        var body = s.Own[s.IndexOfOwn(1)];
+        body.X = 345f;
+        body.WaypointX = 345f;
+        body.Strength = 12000f;
+        s.Own[s.IndexOfOwn(1)] = body;
+        var day = Review(s);
+        AssertTrue(day.Plan.MainStaged, "staged");
+        AssertEqual(ForceAllocator.ReasonSecession, Of(day.Allocation, 20).Reason, "the formation is the state's garrison");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "and is not the push's scout");
+        AssertTrue(ReconPlanner.ScoutPool(s) >= 1, "though the pool counts it");
+    }
+
+    private static void ScoutsMainObjectiveNamesTheMainTasksOnly()
+    {
+        foreach (string reason in new[] { ReconPlanner.ReasonMainAxis })
+            AssertTrue(ReconPlanner.ScoutsMainObjective(new ReconTask { Kind = ReconKind.Screen, Reason = reason }), "the main-axis screen");
+        AssertTrue(ReconPlanner.ScoutsMainObjective(new ReconTask { Kind = ReconKind.Probe, Reason = "probe" }), "the probe");
+        AssertTrue(ReconPlanner.ScoutsMainObjective(new ReconTask { Kind = ReconKind.AdvanceGuard, Reason = "advance-guard" }), "the advance guard");
+        foreach (string reason in new[] { ReconPlanner.ReasonCapitalApproach, ReconPlanner.ReasonFrontApproach, "belief", "screen-posture" })
+            AssertFalse(ReconPlanner.ScoutsMainObjective(new ReconTask { Kind = ReconKind.Screen, Reason = reason }), reason + " is not the push's eyes");
+        AssertFalse(ReconPlanner.ScoutsMainObjective(new ReconTask { Kind = ReconKind.Picket, Reason = ReconPlanner.ReasonMainAxis }), "a picket is never one");
+    }
+
+    // The row's unfilled count pairs tasks with missions as the ledger does: kind, hold point and reason.
+    private static void TheUnfilledCountMatchesTasksByKindPointAndReason()
+    {
+        var s = Base();
+        s.Own.Add(Corps(1, 100f, 6000f));
+        var ledger = new ReconMissionLedger();
+        var a = new Allocation { Alliance = 0 };
+        a.Assignments.Add(new Assignment { InstanceId = 1, Role = FormationRole.Recon, SectorId = 0, TargetX = 200f, TargetZ = 5f, Reason = "belief" });
+        var tasks = new List<ReconTask>
+        {
+            new ReconTask { Kind = ReconKind.Screen, SectorId = 0, HoldX = 200f, HoldZ = 5f, Reason = "belief" },
+            new ReconTask { Kind = ReconKind.Screen, SectorId = 0, HoldX = 300f, HoldZ = 5f, Reason = "belief" },   // another point
+            new ReconTask { Kind = ReconKind.Screen, SectorId = 0, HoldX = 200f, HoldZ = 9f, Reason = "belief" },   // another point (z)
+            new ReconTask { Kind = ReconKind.Screen, SectorId = 0, HoldX = 200f, HoldZ = 5f, Reason = ReconPlanner.ReasonMainAxis },   // another reason
+            new ReconTask { Kind = ReconKind.Probe, SectorId = 0, HoldX = 200f, HoldZ = 5f, Reason = "belief" },     // another kind
+        };
+        ledger.Sync(s, tasks, a);
+        var counts = ReconStep.CountsOf(s, ledger, tasks);
+        AssertEqual(5, counts.Tasks, "five tasks");
+        AssertEqual(4, counts.Unfilled, "one has its mission");
+        ledger.ReleaseAll("test");
+        AssertEqual(5, ReconStep.CountsOf(s, ledger, tasks).Unfilled, "a cleared mission fills nothing");
+    }
+
     private static void TheReconRowCountsTasksAndUnfilled()
     {
         // The body is the pool's only member and the last of the main effort: tasks exist, nobody can be sent.
@@ -239,6 +336,11 @@ internal static class ReconNeverTasksTests
         AssertContains(row, " listed=1 pool=1", "the capital-defence body is named, and the one formation the pick can take is the pool: " + row);
         AssertEqual(1, ReconPlanner.ListedCount(SmokeUnion(FormationFlags.InOffensiveOps)), "an offensive-operations entry is listed too");
         AssertEqual(0, ReconPlanner.ListedCount(SmokeUnion(0)), "an unlisted body is not");
+        var busyListed = SmokeUnion(0);
+        var inBattle = busyListed.Own[busyListed.IndexOfOwn(13)];
+        inBattle.Flags |= FormationFlags.CapitalDefense;
+        busyListed.Own[busyListed.IndexOfOwn(13)] = inBattle;
+        AssertEqual(0, ReconPlanner.ListedCount(busyListed), "a busy formation is not massable, so its list entry says nothing about the mass");
     }
 
     // The probe/screen is a question, not a post: answered by sight or a fresh belief, the task is gone and the formation goes back to
@@ -369,6 +471,8 @@ internal static class ReconNeverTasksTests
         AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 issued=0 confirmed=0 failed=2 retried=0 gaveUp=0 queued=0 skippedPlayer=0 skippedBusy=0 deferred=0").Category, "a failed count above zero is still a failure");
         AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=10").Category, "ten is not zero");
         AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=0.5").Category, "nor is 0.5");
+        AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=05").Category, "nor is 05");
+        AssertEqual(TelemetryCategory.Write, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=0").Category, "a zero at the end of the line is a zero");
         AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 failed=0 exception while moving").Category, "a zero counter does not hide a real exception word");
         AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 move failed for corps 4").Category, "a failed word with no value is an event");
         AssertEqual(TelemetryCategory.Failure, TelemetryTagPolicy.Route("[CampaignMover] alliance=0 error=0 failed=1").Category, "a later non-zero failed still counts");
