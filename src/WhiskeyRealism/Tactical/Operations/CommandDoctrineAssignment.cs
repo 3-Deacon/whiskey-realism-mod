@@ -48,7 +48,7 @@ namespace WhiskeyRealism.Tactical.Operations
             if (stance == BattleStance.Defender && objectiveMatched && objective.Type == TacticalObjectiveType.EnemyLine)
                 anchor = TacticalDefensiveLineAnchorPlanner.PlanOwnFront(objective, nodes, battlefront);
 
-            int sideBank = crossings != null && stance == BattleStance.Defender ? OwnBank.SideBank(crossings, nodes) : -1;
+            int sideBank = crossings != null ? OwnBank.SideBank(crossings, nodes) : -1;
 
             for (int i = 0; i < nodes.Length; i++)
             {
@@ -82,18 +82,21 @@ namespace WhiskeyRealism.Tactical.Operations
                     reserveFraction);
                 sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
-                // A position the ledger computes stays on a bank unless the node's task goes to the enemy (the crossing gate decides those at
-                // write time): the side's bank for a Defender, the bank the node stands on for the rest. A maneuver's target, which the plan
-                // chose with its crossing, replaces the primary below, after this.
+                // A position the ledger computes stays on a bank. A post (primary, support) keeps the side's bank for a Defender and the bank the
+                // node stands on for the rest, so an Attacker's bridgehead post stays where the plan put it; a task that goes to the enemy is the
+                // executor's crossing gate's, not the bank rule's. A fall back is home for every stance: the side's bank, as the target would be
+                // without the clamp (a crossed node's soft-abort post was clamped to the river edge on the enemy's bank). A maneuver's target
+                // replaces the primary below, after this.
                 bool keepBank = crossings != null && KeepsItsBank(task, stance);
+                int postBank = stance == BattleStance.Defender ? sideBank : -1;
                 CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
                     task,
                     objective.ObjectiveId,
-                    keepBank ? KeepBank(crossings, sideBank, nodes, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
-                    keepBank ? KeepBank(crossings, sideBank, nodes, node, linePlan.SupportTarget) : linePlan.SupportTarget,
-                    keepBank ? KeepBank(crossings, sideBank, nodes, node, linePlan.FallbackTarget) : linePlan.FallbackTarget,
+                    keepBank ? KeepBank(crossings, postBank, nodes, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
+                    keepBank ? KeepBank(crossings, postBank, nodes, node, linePlan.SupportTarget) : linePlan.SupportTarget,
+                    crossings != null ? KeepBank(crossings, sideBank, nodes, node, linePlan.FallbackTarget) : linePlan.FallbackTarget,
                     idle,
                     operation.MinimumCommitSeconds,
                     nowSeconds,

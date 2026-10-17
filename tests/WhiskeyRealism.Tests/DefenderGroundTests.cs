@@ -46,6 +46,9 @@ internal static class DefenderGroundTests
             ("defender ground an own front is kept for an enemy-line objective that has an approach avenue", TheOwnFrontOverridesAnAvenueAnchor),
             ("defender ground the position survives every copy of a state: nested division, works hold, stance guard, exploit overlay, role rewrite", ThePositionSurvivesEveryCopy),
             ("defender ground the W&L order text gets the node's own position, or no point when the node is unplaced", ThePlayerOrderSnapshotUsesTheNodePosition),
+            ("defender ground a crossed attacker's soft-abort fall back goes home to the side's bank, as the target is without the clamp", ACrossedNodesFallBackGoesHome),
+            ("defender ground an attacker's bridgehead post stays on the bridgehead bank while its fall back goes home", ABridgeheadPostIsNotPulledBack),
+            ("defender ground a crossed maneuvering node keeps its support post and its fall back goes home", AManeuveringNodesSupportStaysAndFallBackGoesHome),
         });
     }
 
@@ -670,6 +673,79 @@ internal static class DefenderGroundTests
         FlankResponseTests.AssertPinned(adapter,
             "state.HasPosition ? new PlayerOrderPoint(state.X, state.Z) : default(PlayerOrderPoint), state.HasPosition ? new PlayerOrderPoint(state.X, state.Z) : default(PlayerOrderPoint), army.CurrentOperation.PrimaryObjectiveId, \"command-operation\");",
             "an unplaced node gives no point");
+    }
+
+    // ---- the way back: a fall back is home for every stance ------------------------------------------------------------------------------
+
+    // The verify probe: an Attacker or Meeting side that has crossed. n0 and n1 stand in region 1 (across, toward the enemy at x 300, region 0), n2..n4 on the
+    // start bank (region 2). SoftAbort: every node falls back (role FallbackGuard).
+    private static CommandNodeOperationalState[] CrossedAttackerNodes(CommandNodeRole role)
+    {
+        float[] xs = { 800f, 850f, 1150f, 1250f, 1350f };
+        var nodes = new CommandNodeOperationalState[xs.Length];
+        for (int i = 0; i < xs.Length; i++)
+            nodes[i] = CommandNodeOperationalState.Create("n" + i, CommandEchelonKind.BrigadeLike, role, CommandTaskType.FormUp, xs[i], -1000f + 60f * i, 270f);
+        return nodes;
+    }
+
+    private static void ACrossedNodesFallBackGoesHome()
+    {
+        var picture = new RiverCrossingTests.Picture();
+        CommandNodeOperationalState[] nodes = CrossedAttackerNodes(CommandNodeRole.FallbackGuard);
+        BattlefieldPictureSnapshot enemy = EnemyLinePicture(300f, -1000f);
+        foreach (BattleStance stance in new[] { BattleStance.Attacker, BattleStance.Meeting, BattleStance.Defender })
+        {
+            CommandDoctrineOrder[] free = Build(nodes, stance, enemy, null, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort);
+            CommandDoctrineOrder[] kept = Build(nodes, stance, enemy, picture, TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.SoftAbort);
+            for (int i = 0; i < 2; i++)
+            {
+                AssertEqual(CommandTaskType.FallBackToLine, kept[i].Task, stance + " n" + i + " falls back");
+                AssertTrue(free[i].FallbackTarget.HasValue && kept[i].FallbackTarget.HasValue, stance + " n" + i + " has a fall-back post");
+                AssertEqual(2, picture.RegionAt(kept[i].FallbackTarget.X, kept[i].FallbackTarget.Z), stance + " n" + i + " falls back to the side's bank (x " + kept[i].FallbackTarget.X + ")");
+                AssertNear(free[i].FallbackTarget.X, kept[i].FallbackTarget.X, 0.01f, stance + " n" + i + " fall-back x is the target without the clamp");
+                AssertNear(free[i].FallbackTarget.Z, kept[i].FallbackTarget.Z, 0.01f, stance + " n" + i + " fall-back z is the target without the clamp");
+            }
+        }
+    }
+
+    private static void ABridgeheadPostIsNotPulledBack()
+    {
+        // An Attacker's crossed nodes form up on the bridgehead bank (region 1): the bank rule keeps a post on the bank its node stands on, not the
+        // start bank; the fall back of the same order is home.
+        var picture = new RiverCrossingTests.Picture();
+        CommandNodeOperationalState[] nodes = CrossedAttackerNodes(CommandNodeRole.SupportingAttack);
+        CommandDoctrineOrder[] orders = Build(nodes, BattleStance.Attacker, EnemyLinePicture(300f, -1000f, exposed: false), picture, TacticalOperationShape.SingleMainEffort);
+        for (int i = 0; i < 2; i++)
+        {
+            AssertEqual(CommandTaskType.FormUp, orders[i].Task, "n" + i + " forms up");
+            AssertEqual(1, picture.RegionAt(orders[i].PrimaryTarget.X, orders[i].PrimaryTarget.Z), "n" + i + " bridgehead post stays on the bridgehead bank (x " + orders[i].PrimaryTarget.X + ")");
+            AssertEqual(2, picture.RegionAt(orders[i].FallbackTarget.X, orders[i].FallbackTarget.Z), "n" + i + " fall back is home (x " + orders[i].FallbackTarget.X + ")");
+        }
+
+        for (int i = 2; i < nodes.Length; i++)
+            AssertEqual(2, picture.RegionAt(orders[i].PrimaryTarget.X, orders[i].PrimaryTarget.Z), "n" + i + " on the start bank keeps it");
+    }
+
+    private static void AManeuveringNodesSupportStaysAndFallBackGoesHome()
+    {
+        // A crossed node whose maneuver is a support attack: the support post is the task's (made behind the crossing gate, left where the plan
+        // put it, across the river), its fall back is home on the side's bank.
+        var picture = new RiverCrossingTests.Picture();
+        CommandNodeOperationalState[] nodes = CrossedAttackerNodes(CommandNodeRole.SupportingAttack);
+        // Deep in the bridgehead: 300 m behind it (the task's own fall back) is still across the river from the start bank.
+        nodes[0] = CommandNodeOperationalState.Create("n0", CommandEchelonKind.BrigadeLike, CommandNodeRole.SupportingAttack, CommandTaskType.FormUp, 600f, -1000f, 270f);
+        ManeuverOrder support = new ManeuverOrder { Phase = ManeuverPhase.Attack, Task = CommandTaskType.SupportAttack, TargetX = 330f, TargetZ = -990f, Heading = 270f, Reason = "attack-line-end" };
+        var table = EnvelopmentManeuver.ExpandToNodes(new[] { new ChildManeuver("child-0", support, 1f, 0f) }, new[] { FlankResponseTests.NodeIntent("n0", "child-0") });
+        var operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "enemy-line-1", 900f);
+        CommandDoctrineOrder o = CommandDoctrineAssignment.Build(nodes, operation, EnemyLinePicture(300f, -1000f, exposed: false), 20000f, 100f, 0.3f,
+            BattleStance.Attacker, table, false, picture)[0];
+        AssertEqual(CommandTaskType.SupportAttack, o.Task, "the maneuver's task");
+        AssertTrue(o.SupportTarget.HasValue, "a support post");
+        AssertEqual(0, picture.RegionAt(o.SupportTarget.X, o.SupportTarget.Z), "the support post stays across the river (x " + o.SupportTarget.X + ")");
+        AssertEqual(2, picture.RegionAt(o.FallbackTarget.X, o.FallbackTarget.Z), "the fall back is home (x " + o.FallbackTarget.X + ")");
+        CommandDoctrineOrder free = CommandDoctrineAssignment.Build(nodes, operation, EnemyLinePicture(300f, -1000f, exposed: false), 20000f, 100f, 0.3f,
+            BattleStance.Attacker, table, false, null)[0];
+        AssertEqual(1, picture.RegionAt(free.FallbackTarget.X, free.FallbackTarget.Z), "(without the rule it lies across: x " + free.FallbackTarget.X + ")");
     }
 
     private static ObjectiveRecord EnemyLineRecord(float x, float z)
