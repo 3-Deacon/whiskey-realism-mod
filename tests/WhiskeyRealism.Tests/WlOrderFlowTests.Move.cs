@@ -544,6 +544,7 @@ internal static partial class WlOrderFlowTests
             "lost is vanilla's own test (125282-125286: an active mounted line without a courier) on the entry's primary line");
         AssertTrue(queue.Contains("WlMoveState.CarriedOutAfterGone(unit.regimentpaths > 0, distance, unit.combatstatussubordinates > 0f)") && queue.Contains("carrier.X") && queue.Contains("carrier.Z"),
             "an entry that is gone is told lost from carried out by the unit's path, its distance to the target it was given and its contact");
+        AssertTrue(queue.Contains("if (queued) return WlMoveState.Classify(true, lost, false);"), "a queued entry is judged by its courier line alone: the path says nothing while the move waits");
         AssertTrue(queue.Contains("if (latest == null || entry.processingtime > latest.processingtime) latest = entry;"), "the carrier entry of a unit is its latest pending move");
         AssertTrue(queue.Contains("processingTime = entry.processingtime;") && queue.Contains("stamp = entry.lastupdate;") && queue.Contains("orderType = entry.ordertype;"), "the carrier records the entry's processing time and its creation stamp");
         AssertTrue(queue.Contains("unit.transform.parent"), "the scene parent is the queue owner");
