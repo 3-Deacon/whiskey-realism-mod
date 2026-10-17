@@ -399,13 +399,15 @@ namespace WhiskeyRealism.Strategic.Planner
             int current = state.CurrentMainObjective;
             Retain(cands, current, state);
             int best = Best(cands);
-            int held = BestOf(cands, current);
+            int held = HeldRecord(cands, current, state);
 
             if (best < 0)
             {
                 state.CurrentMainObjective = -1;
                 state.BelowOddsDays = 0;
                 ResetChallenger(state);
+                ResetRecordChallenger(state);
+                state.CurrentTargetX = state.CurrentTargetZ = float.NaN;
                 reason = current >= 0 ? "no-candidate" : "none";
                 return -1;
             }
@@ -456,7 +458,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 state.DecisionSerial++;
                 state.BelowOddsDays = 0;
                 ResetChallenger(state);
+                ResetRecordChallenger(state);
             }
+            state.CurrentTargetX = cands[chosen].X;
+            state.CurrentTargetZ = cands[chosen].Z;
             return chosen;
         }
 
@@ -464,8 +469,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // within OddsDeadband below its RequiredRatio, for fewer than SwitchDays consecutive reviews.
         private static void Retain(List<Candidate> cands, int current, PlannerState state)
         {
-            int index = -1;
-            for (int i = 0; i < cands.Count; i++)
+            // The record the main effort is on has the deadband, not whichever record of the objective scores best today.
+            int index = KeptRecord(cands, current, state, anyEligibility: true);
+            for (int i = 0; i < cands.Count && index < 0; i++)
                 if (cands[i].ObjectiveId == current && cands[i].Force >= 0 && (index < 0 || cands[i].Score > cands[index].Score)) index = i;
             if (index < 0) return;
             var cand = cands[index];
@@ -548,6 +554,61 @@ namespace WhiskeyRealism.Strategic.Planner
                     best = i;
             }
             return best;
+        }
+
+        // The record of the current objective the main effort is on (PlannerState.CurrentTarget), -1 when none stands: no record kept, or it is no
+        // longer offered. anyEligibility false asks for an eligible record only (one that is still valid: not accomplished, reachable, within odds).
+        private static int KeptRecord(List<Candidate> cands, int objectiveId, PlannerState state, bool anyEligibility)
+        {
+            if (objectiveId < 0 || float.IsNaN(state.CurrentTargetX) || float.IsNaN(state.CurrentTargetZ)) return -1;
+            for (int i = 0; i < cands.Count; i++)
+            {
+                if (cands[i].ObjectiveId != objectiveId || (!anyEligibility && !cands[i].Eligible) || cands[i].Force < 0) continue;
+                if (SamePoint(cands[i].X, cands[i].Z, state.CurrentTargetX, state.CurrentTargetZ)) return i;
+            }
+            return -1;
+        }
+
+        private static bool SamePoint(float ax, float az, float bx, float bz)
+        {
+            return Math.Abs(ax - bx) <= SameTargetRadius && Math.Abs(az - bz) <= SameTargetRadius;
+        }
+
+        // The target record the current objective's main effort uses today. An objective has several records, and the best of them changing
+        // must not move the main effort (smoke 2026-10-17: 29@3 -> 29@2 -> 29@6 in two reviews, switch=hold): the record kept stays until
+        // another record of the objective beats it by SwitchMargin on SwitchDays consecutive reviews (the objective switch's own rule), or the
+        // kept record is invalid at once (no longer offered, accomplished, unreachable, below its odds): then the best record is taken.
+        private static int HeldRecord(List<Candidate> cands, int objectiveId, PlannerState state)
+        {
+            int best = BestOf(cands, objectiveId);
+            if (best < 0) return -1;
+            int kept = KeptRecord(cands, objectiveId, state, anyEligibility: false);
+            if (kept < 0 || kept == best)
+            {
+                ResetRecordChallenger(state);
+                return kept < 0 ? best : kept;
+            }
+            if (cands[best].Score - cands[kept].Score <= SwitchMargin)
+            {
+                ResetRecordChallenger(state);
+                return kept;
+            }
+            if (state.RecordChallengerDays > 0 && SamePoint(cands[best].X, cands[best].Z, state.RecordChallengerX, state.RecordChallengerZ)) state.RecordChallengerDays++;
+            else
+            {
+                state.RecordChallengerX = cands[best].X;
+                state.RecordChallengerZ = cands[best].Z;
+                state.RecordChallengerDays = 1;
+            }
+            if (state.RecordChallengerDays < SwitchDays) return kept;
+            ResetRecordChallenger(state);
+            return best;
+        }
+
+        private static void ResetRecordChallenger(PlannerState state)
+        {
+            state.RecordChallengerX = state.RecordChallengerZ = float.NaN;
+            state.RecordChallengerDays = 0;
         }
 
         private static int BestOf(List<Candidate> cands, int objectiveId)
