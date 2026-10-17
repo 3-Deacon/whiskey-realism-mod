@@ -36,6 +36,7 @@ internal static class ReconNeverTasksTests
             ("AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw", AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw),
             ("AScoutOutForAnotherTaskDoesNotBlockTheDraw", AScoutOutForAnotherTaskDoesNotBlockTheDraw),
             ("AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord", AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord),
+            ("ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest", ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest),
             ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
             ("TheUnfilledCountMatchesTasksByKindPointAndReason", TheUnfilledCountMatchesTasksByKindPointAndReason),
             ("TheReconRowCountsTasksAndUnfilled", TheReconRowCountsTasksAndUnfilled),
@@ -596,6 +597,7 @@ internal static class ReconNeverTasksTests
             AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, army + ": it keeps holding");
             AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, army + ": and the refusal is named");
             AssertContains(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation).Row(0), " why=believed-threat ", army + ": in the [Recon] row");
+            AssertFalse(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation).Equals(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks)), army + ": a row that differs only by why= is a changed row");
         }
     }
 
@@ -739,6 +741,36 @@ internal static class ReconNeverTasksTests
         AssertEqual(0, state.ChallengerDays, "objective 41 never counts as a challenger: it does not beat 40's best record by the margin");
         AssertEqual(40, state.CurrentMainObjective, "and the main effort is still objective 40");
         AssertNear(400f, state.CurrentTargetX, 0.5f, "on its kept record, which trails the best one");
+    }
+
+    // A standing trigger (a capital threat) never re-draws among near equals while the current objective is within Epsilon of the best: the
+    // objective's value is its best record's, and the main effort stays on the record it holds.
+    private static void ATriggerKeepsTheKeptRecordWhileTheObjectiveIsStillBest()
+    {
+        Func<float, float, float, bool, CampaignSnapshot> world = (a, b, other, armyAtCapital) =>
+        {
+            var s = Records(a, b);
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 41, X = 698f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = other });
+            if (armyAtCapital) s.Beliefs.Add(ExecutorFixtures.Belief(50f, 0f, 120000f));
+            return s;
+        };
+        float second = -1f, chosen = -1f;
+        for (float b2 = 0.3f; b2 <= 1f && chosen < 0f; b2 += 0.1f)
+            for (float imp = 0f; imp <= 1f && chosen < 0f; imp += 0.05f)
+            {
+                var s = world(Slight, b2, imp, true);
+                float best40 = Math.Max(ScoreOf(s, 400f), ScoreOf(s, 700f));
+                float c = ScoreOf(s, 698f);
+                if (c - best40 > 0.002f && c - best40 < TheaterPlanner.Epsilon - 0.01f && best40 - ScoreOf(s, 400f) > TheaterPlanner.Epsilon + 0.01f) { second = b2; chosen = imp; }
+            }
+        AssertTrue(chosen >= 0f, "a rival inside Epsilon of the objective's best record, with the kept record outside it, exists");
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(world(Lean, Slight, 0f, false), state).MainObjectiveX, 0.5f, "day 1: objective 40, record 400");
+        int serial = state.DecisionSerial;
+        var day2 = PlanOf(world(Slight, second, chosen, true), state);
+        AssertEqual(40, day2.MainObjectiveId, "day 2, under a capital threat: still objective 40");
+        AssertNear(400f, day2.MainObjectiveX, 0.5f, "on the record it holds");
+        AssertEqual(serial, state.DecisionSerial, "the same decision");
     }
 
     // A record that leads, but by no more than the margin, is not a challenger: it breaks the run of reviews.
