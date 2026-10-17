@@ -84,6 +84,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC13: an exploit's Advance and Strike Moves are not delayed either, as vanilla's own isolated-target move
         // (CheckForSeparatedEnemy 8188, useorderdelay: false): the courier cadence never applies, and the asset
         // settles the moment it is ordered. The posture pipeline passes exploit for an exploit order only.
+        //
+        // BC14W: a works-hold contest move (IntentFlags.Contest) is not delayed either, and the recent-order window and the courier cadence do not
+        // apply to it (InCooldown): it turns back a move vanilla (or an order queued before the hold) just gave a held group, restoring the standing
+        // order the group already holds, and a courier delay would let the group walk into the works band first. It carries no UseOrderDelay flag.
         public static bool ShouldUseOrderDelayForExecutorWaypoint(
             CommandTaskType task,
             bool battleActive,
