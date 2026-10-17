@@ -1,7 +1,10 @@
+using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Telemetry;
+using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Tactical.Battle.Producers
 {
@@ -30,6 +33,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // call. Per-battery hold: Artillery Audit Min Hold Seconds (real seconds at
     // 1x) on the doctrine clock against the battery's last executor outcome; the
     // point-blank watchdog is Safety and is not held.
+    //
+    // Unit churn (smoke 2026-10-17): the hold is time-based and remembers only Whiskey's own writes, so a bombardment vanilla restarts
+    // (CheckAIBombardment 3890-3906, every micro cycle its group conditions hold) was cancelled again every cycle: a 7 <-> 9 loop. The producer
+    // reads the executor's last combat behavior outcome for the battery; a bombardment seen again inside ArtilleryRestartAcceptHours of the
+    // doctrine's own 7 is a vanilla restart (BattleWriterPolicy.RestartedAfterOwnCancel), accepted for the window unless the cancel guards the
+    // battery. One owner per channel: after the cancel, vanilla owns the next window.
     internal sealed class ArtilleryIntentProducer : IBattleIntentProducer
     {
         private static readonly OrderChannel[] HeldChannels =
@@ -37,8 +46,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             OrderChannel.CombatBehavior, OrderChannel.Formation, OrderChannel.Facing, OrderChannel.Move,
         };
 
+        private const float AcceptedRowSeconds = 30f;
+        private static readonly Dictionary<string, float> _acceptedRowAt = new Dictionary<string, float>();
+
         private readonly bool _pointBlank;
         private readonly BattleOrderIntent[] _buffer = new BattleOrderIntent[3];
+
+        static ArtilleryIntentProducer()
+        {
+            BattleScope.Register("artillery-restart-rows", _acceptedRowAt.Clear);
+        }
 
         internal ArtilleryIntentProducer(bool pointBlank)
         {
@@ -77,7 +94,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if ((UnityEngine.Object)unit == null) continue;
                     BattleArtilleryState state = ReadState(snapshot, i, unit, rules);
                     state.InHold = InHold(executor, own[i].InstanceId, now, holdHours);
-                    int n = BattleWriterPolicy.ArtilleryDoctrineIntents(snapshot, i, state, rules, _buffer);
+                    state.RestartedAfterOurCancel = executor != null &&
+                        executor.TryGetLastOutcome(own[i].InstanceId, OrderChannel.CombatBehavior, out OrderOutcome lastBehavior) &&
+                        BattleWriterPolicy.RestartedAfterOwnCancel(lastBehavior, now);
+                    int n = BattleWriterPolicy.ArtilleryDoctrineIntents(snapshot, i, state, rules, _buffer, out bool cancelAccepted);
+                    if (cancelAccepted) NoteRestartAccepted(snapshot, i);
                     for (int k = 0; k < n; k++)
                     {
                         sink.Submit(_buffer[k]);
@@ -87,6 +108,35 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                                 _buffer[k].TargetX, _buffer[k].TargetZ, now);
                     }
                 }
+            }
+        }
+
+        // One bounded row per battery per AcceptedRowSeconds: the doctrine wanted to cancel a bombardment vanilla restarted after the doctrine's own
+        // cancel and left it alone for the window. This is the row that tells the next smoke which side wrote which behavior.
+        private static void NoteRestartAccepted(BattleSnapshot snapshot, int index)
+        {
+            try
+            {
+                int battery = snapshot.Own[index].InstanceId;
+                OnceLog.Info("tactical-artillery:restart-accepted",
+                    "[ArtilleryRestart] first bombardment vanilla restarted after the doctrine's cancel, left to vanilla for " + BattleWriterPolicy.ArtilleryRestartAcceptHours + " battle hours");
+                if (!TacticalTelemetry.ShouldEmit(_acceptedRowAt, "tactical-artillery-restart:" + snapshot.Alliance + ":" + battery, "accepted",
+                        UnityEngine.Time.realtimeSinceStartup, AcceptedRowSeconds, false))
+                    return;
+                int alliance = snapshot.Alliance;
+                int parent = snapshot.Own[index].ParentIndex;
+                int parentId = parent >= 0 && parent < snapshot.OwnCount ? snapshot.Own[parent].InstanceId : 0;
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalArtilleryRestartAccepted", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(alliance)
+                        .WithDecision("RestartAccepted", "vanilla-restart-after-cancel", "side=" + alliance + "|battery=" + battery)
+                        .WithField("battery", battery)
+                        .WithField("parent", parentId)
+                        .WithField("windowHours", BattleWriterPolicy.ArtilleryRestartAcceptHours));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-artillery:restart-row", "[ArtilleryRestart] row failed: " + ex.GetType().Name);
             }
         }
 

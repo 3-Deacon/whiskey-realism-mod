@@ -355,5 +355,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public IntentSource Source;
         public double AtHours;
         public int Retries;
+        // The intent's Value when an issued write is recorded (a combat behavior, a stance, a formation index); 0 for the other outcomes.
+        public int Value;
     }
 }
