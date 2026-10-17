@@ -488,11 +488,20 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
 
+            // The formations the post may ask for (GarrisonPlanner.PickFormation's pool): not one the tracker gave up on at the post; a
+            // formation nothing else has claimed; a Reserve surplus formation; and the post's own incumbent when the sector's hold reserve
+            // has already claimed it in the post's own sector. That last case keeps the post from changing hands every day: the hold reserve
+            // takes the formations nearest the believed army, which is where a post's garrison stands. Taking it back is free for the sector
+            // (it stays a Hold formation of the same sector, still counted in its hold), so the sector's hold is unchanged.
             private bool PostCandidate(int i, GarrisonPost post)
             {
                 if (GaveUpAt(i, post.X, post.Z)) return false;
                 if (Free(i) && !_inMass[i]) return true;
-                return _done[i] && _role[i] == FormationRole.Reserve && WlChainRules.MayMove(_s.Own[i].Chain) && TheaterPlanner.Movable(_s.Own[i]);
+                var f = _s.Own[i];
+                if (!_done[i] || !WlChainRules.MayMove(f.Chain) || !TheaterPlanner.Movable(f)) return false;
+                if (_role[i] == FormationRole.Reserve) return true;
+                return _role[i] == FormationRole.Hold && ReferenceEquals(_reason[i], ReasonHoldReserve)
+                    && post.InstanceIds.Count > 0 && post.InstanceIds[0] == f.InstanceId && _sector[i] == _sectors.SectorAt(post.X, post.Z);
             }
 
             // Spec C21: the supply threshold is the raw metric.

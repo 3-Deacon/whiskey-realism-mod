@@ -40,6 +40,7 @@ internal static class GarrisonPlannerTests
             ("AFormationAtThePostHoldsInPlaceAndOneAwayMarches", AFormationAtThePostHoldsInPlaceAndOneAwayMarches),
             ("AReserveSurplusMayBePostedButTheMassNever", AReserveSurplusMayBePostedButTheMassNever),
             ("AFormationTheTrackerGaveUpOnIsNotSeated", AFormationTheTrackerGaveUpOnIsNotSeated),
+            ("TheSectorsHoldReserveDoesNotTakeAPostsIncumbentFromIt", TheSectorsHoldReserveDoesNotTakeAPostsIncumbentFromIt),
             ("TheSecessionRowIgnoresTheOrdinaryPosts", TheSecessionRowIgnoresTheOrdinaryPosts),
             ("TheLedgerRecordsMovingHoldingUncoveredAndReleased", TheLedgerRecordsMovingHoldingUncoveredAndReleased),
             ("TheGarrisonRowsCarryTheSpecifiedFields", TheGarrisonRowsCarryTheSpecifiedFields),
@@ -211,6 +212,16 @@ internal static class GarrisonPlannerTests
         near.Own.Add(Corps(7, 503f, 600f));                              // an own formation within bugle range counts too
         near.Own.Add(Corps(8, 600f, 9000f));                             // one beyond it does not
         AssertNear(full - 600f, Posts(near)[0].Need, 1f, "an own formation at the post is existing strength");
+
+        // The main effort's mass passing through does not garrison the place it passes: it will march on.
+        var passing = Side();
+        passing.Objectives.Add(Town(40, 500f));
+        passing.Beliefs.Add(Seen(560f, 30000f));
+        passing.Own.Add(Corps(9, 503f, 9000f));
+        var plan = HandPlan(passing);
+        plan.MassInstanceIds.Add(9);
+        AssertNear(full, Posts(passing, plan)[0].Need, 1f, "a mass member standing there is not existing strength");
+        AssertNear(0f, Posts(passing, plan)[0].ExistingStrength, 0.01f, "none at all");
     }
 
     private static void NeedFromBeliefsOnly()
@@ -722,6 +733,44 @@ internal static class GarrisonPlannerTests
         AssertEqual(2, alloc.Seats[0].InstanceId, "the next candidate takes the post");
         alloc.TryGet(1, out var gave);
         AssertTrue(gave.Reason != ForceAllocator.ReasonGarrisonPost && gave.Role == FormationRole.Hold, "the formation that gave up on the post is not kept for it");
+    }
+
+    // The hold reserve takes the formations nearest the believed army, which is where a post's garrison stands. Without the reclaim the post
+    // would lose its holder to the hold reserve and be re-filled from elsewhere day after day.
+    private static void TheSectorsHoldReserveDoesNotTakeAPostsIncumbentFromIt()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        s.Own.Add(Corps(1, 503f, 6000f));                                // the incumbent, nearest the army
+        s.Own.Add(Corps(2, 450f, 6000f));
+        s.Own.Add(Corps(3, 350f, 6000f));                                // a free corps that could have been asked instead
+        var plan = HandPlan(s);
+        var sectors = ExecutorFixtures.Sectors(s);
+        plan.Sectors.Add(new SectorPlan { SectorId = sectors.SectorAt(500f, 0f), Posture = TheaterPosture.Hold, HoldNeed = 9000f });
+        var retained = new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") };
+        var alloc = Allocate(s, plan, retained);
+        alloc.TryGet(2, out var other);
+        AssertEqual(ForceAllocator.ReasonHoldReserve, other.Reason, "the sector's hold reserve took the next corps");
+        AssertEqual(1, alloc.Seats.Count, "one seat");
+        AssertEqual(1, alloc.Seats[0].InstanceId, "the incumbent keeps the post although the hold reserve claimed it first");
+        alloc.TryGet(1, out var holder);
+        AssertEqual(FormationRole.Hold, holder.Role, "as a Hold formation of the same sector");
+        AssertEqual(ForceAllocator.ReasonGarrisonPost, holder.Reason, "for the post");
+
+        // Another sector's hold reserve is not reclaimed: the sector would be left short.
+        var elsewhere = Side();
+        elsewhere.Objectives.Add(Town(40, 500f));
+        elsewhere.Objectives.Add(Town(41, 200f));
+        elsewhere.Beliefs.Add(Seen(560f, 30000f));
+        elsewhere.Beliefs.Add(Seen(160f, 30000f));
+        elsewhere.Own.Add(Corps(1, 220f, 6000f));                        // the incumbent now stands in the western sector
+        var plan2 = HandPlan(elsewhere);
+        var sectors2 = ExecutorFixtures.Sectors(elsewhere);
+        plan2.Sectors.Add(new SectorPlan { SectorId = sectors2.SectorAt(200f, 0f), Posture = TheaterPosture.Hold, HoldNeed = 9000f });
+        var alloc2 = Allocate(elsewhere, plan2, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
+        alloc2.TryGet(1, out var reserved);
+        AssertEqual(ForceAllocator.ReasonHoldReserve, reserved.Reason, "a hold reserve of another sector stays where it is");
     }
 
     private static void TheSecessionRowIgnoresTheOrdinaryPosts()
