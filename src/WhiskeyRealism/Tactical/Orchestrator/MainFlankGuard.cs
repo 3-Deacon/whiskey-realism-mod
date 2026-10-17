@@ -31,6 +31,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>How far past the main's centre its flank end lies, for the terrain test (half a frontage).</summary>
         public const float FlankEndMeters = FrontageMeters * 0.5f;
 
+        /// <summary>
+        /// The longest a hold lasts (battle seconds, doctrine clock): 20 battle-minutes. Twenty minutes is a third of the plan commitment hold
+        /// (<c>ArmyReplanTriggers.PlanCommitmentBattleSeconds</c>, an hour), so a hold never outlives the plan it serves; it is longer than the arrival hold's
+        /// 15-minute budget (<c>MainArrivalHoldLatch.MaxHoldBattleSeconds</c>), which a main may also wait out after it; and it is long enough for a guard
+        /// from the far end of its range (<see cref="GuardRangeMeters"/>) to march up at brigade pace. Past it the main advances with an open flank rather than
+        /// never attack.
+        /// </summary>
+        public const float MaxHoldBattleSeconds = 20f * 60f;
+
+        public const string HoldReason = "flank-unguarded-hold";
+        public const string InTransitReason = "flank-guard-in-transit";
+        public const string AdvanceReason = "flank-unguarded-advance";
+        public const string ReleaseReason = "flank-covered-release";
+
         /// <summary>A hold lasts at least this long (battle seconds): a neighbour crossing the reach line does not flip the main between holding and advancing.</summary>
         public const float MinHoldBattleSeconds = 120f;
 
@@ -90,13 +104,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public bool LeftAnchored { get; }
             public bool RightAnchored { get; }
 
-            public bool LeftOpen => LeftExposed && !LeftGuarded && !LeftAnchored;
-            public bool RightOpen => RightExposed && !RightGuarded && !RightAnchored;
+            /// <summary>The left flank has no line unit in reach and does not rest on a river (a guard assigned to it is still on its way).</summary>
+            public bool LeftOpen => LeftExposed && !LeftAnchored;
+            public bool RightOpen => RightExposed && !RightAnchored;
 
-            /// <summary>A flank is exposed and nothing covers it: the main does not advance.</summary>
+            /// <summary>A flank is open: the main does not advance (until the hold's bound).</summary>
             public bool Open => LeftOpen || RightOpen;
 
+            /// <summary>An open flank has no guard assigned at all: nobody has been given to it.</summary>
+            public bool Unguarded => (LeftOpen && !LeftGuarded) || (RightOpen && !RightGuarded);
+
+            /// <summary>Every open flank has a guard assigned that has not yet come into reach.</summary>
+            public bool InTransit => Open && !Unguarded;
+
             public string Reason => LeftOpen ? (RightOpen ? "both-flanks-open" : "left-flank-open") : RightOpen ? "right-flank-open" : "flanks-covered";
+
+            /// <summary>Why the main is held while this cover is open.</summary>
+            public string HoldWhy => Unguarded ? HoldReason : InTransitReason;
         }
 
         public static Cover Assess(IReadOnlyList<Neighbour> others, bool leftAnchored, bool rightAnchored)
@@ -122,29 +146,42 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return new Cover(!leftNear, !rightNear, leftGuard, rightGuard, leftAnchored, rightAnchored);
         }
 
-        /// <summary>The main's hold on the doctrine clock: whether it is holding, since when, and since when its flanks have been covered (negative: not covered).</summary>
+        /// <summary>
+        /// The main's hold on the doctrine clock: whether it is holding, since when, since when its flanks have been covered (negative: not covered), and
+        /// whether the hold ran out its bound and the main advances with the flank open (<see cref="Advanced"/>, kept until the flanks are covered again).
+        /// </summary>
         public readonly struct HoldState
         {
-            public HoldState(bool holding, float heldSinceHours, float coveredSinceHours)
+            public HoldState(bool holding, float heldSinceHours, float coveredSinceHours, bool advanced = false)
             {
                 Holding = holding;
                 HeldSinceHours = heldSinceHours;
                 CoveredSinceHours = coveredSinceHours;
+                Advanced = advanced;
             }
 
             public bool Holding { get; }
             public float HeldSinceHours { get; }
             public float CoveredSinceHours { get; }
+            public bool Advanced { get; }
         }
 
         /// <summary>
-        /// An open flank starts the hold at once. The hold ends only after it has lasted <see cref="MinHoldBattleSeconds"/> and the flanks have been covered for
-        /// <see cref="CoveredBattleSeconds"/> without a break; an open flank again restarts that count.
+        /// An open flank starts the hold at once and it runs until the flanks are covered or <see cref="MaxHoldBattleSeconds"/> have passed since it began, when
+        /// the main advances anyway and stays released while the flank stays open. A hold ends on cover only after it has lasted
+        /// <see cref="MinHoldBattleSeconds"/> and the flanks have been covered for <see cref="CoveredBattleSeconds"/> without a break; an open flank again
+        /// restarts that count.
         /// </summary>
         public static HoldState Step(HoldState previous, bool open, float nowHours)
         {
             if (open)
-                return previous.Holding ? new HoldState(true, previous.HeldSinceHours, -1f) : new HoldState(true, nowHours, -1f);
+            {
+                if (previous.Advanced) return previous;
+                if (!previous.Holding) return new HoldState(true, nowHours, -1f);
+                if (TacticalBattleClock.HoursToBattleSeconds(nowHours - previous.HeldSinceHours) >= MaxHoldBattleSeconds)
+                    return new HoldState(false, previous.HeldSinceHours, -1f, advanced: true);
+                return new HoldState(true, previous.HeldSinceHours, -1f);
+            }
             if (!previous.Holding) return default(HoldState);
 
             float coveredSince = previous.CoveredSinceHours >= 0f ? previous.CoveredSinceHours : nowHours;
@@ -152,6 +189,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float covered = TacticalBattleClock.HoursToBattleSeconds(nowHours - coveredSince);
             if (held >= MinHoldBattleSeconds && covered >= CoveredBattleSeconds) return default(HoldState);
             return new HoldState(true, previous.HeldSinceHours, coveredSince);
+        }
+
+        /// <summary>The reason of the row a change of the hold writes, or null when the hold did not change.</summary>
+        public static string ChangeReason(HoldState previous, HoldState next, Cover cover)
+        {
+            if (!previous.Holding && next.Holding) return cover.HoldWhy;
+            if (previous.Holding && !next.Holding) return next.Advanced ? AdvanceReason : ReleaseReason;
+            return null;
         }
 
         /// <summary>A reserve or support unit given to a main's exposed flank.</summary>

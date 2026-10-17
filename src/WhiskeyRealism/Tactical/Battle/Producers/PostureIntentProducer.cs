@@ -455,19 +455,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             _flankHold.TryGetValue(id, out MainFlankGuard.HoldState previous);
             MainFlankGuard.HoldState next = MainFlankGuard.Step(previous, cover.Open, (float)s.DoctrineHours);
             _flankHold[id] = next;
-            if (previous.Holding != next.Holding) EmitFlankHold(s, id, next.Holding, cover);
-            if (next.Holding) reason = "flank-unguarded-hold";
+            string change = MainFlankGuard.ChangeReason(previous, next, cover);
+            if (change != null) EmitFlankHold(s, id, next.Holding, change, cover);
+            if (next.Holding) reason = cover.HoldWhy;
             return next.Holding;
         }
 
-        private static void EmitFlankHold(BattleSnapshot s, int id, bool holding, MainFlankGuard.Cover cover)
+        private static void EmitFlankHold(BattleSnapshot s, int id, bool holding, string reason, MainFlankGuard.Cover cover)
         {
             try
             {
-                string reason = cover.Reason;
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalFlankGuardHold", TelemetrySeverity.Info,
                     ev => ev
                         .WithDecision("TacticalFlankGuardHold", holding ? "hold" : "release", reason)
+                        .WithField("open", cover.Reason)
                         .WithField("side", s.Alliance)
                         .WithField("group", id)
                         .WithField("holding", holding)
