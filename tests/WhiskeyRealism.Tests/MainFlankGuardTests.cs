@@ -266,5 +266,7 @@ internal static class MainFlankGuardTests
         FlankResponseTests.AssertPinned(producer, "return _flankHold.TryGetValue(groupId, out MainFlankGuard.HoldState hold) && hold.Holding", "a main held on its flank is no exploit asset");
         string army = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Orchestrator/ArmyOrchestrator.cs");
         FlankResponseTests.AssertPinned(army, "flankAnchored: FlankAnchoredProbe()", "the leaf map is built with the terrain picture's anchored ends");
+        FlankResponseTests.AssertPinned(army, "!(builtAgo >= LeafMapRefreshHours)", "the cached map is rebuilt every few doctrine minutes: the guards read where the brigades stand");
+        FlankResponseTests.AssertPinned(army, "includeCrest: false", "a crest is cover, not an impassable end");
     }
 }
