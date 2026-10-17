@@ -54,6 +54,7 @@ internal static class MainFlankGuardTests
             ("flank guard a guard in transit keeps the main holding and one that is not moving does not", TheSnapshotSeesTransit),
             ("flank guard the guard is sent to the post by a Move and not again while its order leads there", TheGuardIsSentToThePost),
             ("flank guard the guard pass hands back a unit with no post and one in contact", TheGuardPassHandsBack),
+            ("flank guard a guard whose group or formation withdraws holds no claim and takes no move", AWithdrawingFormationsGuardHoldsNothing),
             ("flank guard a stopped unit whose last waypoint is the post is sent again and is not in transit", AStoppedUnitIsResentAndNotInTransit),
             ("flank guard the post is right on a rotated axis", ThePostOnARotatedAxis),
             ("flank guard the posture producer calls the guard and the hold and the exploit producer sees it held", ThePostureProducerWiring),
@@ -625,7 +626,7 @@ internal static class MainFlankGuardTests
         AssertEqual(CommandTaskType.GuardFlank, leaf.LeafTask, "its task is GuardFlank, which LeafBrigadeMovePolicy gives no move");
         AssertTrue(!LeafBrigadeMovePolicy.Decide(leaf.LeafTask, false, true, false, false, false).Move, "(the slot path moves nothing for it)");
 
-        var outcome = FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, closeEngaged: false, pending: false, out BattleOrderIntent intent, out string why);
+        var outcome = FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, closeEngaged: false, pending: false, withdrawing: false, out BattleOrderIntent intent, out string why);
         AssertEqual(FlankGuardLeaf.GuardOutcome.Move, outcome, "the guard is sent: " + why);
         AssertEqual(OrderChannel.Move, intent.Channel, "by a Move");
         AssertEqual(101, intent.GroupId, "to the guard");
@@ -640,7 +641,7 @@ internal static class MainFlankGuardTests
         s.Own[at].RegimentPaths = 1;
         s.Own[at].LastWaypointX = -440f;
         s.Own[at].LastWaypointZ = -140f;
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, out BattleOrderIntent claim, out string toward), "on its way: " + toward);
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, false, out BattleOrderIntent claim, out string toward), "on its way: " + toward);
         AssertEqual("toward-post", toward, "the reason says so");
         AssertTrue((claim.Flags & IntentFlags.StandingClaim) != 0 && claim.Priority == IntentPriority.Post && claim.Channel == OrderChannel.Move,
             "it keeps its claim: a standing Move claim at Post priority, so its division's move fans out around it");
@@ -651,11 +652,11 @@ internal static class MainFlankGuardTests
         moved.Own[at2].RegimentPaths = 1;
         moved.Own[at2].LastWaypointX = -440f;
         moved.Own[at2].LastWaypointZ = -140f;
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Move, FlankGuardLeaf.PlanGuard(moved, at2, in leaf, false, false, out BattleOrderIntent follow, out _), "a main that advances draws its guard after it");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Move, FlankGuardLeaf.PlanGuard(moved, at2, in leaf, false, false, false, out BattleOrderIntent follow, out _), "a main that advances draws its guard after it");
         AssertTrue(Math.Abs(follow.TargetZ - 450f) < 0.5f, "to the new post: " + follow.TargetZ);
 
         var at3 = Field(5.0, (100, 0f, 0f), (101, -440f, -140f));
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(at3, at3.IndexOfOwn(101), in leaf, false, false, out BattleOrderIntent held, out string atPost), "at its post it stays");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(at3, at3.IndexOfOwn(101), in leaf, false, false, false, out BattleOrderIntent held, out string atPost), "at its post it stays");
         AssertEqual("at-post", atPost, "the reason says so");
         AssertTrue((held.Flags & IntentFlags.StandingClaim) != 0 && held.Priority == IntentPriority.Post,
             "and holds its claim: a guard at its post submits a standing claim every tick, not nothing");
@@ -665,14 +666,65 @@ internal static class MainFlankGuardTests
     {
         var s = Field(5.0, (100, 0f, 0f), (101, -1500f, -300f));
         var leaf = Leaf(101, DirectChildRole.RefuseLeft, postMain: 100, postLeft: true);
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, closeEngaged: true, false, out _, out _), "in contact it is not sent");
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, false, pending: true, out _, out _), "with an order pending it is not sent");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, closeEngaged: true, false, false, out _, out _), "in contact it is not sent");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, false, pending: true, withdrawing: false, out _, out _), "with an order pending it is not sent");
         var gone = Leaf(101, DirectChildRole.RefuseLeft, postMain: 999, postLeft: true);
-        AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in gone, false, false, out _, out _), "a main that is not in the snapshot leaves no post");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in gone, false, false, false, out _, out _), "a main that is not in the snapshot leaves no post");
         var plain = Leaf(101, DirectChildRole.Reserve);
-        AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in plain, false, false, out _, out _), "a unit with no post runs the normal leaf pass");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in plain, false, false, false, out _, out _), "a unit with no post runs the normal leaf pass");
         s.Own[s.IndexOfOwn(100)].Flags |= UnitFlags.Routed;
-        AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, false, false, out _, out _), "a routed main leaves no post");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, false, false, false, out _, out _), "a routed main leaves no post");
+    }
+
+    private struct WalkHost : IGroupWalkHost
+    {
+        public CommandTaskType[] Task; public bool[] Has; public bool[] Recent;
+        public bool HasPosture(int index) => Has[index];
+        public CommandTaskType TaskOf(int index) => Task[index];
+        public bool WithdrawalRecent(int index) => Recent[index];
+    }
+
+    // Verify round 3: a posted guard's Post claim outranks Support-priority withdrawal moves (WithdrawalIntentProducer.TryPlanStalledFallback), so the guard of a
+    // formation that withdraws would stay while the formation walks away. The producer asks the ancestor walk unit churn's column deployment uses, and the
+    // guard planner holds no claim and takes no move when it says so.
+    private static void AWithdrawingFormationsGuardHoldsNothing()
+    {
+        // division 10 -> guard 101; the main 100 stands beside
+        var s = Field(5.0, (10, 0f, 0f), (100, 0f, 0f), (101, -1500f, -300f));
+        int g = s.IndexOfOwn(101);
+        s.Own[g].ParentIndex = s.IndexOfOwn(10);
+        var leaf = Leaf(101, DirectChildRole.RefuseLeft, postMain: 100, postLeft: true);
+
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Move, FlankGuardLeaf.PlanGuard(s, g, in leaf, false, false, withdrawing: false, out _, out _), "(a formation that does not withdraw: the guard is sent)");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Withdrawing, FlankGuardLeaf.PlanGuard(s, g, in leaf, false, false, withdrawing: true, out BattleOrderIntent none, out string why),
+            "its formation withdraws: " + why);
+        AssertEqual(0, none.GroupId, "no claim and no move are handed back");
+
+        // what the producer's walk reads: a withdrawal task on the division, or a recent withdrawal move for the division or the guard
+        int n = s.OwnCount;
+        for (int mode = 0; mode < 3; mode++)
+        {
+            var host = new WalkHost { Task = new CommandTaskType[n], Has = new bool[n], Recent = new bool[n] };
+            int division = s.IndexOfOwn(10);
+            if (mode == 0) { host.Has[division] = true; host.Task[division] = CommandTaskType.FallBackToLine; }
+            if (mode == 1) host.Recent[division] = true;
+            if (mode == 2) host.Recent[g] = true;
+            ApproachLine.Walk(s.Own, n, g, ref host, out _, out bool walked);
+            AssertTrue(walked, "mode " + mode + ": the walk finds the withdrawal");
+        }
+        var calm = new WalkHost { Task = new CommandTaskType[n], Has = new bool[n], Recent = new bool[n] };
+        calm.Has[s.IndexOfOwn(10)] = true;
+        calm.Task[s.IndexOfOwn(10)] = CommandTaskType.AttackObjective;
+        ApproachLine.Walk(s.Own, n, g, ref calm, out _, out bool calmWalked);
+        AssertFalse(calmWalked, "a division on an attack task is no withdrawal");
+        AssertTrue(ColumnDeployment.WithdrawalTask(CommandTaskType.FallBackToLine) && !ColumnDeployment.WithdrawalTask(CommandTaskType.GuardFlank), "and the guard's own task is not one");
+
+        // the producer's walk host and ledger lookup are the ones above
+        string producer = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/Producers/PostureIntentProducer.cs");
+        string method = FlankResponseTests.Between(producer, "private static bool FormationWithdraws(", "// BR-M1: holds a Main-effort brigade");
+        FlankResponseTests.AssertPinned(method, "ApproachLine.Walk(s.Own, s.OwnCount, index, ref host, out _, out bool walked);", "the ancestor walk");
+        FlankResponseTests.AssertPinned(method, "ColumnDeployment.WithdrawalTask(state.Task)", "and the ledger's task of every group above");
+        FlankResponseTests.AssertPinned(method, "if (ColumnDeployment.WithdrawalTask(task)) return true;", "and the guard's own task");
     }
 
     // A unit whose order ended (no path, no queued order, not moving) with its last waypoint still the post is not on its way: it is sent again, and the
@@ -687,7 +739,7 @@ internal static class MainFlankGuardTests
         s.Own[at].LastWaypointX = -450f;
         s.Own[at].LastWaypointZ = -150f;
         var leaf = Leaf(101, DirectChildRole.RefuseLeft, postMain: 100, postLeft: true);
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Move, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, out BattleOrderIntent resent, out string why), "re-sent: " + why);
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Move, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, false, out BattleOrderIntent resent, out string why), "re-sent: " + why);
         AssertTrue(Math.Abs(resent.TargetX - -450f) < 0.5f, "to the post");
 
         var map = LeafMap(Leaf(100, DirectChildRole.Main), leaf);
@@ -750,9 +802,14 @@ internal static class MainFlankGuardTests
         FlankResponseTests.AssertPinned(body, "FlankHolding(s, i, leafMap", "the leaf pass asks whether the main's flanks are covered");
         FlankResponseTests.AssertPinned(body, "task = CommandTaskType.HoldObjective;", "an open flank holds the main in place");
         FlankResponseTests.AssertPinned(body, "army.CurrentBattleStance != BattleStance.Defender", "a Defender's main advances nowhere and is not gated");
-        FlankResponseTests.AssertPinned(body, "FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, out BattleOrderIntent guardMove", "a flank guard is planned before the slot path");
-        FlankResponseTests.AssertPinned(body, "if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)", "a posted guard is handled here and never runs the slot path");
-        FlankResponseTests.AssertPinned(body, "sink.Submit(guardMove);", "its Move to the post, or its standing claim, is submitted every tick it is posted");
+        FlankResponseTests.AssertPinned(body, "FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, withdrawing, out BattleOrderIntent guardMove", "a flank guard is planned before the slot path");
+        // The whole block, once, comments aside: a submit that waits on the Move outcome (the standing claim then lost) or a block that does not return fails this.
+        UnitChurnTests.PinStatement(UnitChurnTests.Code(body),
+            "if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost) { if (guardOutcome != FlankGuardLeaf.GuardOutcome.Withdrawing) sink.Submit(guardMove); "
+            + "if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) t.Groups[i].Submitted = true; "
+            + "PostureTelemetry.Leaf(s, i, leaf, task, guardWhy, guardOutcome == FlankGuardLeaf.GuardOutcome.Move); return; }",
+            "a posted guard is handled here, submits its Move or its standing claim every tick it is posted, and never runs the slot path");
+        FlankResponseTests.AssertPinned(body, "bool withdrawing = FormationWithdraws(s, t, i, task, side);", "a withdrawing formation is asked before the guard is planned");
         FlankResponseTests.AssertPinned(producer, "FlankGuardLeaf.MainHolds(s, mainIndex, leafMap, _flankHold", "the hold is the pure half's");
         FlankResponseTests.AssertPinned(producer, "return _flankHold.TryGetValue(groupId, out MainFlankGuard.HoldState hold) && hold.Holding", "a main held on its flank is no exploit asset");
         FlankResponseTests.AssertPinned(producer, "if (change != null) EmitFlankHold(", "one row per change of the hold, advance included");

@@ -603,14 +603,14 @@ internal static class UnitChurnTests
     }
 
     // The source without its comments, so a pinned statement cannot be satisfied by one that was commented out beside a mutated copy.
-    private static string Code(string text)
+    internal static string Code(string text)
     {
         text = System.Text.RegularExpressions.Regex.Replace(text, @"/\*.*?\*/", "", System.Text.RegularExpressions.RegexOptions.Singleline);
         return System.Text.RegularExpressions.Regex.Replace(text, @"//[^\n]*", "");
     }
 
     // A whole statement, present once: a mutation of any of its terms changes the text and fails this.
-    private static void PinStatement(string body, string statement, string label)
+    internal static void PinStatement(string body, string statement, string label)
     {
         string flat = FlankResponseTests.Flat(body);
         string want = FlankResponseTests.Flat(statement);
@@ -663,7 +663,7 @@ internal static class UnitChurnTests
         PinStatement(pass, "groupTask = t.Groups[group].State.Task;", "the group's recorded task");
         PinStatement(pass, "groupFormation = own[group].Formation;", "the group's formation (4 is the route's column)");
         PinStatement(pass, "routeColumn = t.Groups[group].RouteColumn;", "the group's route column is the pipeline's record");
-        string walkHost = Code(FlankResponseTests.Between(producerFile, "private readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
+        string walkHost = Code(FlankResponseTests.Between(producerFile, "internal readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
         PinStatement(walkHost, "public bool HasPosture(int index) => _groups[index].Has;", "the posture row exists");
         PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].State.Task;", "its task");
         PinStatement(walkHost, "public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);", "the executor's last move for that unit");

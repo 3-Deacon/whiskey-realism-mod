@@ -365,11 +365,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // path, so the move is its own, through the same leaf Move intent.
             if (leaf.HasFlankPost)
             {
-                FlankGuardLeaf.GuardOutcome guardOutcome = FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, out BattleOrderIntent guardMove, out string guardWhy);
+                bool withdrawing = FormationWithdraws(s, t, i, task, side);
+                FlankGuardLeaf.GuardOutcome guardOutcome = FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, withdrawing, out BattleOrderIntent guardMove, out string guardWhy);
                 if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)
                 {
-                    // The Move to the post, or the standing claim that keeps the division's own move from re-pathing the guard back.
-                    sink.Submit(guardMove);
+                    // The Move to the post, or the standing claim that keeps the division's own move from re-pathing the guard back; nothing while
+                    // its formation withdraws.
+                    if (guardOutcome != FlankGuardLeaf.GuardOutcome.Withdrawing) sink.Submit(guardMove);
                     if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) t.Groups[i].Submitted = true;
                     PostureTelemetry.Leaf(s, i, leaf, task, guardWhy, guardOutcome == FlankGuardLeaf.GuardOutcome.Move);
                     return;
@@ -396,6 +398,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));
             t.Groups[i].Submitted = true;
             PostureTelemetry.Leaf(s, i, leaf, task, "submitted", true);
+        }
+
+        // The guard's group or its formation withdraws: a withdrawal task on it, on a group above it (the ledger's state, or the posture row of this tick), or a
+        // recent withdrawal move for any of them (the ancestor walk unit churn's column deployment uses).
+        private static bool FormationWithdraws(BattleSnapshot s, PostureTick.State t, int index, CommandTaskType task, TacticalBattleOrchestrator side)
+        {
+            if (ColumnDeployment.WithdrawalTask(task)) return true;
+            var host = new FacingPulseIntentProducer.GroupWalkHost(t.Groups, s.Own, OrderExecutor.ForAlliance(s.Alliance), s.DoctrineHours);
+            ApproachLine.Walk(s.Own, s.OwnCount, index, ref host, out _, out bool walked);
+            if (walked) return true;
+            int a = s.Own[index].ParentIndex;
+            for (int hops = 0; a >= 0 && a < s.OwnCount && hops < ApproachLine.MaxGroupHops; hops++, a = s.Own[a].ParentIndex)
+                if (PostureLedger.TryResolveState(s.Own[a].InstanceId, side, out CommandNodeOperationalState state) && ColumnDeployment.WithdrawalTask(state.Task)) return true;
+            return false;
         }
 
         // BR-M1: holds a Main-effort brigade on AttackObjective as Screen until its
@@ -2051,7 +2067,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         // ApproachLine.Walk over the posture table and the executor's outcomes; a struct, so the walk allocates nothing.
-        private readonly struct GroupWalkHost : IGroupWalkHost
+        internal readonly struct GroupWalkHost : IGroupWalkHost
         {
             private readonly GroupPosture[] _groups;
             private readonly UnitRecord[] _own;

@@ -22,6 +22,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             Handled,
             /// <summary>A Move to the post is the intent to submit.</summary>
             Move,
+            /// <summary>Its group or its formation is withdrawing: no claim and no move, so the withdrawal (Support-priority fallbacks included) is not outranked.</summary>
+            Withdrawing,
         }
 
         /// <summary>
@@ -94,7 +96,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         /// The flank guard's move: to the post at its main's flank, at <see cref="IntentPriority.Post"/>. A unit in contact, with a pending order, already at the
         /// post or whose order already leads there writes nothing, but it keeps its claim: <paramref name="intent"/> is then the standing claim, renewed every
         /// tick the guard is posted, so the move of the division it sits in fans out around it (the executor's claim model: a descendant's higher claim shields
-        /// it). A unit whose main is gone or routed has no post, no claim, and runs the normal leaf pass.
+        /// it). A unit whose main is gone or routed has no post, no claim, and runs the normal leaf pass. A guard whose own group or formation is withdrawing
+        /// (<paramref name="withdrawing"/>: a withdrawal task on it or an ancestor, or a recent withdrawal move) holds no claim and takes no move: a Post claim
+        /// outranks the Support-priority fallbacks (WithdrawalIntentProducer.TryPlanStalledFallback), and a formation that withdraws must withdraw whole.
         /// </summary>
         internal static GuardOutcome PlanGuard(
             BattleSnapshot s,
@@ -102,6 +106,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             in TacticalLeafBrigadeMap.LeafAssignment leaf,
             bool closeEngaged,
             bool pending,
+            bool withdrawing,
             out BattleOrderIntent intent,
             out string why)
         {
@@ -113,6 +118,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (mainIndex < 0) return GuardOutcome.NoPost;
             ref UnitRecord main = ref s.Own[mainIndex];
             if ((main.Flags & UnitFlags.Alive) == 0 || PostureSense.Routed(main)) return GuardOutcome.NoPost;
+
+            if (withdrawing) { why = "withdrawing"; return GuardOutcome.Withdrawing; }
 
             MainFlankGuard.PostOf(in axis, main.X, main.Z, leaf.FlankPostLeft, out float px, out float pz, out float heading);
             ref UnitRecord guard = ref s.Own[guardIndex];

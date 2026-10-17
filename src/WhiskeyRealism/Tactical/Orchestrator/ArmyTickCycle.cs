@@ -453,7 +453,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         internal static float MainBandStrengthLost(float current, float history, float armyThen, float armyNow)
         {
             if (history <= 0f || current >= history) return current;
-            float armyDrop = armyThen > 0f ? Math.Max(0f, armyThen - armyNow) : 0f;
+            float armyDrop = Math.Max(0f, armyThen - armyNow);
             float bandDrop = history - current;
             return history - Math.Min(bandDrop, armyDrop);
         }
