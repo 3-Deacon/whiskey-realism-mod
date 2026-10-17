@@ -150,10 +150,14 @@ internal static partial class ManeuverFeasibilityTests
         FlankResponseTests.AssertPinned(run, "CommandPostureExecutor.Decide(order, physical, eligibility, (float)s.DoctrineHours, worksLane)", "a former fix with an open lane is planned to it");
         FlankResponseTests.AssertPinned(run, "WorksHoldGuard.LaneOpen(in order, army?.Feasibility?.HeldWorks)", "against the ledger's held works");
         FlankResponseTests.AssertPinned(run, "StanceSubmitted = worksStance > 0", "the request does not submit a second stance");
-        int returns = 0;
-        for (int at = flat.IndexOf("return worksStance > 0;", StringComparison.Ordinal); at >= 0; at = flat.IndexOf("return worksStance > 0;", at + 1, StringComparison.Ordinal)) returns++;
-        AssertEqual(3, returns, "the three early exits after the stance count it as a submission");
-        FlankResponseTests.AssertPinned(run, "int submitted = worksStance + PostureIntentPlan.Submit(sink, request);", "and so does the final count");
+        // A stance is no order that moves or re-lays the group: the three early exits after it, and the follower's, report no submission, so the group's
+        // facing pulse and fire control still run (Groups[i].Submitted, which the pulse skips, is true only for a group the pipeline ordered).
+        AssertFalse(flat.Contains("return worksStance > 0;"), "no early exit counts a stance as a submission");
+        FlankResponseTests.AssertPinned(run, "decision, worksStance, decision.Reason); return false;", "the no-write exit");
+        FlankResponseTests.AssertPinned(run, "decision, worksStance, \"nav-budget-deferred\"); return false;", "the nav-budget exit");
+        FlankResponseTests.AssertPinned(run, "decision, worksStance, \"road-route-deferred\"); return false;", "the road-route exit");
+        FlankResponseTests.AssertPinned(run, "int submitted = worksStance + PostureIntentPlan.Submit(sink, request);", "the final count adds the stance");
+        FlankResponseTests.AssertPinned(run, "return submitted > worksStance;", "and reports a submission only past the stance");
         FlankResponseTests.AssertPinned(producer, "TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, leaf.WorksHeld, out string overrideReason)",
             "the leaf path is told of the hold");
         string play = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PlayIntentProducer.cs");
@@ -224,8 +228,8 @@ internal static partial class ManeuverFeasibilityTests
         int pin = producer.IndexOf("army.PinsWorksNode(state.NodeId)", StringComparison.Ordinal);
         int decide = producer.IndexOf("CommandPostureExecutor.Decide(order, physical, eligibility", StringComparison.Ordinal);
         AssertTrue(hold > 0 && pin > hold && decide > pin, "the pin is asked after the hold's stance and before the posture decision");
-        AssertTrue(producer.Contains("if (worksStance == 0 && recordTick && (exploit ? ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) : army != null && army.PinsWorksNode(state.NodeId))) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
-            "only for a group the hold did not guard, on the producer's own pass; an exploit asset asks the exploit table, the rest the army");
+        AssertTrue(producer.Contains("if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId)) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
+            "only for a group the hold did not guard, on the producer's own pass; an exploit asset was made a hold before, and has the hold's stance");
 
         string runtime = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs"));
         AssertTrue(runtime.Contains("doctrineAction == DoctrineConsumerAction.Allow && side.Army != null && side.Army.PinsWorksNode(doctrineNodeId)) { cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold("),

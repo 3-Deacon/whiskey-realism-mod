@@ -564,8 +564,8 @@ namespace WhiskeyRealism.Tactical.Operations
                         "fallback-line",
                         PostureExecutionTarget.DoctrineFallbackTarget,
                         clearInterruptedPaths: true);
-                case CommandTaskType.HoldObjective when holdLane && WorksHoldGuard.Holds(order.Task, order.Reason) && order.PreGuardTask == CommandTaskType.FixEnemy:
-                    // BC14W: a former fix whose lane lies outside the works band still goes to its lane and holds and fires there.
+                case CommandTaskType.HoldObjective when holdLane && WorksHoldGuard.Holds(order.Task, order.Reason) && WorksHoldGuard.HasLane(in order):
+                    // BC14W: a former fix whose lane lies outside the works band still goes to its lane and holds and fires there; so does a pinned exploit at the band's edge.
                     return FormationAndWaypoint("fix-lane-hold", PostureExecutionTarget.DoctrinePrimaryTarget);
                 default:
                     return Decide(
@@ -1197,12 +1197,15 @@ namespace WhiskeyRealism.Tactical.Operations
         public static bool Holds(CommandTaskType task, string reason)
             => task == CommandTaskType.HoldObjective && string.Equals(reason, Reason, StringComparison.Ordinal);
 
+        /// <summary>A guarded order that goes to a point outside the works band and holds there: a former fix (its lane) or an exploit held at the band's edge (requirement-works-pin).</summary>
+        public static bool HasLane(in CommandDoctrineOrder order) => order.PreGuardTask == CommandTaskType.FixEnemy || order.ExploitId >= 0;
+
         /// <summary>
         /// A guarded former fix whose lane (the order's primary target, 170 units from the line objective) lies outside the works band still goes to
         /// it and holds and fires there; every other guarded order holds where it stands.
         /// </summary>
         public static bool LaneOpen(in CommandDoctrineOrder order, IWorksQuery works)
-            => works != null && Holds(order.Task, order.Reason) && order.PreGuardTask == CommandTaskType.FixEnemy && order.PrimaryTarget.HasValue
+            => works != null && Holds(order.Task, order.Reason) && HasLane(in order) && order.PrimaryTarget.HasValue
                && !works.InWorksBand(order.PrimaryTarget.X, order.PrimaryTarget.Z);
 
         /// <summary>

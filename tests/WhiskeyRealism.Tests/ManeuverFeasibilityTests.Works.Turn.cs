@@ -18,6 +18,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w TURN-HOLD-FIX the turn-not-struck hold needs a fix facing works: with the fix off the works an unstruck turn holds nothing", WTurnHoldNeedsFix),
         ("bc14w WORKS-PIN-FADED holders faded to memory 0.4 leave the fix pinned and post a look; the same segment with own regiments standing on it lifts the pin", WPinFaded),
         ("bc14w WORKS-PIN-EXPLOIT a non-breach exploit and its followers aimed at unbroken works hold stance 2 whatever the hold; a breach, a broken-in aim and a recall do not", WPinExploit),
+        ("bc14w WORKS-PIN-HOLD a pinned exploit holds at the band's edge on its approach line, keeps its heading, and resumes the strike when the aim is broken in", WPinHold),
         ("bc14w WORKS-PIN-LEDGER the holding fix of an unstruck turn is pinned, the wing is not; the pin lifts when its works are broken in and with the flag off", WPinLedger),
     };
 
@@ -288,12 +289,102 @@ internal static partial class ManeuverFeasibilityTests
         }
 
         string producer = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"));
-        AssertTrue(producer.Contains("(exploit ? ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) : army != null && army.PinsWorksNode(state.NodeId))) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
-            "the asset's pin is asked of the exploit table in the posture pipeline");
+        AssertTrue(producer.Contains("ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId)) { MoveContest.PinHoldPoint(rec.X, rec.Z, order.PrimaryTarget.X, order.PrimaryTarget.Z, army.Feasibility.HeldWorks, out float pinX, out float pinZ);"),
+            "the asset's pin is asked of the exploit table in the posture pipeline and builds its hold at the band's edge");
         AssertTrue(producer.Contains("int followerStance = recordTick && ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId) ? PostureIntentPlan.SubmitWorksPinStance("),
             "and the follower's before its early return");
         string runtime = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs"));
         AssertTrue(runtime.Contains("if (Battle.ExploitTable.ForAlliance(allianceId).PinsExploit(own[i].InstanceId)) { cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold("),
             "#45 writes none for a pinned exploit group");
+    }
+
+    // The coordinator's ruling (verify round 3): a pinned exploit is held outside the band as the fix pin is. The verifier's (-450, 600) aim: unpinned,
+    // the exploit's order moves it onto the works; pinned, its order is the works hold with a lane at the band's edge on its approach line, with the
+    // exploit's heading kept (it faces and fires at the aim), and after the break-in the table pins nothing and the order is the strike again.
+    static void WPinHold()
+    {
+        FeasibilityLedger agg = Scenario7(Aggressive()).Evaluate(WorksPlans);
+        agg.CaptureSelection(BattlePlanId.ManeuverAndFix, Result(agg, BattlePlanId.ManeuverAndFix).Mirrored);
+        agg.RefreshWorksHold(new FakeWorld());
+        IWorksQuery works = agg.HeldWorks;
+        float aimX = X(-450f), aimZ = Z(600f);
+        AssertTrue(works.OnHeldWorks(aimX, aimZ), "control: the verifier's aim lies on held works");
+
+        // The hold point: the band's edge on the line from the group, and no further.
+        MoveContest.PinHoldPoint(X(-450f), Z(0f), aimX, aimZ, works, out float hx, out float hz);
+        AssertNear(X(-450f), hx, 0.5f, "straight ahead: the same lateral");
+        AssertNear(Z(600f - WorksRules.WorksBandMeters), hz, 0.5f, "the band's width short of the profile");
+        AssertFalse(MoveContest.InBand(works, hx, hz), "outside the band");
+        AssertTrue(MoveContest.InBand(works, hx + (aimX - X(-450f)) * 0.01f + 0f, hz + 1f), "and one step on it is in the band");
+        MoveContest.PinHoldPoint(X(-150f), Z(100f), aimX, aimZ, works, out float ox, out float oz);
+        AssertFalse(MoveContest.InBand(works, ox, oz), "from the side, still outside the band");
+        float step = 1f / MoveContest.Distance(X(-150f), Z(100f), aimX, aimZ);
+        AssertTrue(MoveContest.InBand(works, ox + (aimX - X(-150f)) * step, oz + (aimZ - Z(100f)) * step), "and within one unit of its edge, on the line to the aim");
+        MoveContest.PinHoldPoint(X(-450f), Z(540f), aimX, aimZ, works, out float ix, out float iz);
+        AssertTrue(ix == X(-450f) && iz == Z(540f), "a group already in the band holds where it stands");
+        MoveContest.PinHoldPoint(X(-450f), Z(0f), aimX, aimZ, null, out float nx, out float nz);
+        AssertTrue(nx == X(-450f) && nz == Z(0f), "with no works view it stays");
+
+        // The exploit's order, unpinned and pinned.
+        ExploitTable table = ExploitTable.ForAlliance(0);
+        try
+        {
+            table.Clear(ExploitEnd.StandDown);
+            table.Add(new ExploitEntry { Id = 1, AssetId = 60, OpeningId = 1, Kind = OpeningKind.IsolatedCluster, Phase = ExploitPhase.Advance, AimX = aimX, AimZ = aimZ, Heading = 20f });
+            table.SetWorksView(false, works);
+            AssertTrue(table.TryOverride(60, out CommandDoctrineOrder strike, out _), "the asset has the exploit's order");
+            AssertEqual(CommandTaskType.AttackObjective, strike.Task, "an attack");
+            AssertTrue(MoveContest.InBand(works, strike.PrimaryTarget.X, strike.PrimaryTarget.Z), "control: whose target lies in the band, so the posture executor would march it onto the works");
+            var physical = new CommandPhysicalState(false, false, false, 0, false, 0);
+            var eligibility = new WriteEligibilitySnapshot(modeAllowsWrites: true, playerProtected: false, routed: false, orderPending: false, recentOrder: false);
+            PostureExecutionDecision march = CommandPostureExecutor.Decide(strike, physical, eligibility, 10f, holdLane: false);
+            AssertEqual(PostureExecutionAction.SetFormationAndWaypoint, march.Action, "control: unpinned it is a move");
+
+            AssertTrue(table.PinsExploit(60), "pinned");
+            CommandDoctrineOrder held = strike.WithWorksHold(strike.Task, null, DoctrineTargetPoint.From(hx, hz));
+            AssertEqual(CommandTaskType.HoldObjective, held.Task, "its order is a hold");
+            AssertTrue(WorksHoldGuard.Holds(held.Task, held.Reason), "the works hold's, so every reader of the hold reads it");
+            AssertEqual(CommandTaskType.AttackObjective, held.PreGuardTask, "over the attack it replaced");
+            AssertEqual(strike.ExploitId, held.ExploitId, "still the exploit's");
+            AssertNear(strike.ManeuverHeading, held.ManeuverHeading, 1e-4f, "with the exploit's heading toward the aim kept");
+            AssertTrue(WorksHoldGuard.HasLane(in held), "it has a lane");
+            AssertTrue(WorksHoldGuard.LaneOpen(in held, works), "which is outside the band");
+            PostureExecutionDecision lane = CommandPostureExecutor.Decide(held, physical, eligibility, 10f, holdLane: true);
+            AssertEqual(PostureExecutionAction.SetFormationAndWaypoint, lane.Action, "so it goes to the lane");
+            AssertEqual(PostureExecutionTarget.DoctrinePrimaryTarget, lane.Target, "which is the order's target");
+            AssertFalse(MoveContest.InBand(works, held.PrimaryTarget.X, held.PrimaryTarget.Z), "and that target is outside the band: no move onto the works");
+            AssertNear(hx, held.PrimaryTarget.X, 1e-3f, "at the hold point");
+            // A former attack that is no exploit's still holds in place: the lane is the fix's and the exploit's only.
+            CommandDoctrineOrder plain = OrderOf(CommandTaskType.AttackObjective).WithWorksHold(CommandTaskType.AttackObjective);
+            AssertFalse(WorksHoldGuard.HasLane(in plain), "a former attack has no lane");
+
+            // After the break-in: shaken holders at the aim, nothing is pinned and the order is the strike again.
+            FeasField shaken = Scenario7(Aggressive());
+            for (int i = 0; i < shaken.Enemies.Count; i++)
+            {
+                EnemyObservation e = shaken.Enemies[i];
+                e.Morale = 0.3f;
+                shaken.Enemies[i] = e;
+            }
+            FeasibilityLedger after = shaken.Evaluate(WorksPlans);
+            table.SetWorksView(false, after.HeldWorks);
+            AssertFalse(table.PinsExploit(60), "broken in: no pin");
+            AssertTrue(table.TryOverride(60, out CommandDoctrineOrder resumed, out _), "the asset still has the exploit's order");
+            AssertEqual(CommandTaskType.AttackObjective, resumed.Task, "the strike resumes");
+            AssertNear(aimX, resumed.PrimaryTarget.X, 1e-3f, "on the aim");
+        }
+        finally
+        {
+            table.SetWorksView(false, null);
+            table.Clear(ExploitEnd.StandDown);
+        }
+
+        // The pipeline builds the hold from the table's answer, and a stance alone is no submission (the facing pulse and the fire control still run).
+        string run = FlankResponseTests.Flat(FlankResponseTests.Between(FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"),
+            "internal static bool Run(", "private static bool CanBypassStaleQueuedOrder"));
+        int convert = run.IndexOf("order = order.WithWorksHold(WorksHoldGuard.Holds(order.Task, order.Reason) ? order.PreGuardTask : order.Task, null, DoctrineTargetPoint.From(pinX, pinZ));", StringComparison.Ordinal);
+        int held2 = run.IndexOf("bool worksHeld = WorksHoldGuard.Holds(state.Task, state.Reason)", StringComparison.Ordinal);
+        AssertTrue(convert > 0 && held2 > convert, "the conversion precedes the hold's reading, so the converted asset is a held group");
+        AssertTrue(run.Contains("&& order.PrimaryTarget.HasValue && army?.Feasibility?.HeldWorks != null"), "it needs the aim and the works");
     }
 }
