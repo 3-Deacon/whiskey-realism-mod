@@ -153,6 +153,11 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(facts[0].Threatened, "the own-held objective is threatened");
         AssertFalse(facts[1].Threatened, "the enemy-held one is not marked");
         AssertFalse(ObjectiveScoring.Threatened(null, x, z), "no snapshot, no threat");
+
+        // The fact reads the samples too: an own-held objective an unperceived enemy regiment stands on is not marked.
+        var hiddenFacts = new ObjectiveFact[2];
+        ObjectiveScoring.FactsOf(new[] { LiveCapture("own", 0, 50, x, z) }, 0, hidden.Snapshot(), hiddenFacts);
+        AssertFalse(hiddenFacts[0].Threatened, "the own-held objective an unperceived enemy stands on is not threatened");
     }
 
     static void ObjAlliancePoints()

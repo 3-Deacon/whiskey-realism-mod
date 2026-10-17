@@ -141,6 +141,16 @@ internal static partial class ManeuverFeasibilityTests
 
     static void ObjScreenDraw()
     {
+        // The two best secondaries by score, best first, whatever order the table lists them in: the best arrives last.
+        FeasField four = ObjField();
+        four.AddObjective("o10", -600f, 700f, 10f);
+        four.AddObjective("o20", -200f, 700f, 20f);
+        four.AddObjective("o30", 200f, 700f, 30f);
+        four.AddObjective("o40", 600f, 700f, 40f);
+        var kept = new SecondaryObjective[ObjectiveScoring.MaxSecondaryScreens];
+        AssertEqual(2, ObjectiveScoring.Secondaries(four.Evaluate(), null, kept), "two kept of four");
+        AssertTrue(kept[0].Id == "o40" && kept[1].Id == "o30" && kept[0].Score > kept[1].Score, "the highest-scored two, best first: " + kept[0].Id + ", " + kept[1].Id);
+
         TacticalFrontAxis axis = ScreenAxis();
         SecondaryObjective[] one = { Secondary("east", 230f, 600f) };
         // A child with player-owned strength is passed over for the next nearest.

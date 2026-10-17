@@ -141,6 +141,15 @@ internal static partial class ManeuverFeasibilityTests
         TacticalOperationShape shape = TacticalOperationDirector.Decide(strong.WithObjectiveDoctrine(new FeasibilityLedger(), null)).Operation.Shape;
         AssertTrue(shape != TacticalOperationShape.ParallelObjectives, "under the doctrine no ParallelObjectives operation opens, got " + shape);
 
+        // An infeasible row never wins, whatever it scores (the one place the rule lives).
+        var rival = new[]
+        {
+            new ObjectiveEstimate { Id = "x", Score = 5f, Feasible = false },
+            new ObjectiveEstimate { Id = "y", Score = 1f, Feasible = true },
+        };
+        AssertEqual(1, ObjectiveScoring.PickMainEffort(rival, new float[2], null), "an infeasible row with the highest score does not take the main effort");
+        AssertEqual(-1, ObjectiveScoring.PickMainEffort(new ReadOnlySpan<ObjectiveEstimate>(rival, 0, 1), new float[1], null), "and with nothing else feasible there is none");
+
         // Flag off: the ledger is carried but the shipped director runs.
         bool before = Plugin.ObjectiveDoctrine;
         try

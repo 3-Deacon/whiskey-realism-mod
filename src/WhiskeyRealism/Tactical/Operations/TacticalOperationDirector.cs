@@ -609,12 +609,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 BattlefieldObjectiveEstimate objective = objectives[i];
                 if (!IsUsableObjective(objective)) continue;
                 ObjectiveEstimate entry;
-                if (TryLedgerRow(ledger, objective.ObjectiveId, out entry))
-                {
-                    if (!entry.Feasible) continue;
-                    entry.Id = objective.ObjectiveId;
-                }
-                else entry = new ObjectiveEstimate { Id = objective.ObjectiveId, Value = objective.Value, Feasible = true, Score = objective.Value * (1f + pressure.U) };
+                if (!TryLedgerRow(ledger, objective.ObjectiveId, out entry))
+                    entry = new ObjectiveEstimate { Id = objective.ObjectiveId, Value = objective.Value, Feasible = true, Score = objective.Value * (1f + pressure.U) };
                 _pickTable[count] = entry;
                 _pickTerms[count] = ObjectiveSelectionScore(objective, input.Stance) - objective.Value;
                 _pickMap[count] = i;

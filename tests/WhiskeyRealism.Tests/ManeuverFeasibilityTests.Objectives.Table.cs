@@ -5,6 +5,7 @@ using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using static TestHarness;
+using static TestFixtures;
 using static BattleMovementHonestyTests;
 using static ManeuverFeasibilityFixtures;
 
@@ -50,6 +51,9 @@ internal static partial class ManeuverFeasibilityTests
         AssertFalse(across.Feasible, "an objective behind a river with no crossing is infeasible for the main effort");
         AssertEqual("no-crossing", across.Reason, "named by the route screen's reason");
         AssertTrue(Row(ledger, "near").Feasible, "the objective on the own bank is feasible");
+        // The strike must land a margin before dark, as the candidates' bodies do (the model's one rule, ManeuverFeasibility.DaylightMarginHours).
+        string step = MethodBody(ReadRepoFile("src/WhiskeyRealism/Tactical/Orchestrator/Plays/ManeuverFeasibility.Objectives.cs"), "internal static void StepObjective(");
+        AssertTrue(step != null && step.Contains("strikeHours > job.Input.DaylightHours - DaylightMarginHours ? 1f : 0f"), "the objective's daylight term keeps the candidates' margin before dark");
 
         // A Clear ford makes the same objective feasible.
         FeasField ford = ObjField(HorizontalBand(470f, 490f, (0f, 480f)));
@@ -123,7 +127,7 @@ internal static partial class ManeuverFeasibilityTests
         ford.AddObjective("t", 0f, 700f, 50f);
         ObjectiveEstimate across = Row(ford.Evaluate(), "t");
         AssertTrue(across.Feasible, "the ford carries the main body across");
-        AssertNear(ObjectiveScoring.ContestedWeight * ManeuverFeasibility.StrikeLegWeight, across.Penalty, 1e-4f, "r is the Held ford's contested value alone");
+        AssertNear(0.3f, across.Penalty, 1e-4f, "r is the Held ford's contested value alone: 0.6 x 0.5 x 1");
         AssertEqual("contested", across.Reason, "named contested");
     }
 

@@ -43,15 +43,16 @@ internal static partial class ManeuverFeasibilityTests
         AssertFalse(FeasibilityTelemetry.MainEffortRowDue(0, "A", 0, 10.10, out _), "the same objective 0.10 h later: none");
         AssertTrue(FeasibilityTelemetry.MainEffortRowDue(0, "B", 0, 10.12, out _), "the objective changes: a row at once");
         AssertFalse(FeasibilityTelemetry.MainEffortRowDue(0, "B", 0, 10.20, out _), "and none after");
-        AssertFalse(FeasibilityTelemetry.MainEffortRowDue(0, null, 1, 10.205, out _), "a contest with no objective picked gives no row, and stays pending");
-        AssertTrue(FeasibilityTelemetry.MainEffortRowDue(0, "B", 2, 10.21, out c), "a chain move contested since the last row: a row");
-        AssertEqual(3, c, "it reports all the contests since the last row, those pending included");
+        AssertTrue(FeasibilityTelemetry.MainEffortRowDue(0, "B", 2, 10.21, out c), "a chain move contested since the last row: a row, the same objective and 0.09 h on");
+        AssertEqual(2, c, "it reports the contests");
         AssertFalse(FeasibilityTelemetry.MainEffortRowDue(0, "B", 0, 10.30, out c), "and none after: the row took the contests");
         AssertEqual(0, c, "nothing to report on a row that is not due");
         AssertTrue(FeasibilityTelemetry.MainEffortRowDue(0, "B", 0, 10.50, out c), "the heartbeat: 0.25 h after the last row");
         AssertEqual(0, c, "with no contest to report");
+        AssertFalse(FeasibilityTelemetry.MainEffortRowDue(0, null, 1, 10.60, out _), "a contest with no objective picked gives no row");
         AssertFalse(FeasibilityTelemetry.MainEffortRowDue(0, null, 0, 10.90, out _), "no pick: no row");
-        AssertTrue(FeasibilityTelemetry.MainEffortRowDue(0, "B", 0, 10.91, out _), "a pick that lapsed and came back is a change");
+        AssertTrue(FeasibilityTelemetry.MainEffortRowDue(0, "B", 0, 10.91, out c), "a pick that lapsed and came back is a change");
+        AssertEqual(1, c, "and reports the contest that waited for it");
         FeasibilityTelemetry.MainEffortRowDue(1, null, 0, 0.0, out _);
 
         // The contrast: the best-valued row the side could take (r below RiskyPenalty), and the nearest it does not hold.

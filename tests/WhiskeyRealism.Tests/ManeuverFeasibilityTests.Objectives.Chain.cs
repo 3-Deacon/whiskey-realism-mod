@@ -98,7 +98,7 @@ internal static partial class ManeuverFeasibilityTests
         f.DueChains.Add("A");
         FeasibilityLedger ledger = f.Evaluate();
         ObjectiveEstimate a = Row(ledger, "A"), b = Row(ledger, "B");
-        AssertNear(ObjectiveScoring.HistoricalPriorWeight, a.Prior, 1e-6f, "the due chain's objective gains 0.3");
+        AssertNear(0.3f, a.Prior, 1e-6f, "the due chain's objective gains 0.3");
         AssertNear(0f, b.Prior, 1e-9f, "the other gains none");
         AssertNear(a.Value * (1f + ledger.Pressure.U) - ObjectiveScoring.SelectRiskWeight(ledger.Pressure) * a.Penalty + a.Prior + a.Hold, a.Score, 1e-5f, "and the prior is in its score");
         FeasField none = ObjField();
