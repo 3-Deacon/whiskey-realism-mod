@@ -108,6 +108,10 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCavalryStrike", TelemetryCategory.Decision);
             AddTactical("TacticalStanceCooldown", TelemetryCategory.State);
             AddTactical("TacticalSeparatedEnemySteer", TelemetryCategory.State);
+            // BC16 step 0 (record only): the corps-level layout mirror check and the formation tug-of-war. State, not Trace: Trace sheds first
+            // and these rows decide whether A4 is built (plan decision 9).
+            AddTactical("TacticalLayoutMirror", TelemetryCategory.State);
+            AddTactical("TacticalFormationFlip", TelemetryCategory.State);
             // Scope B alignment (2026-05-22): canonical stance-write event +
             // newer telemetry tags that emit but were not yet registered.
             // Unregistered tags fall through to default routing which can

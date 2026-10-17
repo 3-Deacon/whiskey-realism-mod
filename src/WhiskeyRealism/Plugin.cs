@@ -462,7 +462,9 @@ namespace WhiskeyRealism
                 "Enable Tactical Observer",
                 true,
                 "Default ON. Emits tactical observer summaries, decision-matrix rows, ops-ledger/posture rows and the commander-intent/reserve-drift rows to the tactical tuning sidecar, deduped per signature (Tactical Observer Min Seconds Between Summaries). " +
-                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state.");
+                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state. " +
+                "It also gates the BC16 record-only formation observers (LayoutObserverPatch): TacticalLayoutMirror rows (how each group order laid its brigades' regiments out, left to right or mirrored), TacticalFormationFlip rows " +
+                "(a group whose formation changed twice within 0.1 battle-hours) and the once-per-battle [FormationProbe] line. They write nothing into the battle.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",

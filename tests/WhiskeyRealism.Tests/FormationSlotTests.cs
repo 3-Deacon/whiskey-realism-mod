@@ -11,7 +11,7 @@ internal static partial class FormationSlotTests
 {
     public static void Run()
     {
-        RunAll(Join(MirrorTests(), FlipTests()));
+        RunAll(Join(MirrorTests(), FlipTests(), RuntimeTests()));
     }
 
     private static (string, Action)[] Join(params (string, Action)[][] parts)
