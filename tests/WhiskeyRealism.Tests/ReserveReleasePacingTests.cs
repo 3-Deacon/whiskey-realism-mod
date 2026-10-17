@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
 
@@ -23,6 +24,8 @@ internal static class ReserveReleasePacingTests
             ("reserve release dead-band: a target inside the dedupe radius of the last is no new release", ATargetInsideTheDedupeRadiusIsNoNewRelease),
             ("reserve release dead-band: a move the executor never took is retried", AMoveTheExecutorNeverTookIsRetried),
             ("reserve release replay: the smoke's role churn sends no order", TheSmokeRoleChurnSendsNoOrder),
+            ("reserve commit #59: only a real release lets vanilla commit a ledger-held group's reserve", OnlyARealReleaseAllowsVanillasCommit),
+            ("reserve release: the allocator reads the base reserves from the one pooled array, allocating none", TheAllocatorSharesTheOnePooledArray),
             ("reserve release producer: pinned to the real release, the hold and the dead-band", TheProducerIsWiredToTheRules),
         });
     }
@@ -229,6 +232,63 @@ internal static class ReserveReleasePacingTests
         // A release whose target drifts 90 m between orders: never an order while the last is queued (at most one per hold-plus-courier cycle).
         int drifting = Replay(s => DirectChildRole.RefuseRight, s => true, defender: true, seconds: 2400, stepSeconds: 5, driftMeters: 90f);
         AssertTrue(drifting >= 2 && drifting <= 14, "a drifting target is paced by the courier, not sent per tick: " + drifting);
+    }
+
+    // #59 (BattleReserveCommitGatePatch): the allow path reads the command-node intent. The mark rides from the direct child through the command tree to
+    // every descendant and through the resolver's direct-child fallback.
+    private static void OnlyARealReleaseAllowsVanillasCommit()
+    {
+        var tree = CommandTreeBuilder.Build(new[]
+        {
+            new CommandTreeBuilder.CommandProbe(100, 0, 1, 17, "Army", true, false, false),
+            new CommandTreeBuilder.CommandProbe(200, 100, 1, 15, "Corps", true, false, false),
+            new CommandTreeBuilder.CommandProbe(300, 200, 1, 14, "Division", true, false, false),
+        }, 1, 0);
+        var held = TacticalReserveCommitGate.HeldResolution(
+            new[] { new CommandNodeOperationalState("node-300", CommandEchelonKind.DivisionLike, CommandNodeRole.Reserve, CommandTaskType.ReserveWait, CommandTaskState.Committed) },
+            300, 0, new CommandIntentResolution(false, default, "unused"));
+        AssertEqual(DirectChildRole.Reserve, held.Intent.Role, "the ledger holds the division in reserve");
+
+        foreach (bool released in new[] { true, false })
+        {
+            var nodes = CommandTreeIntentAllocator.Allocate(tree, new[] { Intent(DirectChildRole.SupportMain, released, groupId: 200) });
+            CommandIntentResolution viaTree = CommandIntentResolver.ResolveForInstance(300, nodes);
+            AssertTrue(viaTree.Found, "the division resolves through the tree");
+            AssertEqual(released, viaTree.Intent.ReleasedFromReserve, "the division carries its corps' mark (" + released + ")");
+            AssertEqual(released, TacticalReserveCommitGate.ReleasedByAllocator(held, viaTree),
+                "vanilla's commit is allowed " + (released ? "for a real release" : "never for a role from the evidence"));
+
+            CommandIntentResolution viaFallback = CommandIntentResolver.ResolveForInstance(200, Array.Empty<CommandNodeIntent>(),
+                new[] { Intent(DirectChildRole.SupportMain, released, groupId: 200) });
+            AssertEqual(released, viaFallback.Intent.ReleasedFromReserve, "the direct-child fallback carries the mark (" + released + ")");
+        }
+        var decision = TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(playerControlled: false,
+            reserveReleased: TacticalReserveCommitGate.ReleasedByAllocator(held,
+                CommandIntentResolver.ResolveForInstance(300, CommandTreeIntentAllocator.Allocate(tree, new[] { Intent(DirectChildRole.SupportMain, false, groupId: 200) })))));
+        AssertEqual(TacticalReserveCommitGate.Action.Deny, decision.Action, "the gate denies the evidence-tier role");
+    }
+
+    private static void TheAllocatorSharesTheOnePooledArray()
+    {
+        string allocator = FlankResponseTests.SourceText("Tactical", "Orchestrator", "DirectChildAllocator.cs");
+        FlankResponseTests.AssertPinned(allocator, "bool[] heldByBase = ReserveFlags(roles);", "the base reserves come from the pooled array");
+        FlankResponseTests.AssertPinned(allocator, "ReleaseReserves(plan, evidence, roles, release, snapshots, guards, heldByBase);", "and the release reads that same array");
+        FlankResponseTests.AssertPinned(allocator, "(baseReserve ?? ReserveFlags(roles))", "a caller with none (the leaf release) gets the pooled one");
+        AssertFalse(FlankResponseTests.Flat(allocator).Contains("heldByBase = new bool["), "no array of its own per allocation");
+
+        // Behaviour across calls of different sizes: a stale tail of the pool never marks a child of a smaller allocation.
+        var personality = new PersonalityVector(0.2f, 0f, 0f, 0f, 0f);
+        DirectChildEvidence[] five =
+        {
+            new DirectChildEvidence(3, 1, true, 0, 3, 0.8f), new DirectChildEvidence(3, 0, false, 1, 0, 0.7f, deployedReserve: true),
+            new DirectChildEvidence(3, 1, true, 2, 0, 0.8f), new DirectChildEvidence(3, 0, false, 3, 0, 0.7f, deployedReserve: true),
+            new DirectChildEvidence(3, 1, true, 4, 3, 0.8f),
+        };
+        var big = DirectChildAllocator.AllocateWithZones(Plan(), personality, Children(5), five, null, null, new ReserveReleaseContext(0.5f));
+        AssertTrue(big[1].ReleasedFromReserve && big[3].ReleasedFromReserve, "both reserves of the big allocation were released");
+        DirectChildEvidence[] two = { new DirectChildEvidence(3, 1, false, 0, 0, 0.8f), new DirectChildEvidence(3, 1, true, 2, 0, 0.8f) };
+        var small = DirectChildAllocator.AllocateWithZones(Plan(), personality, Children(2), two, null, null, new ReserveReleaseContext(0.5f));
+        AssertFalse(small[0].ReleasedFromReserve || small[1].ReleasedFromReserve, "a smaller allocation after a bigger one marks nothing the pool still held");
     }
 
     private static void TheProducerIsWiredToTheRules()

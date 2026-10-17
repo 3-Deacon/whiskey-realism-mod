@@ -91,14 +91,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// The reserve-release producer: <paramref name="held"/> (the resolution the
         /// gate acts on, ledger state first) still says Reserve while
         /// <paramref name="allocator"/> (the command-node intent the direct-child
-        /// allocator produced) has re-roled the group to a committed role.
+        /// allocator produced) has RELEASED the group to a committed role
+        /// (<see cref="CommandNodeIntent.ReleasedFromReserve"/>). A role the evidence tiers gave a group the ledger still holds is a disagreement the
+        /// ledger resolves, not a release (the rule of <see cref="TryReleasedDirectChild"/>): vanilla's reserve commit stays denied for it.
         /// </summary>
         public static bool ReleasedByAllocator(CommandIntentResolution held, CommandIntentResolution allocator)
         {
             if (!held.Found || held.Intent.Role != DirectChildRole.Reserve) return false;
             if (!allocator.Found) return false;
             DirectChildRole role = allocator.Intent.Role;
-            return role != DirectChildRole.Reserve && role != DirectChildRole.Unknown;
+            return role != DirectChildRole.Reserve && role != DirectChildRole.Unknown && allocator.Intent.ReleasedFromReserve;
         }
 
         /// <summary>CheckUseOfReserves 6084: vanilla returns for an inactive group or a regiment-level unit (unittyp &lt;= 13).</summary>

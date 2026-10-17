@@ -492,10 +492,10 @@ internal static class ReserveMigrationTests
             beforePaths: 0, afterPaths: afterPaths, beforeQueue: 0, afterQueue: 0, useOrderDelays: useOrderDelays);
     }
 
-    private static CommandIntentResolution Resolved(DirectChildRole role)
+    private static CommandIntentResolution Resolved(DirectChildRole role, bool released = true)
     {
         return new CommandIntentResolution(true,
-            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0), "test");
+            new CommandNodeIntent("node-1", "node-1", role, DirectChildAxis.Hold, 0, 0, 0, released), "test");
     }
 
     // released: the allocation's own release (DirectChildIntent.ReleasedFromReserve); false is a role the evidence tiers gave.

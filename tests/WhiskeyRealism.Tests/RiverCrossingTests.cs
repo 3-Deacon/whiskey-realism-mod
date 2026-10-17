@@ -631,19 +631,47 @@ internal static class RiverCrossingTests
         AssertEqual(CrossingVerdict.ViaCrossing, Decide(p, 100f, 100f, 700f, 100f), "and built again when the next battle asks");
     }
 
+    // The graph's edges: ordered pairs of links that share a land region (the rule's own adjacency), counted by brute force from the picture.
+    private static long AdjacencyEntries(ICrossingPicture picture)
+    {
+        Span<int> a = stackalloc int[RiverCrossingRule.MaxRegionsPerLink], b = stackalloc int[RiverCrossingRule.MaxRegionsPerLink];
+        long entries = 0;
+        for (int u = 0; u < picture.LinkCount; u++)
+        {
+            int na = picture.RegionsOfLink(u, a);
+            for (int v = 0; v < picture.LinkCount; v++)
+            {
+                if (v == u) continue;
+                int nb = picture.RegionsOfLink(v, b);
+                bool shares = false;
+                for (int i = 0; i < na && !shares; i++)
+                    for (int j = 0; j < nb && !shares; j++)
+                        shares = a[i] == b[j];
+                if (shares) entries++;
+            }
+        }
+        return entries;
+    }
+
     private static void TheSearchOver252LinksIsBounded()
     {
         var wide = new Wide();
         AssertEqual(252, wide.LinkCount, "(fixture) 252 links");
         RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out CrossingRoute warm);
         AssertEqual(3, warm.Crossings, "the leg over three rivers is routed link by link");
-        const int calls = 400;
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        for (int i = 0; i < calls; i++) RiverCrossingRule.Decide(wide, 100f + i % 7, 400f, 1700f, 400f, out _);
-        watch.Stop();
-        double ms = watch.Elapsed.TotalMilliseconds / calls;
-        Console.WriteLine("INFO RIVER-ROUTE 252 links, 3 crossings: " + ms.ToString("0.000") + " ms a call (adjacency built once per map)");
-        AssertTrue(ms < 1.0, "a call over 252 links stays under a millisecond: " + ms);
+        // The bound is the search's work, not a clock (a wall-clock limit failed under load): every link is expanded at most once and each
+        // expansion relaxes only the edges of that link, so one call is bounded by the links and by the graph's undirected edges (a pair is relaxed only from the end expanded first).
+        long expandedBefore = RiverCrossingRule.ExpandedLinks, relaxedBefore = RiverCrossingRule.RelaxedEdges;
+        RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out _);
+        long expanded = RiverCrossingRule.ExpandedLinks - expandedBefore, relaxed = RiverCrossingRule.RelaxedEdges - relaxedBefore;
+        Console.WriteLine("INFO RIVER-ROUTE 252 links, 3 crossings: " + expanded + " links expanded, " + relaxed + " of " + AdjacencyEntries(wide) / 2 + " edges relaxed a call");
+        AssertTrue(expanded > 0, "(control) the search counts its work: " + expanded);
+        AssertTrue(expanded <= wide.LinkCount, "a call expands each of the 252 links at most once: " + expanded);
+        AssertTrue(relaxed <= AdjacencyEntries(wide) / 2, "and relaxes each edge of the graph at most once, from the end expanded first (E/2 = " + AdjacencyEntries(wide) / 2 + "): " + relaxed);
+        // The work does not grow across calls (the adjacency is built once per map, and nothing accumulates).
+        long beforeMany = RiverCrossingRule.ExpandedLinks;
+        for (int i = 0; i < 50; i++) RiverCrossingRule.Decide(wide, 100f + i % 7, 400f, 1700f, 400f, out _);
+        AssertEqual(50 * expanded, RiverCrossingRule.ExpandedLinks - beforeMany, "50 calls cost 50 times one");
         long begin = TestFixtures.BeginAllocationWindow();
         for (int i = 0; i < 100; i++) RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out _);
         AssertEqual(0L, TestFixtures.AllocatedSince(begin), "and allocates nothing once the adjacency is built");

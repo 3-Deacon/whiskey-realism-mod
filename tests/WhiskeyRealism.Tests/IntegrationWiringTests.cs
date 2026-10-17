@@ -26,10 +26,10 @@ internal static class IntegrationWiringTests
         Console.WriteLine("PASS " + name);
     }
 
-    private static CommandIntentResolution Resolved(DirectChildRole role)
+    private static CommandIntentResolution Resolved(DirectChildRole role, bool released = true)
         => new CommandIntentResolution(true,
             new CommandNodeIntent("node-200", "node-200", role, DirectChildAxis.Hold,
-                primarySector: 2, supportPriority: 50, depth: 1),
+                primarySector: 2, supportPriority: 50, depth: 1, releasedFromReserve: released),
             "test");
 
     private static readonly CommandIntentResolution NotFound = new CommandIntentResolution(false, default, "missing");
@@ -41,6 +41,9 @@ internal static class IntegrationWiringTests
         var held = Resolved(DirectChildRole.Reserve);
         TestHarness.AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain)), "re-roled to support");
         TestHarness.AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Fix)), "re-roled to crisis fix");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain, released: false)),
+            "a role from the evidence tiers is no release: vanilla's commit stays denied (smoke 2026-10-17)");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Main, released: false)), "Main from the evidence");
         TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Reserve)), "allocator still holds it");
         TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Unknown)), "no allocator opinion");
         TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, NotFound), "allocator unresolved");

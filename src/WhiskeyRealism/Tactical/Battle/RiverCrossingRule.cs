@@ -336,6 +336,12 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        /// <summary>
+        /// The search's work, counted for the harness (a deterministic bound where a clock would flake): links taken off the frontier and edges relaxed,
+        /// summed over every <see cref="Search"/> since the process began. A call expands each link at most once.
+        /// </summary>
+        internal static long ExpandedLinks, RelaxedEdges;
+
         // Dijkstra over the admitted links: a link's cost is the straight distance from the point the group is at when it takes it. The start
         // links are those of the start region; the route ends at a link of the target region. Returns the links in order; 0 when none.
         private static int Search(Graph g, ICrossingPicture p, ReadOnlySpan<bool> admit, float x0, float z0, float x1, float z1, int from, int to, Span<int> path)
@@ -361,6 +367,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (!done[i] && dist[i] < best) { best = dist[i]; u = i; }
                 if (u < 0 || best >= total) break;      // nothing left that can beat the route found
                 done[u] = true;
+                ExpandedLinks++;
                 if (Touches(g, u, to))
                 {
                     float through = dist[u] + Distance(g.X[u], g.Z[u], x1, z1);
@@ -370,6 +377,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     int v = g.Neighbours[e];
                     if (done[v] || !admit[v]) continue;
+                    RelaxedEdges++;
                     float via = dist[u] + g.Weight[e];
                     if (via < dist[v]) { dist[v] = via; prev[v] = u; }
                 }

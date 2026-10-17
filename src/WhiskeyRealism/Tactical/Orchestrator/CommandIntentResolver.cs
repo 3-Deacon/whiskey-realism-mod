@@ -81,7 +81,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         direct.Axis,
                         direct.PrimarySector,
                         (int)Math.Round(direct.SupportPriority01 * 100f),
-                        depth: 0),
+                        depth: 0,
+                        releasedFromReserve: direct.ReleasedFromReserve),
                     "o3-direct-child-fallback");
             }
 

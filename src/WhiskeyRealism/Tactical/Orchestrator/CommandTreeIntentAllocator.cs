@@ -58,7 +58,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     directIntent.Axis,
                     directIntent.PrimarySector,
                     (int)Math.Round(directIntent.SupportPriority01 * 100f),
-                    node.Depth);
+                    node.Depth,
+                    directIntent.ReleasedFromReserve);
             }
 
             var parentNodeId = node.ParentNodeId;
@@ -73,7 +74,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         parentIntent.Axis,
                         parentIntent.PrimarySector,
                         parentIntent.SupportPriority,
-                        node.Depth);
+                        node.Depth,
+                        parentIntent.ReleasedFromReserve);
                 }
 
                 parentByNode.TryGetValue(parentNodeId, out parentNodeId);

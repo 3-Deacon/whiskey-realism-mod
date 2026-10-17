@@ -353,10 +353,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             GuardPoint[] guards = GuardScratch(snapshots.Count);
             // The base allocation's Reserve children: only these can be released. A child the evidence tiers already gave a committed role is not
-            // released by it (the reserve-release producer moves a released child only, TacticalReserveCommitGate.TryReleasedDirectChild).
-            var heldByBase = new bool[roles.Length];
-            for (int i = 0; i < roles.Length; i++) heldByBase[i] = roles[i] == DirectChildRole.Reserve;
-            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards);
+            // released by it (the reserve-release producer moves a released child only, TacticalReserveCommitGate.TryReleasedDirectChild). The one pooled
+            // array (ReserveFlags) is read again below for the intents and handed to the release for its hysteresis: valid until the next ReserveFlags call.
+            bool[] heldByBase = ReserveFlags(roles);
+            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards, heldByBase);
 
             var intents = new DirectChildIntent[snapshots.Count];
             for (int i = 0; i < snapshots.Count; i++)
@@ -423,10 +423,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildRole[] roles,
             ReserveReleaseContext release,
             IReadOnlyList<DirectChildSnapshot> snapshots,
-            GuardPoint[] guards)
+            GuardPoint[] guards,
+            bool[] wasReserve = null)
         {
             var axisOverride = new int[roles.Length];
-            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride);
+            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride, wasReserve);
             return axisOverride;
         }
 
@@ -438,13 +439,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ReserveReleaseContext release,
             IReadOnlyList<DirectChildSnapshot> snapshots,
             GuardPoint[] guards,
-            int[] axisOverride)
+            int[] axisOverride,
+            bool[] baseReserve = null)
         {
             for (int i = 0; i < roles.Length; i++) axisOverride[i] = -1;
 
             bool exploit = plan.Phase == BattlePhase.Exploit;
             bool oddsReached = plan.ReserveCommitTriggerOdds > 0f && release.GlobalOdds >= plan.ReserveCommitTriggerOdds;
-            bool[] wasReserve = release.Hysteresis != null ? ReserveFlags(roles) : null;
+            // baseReserve: the caller's flags of the roles as they stand now (ReserveFlags), else computed here when the hysteresis needs them.
+            bool[] wasReserve = release.Hysteresis != null ? (baseReserve ?? ReserveFlags(roles)) : null;
 
             if (release.Staggered)
             {
