@@ -97,6 +97,8 @@ internal static class OrdnancePinTests
         var beats = Cand(5, wsf: 2.0f);
         var trails = Cand(3, wsf: 1.2f);
         AssertEqual(3, Pick(0f, 5, beats, trails).Id, "an enemy never seen gives no edge term: the tie goes to the lower id");
+        AssertNear(0.35f + 0.20f * 0.75f + 0.20f + 0.15f * 0.5f, Pick(0f, 5, beats).Score, 1e-5f, "...and a lone candidate scores without the edge's tenth when the enemy is unseen");
+        AssertNear(0.35f + 0.20f * 0.75f + 0.20f + 0.15f * 0.5f + 0.10f, Pick(1.5f, 5, beats).Score, 1e-5f, "...with it when it beats a believed quality");
         var edge = Pick(1.5f, 5, beats, trails);
         AssertEqual(5, edge.Id, "a believed enemy lane quality that one model beats and the other does not gives the edge");
         AssertEqual(PickReason.Edge, edge.Reason, "named");
@@ -138,7 +140,9 @@ internal static class OrdnancePinTests
         string runtime = Src("Strategic/Planner/EnemyDetectionRuntime.cs");
         AssertTrue(runtime.Contains("RifleQuality = ") && runtime.Contains("GunQuality = "), "the detection runtime records both lanes at the sighting");
         AssertTrue(runtime.Contains("SightedQuality") && runtime.Contains("AICampaign.GetWeaponStrengthFactor("), "from vanilla's own per-model WSF, split by the model's isari");
-        AssertTrue(CountOccurrences(runtime, "QualityOf(") >= 3, "for a field group, an objective garrison and the rollback list");
+        AssertEqual(3, CountOccurrences(runtime, "RifleQuality = quality.Rifle"), "for a field group, an objective garrison and the rollback list");
+        AssertEqual(3, CountOccurrences(runtime, "GunQuality = quality.Gun"), "both lanes each time");
+        AssertEqual(3, CountOccurrences(runtime, "= QualityOf("), "each from the group the side sees");
     }
 
     private static void AlliancesTwoToFourIgnored()
@@ -207,6 +211,8 @@ internal static class OrdnancePinTests
         AssertTrue(opens.Contains("CampaignPlannerRuntime.ExecutorsEnabled()"), "and the planner's executors flag");
         string tryPick = BodyOf(runtime, "internal static bool TryPick(");
         AssertTrue(tryPick.Contains("OrdnancePicker.Pick("), "the decision is the pure one");
+        AssertTrue(HasLine(tryPick, "picked = choice.Id;"), "the runtime hands the pure choice back");
+        AssertTrue(HasLine(tryPick, "return choice.Id != vanillaPick;"), "and says whether it differs from vanilla's pick");
         AssertTrue(tryPick.Contains("OrdnancePicker.NeedsPriceRead("), "a price is read only for candidates that can win");
         AssertTrue(tryPick.Contains("GameVars.alliance[alliance].weaponorders[j].quantity > 0"), "vanilla's open-order test (16296)");
     }
