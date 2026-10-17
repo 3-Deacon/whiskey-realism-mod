@@ -33,6 +33,11 @@ internal static partial class BattleLodTests
             ("bc15 CLAIM a renewed claim, a carried source, a due group and a Full group wake nothing", ClaimWakeControls),
             ("bc15 CLAIM the intent a lapsed claim hid executes on the tick it lapses, as at full rate", HiddenIntentSurfacesOnLapse),
             ("bc15 CLAIM the wake-up runs the tiered producers once more for the woken groups alone", WakePassIsWired),
+            ("bc15 CLAIM a lapsed claim on a regiment or battery under a Distant group wakes the group, and the groups above it", SubUnitClaimWakesTheGroup),
+            ("bc15 CLAIM the lapsed units are listed once each, from the published table, grown when full", LapsedUnitsAreCollected),
+            ("bc15 TIE second-pass intents go in where their producer's first-pass block ended, so a same-priority tie is won as at full rate", SecondPassKeepsFullRateTieOrder),
+            ("bc15 TIE the tick records each producer's block end and inserts each tiered producer's second-pass block there", TieOrderIsWired),
+            ("bc15 SCOPES the lapse scan and each second-pass producer have their own scope names", WakeScopesAreTagged),
         };
     }
 
@@ -501,7 +506,7 @@ internal static partial class BattleLodTests
         int producers = At(tick, "producer.Produce(snapshot, arbiter);");
         int wake = At(tick, "BattleLodRuntime.WakeLapsedClaims(snapshot, arbiter, now) > 0", producers);
         int begin = At(tick, "BattleLodRuntime.BeginWakePass();", wake);
-        int tiered = At(tick, "if (!BattleLodRuntime.IsTieredProducer(producer.Name)) continue;", begin);
+        int tiered = At(tick, "if (!BattleLodRuntime.IsTieredProducer(producer.Name) || p >= _producerEnds.Length) continue;", begin);
         int end = At(tick, "BattleLodRuntime.EndWakePass();", tiered);
         int resolve = At(tick, "winners = arbiter.Resolve(_winners);", end);
         AssertTrue(producers < wake && wake < begin && begin < tiered && tiered < end && end < resolve,
@@ -518,5 +523,209 @@ internal static partial class BattleLodTests
             flagAt < At(runtime, "BattleLod.WakeLapsedClaims(s, state, arbiter, nowHours)", wakeAt), "and only with the flag on");
         AssertTrue(Regex.IsMatch(Source(PostureFile), @"if \(!BattleLodRuntime\.InWakePass\) t\.Records\.Carry\(t\.Groups, i, rec\.InstanceId\);"),
             "the second pass does not put last tick's row over a group that ran in the first");
+    }
+
+    // ---- sub-unit claims ----
+
+    private static LodWorld DistantDivisionWorld()
+    {
+        // division 50 over brigades 100 and 101, each with two regiments; both brigades and the division Distant and not due on one tick.
+        LodWorld w = QuietWorld(2);
+        w.Division(50, 0, 1075f, 1000f);
+        w.Unit(100).ParentId = 50;
+        w.Unit(101).ParentId = 50;
+        for (int t = 0; t < 24; t++)
+        {
+            w.Tick();
+            if (w.Tier(50) == LodTier.Distant && w.Tier(100) == LodTier.Distant && w.Tier(101) == LodTier.Distant &&
+                !w.Due(50) && !w.Due(100) && !w.Due(101)) return w;
+        }
+        throw new Exception("the division and its brigades were never all Distant and not due on one tick");
+    }
+
+    private static void SubUnitClaimWakesTheGroup()
+    {
+        // The claim of a Full-only producer on a regiment (fire control's combat behavior, a charge) lapses: its brigade is woken, and so is the division above.
+        LodWorld w = DistantDivisionWorld();
+        OrderArbiter arbiter = PublishedArbiter(PlayClaim(1001, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        arbiter.BeginTick();
+        AssertFalse(arbiter.HasLapsedUncarriedClaim(100), "precondition: the brigade's own cells hold no lapsed claim");
+        AssertEqual(2, BattleLod.WakeLapsedClaims(w.S, w.State, arbiter, w.Hours), "the brigade and the division are woken");
+        AssertTrue(w.State.IsClaimWoken(w.S.IndexOfOwn(100)) && w.State.IsClaimWoken(w.S.IndexOfOwn(50)), "named for the second pass");
+        AssertEqual(LodPromotion.Claim, w.State.LastPromotion(w.S.IndexOfOwn(100)), "for the claim");
+        AssertEqual(LodTier.Distant, w.State.TierOf(w.S.IndexOfOwn(101)), "the sibling brigade, which has no lapsed claim below it, stays Distant");
+        AssertFalse(w.State.IsClaimWoken(w.S.IndexOfOwn(101)), "and is not named");
+        AssertFalse(w.State.IsClaimWoken(w.S.IndexOfOwn(1001)), "a regiment is never named: its group's producers decide for it");
+
+        // The same claim renewed, or a claim of a carried source, wakes nothing.
+        LodWorld renewed = DistantDivisionWorld();
+        OrderArbiter keeps = PublishedArbiter(PlayClaim(1001, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        keeps.BeginTick();
+        keeps.Submit(PlayClaim(1001, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        AssertEqual(0, BattleLod.WakeLapsedClaims(renewed.S, renewed.State, keeps, renewed.Hours), "a renewed claim on a regiment");
+        LodWorld tiered = DistantDivisionWorld();
+        OrderArbiter facing = PublishedArbiter(PlayClaim(1001, OrderChannel.Facing, IntentSource.FacingPulse, IntentPriority.Scorer));
+        facing.BeginTick();
+        AssertEqual(0, BattleLod.WakeLapsedClaims(tiered.S, tiered.State, facing, tiered.Hours), "a claim of a tiered source on a regiment");
+
+        // A claim on a regiment of the other brigade wakes that brigade only.
+        LodWorld other = DistantDivisionWorld();
+        OrderArbiter b = PublishedArbiter(PlayClaim(1011, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        b.BeginTick();
+        BattleLod.WakeLapsedClaims(other.S, other.State, b, other.Hours);
+        AssertTrue(other.State.IsClaimWoken(other.S.IndexOfOwn(101)) && !other.State.IsClaimWoken(other.S.IndexOfOwn(100)), "the brigade that owns the regiment");
+
+        // The marks of one call do not outlive it: a lapse seen while brigade 100 was due must not wake it on a later tick for another brigade's lapse.
+        LodWorld later = DistantDivisionWorld();
+        for (int k = 0; k < 40 && !(later.Tier(100) == LodTier.Distant && later.Due(100)); k++) later.Tick();
+        AssertTrue(later.Tier(100) == LodTier.Distant && later.Due(100), "precondition: brigade 100 is Distant and on its due tick");
+        OrderArbiter first = PublishedArbiter(PlayClaim(1001, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        first.BeginTick();
+        BattleLod.WakeLapsedClaims(later.S, later.State, first, later.Hours);
+        AssertFalse(later.State.IsClaimWoken(later.S.IndexOfOwn(100)), "a due group is not woken");
+        for (int k = 0; k < 40 && !(later.Tier(100) == LodTier.Distant && !later.Due(100) && later.Tier(101) == LodTier.Distant && !later.Due(101)); k++) later.Tick();
+        AssertTrue(later.Tier(100) == LodTier.Distant && !later.Due(100) && later.Tier(101) == LodTier.Distant && !later.Due(101), "precondition: both brigades asleep");
+        OrderArbiter second = PublishedArbiter(PlayClaim(1011, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        second.BeginTick();
+        BattleLod.WakeLapsedClaims(later.S, later.State, second, later.Hours);
+        AssertTrue(later.State.IsClaimWoken(later.S.IndexOfOwn(101)), "brigade 101 is woken for its regiment's lapse");
+        AssertFalse(later.State.IsClaimWoken(later.S.IndexOfOwn(100)), "and brigade 100 is not woken by the mark the first call left");
+
+        // A regiment under a Full group: nothing to wake.
+        LodWorld full = QuietWorld();
+        full.Tick();
+        OrderArbiter c = PublishedArbiter(PlayClaim(1001, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        c.BeginTick();
+        AssertEqual(0, BattleLod.WakeLapsedClaims(full.S, full.State, c, full.Hours), "a Full group runs its producers already");
+
+        // A unit the snapshot does not know (a dead regiment): ignored.
+        LodWorld stale = DistantNotDueWorld();
+        OrderArbiter d = PublishedArbiter(PlayClaim(99999, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        d.BeginTick();
+        AssertEqual(0, BattleLod.WakeLapsedClaims(stale.S, stale.State, d, stale.Hours), "a claim on a unit that is gone");
+    }
+
+    private static void LapsedUnitsAreCollected()
+    {
+        // 40 units with a lapsed claim on two channels each, one with a renewed claim, one of a carried source: 40 listed, once each, through a small array.
+        var claims = new List<BattleOrderIntent>();
+        for (int u = 0; u < 40; u++)
+        {
+            claims.Add(PlayClaim(5000 + u, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+            claims.Add(PlayClaim(5000 + u, OrderChannel.Stance, IntentSource.Withdrawal, IntentPriority.Safety));
+        }
+        claims.Add(PlayClaim(6000, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        claims.Add(PlayClaim(6001, OrderChannel.Facing, IntentSource.FacingPulse, IntentPriority.Scorer));
+        OrderArbiter arbiter = PublishedArbiter(claims.ToArray());
+        arbiter.BeginTick();
+        arbiter.Submit(PlayClaim(6000, OrderChannel.CombatBehavior, IntentSource.FireControl, IntentPriority.Executor));
+        int[] ids = new int[4];
+        int count = arbiter.CollectLapsedUncarriedClaims(ref ids);
+        AssertEqual(40, count, "forty units, once each; the renewed claim and the carried source are not listed");
+        AssertTrue(ids.Length >= 40, "the array grew");
+        var seen = new HashSet<int>();
+        for (int k = 0; k < count; k++) AssertTrue(seen.Add(ids[k]) && ids[k] >= 5000 && ids[k] < 5040, "unit " + ids[k]);
+        int[] before = ids;
+        arbiter.CollectLapsedUncarriedClaims(ref ids);
+        AssertTrue(ReferenceEquals(before, ids), "a second collection allocates nothing");
+        AssertEqual(0, new OrderArbiter().CollectLapsedUncarriedClaims(ref ids), "an arbiter with no published claim lists nothing");
+    }
+
+    // ---- tie order ----
+
+    private static void SecondPassKeepsFullRateTieOrder()
+    {
+        // The cell (100, Stance): the group stance (Scorer, a tiered source) and a later Full-only producer's intent of the same priority.
+        BattleOrderIntent stance = PlayClaim(100, OrderChannel.Stance, IntentSource.GroupStanceScorer, IntentPriority.Scorer);
+        BattleOrderIntent later = PlayClaim(100, OrderChannel.Stance, IntentSource.Withdrawal, IntentPriority.Scorer);
+        var winners = new BattleOrderIntent[8];
+
+        var fullRate = new OrderArbiter();
+        fullRate.BeginTick();
+        fullRate.Submit(stance);
+        fullRate.Submit(later);
+        fullRate.Resolve(winners);
+        AssertEqual(IntentSource.GroupStanceScorer, winners[0].Source, "at full rate the producer that submitted first wins the tie");
+
+        var appended = new OrderArbiter();
+        appended.BeginTick();
+        appended.Submit(later);
+        appended.Submit(stance);   // a second pass that only appends
+        appended.Resolve(winners);
+        AssertEqual(IntentSource.Withdrawal, winners[0].Source, "control: appended after the later producer, the stance loses the tie");
+
+        var inserted = new OrderArbiter();
+        inserted.BeginTick();
+        inserted.Submit(PlayClaim(200, OrderChannel.Stance, IntentSource.PostureExecutor, IntentPriority.Executor));   // an earlier producer's intent for another group
+        int blockEnd = inserted.IntentCount;                                                                      // the end of the stance producer's first-pass block
+        inserted.Submit(later);
+        inserted.BeginInsert(blockEnd);
+        inserted.Submit(stance);
+        AssertEqual(1, inserted.EndInsert(), "one intent inserted");
+        AssertEqual(3, inserted.IntentCount, "and counted");
+        inserted.Resolve(winners);
+        AssertEqual(IntentSource.GroupStanceScorer, FindWinner(winners, 8, 100, OrderChannel.Stance).Source, "inserted at the end of its block, the stance wins the tie as at full rate");
+
+        // Several inserts keep their order, and a later block's position moves by what the earlier ones inserted.
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(PlayClaim(1, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));      // 0: producer A
+        int endA = arbiter.IntentCount;
+        arbiter.Submit(PlayClaim(2, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));      // 1: producer B
+        int endB = arbiter.IntentCount;
+        arbiter.Submit(PlayClaim(3, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));      // 2: a later producer
+        int shift = 0;
+        arbiter.BeginInsert(endA + shift);
+        arbiter.Submit(PlayClaim(11, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));
+        arbiter.Submit(PlayClaim(12, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));
+        shift += arbiter.EndInsert();
+        arbiter.BeginInsert(endB + shift);
+        arbiter.Submit(PlayClaim(21, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));
+        shift += arbiter.EndInsert();
+        AssertEqual(3, shift, "three inserted in all");
+        var order = new BattleOrderIntent[16];
+        int n = arbiter.Resolve(order);
+        var ids = new List<int>();
+        for (int k = 0; k < n; k++) ids.Add(order[k].GroupId);
+        AssertEqual("1,11,12,2,21,3", string.Join(",", ids), "the winners come out in the order a full-rate tick would have submitted them");
+
+        // A new tick ends any insertion and an out-of-range position is clamped.
+        arbiter.BeginInsert(99);
+        arbiter.BeginTick();
+        arbiter.Submit(PlayClaim(7, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));
+        AssertEqual(1, arbiter.IntentCount, "BeginTick ends an insertion left open");
+        arbiter.BeginInsert(99);
+        arbiter.Submit(PlayClaim(8, OrderChannel.Move, IntentSource.Withdrawal, IntentPriority.Safety));
+        AssertEqual(1, arbiter.EndInsert(), "an out-of-range position is clamped to the end");
+    }
+
+    private static BattleOrderIntent FindWinner(BattleOrderIntent[] winners, int n, int group, OrderChannel channel)
+    {
+        for (int k = 0; k < n; k++) if (winners[k].GroupId == group && winners[k].Channel == channel) return winners[k];
+        throw new Exception("no winner for group " + group + " on " + channel);
+    }
+
+    private static void TieOrderIsWired()
+    {
+        string tick = Source(TickFile);
+        AssertTrue(Regex.IsMatch(tick, @"if \(p < _producerEnds\.Length\) _producerEnds\[p\] = arbiter\.IntentCount;"), "each producer's block end is recorded after it ran");
+        int wake = At(tick, "BattleLodRuntime.BeginWakePass();");
+        int insert = At(tick, "arbiter.BeginInsert(_producerEnds[p] + shift);", wake);
+        int produce = At(tick, "producer.Produce(snapshot, arbiter);", insert);
+        int end = At(tick, "shift += arbiter.EndInsert();", produce);
+        AssertTrue(wake < insert && insert < produce && produce < end, "the second pass inserts at the block end, shifted by what earlier blocks put in");
+        AssertTrue(Regex.IsMatch(tick, @"finally\s*\{\s*shift \+= arbiter\.EndInsert\(\);\s*\}"), "and the insertion always ends");
+    }
+
+    private static void WakeScopesAreTagged()
+    {
+        string runtime = Source(RuntimeFile);
+        AssertTrue(runtime.Contains("TelemetryPerf.Scope(\"tactical.lod.wake\", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5)"), "the lapse scan has its own scope");
+        const string posture = "src/WhiskeyRealism/Tactical/Battle/Producers/PostureIntentProducer.cs";
+        AssertTrue(Source(posture).Contains("Scope(BattleLodRuntime.InWakePass ? \"tactical.producer.posture.wake\" : \"tactical.producer.posture\","), "the posture producer's second pass has its own name");
+        AssertTrue(Source(posture).Contains("Scope(BattleLodRuntime.InWakePass ? \"tactical.producer.facing-pulse.wake\" : \"tactical.producer.facing-pulse\","), "the facing pulse's too");
+        AssertTrue(Source("src/WhiskeyRealism/Tactical/Battle/Producers/GroupStanceIntentProducer.cs")
+            .Contains("Scope(BattleLodRuntime.InWakePass ? \"tactical.producer.group-stance.wake\" : \"tactical.producer.group-stance\","), "and the group stance's");
+        AssertTrue(Source("docs/telemetry.md").Contains("tactical.lod.wake") && Source("docs/telemetry.md").Contains(".posture.wake"), "documented");
     }
 }

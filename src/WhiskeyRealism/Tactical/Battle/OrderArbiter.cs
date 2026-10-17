@@ -87,7 +87,27 @@ namespace WhiskeyRealism.Tactical.Battle
         public void BeginTick()
         {
             _intentCount = 0;
+            _insertAt = -1;
             _working.Clear();
+        }
+
+        // BC15 decision 14: the second pass of the tiered producers submits at the place its producer's first-pass block ended, so a same-priority
+        // tie between sources resolves as it would have at full rate, where the tiered producers submit before the Full-only ones that follow them.
+        private int _insertAt = -1;
+        private int _inserted;
+
+        /// <summary>Intents submitted from now until <see cref="EndInsert"/> go in at position <paramref name="at"/> (clamped) instead of at the end.</summary>
+        public void BeginInsert(int at)
+        {
+            _insertAt = at < 0 ? 0 : at > _intentCount ? _intentCount : at;
+            _inserted = 0;
+        }
+
+        /// <summary>Ends the insertion; returns how many intents it put in, so the caller can move the later producers' positions.</summary>
+        public int EndInsert()
+        {
+            _insertAt = -1;
+            return _inserted;
         }
 
         public void Submit(in BattleOrderIntent intent)
@@ -102,6 +122,14 @@ namespace WhiskeyRealism.Tactical.Battle
             if (channel < 0 || channel >= OrderChannels.Count) return;
             if (_intentCount == _intents.Length)
                 System.Array.Resize(ref _intents, _intents.Length * 2);
+            if (_insertAt >= 0)
+            {
+                System.Array.Copy(_intents, _insertAt, _intents, _insertAt + 1, _intentCount - _insertAt);
+                _intents[_insertAt++] = intent;
+                _intentCount++;
+                _inserted++;
+                return;
+            }
             _intents[_intentCount++] = intent;
         }
 
@@ -209,14 +237,38 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool HasLapsedUncarriedClaim(int groupId)
         {
             for (int c = 0; c < OrderChannels.Count; c++)
-            {
-                if (!_published.TryGet(groupId, (OrderChannel)c, out BattleOrderIntent claim) || BattleLod.IsCarriedSource(claim.Source)) continue;
-                bool renewed = false;
-                for (int i = 0; i < _intentCount && !renewed; i++)
-                    renewed = _intents[i].GroupId == groupId && (int)_intents[i].Channel == c && _intents[i].Source == claim.Source;
-                if (!renewed) return true;
-            }
+                if (LapsedUncarried(groupId, c)) return true;
             return false;
+        }
+
+        /// <summary>
+        /// The units (a group, a regiment, a battery) with a lapsed non-carried claim, see <see cref="HasLapsedUncarriedClaim"/>, written to
+        /// <paramref name="unitIds"/> (grown when full, so it allocates only on a new high) without repeats. The tier pass folds them up the
+        /// command tree: a lapsed claim on a regiment under a Distant group wakes that group.
+        /// </summary>
+        public int CollectLapsedUncarriedClaims(ref int[] unitIds)
+        {
+            int count = 0;
+            for (int slot = 0; slot < _published.SlotCount; slot++)
+            {
+                int id = _published.GroupAt(slot);
+                for (int c = 0; c < OrderChannels.Count; c++)
+                {
+                    if (!LapsedUncarried(id, c)) continue;
+                    if (unitIds == null || count == unitIds.Length) System.Array.Resize(ref unitIds, unitIds == null ? 16 : unitIds.Length * 2);
+                    unitIds[count++] = id;
+                    break;
+                }
+            }
+            return count;
+        }
+
+        private bool LapsedUncarried(int groupId, int channel)
+        {
+            if (!_published.TryGet(groupId, (OrderChannel)channel, out BattleOrderIntent claim) || BattleLod.IsCarriedSource(claim.Source)) return false;
+            for (int i = 0; i < _intentCount; i++)
+                if (_intents[i].GroupId == groupId && (int)_intents[i].Channel == channel && _intents[i].Source == claim.Source) return false;
+            return true;
         }
 
         /// <summary>
@@ -263,6 +315,9 @@ namespace WhiskeyRealism.Tactical.Battle
             // BC15: the cell was copied from last tick's published claim for a Distant group that is not due, not submitted this tick.
             public bool[] Carried = new bool[64 * OrderChannels.Count];
             public int SlotCount;
+            private int[] _groupBySlot = new int[64];
+
+            public int GroupAt(int slot) => _groupBySlot[slot];
 
             public void Clear()
             {
@@ -277,6 +332,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (!_slotByGroup.TryGetValue(groupId, out int slot))
                 {
                     slot = SlotCount++;
+                    if (slot == _groupBySlot.Length) System.Array.Resize(ref _groupBySlot, _groupBySlot.Length * 2);
+                    _groupBySlot[slot] = groupId;
                     if (SlotCount * OrderChannels.Count > Has.Length)
                     {
                         System.Array.Resize(ref Winners, Winners.Length * 2);

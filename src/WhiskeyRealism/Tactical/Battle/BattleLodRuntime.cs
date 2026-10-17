@@ -185,20 +185,23 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// Decision 14, after every producer submitted and before Resolve: promotes the Distant groups whose non-carried claim lapsed
-        /// (<see cref="BattleLod.WakeLapsedClaims"/>) and empties their carried posture row, so the second pass of the tiered producers fills it
+        /// (<see cref="BattleLod.WakeLapsedClaims"/>, scope tactical.lod.wake) and empties their carried posture row, so the second pass of the tiered producers fills it
         /// afresh. Returns the number of groups woken; the caller then brackets the second pass with <see cref="BeginWakePass"/>/<see cref="EndWakePass"/>.
         /// </summary>
         internal static int WakeLapsedClaims(BattleSnapshot s, OrderArbiter arbiter, double nowHours)
         {
             BattleLodState state = BattleLodState.ForAlliance(s.Alliance);
             if (state == null || arbiter == null || !Plugin.BattleAiLevelOfDetailEnabled()) return 0;
-            int woken = BattleLod.WakeLapsedClaims(s, state, arbiter, nowHours);
-            if (woken == 0) return 0;
-            PostureTick.State tick = PostureTick.Current(s);
-            if (tick != null)
-                for (int i = 0; i < s.OwnCount; i++)
-                    if (state.IsClaimWoken(i)) tick.Groups[i] = default(GroupPosture);
-            return woken;
+            using (TelemetryPerf.Scope("tactical.lod.wake", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
+            {
+                int woken = BattleLod.WakeLapsedClaims(s, state, arbiter, nowHours);
+                if (woken == 0) return 0;
+                PostureTick.State tick = PostureTick.Current(s);
+                if (tick != null)
+                    for (int i = 0; i < s.OwnCount; i++)
+                        if (state.IsClaimWoken(i)) tick.Groups[i] = default(GroupPosture);
+                return woken;
+            }
         }
 
         internal static bool InWakePass => _wakePass;

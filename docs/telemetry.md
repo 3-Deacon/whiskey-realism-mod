@@ -146,6 +146,8 @@ Non-patch scopes:
 | `tactical.arbiter.resolve` | 0.5 ms | `OrderArbiter.Resolve` in the arbiter tick (#68) |
 | `tactical.arbiter.execute` | 2.0 ms | outcomes, retries and winner execution in the arbiter tick |
 | `tactical.lod` | 0.5 ms | BC15 `BattleLodRuntime.BeginTick`: the tier pass and the carry, once per arbiter tick per side (plan estimate under 0.2 ms) |
+| `tactical.lod.wake` | 0.5 ms | BC15 decision 14 `BattleLodRuntime.WakeLapsedClaims`: the scan for lapsed claims of Full-only producers on a Distant group, its regiments and batteries, once per arbiter tick per side after the producers |
+| `tactical.producer.group-stance.wake`, `.posture.wake`, `.facing-pulse.wake` | 2.0 ms | BC15 decision 14: the second pass of the three tiered producers for the groups a lapsed claim woke, named apart from their first pass so a tick's totals stay readable (the sub-scopes `.posture.nav-plan` and `.road-route` keep their names) |
 | `tactical.producer.<name>` | 2.0 ms | each producer's `Produce` (`withdrawal`, `artillery`, `artillery-point-blank`, `group-stance`, `charge-demotion`, `posture` (+ `.nav-plan`), `facing-pulse`, `fire-control`, `play`, `reserve-release`, `charge`) |
 | `tactical.dispatch.emit` | 2.0 ms | `TacticalPlayerDispatchRuntime.Emit` (W&L dispatch) |
 | `tactical.terrain-grid.build` | 2.0 ms | BC10 `BattleTerrainGridRuntime.Get`: the one-time copy of the terrain-id array |

@@ -209,7 +209,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         public void Produce(BattleSnapshot s, IIntentSink sink)
         {
-            using (TelemetryPerf.Scope("tactical.producer.posture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.posture.wake" : "tactical.producer.posture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PostureTick.State t = PostureTick.For(s);
                 if (t == null || sink == null) return;
@@ -1834,7 +1834,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         public void Produce(BattleSnapshot s, IIntentSink sink)
         {
-            using (TelemetryPerf.Scope("tactical.producer.facing-pulse", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.facing-pulse.wake" : "tactical.producer.facing-pulse", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 if (Plugin.EnableTacticalContactFacingPulse == null || !Plugin.EnableTacticalContactFacingPulse.Value) return;
                 PostureTick.State t = PostureTick.Current(s);

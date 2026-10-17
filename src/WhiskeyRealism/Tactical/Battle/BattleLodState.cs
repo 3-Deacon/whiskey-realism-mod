@@ -77,6 +77,9 @@ namespace WhiskeyRealism.Tactical.Battle
         internal bool[] Hot = new bool[BattleSnapshot.InitialCapacity];
         internal bool[] Unsettled = new bool[BattleSnapshot.InitialCapacity];
         private bool[] _claimWoken = new bool[BattleSnapshot.InitialCapacity];
+        // Wake scratch: the units whose claim lapsed, and for each own index whether one lies at or under it.
+        internal int[] LapsedUnits = new int[16];
+        internal bool[] LapsedBelow = new bool[BattleSnapshot.InitialCapacity];
         internal float[] SubtreeRadius = new float[BattleSnapshot.InitialCapacity];
         internal float[] ChangedX = new float[64];
         internal float[] ChangedZ = new float[64];
@@ -241,6 +244,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 Hot = new bool[size];
                 Unsettled = new bool[size];
                 _claimWoken = new bool[size];
+                LapsedBelow = new bool[size];
                 SubtreeRadius = new float[size];
             }
             Array.Clear(_tier, 0, n);

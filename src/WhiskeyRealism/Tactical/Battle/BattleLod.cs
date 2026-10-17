@@ -222,23 +222,39 @@ namespace WhiskeyRealism.Tactical.Battle
         /// The late wake-up for a lapsed claim (decision 14), called after every producer submitted and before Resolve. A producer that runs on every
         /// tick (the division play, a withdrawal, a charge) can hold a cell of a Distant group with a claim that outranks the group's own tiered
         /// producers; at full rate the intent it hides surfaces on the tick the claim goes. A Distant group that is not due, whose last published
-        /// non-carried claim on a cell was not renewed this tick, is promoted now and the caller runs the tiered producers for it. Returns the
+        /// non-carried claim on a cell of it or of a unit under it was not renewed this tick, is promoted now and the caller runs the tiered producers for it. Returns the
         /// number of groups woken; <see cref="BattleLodState.IsClaimWoken"/> names them.
         /// </summary>
         public static int WakeLapsedClaims(BattleSnapshot s, BattleLodState state, OrderArbiter arbiter, double nowHours)
         {
             if (s == null || state == null || arbiter == null) return 0;
+            int lapsed = arbiter.CollectLapsedUncarriedClaims(ref state.LapsedUnits);
+            if (lapsed == 0) return 0;
+            int n = s.OwnCount;
             UnitRecord[] own = s.Own;
-            int woken = 0;
-            for (int i = 0; i < s.OwnCount; i++)
+            if (state.LapsedBelow.Length < n) state.LapsedBelow = new bool[Math.Max(n, state.LapsedBelow.Length * 2)];
+            Array.Clear(state.LapsedBelow, 0, n);
+            // A lapsed claim on a unit counts for every group above it, as an unsettled order does (FoldUnsettled): the regiment and the battery
+            // are the Full-only producers' targets as much as the group is.
+            for (int k = 0; k < lapsed; k++)
             {
-                // The two tests before the lapse test only spare it the cost for a regiment and a due group; PromoteNow is the rule: it takes a group
-                // of a snapshot the pass covered that is Distant and not due, and nothing else.
-                if ((own[i].Flags & UnitFlags.IsGroup) == 0 || state.IsDue(i)) continue;
-                int id = own[i].InstanceId;
-                if (!arbiter.HasLapsedUncarriedClaim(id) || !state.PromoteNow(s, i, LodPromotion.Claim, nowHours)) continue;
+                int a = s.IndexOfOwn(state.LapsedUnits[k]);
+                for (int steps = 0; a >= 0 && a < n && steps <= n; steps++)
+                {
+                    state.LapsedBelow[a] = true;
+                    a = own[a].ParentIndex;
+                }
+            }
+
+            int woken = 0;
+            for (int i = 0; i < n; i++)
+            {
+                // The two tests before PromoteNow only spare it a call for a regiment and a due group; PromoteNow is the rule: it takes a group of a
+                // snapshot the pass covered that is Distant and not due, and nothing else.
+                if (!state.LapsedBelow[i] || (own[i].Flags & UnitFlags.IsGroup) == 0 || state.IsDue(i)) continue;
+                if (!state.PromoteNow(s, i, LodPromotion.Claim, nowHours)) continue;
                 state.MarkClaimWoken(i);
-                arbiter.DropCarried(id);
+                arbiter.DropCarried(own[i].InstanceId);
                 woken++;
             }
             return woken;
