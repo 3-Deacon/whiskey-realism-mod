@@ -447,7 +447,8 @@ namespace WhiskeyRealism.Tactical.Operations
             CommandDoctrineOrder order,
             CommandPhysicalState physical,
             WriteEligibilitySnapshot eligibility,
-            float nowSeconds)
+            float nowSeconds,
+            bool holdLane = false)
         {
             if (!eligibility.ModeAllowsWrites)
             {
@@ -563,6 +564,9 @@ namespace WhiskeyRealism.Tactical.Operations
                         "fallback-line",
                         PostureExecutionTarget.DoctrineFallbackTarget,
                         clearInterruptedPaths: true);
+                case CommandTaskType.HoldObjective when holdLane && WorksHoldGuard.Holds(order.Task, order.Reason) && order.PreGuardTask == CommandTaskType.FixEnemy:
+                    // BC14W: a former fix whose lane lies outside the works band still goes to its lane and holds and fires there.
+                    return FormationAndWaypoint("fix-lane-hold", PostureExecutionTarget.DoctrinePrimaryTarget);
                 default:
                     return Decide(
                         new CommandNodeOperationalState(
@@ -1185,6 +1189,85 @@ namespace WhiskeyRealism.Tactical.Operations
     public static class WorksHoldGuard
     {
         public const string Reason = "works-hold";
+
+        /// <summary>The one predicate every reader keys on: the task is HoldObjective and the reason is the guard's (a later rewrite that changes either is no longer the guard's).</summary>
+        public static bool Holds(CommandTaskType task, string reason)
+            => task == CommandTaskType.HoldObjective && string.Equals(reason, Reason, StringComparison.Ordinal);
+
+        /// <summary>
+        /// A guarded former fix whose lane (the order's primary target, 170 units from the line objective) lies outside the works band still goes to
+        /// it and holds and fires there; every other guarded order holds where it stands.
+        /// </summary>
+        public static bool LaneOpen(in CommandDoctrineOrder order, IWorksQuery works)
+            => works != null && Holds(order.Task, order.Reason) && order.PreGuardTask == CommandTaskType.FixEnemy && order.PrimaryTarget.HasValue
+               && !works.InWorksBand(order.PrimaryTarget.X, order.PrimaryTarget.Z);
+
+        /// <summary>
+        /// Whether the context calls for turning <paramref name="task"/> into a hold. While the hold is on, a node whose top-level child assaults or
+        /// faces works (and that BC11 does not hold) stops attacking: an attack, a support attack and a fix become holds. A breach exploit (Gap,
+        /// Penetration) passes, as does one of any other kind aimed off the works; a Probe and every holding task pass unchanged.
+        /// </summary>
+        public static bool Guards(in WorksGuardContext context, CommandTaskType task)
+        {
+            if (!context.WorksHold) return false;
+            if (task != CommandTaskType.AttackObjective && task != CommandTaskType.SupportAttack && task != CommandTaskType.FixEnemy) return false;
+            if (context.IsExploit)
+                return context.ExploitKind != OpeningKind.Gap && context.ExploitKind != OpeningKind.Penetration && context.ExploitAimOnWorks;
+            return context.FacesWorks && !context.InManeuverTable;
+        }
+
+        /// <summary>The order, guarded when the context calls for it (true), else unchanged.</summary>
+        public static bool Apply(in CommandDoctrineOrder order, in WorksGuardContext context, out CommandDoctrineOrder guarded)
+        {
+            if (!Guards(in context, order.Task))
+            {
+                guarded = order;
+                return false;
+            }
+            guarded = order.WithWorksHold(order.Task);
+            return true;
+        }
+
+        /// <summary>The command state, guarded when the context calls for it (true), else unchanged.</summary>
+        public static bool ApplyState(in CommandNodeOperationalState state, in WorksGuardContext context, out CommandNodeOperationalState guarded)
+        {
+            if (!Guards(in context, state.Task))
+            {
+                guarded = state;
+                return false;
+            }
+            guarded = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, CommandTaskType.HoldObjective, state.TaskState,
+                state.X, state.Z, state.FacingDegrees, Reason, state.Task);
+            return true;
+        }
+
+        /// <summary>The leaf entry, guarded when the context calls for it (true): its task becomes a hold and it is marked, every other field forwarded.</summary>
+        public static bool ApplyLeaf(in TacticalLeafBrigadeMap.LeafAssignment leaf, in WorksGuardContext context, out TacticalLeafBrigadeMap.LeafAssignment guarded)
+        {
+            if (!Guards(in context, leaf.LeafTask))
+            {
+                guarded = leaf;
+                return false;
+            }
+            guarded = new TacticalLeafBrigadeMap.LeafAssignment(leaf.InstanceId, leaf.DisplayName, leaf.LeafRole, CommandTaskType.HoldObjective,
+                leaf.CascadeChain, leaf.ParentNameChain, leaf.TopLevelChildIndex, worksHeld: true);
+            return true;
+        }
+    }
+
+    /// <summary>What the works hold guard needs to know about one node, leaf or exploit order (requirement-works-hold).</summary>
+    public struct WorksGuardContext
+    {
+        /// <summary>The ledger's works hold is on.</summary>
+        public bool WorksHold;
+        /// <summary>The node's top-level child assaults or faces works.</summary>
+        public bool FacesWorks;
+        /// <summary>BC11 holds the node (it is in the side's maneuver table): the maneuver, not the guard, owns its order.</summary>
+        public bool InManeuverTable;
+        /// <summary>The order or state is an exploit's (the asset's or a follower's), with the exploit's opening kind and whether its aim lies on held works.</summary>
+        public bool IsExploit;
+        public OpeningKind ExploitKind;
+        public bool ExploitAimOnWorks;
     }
 
     public static class PostureIntentPlan

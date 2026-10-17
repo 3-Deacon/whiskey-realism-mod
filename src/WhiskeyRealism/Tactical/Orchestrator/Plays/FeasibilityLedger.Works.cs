@@ -73,6 +73,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public int WorksHoldHash => _worksHash;
 
         /// <summary>
+        /// The latest built evaluation's works picture (single-buffered: it can be one evaluation ahead of the published results; works do not move,
+        /// so the difference is the pieces perceived since). Null with the flag off or before the first evaluation.
+        /// </summary>
+        public IWorksQuery HeldWorks => _job.WorksActive ? _job.Works : null;
+
+        /// <summary>
         /// A candidate of the evaluation in progress (other than FocalAssault) is a turn that can be made: it has an enveloping body, every enveloping
         /// body strikes off held works, no body is after dark, and it is not Impossible (requirement-focal-assault's <c>turn-available</c>).
         /// </summary>

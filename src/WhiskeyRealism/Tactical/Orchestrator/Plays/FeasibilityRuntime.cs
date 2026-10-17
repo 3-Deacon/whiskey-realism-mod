@@ -168,6 +168,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // BC14W: the works hold follows BC11's phases every heavy tick, not only when the sliced monitor finishes a run.
                 st.World.Bind(snapshot, regions);
                 st.Ledger.RefreshWorksHold(st.World);
+                ExploitTable.ForAlliance(army.AllianceId).SetWorksView(st.Ledger.WorksHold(out _), st.Ledger.HeldWorks);
 
                 if (forced) return;
 

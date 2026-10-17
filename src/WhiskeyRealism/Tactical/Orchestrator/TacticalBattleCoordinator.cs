@@ -344,6 +344,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         }
 
         /// <summary>
+        /// BC14W: whether a command state's strength counts as the operation's assigned strength (T14): the node is tasked to attack or support, or was
+        /// before the works hold guard turned its attack into a hold (a former FixEnemy never counted), so the director's input neither drops nor rises
+        /// under the hold.
+        /// </summary>
+        internal static class OperationStrength
+        {
+            internal static bool CountsAsAssigned(Operations.CommandTaskType task, Operations.CommandTaskType preGuardTask)
+                => IsAssigned(task) || IsAssigned(preGuardTask);
+
+            private static bool IsAssigned(Operations.CommandTaskType task)
+                => task == Operations.CommandTaskType.AttackObjective || task == Operations.CommandTaskType.SupportAttack;
+        }
+
+        /// <summary>
         /// T14 operation strength filter for one unit of a tasked node's allattachedunits:
         /// combat units only (unittyp &lt;= MaxCombat), with vanilla GetAttachedUnitsReg's
         /// default filters (no dechained units, no skirmisher companies 3/4, no inactive or

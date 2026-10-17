@@ -427,9 +427,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 }
 
                 CommandIntentResolution resolution = army.ResolveCommandIntentForGroup(0, instanceId);
-                return resolution.Found &&
+                bool built = resolution.Found &&
                     CommandNodeOperationsRuntime.TryBuildSingle(resolution.Intent, army.CurrentOperation,
                         side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);
+                // BC14W: a state built here is not one the store guarded; it passes the same guard with this side's context.
+                if (built) state = army.GuardFallback(in state);
+                return built;
             }
             catch
             {

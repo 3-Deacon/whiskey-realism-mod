@@ -1094,8 +1094,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
         private string _leafBrigadeMapSignature = string.Empty;
 
+        /// <summary>
+        /// The leaf map the posture producers read. While the works hold is on, a cached copy whose entries under a child that faces works are
+        /// guarded (<see cref="TacticalLeafBrigadeMap.LeafAssignment.WorksHeld"/>); it is rebuilt when the leaf map, the hold hash or the maneuvers change.
+        /// </summary>
         public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
-            => _leafBrigadeMap;
+            => WorksHoldOn ? GuardedLeafMap() : _leafBrigadeMap;
+
+        private string[] _leafTopChildIds = Array.Empty<string>();
+        private readonly Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _guardedLeafMap = new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _guardedLeafSource;
+        private int _guardedLeafHoldHash, _guardedLeafManeuverHash;
+
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> GuardedLeafMap()
+        {
+            int hash = _feasibility.WorksHoldHash;
+            if (ReferenceEquals(_guardedLeafSource, _leafBrigadeMap) && _guardedLeafHoldHash == hash && _guardedLeafManeuverHash == _maneuverHash)
+                return _guardedLeafMap;
+            _guardedLeafMap.Clear();
+            foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in _leafBrigadeMap)
+            {
+                TacticalLeafBrigadeMap.LeafAssignment leaf = pair.Value;
+                var context = new WorksGuardContext { WorksHold = true };
+                int top = leaf.TopLevelChildIndex;
+                if (top >= 0 && top < _leafTopChildIds.Length)
+                {
+                    context.FacesWorks = _feasibility.FacesWorks(_leafTopChildIds[top]);
+                    context.InManeuverTable = _worksManeuverNodes.TryGet(
+                        WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_leafTopChildIds[top]), out _);
+                }
+                WorksHoldGuard.ApplyLeaf(in leaf, in context, out TacticalLeafBrigadeMap.LeafAssignment guarded);
+                _guardedLeafMap[pair.Key] = guarded;
+            }
+            _guardedLeafSource = _leafBrigadeMap;
+            _guardedLeafHoldHash = hash;
+            _guardedLeafManeuverHash = _maneuverHash;
+            return _guardedLeafMap;
+        }
 
         // The Defender's reserve trace of the latest leaf map: one record per holding command that split among
         // two or more subordinates (what it had, what it holds back, why). Empty for an army that is not the Defender.
@@ -1220,12 +1255,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0) return;
 
             var topAssignments = new List<TacticalLeafBrigadeMap.TopAssignment>(_directChildIntents.Count);
+            var topChildIds = new List<string>(_directChildIntents.Count);
             for (int i = 0; i < _directChildIntents.Count; i++)
             {
                 int instanceId = TacticalBattleCoordinator.ParseInstanceIdFromChildId(_directChildIntents[i].ChildId);
                 if (instanceId == 0) continue;
                 topAssignments.Add(new TacticalLeafBrigadeMap.TopAssignment(instanceId, _directChildIntents[i].Role));
+                topChildIds.Add(_directChildIntents[i].ChildId);
             }
+            // BC14W: LeafAssignment.TopLevelChildIndex indexes the top assignments, which skip a child with no instance id.
+            _leafTopChildIds = topChildIds.ToArray();
 
             float aggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
             if (aggression01 < 0f) aggression01 = 0f;
@@ -1539,11 +1578,99 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
-            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
-                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents),
+            // BC14W (requirement-works-hold): while the works hold is on, the command states are guarded first, in place; the orders built from them
+            // (which take their task from each node's role, not from the state) are then guarded into the army's own array. The ledger's own list
+            // stays as it built it. Both stored products are guarded in this one store, before any reader of the tick.
+            ManeuverNodeTable maneuverNodes =
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents);
+            _worksManeuverNodes = maneuverNodes;
+            bool worksHold = WorksHoldOn;
+            if (worksHold) GuardStates(copiedCommandOperations);
+            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance, maneuverNodes,
                 HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
-            _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
+            _currentDoctrineOrders = worksHold ? GuardOrders(ledger.CurrentDoctrineOrders) : ledger.CurrentDoctrineOrders;
+        }
+
+        // ---- BC14W: the works hold on the stored products (requirement-works-hold) ----
+
+        private ManeuverNodeTable _worksManeuverNodes = new ManeuverNodeTable();
+        private readonly List<CommandDoctrineOrder> _guardedOrders = new List<CommandDoctrineOrder>(64);
+        private string[] _childNodeIds = Array.Empty<string>();
+
+        /// <summary>The ledger's works hold is on and Enable Enemy Works Doctrine is: the stored orders, states and leaf entries of the children that face works are guarded.</summary>
+        internal bool WorksHoldOn => Plugin.EnemyWorksDoctrineEnabled() && _feasibility != null && _feasibility.WorksHold(out _);
+
+        // The node id of each direct child ("node-" + the child's instance id), refreshed when the children change.
+        private string[] ChildNodeIds()
+        {
+            int n = _directChildIntents.Count;
+            bool same = _childNodeIds.Length == n;
+            for (int i = 0; same && i < n; i++)
+                same = string.Equals(_childNodeIds[i], WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_directChildIntents[i].ChildId), StringComparison.Ordinal);
+            if (same) return _childNodeIds;
+            _childNodeIds = new string[n];
+            for (int i = 0; i < n; i++) _childNodeIds[i] = WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_directChildIntents[i].ChildId);
+            return _childNodeIds;
+        }
+
+        // The top-level child a command node belongs to (CommandNodeIntent.SourceNodeId is the child's own node), or -1.
+        private int ChildIndexOfNode(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return -1;
+            string source = nodeId;
+            for (int i = 0; i < _commandNodeIntents.Count; i++)
+            {
+                if (!string.Equals(_commandNodeIntents[i].NodeId, nodeId, StringComparison.Ordinal)) continue;
+                source = _commandNodeIntents[i].SourceNodeId;
+                break;
+            }
+            string[] ids = ChildNodeIds();
+            for (int i = 0; i < ids.Length; i++)
+                if (string.Equals(ids[i], source, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
+        /// <summary>What the guard needs to know about a command node: whether the ledger has its child assaulting or facing works and whether BC11 holds the node.</summary>
+        internal WorksGuardContext WorksContextOfNode(string nodeId)
+        {
+            int child = ChildIndexOfNode(nodeId);
+            return new WorksGuardContext
+            {
+                WorksHold = true,
+                FacesWorks = child >= 0 && _feasibility != null && _feasibility.FacesWorks(_directChildIntents[child].ChildId),
+                InManeuverTable = _worksManeuverNodes.TryGet(nodeId, out _),
+            };
+        }
+
+        private void GuardStates(CommandNodeOperationalState[] states)
+        {
+            for (int i = 0; i < states.Length; i++)
+                if (WorksHoldGuard.ApplyState(in states[i], WorksContextOfNode(states[i].NodeId), out CommandNodeOperationalState guarded))
+                    states[i] = guarded;
+        }
+
+        private IReadOnlyList<CommandDoctrineOrder> GuardOrders(IReadOnlyList<CommandDoctrineOrder> orders)
+        {
+            _guardedOrders.Clear();
+            for (int i = 0; i < orders.Count; i++)
+            {
+                CommandDoctrineOrder order = orders[i];
+                WorksHoldGuard.Apply(in order, WorksContextOfNode(order.NodeId), out CommandDoctrineOrder guarded);
+                _guardedOrders.Add(guarded);
+            }
+            return _guardedOrders;
+        }
+
+        /// <summary>
+        /// A command state the fallback builder made for a group the ledger has no state for (PostureLedger.TryResolveState's TryBuildSingle), guarded
+        /// with this side's context: the node is the group's own, found through the allocated command intents.
+        /// </summary>
+        internal CommandNodeOperationalState GuardFallback(in CommandNodeOperationalState state)
+        {
+            if (!WorksHoldOn) return state;
+            WorksHoldGuard.ApplyState(in state, WorksContextOfNode(state.NodeId), out CommandNodeOperationalState guarded);
+            return guarded;
         }
 
         /// <summary>Test-only: directly install a plan without going through a playbook.</summary>

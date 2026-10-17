@@ -115,6 +115,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool ViaPassed, AttackViaPassed;
         /// <summary>The spec's HoldsForRelease.</summary>
         public bool HoldsForRelease;
+        /// <summary>
+        /// BC14W (requirement-works-hold): the works hold is <c>hopeless-assault</c> and this body assaults works (or it is a start delay of the plan):
+        /// the Hold is kept, its ceiling suppressed and its latched release and budget cleared. See <see cref="EnvelopmentManeuver.HoldForWorksFor"/>.
+        /// </summary>
+        public bool HoldForWorks;
     }
 
     public struct ManeuverState
@@ -140,6 +145,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float ViaX, ViaZ;
         public bool HasAttackVia;
         public float AttackViaX, AttackViaZ;
+
+        /// <summary>BC14W: the hour the works hold last cleared (latched when <see cref="ManeuverInput.HoldForWorks"/> turns false after a hold), beside its flag.</summary>
+        public bool HasWorksClear;
+        public double WorksClearHours;
     }
 
     public struct ManeuverOrder
@@ -190,6 +199,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>FlankMove's river check step on the inward leg (CheckTerrainLine(..., 2f)).</summary>
         public const float InwardStepMeters = 2f;
         public const float MarchStepMeters = 10f;
+
+        /// <summary>
+        /// BC14W: whether the maneuver of a body holds for the works. Only the <c>hopeless-assault</c> hold sets it, for a body that assaults works and
+        /// for a start delay of the plan (the focal assault's support); <c>turn-not-struck</c> never does: the turning wing must march.
+        /// </summary>
+        public static bool HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay) => false;
 
         // ---- the state machine ---------------------------------------------------------------
 

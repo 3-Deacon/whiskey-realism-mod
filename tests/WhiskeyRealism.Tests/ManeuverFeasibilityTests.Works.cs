@@ -15,5 +15,7 @@ internal static partial class ManeuverFeasibilityTests
         into.AddRange(WorksPictureTests());      // ManeuverFeasibilityTests.Works.Picture.cs (task 3)
         into.AddRange(WorksPricingTests());      // ManeuverFeasibilityTests.Works.Pricing.cs (task 4)
         into.AddRange(WorksFocalTests());        // ManeuverFeasibilityTests.Works.Focal.cs (task 5)
+        into.AddRange(WorksGuardTests());        // ManeuverFeasibilityTests.Works.Guard.cs (task 6)
+        into.AddRange(WorksOrderTests());        // ManeuverFeasibilityTests.Works.Orders.cs (task 6)
     }
 }

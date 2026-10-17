@@ -81,8 +81,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 CommandTaskType leafTask,
                 IReadOnlyList<DirectChildRole> cascadeChain,
                 IReadOnlyList<string> parentNameChain,
-                int topLevelChildIndex)
+                int topLevelChildIndex,
+                bool worksHeld = false)
             {
+                WorksHeld = worksHeld;
                 InstanceId = instanceId;
                 DisplayName = displayName ?? string.Empty;
                 LeafRole = leafRole;
@@ -99,6 +101,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             public IReadOnlyList<DirectChildRole> CascadeChain { get; }
             public IReadOnlyList<string> ParentNameChain { get; }
             public int TopLevelChildIndex { get; }
+
+            /// <summary>BC14W: the works hold guard turned the leaf's attack into a hold (the task is then HoldObjective); only the guard's own copy sets it.</summary>
+            public bool WorksHeld { get; }
 
             public string CascadeChainString
             {

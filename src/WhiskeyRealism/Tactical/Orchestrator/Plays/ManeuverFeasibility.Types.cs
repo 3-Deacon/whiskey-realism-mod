@@ -187,6 +187,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>BC14W: a hash of the works hold, its reason and the set of children that face works; a change forces a store of the stored orders.</summary>
         int WorksHoldHash { get; }
+
+        /// <summary>BC14W: the held works of the latest built evaluation (the exploit guard, the probe nomination and the lane check ask it); null with none.</summary>
+        IWorksQuery HeldWorks { get; }
     }
 
     /// <summary>
