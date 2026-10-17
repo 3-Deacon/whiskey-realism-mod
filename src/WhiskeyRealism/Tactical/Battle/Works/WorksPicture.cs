@@ -555,6 +555,31 @@ namespace WhiskeyRealism.Tactical.Battle
             return false;
         }
 
+        /// <summary>
+        /// The works at a strike point have been broken in (the integrator's stance rule, verify round 2): the point lies within the lateral extent of a
+        /// known segment (its pieces or holders; a point off every known segment says nothing, so false), and either no holder stands within
+        /// <see cref="WorksRules.FrontageReachMeters"/> of it (the works there are carried or abandoned) or at least <see cref="WorksRules.ShakenShareMin"/> of
+        /// their strength stands below <see cref="WorksRules.ShakenMorale"/> (shaken). Holders are accepted observations only, so a hidden regiment
+        /// changes nothing.
+        /// </summary>
+        public bool StrikeBrokenIn(float x, float z)
+        {
+            if (!_axis.IsValid || SegmentCount == 0) return false;
+            float lateral = _axis.LateralOf(x, z);
+            bool known = false;
+            for (int sg = 0; sg < SegmentCount && !known; sg++)
+                known = lateral >= _segments[sg].LateralMin - WorksRules.WorksEndMeters && lateral <= _segments[sg].LateralMax + WorksRules.WorksEndMeters;
+            if (!known) return false;
+            float near = 0f, shaken = 0f;
+            for (int h = 0; h < _holderCount; h++)
+            {
+                if (Math.Abs(_ilat[h] - lateral) > WorksRules.FrontageReachMeters) continue;
+                near += _hw[h];
+                if (_hmorale[h] < WorksRules.ShakenMorale) shaken += _hw[h];
+            }
+            return !(near > 0f) || shaken / near >= WorksRules.ShakenShareMin;
+        }
+
         public bool InWorksBand(float x, float z)
         {
             if (HeldSegmentCount == 0 || !_axis.IsValid) return false;

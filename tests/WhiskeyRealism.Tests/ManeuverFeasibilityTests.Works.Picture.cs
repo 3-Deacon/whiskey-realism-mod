@@ -23,6 +23,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w WORKS-FOG a hidden entrenched regiment and an unperceived piece change nothing, the same perceived change the picture", WFog),
         ("bc14w WORKS-LINES the pieces of several lines, one per model object, build one picture; a piece below half done or destroyed is absent", WLines),
         ("bc14w WORKS-OWN a Defender's own works are its regiments in works cover and the pieces within the gap of them or in its zone", WOwn),
+        ("bc14w WORKS-BROKEN-IN a strike point is broken in when the works around it hold no one, or 40% of the strength within 300 of it is shaken; elsewhere on the works, or off the known works, it is not", WBrokenIn),
         ("bc14w FEAS-PIN-W the BC14W sources read no enemy record, scheduledarrival, durationleft, occupiedby, fortificationpoints or march literal", WFeasPin),
     };
 
@@ -418,5 +419,43 @@ internal static partial class ManeuverFeasibilityTests
             string literal = FirstMarchLiteral(text);
             AssertTrue(literal == null, Path.GetFileName(file) + " carries a vanilla literal: " + literal);
         }
+    }
+
+    // The integrator's ruling (verify round 2): a fix facing works is pinned at stance 2 until the strike it pins for has broken in. "Broken in" is read
+    // from the picture: the holders within WorksRules.FrontageReachMeters of the strike point are gone (the works there are known and empty) or
+    // WorksRules.ShakenShareMin of their strength is below WorksRules.ShakenMorale. Fog-honest by construction: only accepted observations are holders.
+    static void WBrokenIn()
+    {
+        var points = new Points().Line(-600f, 600f, 50f, l => 600f);
+        float sx = X(-300f), sz = Z(600f);
+
+        // Control: a line of healthy holders is not broken in at any point.
+        WorksPicture healthy = BuildEnemy(Snapshot(Sample(-300f, 600f, 1000f), Sample(0f, 600f, 1000f), Sample(300f, 600f, 1000f)), points);
+        AssertTrue(healthy.OnHeldWorks(sx, sz), "control: the strike point is on held works");
+        AssertFalse(healthy.StrikeBrokenIn(sx, sz), "healthy holders: not broken in");
+
+        // Shaken: 40% of the strength within reach is below 0.45; 30% is not.
+        WorksPicture shaken = BuildEnemy(Snapshot(Sample(-300f, 600f, 400f, morale: 0.3f), Sample(-250f, 600f, 600f), Sample(300f, 600f, 1000f)), points);
+        AssertTrue(shaken.StrikeBrokenIn(sx, sz), "40% of the strength near the strike shaken: broken in");
+        WorksPicture most = BuildEnemy(Snapshot(Sample(-300f, 600f, 300f, morale: 0.3f), Sample(-250f, 600f, 700f), Sample(300f, 600f, 1000f)), points);
+        AssertFalse(most.StrikeBrokenIn(sx, sz), "30% shaken: not broken in");
+        WorksPicture edge = BuildEnemy(Snapshot(Sample(-300f, 600f, 400f, morale: 0.45f), Sample(-250f, 600f, 600f)), points);
+        AssertFalse(edge.StrikeBrokenIn(sx, sz), "morale exactly 0.45 is not shaken");
+
+        // Shaken holders far from the strike do not count for it.
+        WorksPicture far = BuildEnemy(Snapshot(Sample(-300f, 600f, 1000f), Sample(500f, 600f, 1000f, morale: 0.1f)), points);
+        AssertFalse(far.StrikeBrokenIn(sx, sz), "shaken holders 800 away: not this strike's");
+        AssertTrue(far.StrikeBrokenIn(X(500f), Z(600f)), "and broken in at their own");
+
+        // Carried: the pieces there are perceived (the works are known) but no holder stands within reach of the strike.
+        WorksPicture carried = BuildEnemy(Snapshot(Sample(450f, 600f, 1000f)), points);
+        AssertTrue(carried.StrikeBrokenIn(sx, sz), "known works, nobody within 300 of the strike: carried");
+        AssertFalse(carried.StrikeBrokenIn(X(450f), Z(600f)), "control: where the holder stands it is not");
+
+        // Fog: a hidden regiment and an unknown stretch say nothing. No pieces perceived there and no holder: the picture covers nothing there.
+        WorksPicture unknown = BuildEnemy(Snapshot(Sample(450f, 600f, 1000f)), new Points());
+        AssertFalse(unknown.StrikeBrokenIn(sx, sz), "no works known at the strike: not broken in");
+        AssertFalse(healthy.StrikeBrokenIn(X(1500f), Z(600f)), "beyond the segment's extent: not broken in");
+        AssertFalse(new WorksPicture().StrikeBrokenIn(sx, sz), "an empty picture breaks in nothing");
     }
 }
