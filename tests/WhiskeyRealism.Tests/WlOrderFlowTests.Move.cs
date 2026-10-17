@@ -469,7 +469,9 @@ internal static partial class WlOrderFlowTests
         AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.CarrierUnitId != 0 && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.CarrierUnitId = call\.CarrierUnitId;\s*entry\.CarrierTime = call\.CarrierTime;\s*\}"),
             "Route arms an entry from the call's carrier and only while couriers are on");
         AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "no other origin is armed: vanilla's own orders are timed as before");
-        AssertTrue(BodyOf(code, "public MoveState MoveOf(").Contains("WlMoveQueue.StateOf(carrier, e.CarrierTime)"), "the host asks about the carrier unit and its entry");
+        string moveOf = BodyOf(code, "public MoveState MoveOf(");
+        AssertTrue(moveOf.Contains("Regiment carrier = ResolveUnit(e.CarrierUnitId);") && moveOf.Contains("WlMoveQueue.StateOf(carrier, e.CarrierTime)"),
+            "the host asks about the carrier unit (not the ordered unit) and its entry");
         string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
         AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.processingtime, carrierProcessingTime)"), "only an entry that carries the order counts");
         AssertTrue(queue.Contains("line.type == 1") && queue.Contains("line.targetunit") && queue.Contains("line.courierref == null"),
