@@ -164,7 +164,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.Consolidate:
                 case CommandTaskType.ReserveWait:
                 case CommandTaskType.ReleaseReserve:
-                case CommandTaskType.RecoverStuckOrder:
                     return 0;
                 case CommandTaskType.Screen:
                 case CommandTaskType.Probe:

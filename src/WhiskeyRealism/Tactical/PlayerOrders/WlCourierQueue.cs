@@ -25,6 +25,16 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public PlayerOrderCandidate P62Candidate;
         // What the order is for, for the condition lines under vanilla's text (Whiskey origins).
         public OrderIntentKind Kind;
+        // An executor dispatch made while the move it accompanies was still in its superior's order queue
+        // (WlMoveCarrier): the superior has not got that order yet, so the player is not told until it has.
+        // Carrier is the queued move that carries the order (the ordered unit's, or the latest child's of a
+        // fan-out): its unit, entry identity and target. LegHours is the delay from the superior to the
+        // player (courier delay), run from the moment the move is carried out. MoveHeld: the
+        // "move-in-flight" row was written.
+        public bool AwaitsMove;
+        public bool MoveHeld;
+        public WlMoveCarrier Carrier;
+        public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.
         public string UnitName;
@@ -137,7 +147,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return false;
         }
 
-        // The earliest-due entry that is due (ties by enqueue order), removed from the queue.
+        // The earliest-due entry that is due (ties by enqueue order), removed from the queue. An entry
+        // waiting for its unit's move (AwaitsMove) counts as due on every pass: the pass asks the game
+        // where the move stands, and sets the due time itself once it has been carried out.
         // `superseded` is set when it was issued strictly before the last accepted delivery and
         // is not a retreat: a later order from the chain countermands it, and it is reported to the
         // sink and must be discarded by the caller.
@@ -146,7 +158,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             int best = -1;
             for (int i = 0; i < _count; i++)
             {
-                if (_pending[i].DueAt > now) continue;
+                if (_pending[i].DueAt > now && !_pending[i].AwaitsMove) continue;
                 if (best < 0 || _pending[i].DueAt < _pending[best].DueAt
                     || (_pending[i].DueAt == _pending[best].DueAt && _pending[i].EnqueueSeq < _pending[best].EnqueueSeq))
                     best = i;
