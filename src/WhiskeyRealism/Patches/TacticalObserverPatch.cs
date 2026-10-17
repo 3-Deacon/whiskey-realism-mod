@@ -2090,7 +2090,10 @@ namespace WhiskeyRealism.Patches
                     .WithField("enemy", sector.EnemyStrength)
                     .WithField("confidence", sector.Confidence)
                     .WithField("movement", SafeMovementMode(group))
+                    // A group object's own formation reads 3 for good (ChangeRegimentFormation forces it, 135437): "3:MarchColumn" on a brigade row is no
+                    // column state. groupFormation is the group's layout (0 Line, 1 Double Line, 2 Successive Lines, 3 Attack Column, 4 March Column).
                     .WithField("formation", FormatFormation(SafeFormation(group)))
+                    .WithField("groupFormation", group.groupformation)
                     .WithField("orderedFormation", FormatFormation(SafeFormationOrdered(group)))
                     .WithField("paths", SafeRegimentPaths(group))
                     .WithField("pathInterrupted", group.pathinterrupted)

@@ -787,7 +787,7 @@ namespace WhiskeyRealism.Tactical.Battle
             _lastOrderAt[key] = nowHours;
             SetLastOutcome(new OrderOutcome
             {
-                GroupId = i.GroupId, Channel = i.Channel, Kind = OrderOutcomeKind.Issued, Source = i.Source, AtHours = nowHours,
+                GroupId = i.GroupId, Channel = i.Channel, Kind = OrderOutcomeKind.Issued, Source = i.Source, AtHours = nowHours, Value = i.Value, Flags = i.Flags,
             });
             if (i.Channel != OrderChannel.Move) return;
 

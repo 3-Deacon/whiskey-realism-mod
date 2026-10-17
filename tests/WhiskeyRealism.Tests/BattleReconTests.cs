@@ -2,6 +2,7 @@ using System;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
@@ -21,6 +22,7 @@ internal static class BattleReconTests
             ("bc14 LOOK-RECON a crossing look is taken after stale entry points and bands, from the stand-off, inside the mission cap, never toward a superior enemy", CrossingLookRecon),
             ("recon scout never a company, player-owned, feuding or shaken regiment", ScoutFilterRefusals),
             ("recon scout's brigade must be settled and not moved by posture this tick", ScoutParentMustBeSettled),
+            ("recon scout under a leaf brigade: the leaf's posture row (unit churn) holds a scout back while the brigade moved, and carries the ledger task a probe hold compares", ScoutUnderALeafBrigade),
             ("recon stale entry point beats stale band and forward", StaleEntryPointPickedFirst),
             ("recon stale band when every entry point is watched", StaleBandPickedNext),
             ("recon forward only before any contact", ForwardOnlyBeforeContact),
@@ -305,6 +307,26 @@ internal static class BattleReconTests
         s.Own[brigade].AiStanceOrdered = 1;
         s.Own[brigade].Flags |= UnitFlags.PlayerOwned;
         AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade is the player's");
+    }
+
+    // Unit churn (2026-10-17): a leaf brigade now records a GroupPosture row (LeafPosture.Record), which the recon producer copies into the picture
+    // (PostureMoved from Submitted, PostureTask from the row's task). Before, a leaf brigade had no row: its scouts were never held back by a move the
+    // brigade had just been given, and a probe or hold on it compared the ledger task against None.
+    private static void ScoutUnderALeafBrigade()
+    {
+        var s = Field(1.0);
+        var p = Picture(s);
+        int a = s.IndexOfOwn(CavA);
+        int brigade = s.IndexOfOwn(CavBrigade);
+        GroupPosture row = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CavBrigade, closeEngaged: false, flankRisk: false);
+        p.PostureMoved[brigade] = row.Has && row.Submitted;
+        p.PostureTask[brigade] = row.Has ? row.State.Task : CommandTaskType.None;
+        AssertTrue(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "a leaf brigade that stays (a reserve, a hold) leaves its cavalry free to scout");
+        AssertEqual(CommandTaskType.ReserveWait, p.PostureTask[brigade], "and the ledger task a probe's hold compares is the leaf's own, not None");
+
+        row.Submitted = true;   // ProduceLeaf marks the row when it submits the brigade's move
+        p.PostureMoved[brigade] = row.Has && row.Submitted;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "a leaf brigade that was just given a move holds its scouts back, as a pool brigade's does");
     }
 
     // ------------------------------------------------------------------ targets

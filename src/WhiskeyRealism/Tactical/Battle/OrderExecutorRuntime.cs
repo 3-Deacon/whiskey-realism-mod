@@ -63,6 +63,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             BattleScope.Register("order-executor-runtime", Reset);
             BattleScope.Register("order-executor-bombard-rows", () => _lastBombardRowAt.Clear());
+            BattleScope.Register("order-executor-column-deploy-rows", () => _lastColumnDeployRowAt.Clear());
         }
 
         // Step 1 over the snapshot flags: Commander Mode Active, not PlayerOwned,
@@ -484,6 +485,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
                 case OrderChannel.Formation:
                     if ((w.Flags & (IntentFlags.Limber | IntentFlags.Unlimber)) != 0) return IssueMount(bunits, unit, (w.Flags & IntentFlags.Limber) != 0);
+                    if ((w.Flags & IntentFlags.Deploy) != 0) return IssueDeploy(bunits, view, targetIndex, unit, w);
                     return IssueFormation(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
                 case OrderChannel.Facing:
                     return IssueFacing(bunits, view, targetIndex, unit, w, feudReplay, nowHours, enemiesInRange, lastShapeWriteHours);
@@ -564,6 +566,103 @@ namespace WhiskeyRealism.Tactical.Battle
         // refused flank (BC5a) - the in-place wheel with the skew. The policy's
         // cooldown (0.05 h, 0.1 h under fire) runs from the group's last
         // formation or facing write, as #61's _lastFormationWriteAt did.
+        // Unit churn: deploy an infantry regiment out of the march column (ColumnDeployment.Apply). The live column test comes first (the snapshot is a tick
+        // old). Vanilla's own bridge and crossing guard (allblocksoffbridgeorcrossing, 127669, 127676, 132498-132511) is kept: a regiment on a bridge is not
+        // touched. Then vanilla's manual stop, which restores the formation the column replaced and ends distancemarchcolumn (132502-132506) and, with the
+        // path cleared, keeps CheckFormationChange (127662-127668) from re-columning the regiment on its next look; then the threat heading through the
+        // executor's rotate-in-place (RotateInPlace, the facing path), in place of the march heading vanilla deploys to (127677). Behind the executor's
+        // guards like every battle write; the target passed TacticalWriteGuard.CanWrite in the plan. The row says what was applied.
+        private static bool IssueDeploy(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w)
+        {
+            if (unit.unittyp != TacticalUnitType.Infantry || unit.isrouted || unit.markedforrout || unit.mounted != 0) return false;
+            if (unit.formation != ColumnDeployment.RegimentMarchColumn) return false;
+            GameObject go = ((Component)unit).gameObject;
+            if (go == null) return false;
+            var host = new DeployHost(bunits, unit, go);
+            ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading, (w.Flags & IntentFlags.DeployInMarch) != 0);
+            EmitColumnDeploy(view, targetIndex, w, applied);
+            return applied != ColumnDeployApplied.HeldOnBridge;
+        }
+
+        // The deploy's calls on vanilla, for ColumnDeployment.Apply.
+        private readonly struct DeployHost : IColumnDeployHost
+        {
+            private readonly BattleUnits _bunits;
+            private readonly Regiment _unit;
+            private readonly GameObject _go;
+
+            public DeployHost(BattleUnits bunits, Regiment unit, GameObject go)
+            {
+                _bunits = bunits;
+                _unit = unit;
+                _go = go;
+            }
+
+            public bool OffBridgeOrCrossing => _unit.allblocksoffbridgeorcrossing;
+            public int Formation => _unit.formation;
+
+            public void Stop()
+            {
+                _bunits.PerformActionForGroupForAllUnitsOnLevel(_go, -1, "StopRegiment", ManualStop,
+                    alsononactive: false, excluderoutedandretreatingunits: false, sameaigrouponly: true);
+            }
+
+            public void ReformToLine(float heading)
+            {
+                _unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));
+            }
+
+            public void DeployInMarch(float heading)
+            {
+                // Vanilla's own sequence (CheckFormationChange 127678-127681), unitwhogavelastmovingorder kept as it keeps it.
+                Regiment lastOrderUnit = _unit.unitwhogavelastmovingorder;
+                _unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));
+                _unit.distancemarchcolumn = false;
+                _unit.unitwhogavelastmovingorder = lastOrderUnit;
+            }
+
+            public bool Rotate(float heading) => RotateInPlace(_unit, heading);
+        }
+
+        private static readonly Dictionary<string, float> _lastColumnDeployRowAt = new Dictionary<string, float>();
+
+        // One TacticalColumnDeploy row per regiment per 30 s and outcome: why it was deployed (the intent's reason), the bearing it was given and what the
+        // executor applied. Emitted here and not at the submit, so a deploy the executor refused or held on a bridge is not reported as done.
+        private static void EmitColumnDeploy(BattleSnapshot view, int targetIndex, in BattleOrderIntent w, ColumnDeployApplied applied)
+        {
+            try
+            {
+                OnceLog.Info("tactical-column-deploy:first", "[ColumnDeploy] first march column deployment: " + w.Reason + " applied " + applied);
+                if (view == null || targetIndex < 0 || targetIndex >= view.OwnCount) return;
+                UnitRecord rec = view.Own[targetIndex];
+                string reason = w.Reason;
+                float heading = w.Heading;
+                string appliedName = applied.ToString();
+                int side = view.Alliance;
+                string signature = side + "|" + rec.InstanceId + "|" + reason + "|" + appliedName;
+                if (!TacticalTelemetry.ShouldEmit(_lastColumnDeployRowAt, "tactical-column-deploy:" + side + ":" + rec.InstanceId, signature,
+                        Environment.TickCount * 0.001f, 30f, false))
+                    return;
+                string unit = PostureTelemetry.NameOf(view, targetIndex);
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Write, "TacticalColumnDeploy", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(side)
+                        .WithUnit(unit)
+                        .WithDecision("ColumnDeploy", reason, signature)
+                        .WithField("reason", reason)
+                        .WithField("applied", appliedName)
+                        .WithField("targetFacing", heading)
+                        .WithField("receivedFire", rec.ReceivedFire)
+                        .WithField("fireFromFlank", rec.FireFromFlank)
+                        .WithField("outflanked", rec.Outflanked)
+                        .WithField("paths", rec.RegimentPaths));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:column-deploy-row", "[ColumnDeploy] row failed: " + ex.GetType().Name);
+            }
+        }
+
         private static bool IssueFormation(BattleUnits bunits, BattleSnapshot view, int targetIndex, Regiment unit, in BattleOrderIntent w,
             bool feudReplay, double nowHours, float enemiesInRange, float lastShapeWriteHours)
         {

@@ -7,6 +7,15 @@ namespace WhiskeyRealism.Tactical
             return unitType == TacticalUnitType.BattleGroupBrigade;
         }
 
+        // The explicit demotion of a vanilla assault (TacticalChargeDenial) also reaches a pool division. A division's stance reaches the leaf brigades under
+        // it by order (SetAIStance is applied to the advised group and every unit on its level, 125390), and TacticalStanceWriter refuses a leaf brigade
+        // (it writes only groups in AIBattle.unitsused), so a leaf brigade's assault can only be taken back where it came from. #45's scorer stays
+        // brigade-only (AllowsLocalGroupStanceWriter).
+        public static bool AllowsChargeDemotion(int unitType)
+        {
+            return unitType == TacticalUnitType.BattleGroupBrigade || unitType == TacticalUnitType.BattleGroupDivision;
+        }
+
         public static TacticalMacroDecision DecideMacro(TacticalMacroDecisionInput input)
         {
             if (input.DebugOverrideActive)
