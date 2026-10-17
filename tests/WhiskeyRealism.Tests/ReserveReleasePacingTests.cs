@@ -411,7 +411,16 @@ internal static class ReserveReleasePacingTests
         var stable = new[] { Intent(DirectChildRole.Main, false) };
         AssertTrue(ReferenceEquals(stable, DirectChildAllocator.RestampReleases(stable, new[] { Intent(DirectChildRole.Main, false) })), "unchanged marks: the list itself");
         string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
-        FlankResponseTests.AssertPinned(army, "DirectChildAllocator.RestampReleases(DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis), allocated)", "the army restamps after every pass that keeps an intent");
+        // The restamp is the LAST step before the command tree reads the intents: nothing sits between it and the Allocate call, so a pass merged in
+        // from another branch (a role hold) cannot land after it without conflicting with these lines or failing this pin.
+        FlankResponseTests.AssertPinned(army,
+            "_directChildIntents = DirectChildAllocator.RestampReleases(_directChildIntents, allocated); _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);",
+            "the restamp is immediately before the command tree's Allocate");
+        string observe = FlankResponseTests.Between(army, "IReadOnlyList<DirectChildIntent> allocated = DirectChildAllocator.AllocateWithZones(", "EmitFlankReserveReleaseTelemetry(previousIntents");
+        int stabilize = observe.IndexOf("StabilizeMain(", StringComparison.Ordinal), screen = observe.IndexOf("ScreenSecondaryObjectives();", StringComparison.Ordinal);
+        int restamp = observe.IndexOf("RestampReleases(", StringComparison.Ordinal), tree = observe.IndexOf("CommandTreeIntentAllocator.Allocate(", StringComparison.Ordinal);
+        AssertTrue(stabilize >= 0 && screen > stabilize && restamp > screen && tree > restamp, "the order is the main hysteresis, the screening, the restamp, the command tree");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(observe, "RestampReleases\\(").Count, "and one restamp");
     }
 
     private static void TheRowsAreThrottledBeforeAnythingIsBuilt()

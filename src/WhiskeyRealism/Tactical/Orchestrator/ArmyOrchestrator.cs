@@ -718,10 +718,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<DirectChildIntent> allocated = DirectChildAllocator.AllocateWithZones(
                 _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
                 perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext());
-            // Every pass that keeps an intent from an earlier tick (the main hysteresis; a role hold when one is added) is followed by the restamp: the
-            // release marks are the fresh allocation's, never carried (DirectChildAllocator.RestampReleases).
-            _directChildIntents = DirectChildAllocator.RestampReleases(DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis), allocated);
+            _directChildIntents = DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis);
             ScreenSecondaryObjectives();
+            // Any further pass that keeps an intent from an earlier tick (a role hold) goes ABOVE this line. The release marks are a fact about the
+            // allocation that just ran, so they are re-derived from it last, immediately before the command tree reads the intents: a kept intent
+            // must not carry a taken-back release into the tree (DirectChildAllocator.RestampReleases; pinned by a source test).
+            _directChildIntents = DirectChildAllocator.RestampReleases(_directChildIntents, allocated);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
             EmitStaggeredReleaseTelemetry();
