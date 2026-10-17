@@ -16,7 +16,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float reserveFraction = 0f,
             BattleStance stance = BattleStance.Meeting,
             ManeuverNodeTable maneuvers = null,
-            bool reverseSlope = false)
+            bool reverseSlope = false,
+            ICrossingPicture crossings = null)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
 
@@ -43,6 +44,9 @@ namespace WhiskeyRealism.Tactical.Operations
             TacticalDefensiveLineAnchor anchor = objectiveMatched
                 ? TacticalDefensiveLineAnchorPlanner.Plan(objective, battlefront, nodes.Length, TerrainPicture.CurrentForPlanning(), reverseSlope)
                 : TacticalDefensiveLineAnchor.None("battle-line-no-objective");
+            // A Defender whose objective is the enemy line stands on its own front, never on a line laid relative to the enemy's (smoke 2026-10-17).
+            if (stance == BattleStance.Defender && objectiveMatched && objective.Type == TacticalObjectiveType.EnemyLine)
+                anchor = TacticalDefensiveLineAnchorPlanner.PlanOwnFront(objective, nodes, battlefront);
 
             for (int i = 0; i < nodes.Length; i++)
             {
@@ -76,14 +80,17 @@ namespace WhiskeyRealism.Tactical.Operations
                     reserveFraction);
                 sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
+                // A position the ledger computes stays on the node's bank unless the node's task goes to the enemy (the crossing gate decides
+                // those at write time) or the plan chose the crossing (a maneuver's via).
+                bool keepBank = crossings != null && !maneuvering && KeepsItsBank(task, stance);
                 CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
                     task,
                     objective.ObjectiveId,
-                    linePlan.PrimaryTarget,
-                    linePlan.SupportTarget,
-                    linePlan.FallbackTarget,
+                    keepBank ? OwnBank.Keep(crossings, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
+                    keepBank ? OwnBank.Keep(crossings, node, linePlan.SupportTarget) : linePlan.SupportTarget,
+                    keepBank ? OwnBank.Keep(crossings, node, linePlan.FallbackTarget) : linePlan.FallbackTarget,
                     idle,
                     operation.MinimumCommitSeconds,
                     nowSeconds,
@@ -103,6 +110,25 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return orders.ToArray();
+        }
+
+        // A Defender's every position stays on its bank. Any other side's tasks that go to the enemy (attack, support, fix, probe, scout, screen)
+        // are made by the executor behind the crossing gate, which routes them by a known crossing or refuses them and asks for a look.
+        internal static bool KeepsItsBank(CommandTaskType task, BattleStance stance)
+        {
+            if (stance == BattleStance.Defender) return true;
+            switch (task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Probe:
+                case CommandTaskType.Scout:
+                case CommandTaskType.Screen:
+                    return false;
+                default:
+                    return true;
+            }
         }
 
         // anchoredLeft is the +L end (command index 0), anchoredRight the -L end (index n-1): an end resting on a river or crest keeps

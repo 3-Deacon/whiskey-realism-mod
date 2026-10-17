@@ -1178,7 +1178,7 @@ namespace WhiskeyRealism.Tactical.Operations
             if (guarded == state.Task && (!hasOrder || TacticalDecisionDoctrine.TaskForStance(order.Task, stance) == order.Task))
                 return false;
             state = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, guarded, state.TaskState,
-                state.X, state.Z, state.FacingDegrees, state.Reason, state.PreGuardTask);
+                state.X, state.Z, state.FacingDegrees, state.Reason, state.PreGuardTask, state.HasPosition);
             if (hasOrder) order = order.WithTask(guarded, guarded == CommandTaskType.Screen ? ScreenReason : HoldReason);
             return true;
         }
@@ -1243,7 +1243,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return false;
             }
             guarded = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, CommandTaskType.HoldObjective, state.TaskState,
-                state.X, state.Z, state.FacingDegrees, Reason, state.Task);
+                state.X, state.Z, state.FacingDegrees, Reason, state.Task, state.HasPosition);
             return true;
         }
 

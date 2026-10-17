@@ -121,6 +121,17 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             BattlefieldObjectiveEstimate lineObjective = defensiveAnchor.AsLineObjective(objective);
+            // A node the ledger could not place has no position to plan from: the direction, the reserve post and the fallback would all be
+            // laid from the map origin (smoke 2026-10-17). An approach avenue gives the direction without the node; nothing else does.
+            if (!node.HasPosition && !HasUsableAvenue(lineObjective))
+            {
+                return new TacticalBattleLinePlan(
+                    DoctrineTargetPoint.None,
+                    DoctrineTargetPoint.None,
+                    DoctrineTargetPoint.None,
+                    "battle-line-no-position");
+            }
+
             Direction direction = Direction.FromNodeToObjective(node, lineObjective);
             int side = commandIndex % 2 == 0 ? -1 : 1;
             FrontageGeometry frontage = FrontageGeometry.Build(lineObjective, direction, battlefront, nodeCount, defensiveAnchor);
@@ -208,6 +219,11 @@ namespace WhiskeyRealism.Tactical.Operations
                         DoctrineTargetPoint.None,
                         "battle-line-no-movement");
             }
+        }
+
+        private static bool HasUsableAvenue(BattlefieldObjectiveEstimate objective)
+        {
+            return objective.ApproachAvenue.HasAvenue && objective.ApproachAvenue.Confidence01 >= 0.35f;
         }
 
         private static DoctrineTargetPoint Approach(
@@ -385,7 +401,13 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 if (IsDepthSlot(commandIndex, nodeCount))
                 {
-                    return BehindLine(DepthSlotDistance, DepthLane(commandIndex, nodeCount));
+                    // Deeper than the line slots, on the node's own side of the objective. With the enemy's approach axis (an avenue, or a defended
+                    // anchor) "behind" is along the axis, away from the enemy. With the direction from the node to the objective (no avenue) it is
+                    // short of the objective: the slot was BehindLine in both cases, which put it 325 m past the objective, the enemy line, when
+                    // the node's direction was the only axis (smoke 2026-10-17).
+                    return _defensiveSideTargets || _direction.UsesApproachAvenue
+                        ? BehindLine(DepthSlotDistance, DepthLane(commandIndex, nodeCount))
+                        : Approach(_objective, _direction, DepthSlotDistance, DepthLane(commandIndex, nodeCount));
                 }
 
                 return Target(_assemblyStandOff, AssemblyLane(commandIndex, nodeCount));
@@ -481,7 +503,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 // A corridor intercept is a line to form up behind (AssemblyDistance back); a terrain line is the line to stand on: the
                 // line slots take the anchor itself, which already sits at the crest's forward edge, 80 m behind the crest under
                 // ReverseSlopeDefense, or on the wall / river line (inside vanilla's cover snap). Depth slots keep their distance.
-                double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;
+                double assemblyStandOff = defensiveAnchor.OnTerrainLine || defensiveAnchor.OnOwnFront ? 0d : AssemblyDistance;
                 LineFrame(in defensiveAnchor, direction, out double lineX, out double lineZ, out double lineHalf, out double lineCos);
                 DoctrineTargetPoint artillery = defensiveAnchor.HasAnchor && defensiveAnchor.DefensiveArtilleryDepth > 0f
                     ? BehindObjective(objective, direction, defensiveAnchor.DefensiveArtilleryDepth, 0d)
@@ -489,7 +511,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 string suffix = battlefront.HasFrontage ? ":frontage" : ":generated-frontage";
                 if (direction.UsesApproachAvenue) suffix += ":approach-avenue";
                 if (defensiveAnchor.HasAnchor) suffix += ":" + defensiveAnchor.Reason;
-                if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : defensiveAnchor.CorridorAnchor ? ":defensive-side-corridor" : ":defensive-side-intercept";
+                if (defensiveSideTargets) suffix += defensiveAnchor.OnTerrainLine ? ":defensive-side-terrain-line" : defensiveAnchor.OnOwnFront ? ":defensive-side-own-front" : defensiveAnchor.CorridorAnchor ? ":defensive-side-corridor" : ":defensive-side-intercept";
                 if (!defensiveAnchor.CorridorAnchor && !defensiveAnchor.OnTerrainLine && IsTerrainAnchor(objective)) suffix += ":terrain-anchor";
                 if (defensiveAnchor.CorridorAnchor || IsChokeObjective(objective)) suffix += ":objective-lane";
                 return new FrontageGeometry(objective, direction, half, laneScale, defensiveSideTargets, assemblyStandOff, lineX, lineZ, lineHalf, lineCos, artillery, suffix);
@@ -537,8 +559,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 CommandNodeOperationalState node,
                 BattlefieldObjectiveEstimate objective)
             {
-                if (objective.ApproachAvenue.HasAvenue &&
-                    objective.ApproachAvenue.Confidence01 >= 0.35f)
+                if (HasUsableAvenue(objective))
                 {
                     double ax = objective.ApproachAvenue.AxisX;
                     double az = objective.ApproachAvenue.AxisZ;
