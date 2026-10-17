@@ -107,10 +107,12 @@ namespace WhiskeyRealism.Tactical.Battle
             if (picture == null || !picture.Ready) return CrossingVerdict.SameBank;
             int from = picture.RegionAt(x0, z0);
             int to = picture.RegionAt(x1, z1);
-            if (from < 0 || to < 0 || from == to) return CrossingVerdict.SameBank;
+            if (from < 0 || to < 0) return CrossingVerdict.SameBank;
+            // A road leg that leaves its bank and comes back to it crosses the river twice: the road's recorded links are checked although both ends lie on one bank.
+            if (from == to && !(road.Is && road.LinkCount > 0)) return CrossingVerdict.SameBank;
 
             Graph graph = GraphOf(picture);
-            if (graph == null) return CrossingVerdict.NoKnownCrossing;   // two banks and no crossing at all
+            if (graph == null) return from == to ? CrossingVerdict.SameBank : CrossingVerdict.NoKnownCrossing;   // two banks and no crossing at all
             Span<int> path = stackalloc int[MaxLinks];
             Span<bool> admit = stackalloc bool[MaxLinks];
             if (road.Is) return DecideRoadLeg(picture, graph, x0, z0, x1, z1, from, to, attack, road, admit, path, ref route);
@@ -153,6 +155,7 @@ namespace WhiskeyRealism.Tactical.Battle
             else
             {
                 // No links recorded, or they do not chain from the leg's start region to its target region: the full search decides.
+                if (from == to) return CrossingVerdict.SameBank;      // one bank and a record that does not chain: nothing known to check
                 for (int i = 0; i < graph.Links; i++) admit[i] = true;
                 count = Search(graph, picture, admit, x0, z0, x1, z1, from, to, path);
                 if (count == 0) return CrossingVerdict.NoKnownCrossing;      // no crossing joins the banks at all: nothing to look at
