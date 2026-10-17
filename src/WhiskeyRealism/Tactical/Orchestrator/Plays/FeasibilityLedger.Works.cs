@@ -14,6 +14,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             public string ChildId;
             public bool Assaults, Faces;
+            /// <summary>A holding fix facing unbroken works: it is held at stance 2 (the integrator's rule, spec § 7A requirement-works-pin).</summary>
+            public bool Pins;
         }
 
         private FocalPoint _focalFront, _focalBack;
@@ -69,6 +71,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             for (int i = 0; i < _worksChildCount; i++)
                 if (string.Equals(_worksChildren[i].ChildId, childId, StringComparison.Ordinal)) return _worksChildren[i].Faces;
+            return false;
+        }
+
+        /// <inheritdoc />
+        public bool PinsWorks(string childId)
+        {
+            for (int i = 0; i < _worksChildCount; i++)
+                if (string.Equals(_worksChildren[i].ChildId, childId, StringComparison.Ordinal)) return _worksChildren[i].Pins;
             return false;
         }
 
@@ -202,15 +212,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             ReadOnlySpan<MemberEstimate> members = Members(in result);
 
             // Which children assault or face works: the members of a works-assaulting body (a support follows its column into the body), and a holding
-            // fix whose strike point lies on held works.
+            // fix whose strike point lies on held works. A fix pins (stance 2) while the works it faces are not broken in at its own strike point or
+            // at the strike point of any enveloping body of the plan: the strike it pins for.
+            WorksPicture works = _job.WorksActive ? _job.Works : null;
+            bool envelopBrokenIn = false;
+            for (int b = 0; works != null && b < bodies.Length && !envelopBrokenIn; b++)
+                envelopBrokenIn = bodies[b].Envelops && works.StrikeBrokenIn(bodies[b].StrikeX, bodies[b].StrikeZ);
             for (int m = 0; m < members.Length && _worksChildCount < _worksChildren.Length; m++)
             {
                 BodyEstimate body = bodies[members[m].Body];
                 bool reserve = members[m].Kind == ManeuverFeasibility.MemberOther && body.Main;
                 bool assaults = body.AssaultsWorks && !reserve;
-                bool faces = assaults || (members[m].Kind == ManeuverFeasibility.MemberFix && body.StrikeOnWorks);
-                if (!faces) continue;
-                _worksChildren[_worksChildCount++] = new WorksChild { ChildId = members[m].ChildId, Assaults = assaults, Faces = true };
+                bool fixFaces = !assaults && members[m].Kind == ManeuverFeasibility.MemberFix && body.StrikeOnWorks;
+                if (!assaults && !fixFaces) continue;
+                bool pins = fixFaces && !envelopBrokenIn && !(works != null && works.StrikeBrokenIn(body.StrikeX, body.StrikeZ));
+                _worksChildren[_worksChildCount++] = new WorksChild { ChildId = members[m].ChildId, Assaults = assaults, Faces = true, Pins = pins };
                 if (assaults) _worksAssaultCount++;
             }
 

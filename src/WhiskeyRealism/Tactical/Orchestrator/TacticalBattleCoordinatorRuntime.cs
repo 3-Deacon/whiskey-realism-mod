@@ -1947,8 +1947,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     DoctrineConsumerAction doctrineAction = DoctrineConsumerAction.Observe;
                     int dStance = -1;
                     string dReason = null;
+                    string doctrineNodeId = null;
                     if (macro != 3 && TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
                     {
+                        doctrineNodeId = order.NodeId;
                         DoctrineStanceDecision dDec = DoctrineConsumerDecisions.DecideStance(
                             order,
                             DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
@@ -1961,6 +1963,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // BC14W: a group the works hold guard holds takes its stance from the posture executor; #45 writes none and keeps only the
                     // charge demotion (the doctrine Deny of a hold, to stance 2, for a vanilla assault).
                     if (doctrineAction == DoctrineConsumerAction.Deny && string.Equals(dReason, DoctrineConsumerDecisions.WorksHoldReason, StringComparison.Ordinal))
+                    {
+                        cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: true);
+                        continue;
+                    }
+
+                    // BC14W (requirement-works-pin): the doctrine Allow of a fix facing unbroken works is the attack stance the pin withholds; the posture
+                    // executor holds the group at stance 2 (flagged WorksHold), #45 writes none.
+                    if (doctrineAction == DoctrineConsumerAction.Allow && side.Army != null && side.Army.PinsWorksNode(doctrineNodeId))
                     {
                         cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: true);
                         continue;
@@ -2015,6 +2025,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         }
                         int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
                             state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector), sideStance);
+                        // BC14W (requirement-works-pin): the attack stance of a fix facing unbroken works is withheld; the posture executor owns its stance 2.
+                        if (TacticalCommandTaskToStanceMapper.WorksPinHoldsStance(lStance, side.Army != null && side.Army.PinsWorksNode(state.NodeId)))
+                        {
+                            cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: false);
+                            continue;
+                        }
                         // The ledger claims ownership whenever it resolves
                         // (the former #45 rule) — even when the stance is
                         // invalid or equals vanillaOrdered. A Skip with

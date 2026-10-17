@@ -28,6 +28,7 @@ internal static partial class ManeuverFeasibilityTests
         public string Reason = "hopeless-assault";
         public int Hash = 1;
         public readonly HashSet<string> Faces = new HashSet<string>(StringComparer.Ordinal);
+        public readonly HashSet<string> Pins = new HashSet<string>(StringComparer.Ordinal);
 
         public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
         public string BrokenAssumption => null;
@@ -53,6 +54,7 @@ internal static partial class ManeuverFeasibilityTests
         public bool WorksHold(out string reason) { reason = Hold ? Reason : null; return Hold; }
         public bool AssaultsWorks(string childId) => Faces.Contains(childId);
         public bool FacesWorks(string childId) => Faces.Contains(childId);
+        public bool PinsWorks(string childId) => Pins.Contains(childId);
         public int WorksHoldHash => Hash;
         public float Willingness => -1f;
         public IWorksQuery HeldWorks => null;

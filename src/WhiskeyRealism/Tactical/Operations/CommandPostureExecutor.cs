@@ -1507,6 +1507,24 @@ namespace WhiskeyRealism.Tactical.Operations
             return 1;
         }
 
+        public const string WorksPinReason = "works-pin";
+
+        /// <summary>
+        /// BC14W (requirement-works-pin): the stance of a fix facing unbroken works, submitted every posture tick like the works hold's: the mapper's
+        /// pinned stance (2) for the task's attack stance, flagged <see cref="IntentFlags.WorksHold"/> so vanilla's own attack (3, 4) is taken. A task
+        /// that maps to no attack stance gets none (a Screen keeps its screen).
+        /// </summary>
+        public static int SubmitWorksPinStance(IIntentSink sink, int groupId, CommandTaskType task, IntentPriority priority, IntentSource source, int exploitId)
+        {
+            if (sink == null || groupId == 0 || !TacticalCommandTaskToStanceMapper.WorksPinHolds(task, true)) return 0;
+            sink.Submit(new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stance, Value = TacticalCommandTaskToStanceMapper.Map(task, true), Heading = -1f, Task = task,
+                Priority = priority, Source = source, Flags = IntentFlags.WorksHold, Reason = WorksPinReason, ExploitId = exploitId,
+            });
+            return 1;
+        }
+
         private static int SubmitStance(IIntentSink sink, in PostureIntentRequest r)
         {
             if (r.StanceSubmitted) return 0;

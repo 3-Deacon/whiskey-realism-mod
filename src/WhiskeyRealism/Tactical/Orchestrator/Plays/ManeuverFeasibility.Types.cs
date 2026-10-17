@@ -196,6 +196,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>BC14W: the child assaults works or, as a holding fix, faces them (requirement-turn-first).</summary>
         bool FacesWorks(string childId);
 
+        /// <summary>
+        /// BC14W (requirement-works-pin): the child is a holding fix facing works that are not broken in. It holds at stance 2, demonstrating, and is
+        /// not given the attack stance vanilla would escalate to an assault, until the strike it pins for has broken in.
+        /// </summary>
+        bool PinsWorks(string childId);
+
         /// <summary>BC14W: a hash of the works hold, its reason and the set of children that face works; a change forces a store of the stored orders.</summary>
         int WorksHoldHash { get; }
 

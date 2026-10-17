@@ -445,6 +445,7 @@ internal static partial class ManeuverFeasibilityTests
         public bool WorksHold(out string reason) { reason = null; return false; }
         public bool AssaultsWorks(string childId) => false;
         public bool FacesWorks(string childId) => false;
+        public bool PinsWorks(string childId) => false;
         public int WorksHoldHash => 0;
         public float Willingness => -1f;
         public IWorksQuery HeldWorks => null;

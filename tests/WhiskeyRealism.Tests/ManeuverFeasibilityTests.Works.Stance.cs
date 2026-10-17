@@ -16,6 +16,9 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w WORKS-STANCE-RULES a works-hold stance takes vanilla's attack stances, yields to its weak-group screen and the army retreat, and a renewal coexists", WStanceRules),
         ("bc14w WORKS-STANCE-INTENT the one stance of a guarded group is the mapper's hold stance, flagged, at the posture executor's priority", WStanceIntent),
         ("bc14w WORKS-STANCE-45 #45 submits no stance for a guarded order or state and keeps only the charge demotion", WStance45),
+        ("bc14w WORKS-PIN-MAPPER a pin lowers an attack stance to defend and leaves a screen, a hold and every other stance as the mapper has them", WPinMapper),
+        ("bc14w WORKS-PIN-INTENT a pinned fix gets one flagged stance-2 intent keeping its task; a task with no attack stance gets none", WPinIntent),
+        ("bc14w WORKS-PIN-WIRED the posture pipeline and both #45 steps ask the army for the pin, and the node lookup is gated by the doctrine flag", WPinWired),
         ("bc14w WORKS-STANCE-PINS the pipeline submits the stance after every rewrite and before the decision, and no later reader undoes the guard", WStancePins),
     };
 
@@ -167,5 +170,71 @@ internal static partial class ManeuverFeasibilityTests
         int planner = orchestrator.IndexOf("TacticalNestedDivisionPlayPlanner", StringComparison.Ordinal);
         int ledger = orchestrator.IndexOf("Army.UpdateOperationsLedger(", StringComparison.Ordinal);
         AssertTrue(ledger > 0 && (planner < 0 || planner < ledger), "the nested division play planner runs before the guarded store, so it never sees a guarded state");
+    }
+
+    static void WPinMapper()
+    {
+        foreach (CommandTaskType task in Enum.GetValues(typeof(CommandTaskType)))
+        {
+            int plain = TacticalCommandTaskToStanceMapper.Map(task);
+            int pinned = TacticalCommandTaskToStanceMapper.Map(task, worksPin: true);
+            AssertEqual(plain, TacticalCommandTaskToStanceMapper.Map(task, worksPin: false), task + ": without a pin the mapper is unchanged");
+            if (plain == TacticalCommandTaskToStanceMapper.StanceAttack)
+            {
+                AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend, pinned, task + ": an attack stance is lowered to defend");
+                AssertTrue(TacticalCommandTaskToStanceMapper.WorksPinHolds(task, true), task + ": the pin holds it");
+                AssertFalse(TacticalCommandTaskToStanceMapper.WorksPinHolds(task, false), task + ": no pin, no hold");
+            }
+            else
+            {
+                AssertEqual(plain, pinned, task + ": a stance that is not attack is left as it is");
+                AssertFalse(TacticalCommandTaskToStanceMapper.WorksPinHolds(task, true), task + ": nothing to hold");
+            }
+        }
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack, TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy), "control: a fix is an attack stance");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceScreen, TacticalCommandTaskToStanceMapper.Map(CommandTaskType.Screen, worksPin: true), "a screen keeps its screen");
+        AssertTrue(TacticalCommandTaskToStanceMapper.WorksPinHoldsStance(TacticalCommandTaskToStanceMapper.StanceAttack, true), "the #45 scorer's attack stance is held");
+        AssertFalse(TacticalCommandTaskToStanceMapper.WorksPinHoldsStance(TacticalCommandTaskToStanceMapper.StanceDefend, true), "its defend is not");
+        AssertFalse(TacticalCommandTaskToStanceMapper.WorksPinHoldsStance(-1, true), "nor its no-opinion");
+    }
+
+    static void WPinIntent()
+    {
+        var sink = new CaptureSink();
+        AssertEqual(1, PostureIntentPlan.SubmitWorksPinStance(sink, 88, CommandTaskType.FixEnemy, IntentPriority.Executor, IntentSource.PostureExecutor, 5), "one intent");
+        BattleOrderIntent i = sink.Intents[0];
+        AssertEqual(OrderChannel.Stance, i.Channel, "on the stance channel");
+        AssertEqual(2, i.Value, "stance 2");
+        AssertEqual(CommandTaskType.FixEnemy, i.Task, "the task stays the fix's");
+        AssertTrue((i.Flags & IntentFlags.WorksHold) != 0, "flagged, so vanilla's attack stances are taken");
+        AssertEqual(PostureIntentPlan.WorksPinReason, i.Reason, "named for the pin");
+        AssertEqual(88, i.GroupId, "for the group");
+        AssertEqual(5, i.ExploitId, "carrying the exploit id");
+        foreach (CommandTaskType task in new[] { CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.HoldObjective, CommandTaskType.None })
+            AssertEqual(0, PostureIntentPlan.SubmitWorksPinStance(sink, 88, task, IntentPriority.Executor, IntentSource.PostureExecutor, 0), task + " has no attack stance to lower");
+        AssertEqual(0, PostureIntentPlan.SubmitWorksPinStance(sink, 0, CommandTaskType.FixEnemy, IntentPriority.Executor, IntentSource.PostureExecutor, 0), "no group, no intent");
+        AssertEqual(1, sink.Intents.Count, "nothing else was submitted");
+    }
+
+    static void WPinWired()
+    {
+        string producer = FlankResponseTests.Flat(FlankResponseTests.Between(FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"),
+            "internal static bool Run(", "private static bool CanBypassStaleQueuedOrder"));
+        int hold = producer.IndexOf("PostureIntentPlan.SubmitWorksHoldStance(", StringComparison.Ordinal);
+        int pin = producer.IndexOf("army.PinsWorksNode(state.NodeId)", StringComparison.Ordinal);
+        int decide = producer.IndexOf("CommandPostureExecutor.Decide(order, physical, eligibility", StringComparison.Ordinal);
+        AssertTrue(hold > 0 && pin > hold && decide > pin, "the pin is asked after the hold's stance and before the posture decision");
+        AssertTrue(producer.Contains("if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId)) worksStance = PostureIntentPlan.SubmitWorksPinStance("),
+            "only for a group the hold did not guard, on the producer's own pass, never an exploit");
+
+        string runtime = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs"));
+        AssertTrue(runtime.Contains("doctrineAction == DoctrineConsumerAction.Allow && side.Army != null && side.Army.PinsWorksNode(doctrineNodeId)) { cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold("),
+            "#45's doctrine Allow of a pinned fix is a works-hold skip");
+        AssertTrue(runtime.Contains("TacticalCommandTaskToStanceMapper.WorksPinHoldsStance(lStance, side.Army != null && side.Army.PinsWorksNode(state.NodeId))) { cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold("),
+            "and so is its ledger step's attack stance");
+
+        string army = FlankResponseTests.Flat(FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs"));
+        AssertTrue(army.Contains("internal bool PinsWorksNode(string nodeId) { if (!Plugin.EnemyWorksDoctrineEnabled() || _feasibility == null) return false; int child = ChildIndexOfNode(nodeId); return child >= 0 && _feasibility.PinsWorks(_directChildIntents[child].ChildId); }"),
+            "the node lookup is gated by the flag and reads the ledger's per-child pin");
     }
 }

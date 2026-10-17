@@ -592,6 +592,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             int worksStance = worksHeld && recordTick
                 ? PostureIntentPlan.SubmitWorksHoldStance(sink, rec.InstanceId, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId))
                 : 0;
+            // BC14W (requirement-works-pin): a fix facing unbroken works that the hold does not guard is pinned at stance 2 the same way: it keeps its
+            // task, lane and fire, but is never given the attack stance vanilla escalates to an assault, until the strike it pins for has broken in.
+            if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId))
+                worksStance = PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId));
             bool worksLane = worksHeld && hasOrder && WorksHoldGuard.LaneOpen(in order, army?.Feasibility?.HeldWorks);
 
             // BC14W: a held group is not left to walk into the works band by a move Whiskey did not issue (vanilla's chain move, its micro cycle): the

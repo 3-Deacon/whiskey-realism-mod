@@ -1721,6 +1721,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             };
         }
 
+        /// <summary>
+        /// BC14W (requirement-works-pin): the node belongs to a child the ledger holds as a fix facing unbroken works. Its attack stance (3) is held at
+        /// defend (2) with the works-hold flag; the task is not changed, so the fix keeps its lane and its fire. False with the flag off.
+        /// </summary>
+        internal bool PinsWorksNode(string nodeId)
+        {
+            if (!Plugin.EnemyWorksDoctrineEnabled() || _feasibility == null) return false;
+            int child = ChildIndexOfNode(nodeId);
+            return child >= 0 && _feasibility.PinsWorks(_directChildIntents[child].ChildId);
+        }
+
         internal void GuardStates(CommandNodeOperationalState[] states)
         {
             for (int i = 0; i < states.Length; i++)
