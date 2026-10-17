@@ -754,7 +754,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 case CommandTaskType.FixEnemy:
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.ReleaseReserve:
-                case CommandTaskType.RecoverStuckOrder:
                     return true;
                 default:
                     return false;

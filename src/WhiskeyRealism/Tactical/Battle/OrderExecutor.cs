@@ -246,7 +246,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 case CommandTaskType.Screen:
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.ReleaseReserve:
-                case CommandTaskType.RecoverStuckOrder:
                     return true;
                 default:
                     return false;

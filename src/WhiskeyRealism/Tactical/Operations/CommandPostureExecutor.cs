@@ -681,12 +681,6 @@ namespace WhiskeyRealism.Tactical.Operations
                         PostureExecutionAction.ReleaseReserve,
                         "release-reserve",
                         PostureExecutionTarget.ReleasePoint);
-                case CommandTaskType.RecoverStuckOrder:
-                    return new PostureExecutionDecision(
-                        PostureExecutionAction.RecoverInterruptedOrder,
-                        "recover-stuck-order",
-                        PostureExecutionTarget.RecoveryPath,
-                        clearInterruptedPaths: true);
                 case CommandTaskType.ReserveWait:
                     return eligibility.AtAssignedLocation
                         ? Formation("reserve-hold")
@@ -728,7 +722,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 case CommandTaskType.Screen:
                 case CommandTaskType.FallBackToLine:
                 case CommandTaskType.ReleaseReserve:
-                case CommandTaskType.RecoverStuckOrder:
                     return true;
                 default:
                     return false;
@@ -789,8 +782,6 @@ namespace WhiskeyRealism.Tactical.Operations
                     return "delay";
                 case CommandTaskType.Consolidate:
                     return "consolidate";
-                case CommandTaskType.RecoverStuckOrder:
-                    return "recover-stuck-order";
                 default:
                     return "unknown";
             }
@@ -1150,7 +1141,8 @@ namespace WhiskeyRealism.Tactical.Operations
     }
 
     // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
-    // (#61 changed stance before SetWaypoint, L768-774); a formation (and the
+    // (#61 changed stance before SetWaypoint, L768-774; the arbiter now issues the
+    // move first, OrderArbiter: a stance order queued ahead of a move delays it); a formation (and the
     // threat facing, SubmitFacing) go with formation decisions and with SetFormationAndWaypoint,
     // where the executor's formation policy refuses them while the group moves —
     // vanilla re-forms only a settled group (AdjustGroupFormations 5886), and #61

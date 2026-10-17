@@ -1189,8 +1189,7 @@ namespace WhiskeyRealism.Patches
         {
             if (idle == TacticalIdleClassification.ValidIdle) validIdle++;
             if (idle == TacticalIdleClassification.IllegalIdle) illegalIdle++;
-            if ((physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove) ||
-                state.Task == CommandTaskType.RecoverStuckOrder)
+            if (physical.PathInterrupted && physical.Paths <= 0 && !physical.ActiveMove)
             {
                 recoveringStuck++;
             }
