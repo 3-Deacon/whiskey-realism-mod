@@ -445,6 +445,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\PlayAnchor.cs" Link="Orchestrator\Plays\PlayAnchor.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\Plays\PlayExecutorRules.cs" Link="Orchestrator\Plays\PlayExecutorRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Objectives\ObjectiveScoring.cs" Link="Battle\Objectives\ObjectiveScoring.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Objectives\ObjectiveLatch.cs" Link="Battle\Objectives\ObjectiveLatch.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\WorksRules.cs" Link="Battle\Works\WorksRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\WorksPicture.cs" Link="Battle\Works\WorksPicture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\MoveContest.cs" Link="Battle\Works\MoveContest.cs" />

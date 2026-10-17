@@ -161,6 +161,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             unchecked { BattleDayEpoch++; }
             // The reserve release starts over on a new day, plan or no plan.
             if (army != null) ReserveReleaseState.ForAlliance(army.AllianceId)?.Clear();
+            // BC14O: and the main-effort objective's hysteresis.
+            if (army != null) WhiskeyRealism.Tactical.Battle.ObjectiveLatch.ForAlliance(army.AllianceId)?.Clear();
             if (army == null || !army.HasPlan) return;
             var intent = ArmyIntentInference.Build(enemyVisible);
             army.ObserveIntent(intent);

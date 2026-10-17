@@ -1,5 +1,7 @@
 using System;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 
 namespace WhiskeyRealism.Tactical.Operations
 {
@@ -14,7 +16,9 @@ namespace WhiskeyRealism.Tactical.Operations
             float caution01,
             BattlefieldObjectiveEstimate[] objectives,
             float operationAssignedStrength = 0f,
-            BattleStance stance = BattleStance.Meeting)
+            BattleStance stance = BattleStance.Meeting,
+            IFeasibilityLookup feasibility = null,
+            string latchedObjectiveId = null)
         {
             Current = current;
             CurrentTimeSeconds = SanitizeFloorZero(currentTimeSeconds);
@@ -25,6 +29,8 @@ namespace WhiskeyRealism.Tactical.Operations
             Objectives = objectives ?? Array.Empty<BattlefieldObjectiveEstimate>();
             OperationAssignedStrength = SanitizeFloorZero(operationAssignedStrength);
             Stance = stance;
+            Feasibility = feasibility;
+            LatchedObjectiveId = latchedObjectiveId;
         }
 
         public OperationRecord Current { get; }
@@ -41,6 +47,14 @@ namespace WhiskeyRealism.Tactical.Operations
         // The side's battle stance (vanilla GetBattleType via
         // ArmyEvidenceBuilder.ReadBattleStance). A Defender is never sent probing.
         public BattleStance Stance { get; }
+
+        // BC14O: the side's feasibility ledger (its objective table and the pressure of the victory clock) and the main-effort objective latched at the
+        // last pick. Null Feasibility is the shipped director: the best-scoring objective, ParallelObjectives open.
+        public IFeasibilityLookup Feasibility { get; }
+        public string LatchedObjectiveId { get; }
+
+        /// <summary>Enable Objective Doctrine is on and the side has a ledger: the main effort is chosen by <see cref="ObjectiveScoring.PickMainEffort"/>.</summary>
+        public bool ObjectiveDoctrine => Feasibility != null && Plugin.ObjectiveDoctrineEnabled();
 
         public static TacticalOperationDirectorInput ForTest(
             OperationRecord current,
@@ -72,7 +86,9 @@ namespace WhiskeyRealism.Tactical.Operations
                 Caution01,
                 Objectives,
                 assignedStrength,
-                Stance);
+                Stance,
+                Feasibility,
+                LatchedObjectiveId);
         }
 
         public TacticalOperationDirectorInput WithStance(BattleStance stance)
@@ -86,7 +102,26 @@ namespace WhiskeyRealism.Tactical.Operations
                 Caution01,
                 Objectives,
                 OperationAssignedStrength,
-                stance);
+                stance,
+                Feasibility,
+                LatchedObjectiveId);
+        }
+
+        /// <summary>BC14O: the side's ledger and the objective latched at the last pick (null: none).</summary>
+        public TacticalOperationDirectorInput WithObjectiveDoctrine(IFeasibilityLookup feasibility, string latchedObjectiveId)
+        {
+            return new TacticalOperationDirectorInput(
+                Current,
+                CurrentTimeSeconds,
+                OwnStrength,
+                ReserveFraction,
+                Aggression01,
+                Caution01,
+                Objectives,
+                OperationAssignedStrength,
+                Stance,
+                feasibility,
+                latchedObjectiveId);
         }
 
         private static float SanitizeFloorZero(float value)
@@ -105,14 +140,53 @@ namespace WhiskeyRealism.Tactical.Operations
 
     public readonly struct TacticalOperationDirectorDecision
     {
-        public TacticalOperationDirectorDecision(OperationRecord operation, string reason)
+        public TacticalOperationDirectorDecision(OperationRecord operation, string reason, ObjectivePick pick = default(ObjectivePick))
         {
             Operation = operation;
             Reason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason;
+            Pick = pick;
         }
 
         public OperationRecord Operation { get; }
         public string Reason { get; }
+
+        /// <summary>BC14O: the main-effort objective this decision was made with (<see cref="ObjectivePick.Has"/> false with the doctrine off or nothing feasible).</summary>
+        public ObjectivePick Pick { get; }
+
+        public TacticalOperationDirectorDecision WithPick(ObjectivePick pick) => new TacticalOperationDirectorDecision(Operation, Reason, pick);
+    }
+
+    /// <summary>
+    /// BC14O (requirement-main-effort-objective): the main-effort objective <see cref="ObjectiveScoring.PickMainEffort"/> chose among the director's
+    /// objectives, with the numbers its telemetry row carries. The pick is the army's main effort (the plan's band follows it); the operation's primary
+    /// objective is the same unless the side perceives contact elsewhere (the shipped contact-elsewhere rule).
+    /// </summary>
+    public readonly struct ObjectivePick
+    {
+        public ObjectivePick(int index, BattlefieldObjectiveEstimate objective, bool hasRow, ObjectiveEstimate row, float total, string runnerUpId, float runnerUpTotal)
+        {
+            Has = true;
+            Index = index;
+            Objective = objective;
+            HasRow = hasRow;
+            Row = row;
+            Total = total;
+            RunnerUpId = runnerUpId;
+            RunnerUpTotal = runnerUpTotal;
+        }
+
+        public bool Has { get; }
+        /// <summary>The objective's index in the director's objectives.</summary>
+        public int Index { get; }
+        public BattlefieldObjectiveEstimate Objective { get; }
+        /// <summary>The ledger's table has a row for it (<see cref="Row"/>: its value, penalty, prior, hold and score without the director's terms).</summary>
+        public bool HasRow { get; }
+        public ObjectiveEstimate Row { get; }
+        /// <summary>The score with the director's terms: what the pick compared.</summary>
+        public float Total { get; }
+        /// <summary>The best feasible rival (null with none) and its total.</summary>
+        public string RunnerUpId { get; }
+        public float RunnerUpTotal { get; }
     }
 
     // T14 (2026-10-14): a committed operation no longer flickers Committed <->
@@ -135,8 +209,10 @@ namespace WhiskeyRealism.Tactical.Operations
 
         public static TacticalOperationDirectorDecision Decide(TacticalOperationDirectorInput input)
         {
-            TacticalOperationDirectorDecision decision = DecideForAnyStance(input);
-            return input.Stance == BattleStance.Defender ? ForDefender(decision) : decision;
+            ObjectivePick pick = PickMainEffortObjective(input);
+            TacticalOperationDirectorDecision decision = DecideForAnyStance(input, pick);
+            if (input.Stance == BattleStance.Defender) decision = ForDefender(decision);
+            return decision.WithPick(pick);
         }
 
         // BC9: a Defender (vanilla GetBattleType 2) is never committed to, nor left in,
@@ -167,7 +243,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 phase == TacticalOperationPhase.Scouting ? "defender-screen" : "defender-hold");
         }
 
-        private static TacticalOperationDirectorDecision DecideForAnyStance(TacticalOperationDirectorInput input)
+        private static TacticalOperationDirectorDecision DecideForAnyStance(TacticalOperationDirectorInput input, in ObjectivePick pick)
         {
             bool activeOperation = IsActiveOperation(input.Current.Phase);
             bool committed = input.Current.Phase == TacticalOperationPhase.Committed;
@@ -183,7 +259,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new TacticalOperationDirectorDecision(input.Current, "commit-window");
             }
 
-            TacticalOperationDirectorDecision selected = SelectOperation(input, activeOperation);
+            TacticalOperationDirectorDecision selected = SelectOperation(input, activeOperation, in pick);
             if (committed && IsDemotionOfSameObjective(input.Current, selected.Operation) && HoldsCommittedExitEvidence(input))
             {
                 return new TacticalOperationDirectorDecision(input.Current, "commit-hysteresis");
@@ -192,7 +268,7 @@ namespace WhiskeyRealism.Tactical.Operations
             return selected;
         }
 
-        private static TacticalOperationDirectorDecision SelectOperation(TacticalOperationDirectorInput input, bool activeOperation)
+        private static TacticalOperationDirectorDecision SelectOperation(TacticalOperationDirectorInput input, bool activeOperation, in ObjectivePick pick)
         {
 
             if (activeOperation &&
@@ -201,7 +277,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new TacticalOperationDirectorDecision(input.Current, "objective-picture-missing");
             }
 
-            if (!TryPickBestObjective(input.Objectives, input.Stance, out BattlefieldObjectiveEstimate primary))
+            if (!TryPickBestObjective(input.Objectives, input.Stance, in pick, out BattlefieldObjectiveEstimate primary))
             {
                 return activeOperation
                     ? new TacticalOperationDirectorDecision(input.Current, "objective-picture-missing")
@@ -412,6 +488,8 @@ namespace WhiskeyRealism.Tactical.Operations
 
         private static bool CanParallelAttack(TacticalOperationDirectorInput input)
         {
+            // BC14O: one main effort; a second objective is a secondary, screened by the allocator.
+            if (input.ObjectiveDoctrine) return false;
             if (input.Objectives.Length < 2 || input.ReserveFraction < 0.15f)
             {
                 return false;
@@ -445,8 +523,15 @@ namespace WhiskeyRealism.Tactical.Operations
         private static bool TryPickBestObjective(
             BattlefieldObjectiveEstimate[] objectives,
             BattleStance stance,
+            in ObjectivePick pick,
             out BattlefieldObjectiveEstimate best)
         {
+            // BC14O: the main-effort objective, when the doctrine made a pick; otherwise (doctrine off, nothing feasible) the shipped best score.
+            if (pick.Has)
+            {
+                best = pick.Objective;
+                return true;
+            }
             best = default(BattlefieldObjectiveEstimate);
             float bestScore = float.NegativeInfinity;
             bool found = false;
@@ -494,6 +579,77 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return found;
+        }
+
+        // BC14O one chooser (requirement-main-effort-objective): the director's objectives scored together. A map objective with a row in the ledger's
+        // table brings the row's score (value, risk, prior, hold); an infeasible row is out. Any other entry (the enemy line, a recon contact, an own-held
+        // objective nobody threatens) scores its value times (1 + U). The director's own terms (every term of ObjectiveSelectionScore but Value) are
+        // added to each, and the latched objective keeps the main effort unless a rival wins by the switch margin. Main thread only: the buffers are
+        // pooled.
+        private static ObjectiveEstimate[] _pickTable = new ObjectiveEstimate[32];
+        private static float[] _pickTerms = new float[32];
+        private static int[] _pickMap = new int[32];
+
+        internal static ObjectivePick PickMainEffortObjective(TacticalOperationDirectorInput input)
+        {
+            if (!input.ObjectiveDoctrine) return default(ObjectivePick);
+            IFeasibilityLookup ledger = input.Feasibility;
+            BattlefieldObjectiveEstimate[] objectives = input.Objectives;
+            if (_pickTable.Length < objectives.Length)
+            {
+                int size = Math.Max(objectives.Length, _pickTable.Length * 2);
+                _pickTable = new ObjectiveEstimate[size];
+                _pickTerms = new float[size];
+                _pickMap = new int[size];
+            }
+            ObjectivePressure pressure = ledger.Pressure;
+            int count = 0;
+            for (int i = 0; i < objectives.Length; i++)
+            {
+                BattlefieldObjectiveEstimate objective = objectives[i];
+                if (!IsUsableObjective(objective)) continue;
+                ObjectiveEstimate entry;
+                if (TryLedgerRow(ledger, objective.ObjectiveId, out entry))
+                {
+                    if (!entry.Feasible) continue;
+                    entry.Id = objective.ObjectiveId;
+                }
+                else entry = new ObjectiveEstimate { Id = objective.ObjectiveId, Value = objective.Value, Feasible = true, Score = objective.Value * (1f + pressure.U) };
+                _pickTable[count] = entry;
+                _pickTerms[count] = ObjectiveSelectionScore(objective, input.Stance) - objective.Value;
+                _pickMap[count] = i;
+                count++;
+            }
+            var table = new ReadOnlySpan<ObjectiveEstimate>(_pickTable, 0, count);
+            var terms = new ReadOnlySpan<float>(_pickTerms, 0, count);
+            int at = ObjectiveScoring.PickMainEffort(table, terms, input.LatchedObjectiveId);
+            if (at < 0) return default(ObjectivePick);
+
+            string runnerUp = null;
+            float runnerUpTotal = float.NegativeInfinity;
+            for (int i = 0; i < count; i++)
+            {
+                if (i == at || !_pickTable[i].Feasible) continue;
+                float total = _pickTable[i].Score + _pickTerms[i];
+                if (total > runnerUpTotal)
+                {
+                    runnerUpTotal = total;
+                    runnerUp = _pickTable[i].Id;
+                }
+            }
+            bool hasRow = TryLedgerRow(ledger, objectives[_pickMap[at]].ObjectiveId, out ObjectiveEstimate row);
+            return new ObjectivePick(_pickMap[at], objectives[_pickMap[at]], hasRow, row, _pickTable[at].Score + _pickTerms[at], runnerUp, runnerUpTotal);
+        }
+
+        // The ledger's row for a director objective, by the director's own id match.
+        private static bool TryLedgerRow(IFeasibilityLookup ledger, string objectiveId, out ObjectiveEstimate row)
+        {
+            for (int r = 0; r < ledger.ObjectiveCount; r++)
+            {
+                if (ledger.TryObjective(r, out row) && ObjectiveIdMatches(row.Id, objectiveId)) return true;
+            }
+            row = default(ObjectiveEstimate);
+            return false;
         }
 
         // BC12 decision 5. An enemy-held objective is harder the stronger its ground and the harder its approach (the shipped

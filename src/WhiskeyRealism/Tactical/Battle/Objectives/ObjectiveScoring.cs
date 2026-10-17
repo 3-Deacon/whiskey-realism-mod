@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 
 namespace WhiskeyRealism.Tactical.Battle
 {
@@ -60,6 +61,12 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>A perceived enemy sample this close to an own-held objective threatens it (vanilla's defend test, 7473-7481, with samples).</summary>
         public const float ThreatRadiusMeters = 250f;
+
+        /// <summary>A side that is ahead adds this times H to a holding play (Defensive and Neutral) in the catalog's selection.</summary>
+        public const float HoldBiasWeight = 0.2f;
+
+        /// <summary>The chosen main-effort objective changes only when a rival scores this much more.</summary>
+        public const float ObjectiveSwitchMargin = 0.1f;
 
         /// <summary>The weight of the hold term: an own-held objective under threat gains this times H, the hold bias of a side that is ahead.</summary>
         public const float HoldWeight = 1f;
@@ -158,6 +165,48 @@ namespace WhiskeyRealism.Tactical.Battle
             p.U = Clamp01(p.Behind * p.Late * (0.5f + agg01));
             p.H = p.Ahead * (1f - agg01);
             return p;
+        }
+
+        /// <summary>
+        /// An objective's score without the director's own terms: <c>Value x (1 + U) - FeasibilityWeight x (1 - 0.5 U) x Penalty + Prior + Hold</c>. A side
+        /// behind with the day running out values the points more and fears the risk less.
+        /// </summary>
+        public static float Score(in ObjectiveEstimate e, in ObjectivePressure p)
+            => e.Value * (1f + p.U) - SelectRiskWeight(in p) * e.Penalty + e.Prior + e.Hold;
+
+        /// <summary>The weight of the feasibility penalty in an objective's score and in the catalog's selection: <c>FeasibilityWeight x (1 - 0.5 U)</c>.</summary>
+        public static float SelectRiskWeight(in ObjectivePressure p) => ManeuverFeasibility.FeasibilityWeight * (1f - 0.5f * p.U);
+
+        /// <summary>The catalog's bias to a holding play for a side that is ahead: <see cref="HoldBiasWeight"/> x H for a Defensive or Neutral play, else 0.</summary>
+        public static float HoldBias(in ObjectivePressure p, TacticalPlaybookCatalog.PlaybookStance stance)
+            => stance == TacticalPlaybookCatalog.PlaybookStance.Offensive ? 0f : HoldBiasWeight * p.H;
+
+        /// <summary>
+        /// The main-effort objective: the feasible row with the highest <c>Score + directorTerms</c> (the director's own terms beside it, by index), the
+        /// first of equals. The one named <paramref name="currentId"/> (null: none) keeps the main effort unless a rival beats its total by
+        /// <see cref="ObjectiveSwitchMargin"/>, so the main effort does not flicker. -1 when no row is feasible.
+        /// </summary>
+        public static int PickMainEffort(ReadOnlySpan<ObjectiveEstimate> table, ReadOnlySpan<float> directorTerms, string currentId)
+        {
+            int best = -1, current = -1;
+            float bestTotal = float.NegativeInfinity, currentTotal = float.NegativeInfinity;
+            for (int i = 0; i < table.Length; i++)
+            {
+                if (!table[i].Feasible) continue;
+                float total = table[i].Score + (i < directorTerms.Length ? directorTerms[i] : 0f);
+                if (currentId != null && string.Equals(table[i].Id, currentId, StringComparison.Ordinal))
+                {
+                    current = i;
+                    currentTotal = total;
+                }
+                if (total > bestTotal)
+                {
+                    best = i;
+                    bestTotal = total;
+                }
+            }
+            if (current >= 0 && best != current && bestTotal < currentTotal + ObjectiveSwitchMargin) return current;
+            return best;
         }
 
         /// <summary>The objective's feasibility penalty r: <c>1 - (1 - daylight)(1 - detail)(1 - ContestedWeight x contested)</c>.</summary>

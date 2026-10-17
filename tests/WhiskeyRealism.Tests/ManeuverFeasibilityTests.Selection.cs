@@ -49,7 +49,8 @@ internal static partial class ManeuverFeasibilityTests
         public string StationChildId(int column) => null;
 
         // BC14O: no objective table.
-        public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => default(WhiskeyRealism.Tactical.Battle.ObjectivePressure);
+        public WhiskeyRealism.Tactical.Battle.ObjectivePressure PressureValue;
+        public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => PressureValue;
         public int ObjectiveCount => 0;
         public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate) { estimate = default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate); return false; }
         public int ThreatCount => 0;

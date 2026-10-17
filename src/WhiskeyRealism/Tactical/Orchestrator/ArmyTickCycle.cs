@@ -260,7 +260,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // bounce in real-time terms — without the margin, main effort
             // could oscillate every wallclock second. Internal guards still
             // block Consolidate/Withdraw and same-sector calls.
-            if (decisiveSectorId >= 0)
+            // BC14O: with a main-effort objective the plan's main effort follows it (the objective's own latch holds the margin) and the odds-based
+            // shift is not asked; with none, the shift runs as before.
+            if (orchestrator.TryObjectiveSector(out int objectiveSector))
+            {
+                orchestrator.SetObjectiveMainEffort(objectiveSector);
+            }
+            else if (decisiveSectorId >= 0)
             {
                 orchestrator.ConsiderMainEffortShift(
                     decisiveSectorId, decisiveSectorOdds, preShiftMainEffortOdds);

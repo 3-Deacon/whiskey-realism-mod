@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -304,7 +305,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 evidence.Terrain,
                 evidence.CurrentOdds,
                 opposingCommanderHint,
-                defaultMainEffortSector: evidence.DefaultMainEffortSector,
+                defaultMainEffortSector: TryObjectiveSector(out int objectiveSector) ? objectiveSector : evidence.DefaultMainEffortSector,
                 jitterSeed: AllianceId * 31 + 7,
                 envelopmentPressure: envelopmentPressure,
                 allianceId: AllianceId,
@@ -390,14 +391,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public bool ConsiderMainEffortShift(int decisiveSectorId, float decisiveSectorOdds, float currentMainEffortOdds)
         {
-            if (!HasPlan) return false;
-            if (decisiveSectorId < 0) return false;
-            // BC14W: a FocalAssault plan's main effort is the focal point's band, set at its pick.
-            if (_plan.PlanId == BattlePlanId.FocalAssault) return false;
-            if (_plan.MainEffortSector == decisiveSectorId) return false;
-            if (_plan.Phase == BattlePhase.Consolidate ||
-                _plan.Phase == BattlePhase.Withdraw)
-                return false;
+            if (!CanMoveMainEffortTo(decisiveSectorId)) return false;
             // Hysteresis: only shift if candidate is materially better.
             // If currentMainEffortOdds <= 0 (no contact in current sector),
             // any positive candidate wins — there's nothing to lose.
@@ -408,6 +402,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _plan = _plan.WithMainEffortSector(decisiveSectorId);
             return true;
+        }
+
+        // The main effort may move to the band: there is a plan, the band exists and is not the current one, the plan is not a FocalAssault (its main
+        // effort is the focal point's band, set at its pick) and not in Consolidate or Withdraw. Shared by the odds-based shift and the objective's.
+        private bool CanMoveMainEffortTo(int sector)
+        {
+            if (!HasPlan || sector < 0) return false;
+            if (_plan.PlanId == BattlePlanId.FocalAssault) return false;
+            if (_plan.MainEffortSector == sector) return false;
+            return _plan.Phase != BattlePhase.Consolidate && _plan.Phase != BattlePhase.Withdraw;
+        }
+
+        /// <summary>
+        /// BC14O: the plan's main effort follows the main-effort objective (requirement-main-effort-objective). Refused in Consolidate and Withdraw and
+        /// for a FocalAssault plan, as the odds-based shift is; no hysteresis of its own, because the objective's latch carries the margin.
+        /// </summary>
+        public bool SetObjectiveMainEffort(int sector)
+        {
+            if (!CanMoveMainEffortTo(sector)) return false;
+            _plan = _plan.WithMainEffortSector(sector);
+            return true;
+        }
+
+        /// <summary>
+        /// BC14O: the front-axis band of the latched main-effort objective, false when the doctrine is off, nothing is latched or the army has no axis.
+        /// </summary>
+        internal bool TryObjectiveSector(out int sector)
+        {
+            sector = -1;
+            if (_feasibility == null || !_frontAxis.IsValid || !Plugin.ObjectiveDoctrineEnabled()) return false;
+            ObjectiveLatch latch = ObjectiveLatch.ForAlliance(AllianceId);
+            if (latch == null || !latch.Has) return false;
+            sector = _frontAxis.SectorOf(latch.X, latch.Z);
+            return sector >= 0;
         }
 
         /// <summary>
@@ -507,6 +535,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _plan = nextPlan;
             HasPlan = true;
+            // BC14O: a new plan starts the main-effort objective's hysteresis over.
+            ObjectiveLatch.ForAlliance(AllianceId)?.Clear();
             // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
             ReserveRelease.Clear();
             _armyReleaseHysteresis.Clear();
@@ -1653,7 +1683,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             _guardedOrderCount = 0;
             if (worksHold) GuardStates(copiedCommandOperations);
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance, maneuverNodes,
-                HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
+                feasibility: _feasibility, allianceId: AllianceId, reverseSlope: HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
             _currentDoctrineOrders = FinishOrders(ledger.CurrentDoctrineOrders, worksHold);
         }

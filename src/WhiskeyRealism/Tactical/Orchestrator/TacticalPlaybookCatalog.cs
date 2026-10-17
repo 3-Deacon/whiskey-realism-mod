@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Util;
 
@@ -84,6 +85,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool lift = ctx.Feasibility != null && AllCandidatesImpossible(in ctx);
             if (lift) OnceLog.Warning("tactical-battle-core:feasibility-all-impossible",
                 "[Feasibility] every candidate is impossible: the feasibility filter is lifted for this selection");
+            // BC14O: the pressure of the victory clock (zero with the doctrine off): a side behind late takes more risk, one ahead leans to holding plays.
+            ObjectivePressure pressure = ctx.Feasibility != null && Plugin.ObjectiveDoctrineEnabled() ? ctx.Feasibility.Pressure : default(ObjectivePressure);
             uint state = unchecked((uint)ctx.JitterSeed | 1u);
             for (int i = 0; i < _playbooks.Count; i++)
             {
@@ -175,8 +178,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     score += 0.35f * DelayingAffinity(pb.Id);
                 }
 
+                score += ObjectiveScoring.HoldBias(in pressure, StanceOf(pb.Id));
+
                 float baseScore = score;
-                float term = -ManeuverFeasibility.FeasibilityWeight * penalty;
+                float term = -ObjectiveScoring.SelectRiskWeight(in pressure) * penalty;
                 score += term;
                 report?.Add(pb.Id, baseScore, term, verdict, mirrored, reason, skipped: false);
 

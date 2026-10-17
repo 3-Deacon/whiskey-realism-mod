@@ -149,6 +149,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             // Taking an objective is an attack (own 1); holding an own one is a defence from its ground.
             PriceDetail(job, ref b, 0f, assault, false, holds ? MainOwnRatio(job, in b) : 1f, Bar(in job.Input.Army), 1);
             e.Penalty = ObjectiveScoring.Penalty(b.Daylight, b.Detail, contested);
+            e.Score = ObjectiveScoring.Score(in e, in w.Pressure);
             e.Feasible = true;
             e.Reason = ReasonOf(in b);
         }

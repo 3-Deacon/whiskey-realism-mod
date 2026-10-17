@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
+using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -137,8 +139,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // stance: the side's battle stance (ArmyEvidenceBuilder.ReadBattleStance, cached
         // by the army from its force-balance evidence); a Defender is never sent probing.
         // reverseSlope: the army's plan is ReverseSlopeDefense, so a crest line is held 80 m behind the crest (BC12).
+        // feasibility / allianceId (BC14O): the side's ledger, whose objective table and pressure the director picks the main-effort objective with, and
+        // the alliance whose latch holds it (null / -1: the shipped director).
         internal void StoreDoctrineForCommandStates(CommandNodeOperationalState[] commandStates, BattleStance stance,
-            ManeuverNodeTable maneuvers = null, bool reverseSlope = false)
+            ManeuverNodeTable maneuvers = null, bool reverseSlope = false, IFeasibilityLookup feasibility = null, int allianceId = -1)
         {
             if (!RunsLedger)
             {
@@ -147,6 +151,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             var picture = BuildBattlefieldPicture(_currentObjectives);
+            ObjectiveLatch latch = feasibility != null && Plugin.ObjectiveDoctrineEnabled() ? ObjectiveLatch.ForAlliance(allianceId) : null;
             var decision = TacticalOperationDirector.Decide(TacticalOperationDirectorInput.ForTest(
                 _currentOperation,
                 _currentTimeSeconds,
@@ -154,9 +159,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _currentForce.ReserveFraction,
                 Clamp01((_currentPersonality.Aggression + 1f) * 0.5f),
                 Clamp01((_currentPersonality.Caution + 1f) * 0.5f),
-                picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength).WithStance(stance));
+                picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength).WithStance(stance)
+                .WithObjectiveDoctrine(latch != null ? feasibility : null, latch?.Id));
 
             _currentOperation = decision.Operation;
+            // BC14O: the latch follows the pick; nothing feasible (or an objective gone from the map) clears it, and the next pick starts with no margin.
+            if (latch != null)
+            {
+                if (decision.Pick.Has) latch.Set(decision.Pick.Objective.ObjectiveId, decision.Pick.Objective.X, decision.Pick.Objective.Z);
+                else latch.Clear();
+            }
             CommandDoctrineOrder[] orders;
             // BC12: the doctrine build plans the terrain line (TacticalTerrainLinePlanner) once per assignment.
             using (TelemetryPerf.Scope("tactical.terrain-line", TelemetryLayer.Tactical, TelemetryCategory.Performance, 1.0))
