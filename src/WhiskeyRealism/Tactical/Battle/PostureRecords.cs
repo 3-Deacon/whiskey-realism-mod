@@ -15,6 +15,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         public bool FlankRisk;
         public bool Submitted;
         public bool FacingSubmitted;
+        // The pipeline put the group on a BC10 road route or is waiting for its column this tick; its regiments march in column on purpose.
+        public bool RouteColumn;
     }
 
     // The posture row of a leaf brigade (a brigade nested under an AI pool group, led by the leaf map and not by the ledger). Unit churn, 2026-10-17: the

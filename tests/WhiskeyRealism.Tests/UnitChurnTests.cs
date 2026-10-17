@@ -23,6 +23,12 @@ internal static class UnitChurnTests
             ("unit-churn COLUMN-DEPLOY a march-column infantry regiment fired on, flanked or engaged deploys at once; a regiment in line, mounted, withdrawing or routed does not", ColumnDeployDecision),
             ("unit-churn COLUMN-DEPLOY-PLAN the deploy intent is planned for a column regiment and is a duplicate for one already in line", ColumnDeployPlan),
             ("unit-churn COLUMN-DEPLOY-WIRING the executor stops the march, then re-forms to line facing the threat; the pulse producer submits it behind its flag", ColumnDeployWiring),
+            ("unit-churn APPROACH-SKIP every arm of the re-column skip: the flag, Commander Mode Active, the write guard, infantry, a regiment not already in column, a marked regiment", ApproachSkipArms),
+            ("unit-churn APPROACH-MARK a regiment is marked only for an AI line advance or hold with the enemy inside the assault range; never a road march, a withdrawal, a player or a feud unit", ApproachMarkArms),
+            ("unit-churn APPROACH-ROAD a road march or column wait far from the enemy is never skipped, and one near it is not marked either", ApproachRoadMarchNeverSkipped),
+            ("unit-churn APPROACH-TABLE the marks are per alliance, rebuilt every pass and expire", ApproachTableMarksExpire),
+            ("unit-churn APPROACH-DEPLOY a column regiment marked for the approach deploys into line before the enemy is in rifle range", ApproachDeploysColumn),
+            ("unit-churn APPROACH-WIRING the Prefix skips only through ApproachLine.Skips, behind its flag, never throws and allocates nothing; the pulse producer builds the marks", ApproachWiring),
         });
     }
 
@@ -270,5 +276,144 @@ internal static class UnitChurnTests
         int pool = demotion.IndexOf("if (!ArmyPostureInputsRuntime.InAiPool(alliance, own[i].InstanceId)) continue;", StringComparison.Ordinal);
         int resolve = demotion.IndexOf("GroupStanceIntentProducer.TryResolvedDecision(", StringComparison.Ordinal);
         AssertTrue(pool >= 0 && resolve > pool, "the demotion is submitted for a pool group only: the writer refuses a leaf brigade (not-ai-group), whose stance is its ancestor's");
+    }
+
+    // ------------------------------------------------------------------ the approach in line (user-approved Prefix-skip, 2026-10-17)
+
+    // Vanilla CheckFormationChange (127625-127682), called from the regular cycle (112277) and on a manual stop (132370), puts a regiment with a path longer
+    // than mindistanceformarchcolumn (60 m) and no enemy within 100 m into march column (127662-127668). A regiment Whiskey advances in line therefore
+    // marched in column again a moment after every deployment. The Prefix skips that method for the regiments the approach table marks.
+    private static bool SkipBase(bool flagOn = true, bool active = true, bool canWrite = true, int unitTyp = TacticalUnitType.Infantry, int formation = 0, bool marked = true)
+        => ApproachLine.Skips(flagOn, active, canWrite, unitTyp, formation, marked);
+
+    private static void ApproachSkipArms()
+    {
+        AssertTrue(SkipBase(), "all arms met: vanilla's re-column is skipped");
+        AssertFalse(SkipBase(flagOn: false), "Enable Approach Line Advance off: vanilla runs unchanged");
+        AssertFalse(SkipBase(active: false), "Commander Mode not Active: vanilla runs");
+        AssertFalse(SkipBase(canWrite: false), "TacticalWriteGuard.CanWrite refuses (a player unit, a feud group, an exposed descendant): vanilla runs");
+        AssertFalse(SkipBase(unitTyp: TacticalUnitType.Cavalry), "cavalry: vanilla runs");
+        AssertFalse(SkipBase(unitTyp: TacticalUnitType.Artillery), "artillery: vanilla runs");
+        AssertFalse(SkipBase(unitTyp: TacticalUnitType.BattleGroupBrigade), "a group object: vanilla runs");
+        AssertFalse(SkipBase(formation: ColumnDeployment.RegimentMarchColumn), "a regiment already in column: vanilla runs, its deploy near an enemy (127677) is its own");
+        AssertFalse(SkipBase(marked: false), "an unmarked regiment: vanilla runs");
+        AssertTrue(SkipBase(formation: 2), "any formation but the column is kept");
+    }
+
+    private static ApproachLineInput Mark(UnitFlags flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry, CommandTaskType task = CommandTaskType.AttackObjective,
+        bool routeColumn = false, int groupFormation = 0, bool withdrawing = false, bool hasEnemy = true, float distance = 300f, bool groupRecorded = true)
+        => new ApproachLineInput(flags, task, routeColumn, groupFormation, withdrawing, hasEnemy, distance, groupRecorded);
+
+    private static void ApproachMarkArms()
+    {
+        AssertTrue(ApproachLine.Marks(Mark()), "an infantry regiment of a brigade advancing with the enemy at 300 m");
+        AssertTrue(ApproachLine.Marks(Mark(distance: ApproachLine.AssaultRangeMeters)), "at the assault range itself");
+        AssertFalse(ApproachLine.Marks(Mark(distance: ApproachLine.AssaultRangeMeters + 1f)), "a metre beyond it");
+        AssertFalse(ApproachLine.Marks(Mark(hasEnemy: false)), "no perceived enemy");
+        AssertFalse(ApproachLine.Marks(Mark(groupRecorded: false)), "no Whiskey intent recorded for the group");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.PlayerOwned)), "a player-owned regiment");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.Feud)), "a feud regiment");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.PermanentlyDetached)), "a detached regiment");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.Routed)), "a routed regiment");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.OnRetreat)), "a retreating regiment");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsCavalry)), "cavalry");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.IsGroup)), "a group");
+        AssertFalse(ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.IsInfantry)), "an inactive regiment");
+        AssertFalse(ApproachLine.Marks(Mark(withdrawing: true)), "a withdrawing group's regiment");
+
+        foreach (CommandTaskType keeps in new[] { CommandTaskType.AttackObjective, CommandTaskType.SupportAttack, CommandTaskType.FixEnemy, CommandTaskType.HoldObjective,
+            CommandTaskType.HoldChoke, CommandTaskType.GuardFlank, CommandTaskType.Consolidate, CommandTaskType.ReserveWait, CommandTaskType.Counterstroke })
+            AssertTrue(ApproachLine.Marks(Mark(task: keeps)), "a line task: " + keeps);
+        foreach (CommandTaskType other in new[] { CommandTaskType.None, CommandTaskType.AdvanceToAssembly, CommandTaskType.FormUp, CommandTaskType.FallBackToLine,
+            CommandTaskType.Delay, CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.Scout, CommandTaskType.ReleaseReserve })
+            AssertFalse(ApproachLine.Marks(Mark(task: other)), "not a line advance or hold: " + other);
+    }
+
+    private static void ApproachRoadMarchNeverSkipped()
+    {
+        // The BC10 road march: the posture pipeline put the group in march column (group formation 4) for a route, or is waiting for the column.
+        AssertFalse(ApproachLine.Marks(Mark(routeColumn: true)), "a road route or a column wait is not a line advance, whatever the enemy distance");
+        AssertFalse(ApproachLine.Marks(Mark(groupFormation: RoadRoutePlanner.ColumnGroupFormation)), "nor a group already in the route's column");
+        AssertFalse(ApproachLine.Marks(Mark(routeColumn: true, distance: 100f)), "even with the enemy close");
+        AssertFalse(ApproachLine.Marks(Mark(distance: 2000f)), "a march far from the enemy is not marked");
+        // Never marked, never skipped.
+        AssertFalse(SkipBase(marked: ApproachLine.Marks(Mark(routeColumn: true))), "so vanilla's re-column runs on a road march");
+        AssertFalse(SkipBase(marked: ApproachLine.Marks(Mark(distance: 2000f))), "and on a march far from the enemy");
+        // A player's unit: the table never holds it, and the guard refuses it a second time.
+        AssertFalse(SkipBase(marked: ApproachLine.Marks(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.PlayerOwned))), "a player unit is never skipped");
+        AssertFalse(SkipBase(canWrite: false, marked: true), "even if it were marked");
+    }
+
+    private static void ApproachTableMarksExpire()
+    {
+        var table = new ApproachLineTable();
+        table.Begin(0, 10.0);
+        table.Mark(0, 77);
+        AssertTrue(table.Contains(0, 77, 10.0), "marked");
+        AssertFalse(table.Contains(1, 77, 10.0), "the other alliance has no mark");
+        AssertFalse(table.Contains(0, 78, 10.0), "nor another regiment");
+        AssertTrue(table.Contains(0, 77, 10.0 + ApproachLineTable.ValidHours * 0.9), "valid inside the window");
+        AssertFalse(table.Contains(0, 77, 10.0 + ApproachLineTable.ValidHours + 0.001), "expired past the window (the arbiter stopped)");
+        AssertFalse(table.Contains(0, 77, 9.0), "a stamp from the future (a reload) is no mark");
+        table.Begin(0, 10.1);
+        AssertFalse(table.Contains(0, 77, 10.1), "every pass rebuilds the alliance's table");
+        table.Mark(5, 1);
+        AssertFalse(table.Contains(5, 1, 10.1), "an alliance out of range is never marked");
+        table.Begin(-1, 10.1);
+        AssertFalse(table.Contains(-1, 1, 10.1), "nor read");
+        table.Clear();
+        AssertFalse(table.Contains(0, 77, 10.1), "Clear (battle end)");
+    }
+
+    private static void ApproachDeploysColumn()
+    {
+        ColumnDeployInput column(bool approaching, int formation = 3, bool withdrawing = false) =>
+            new ColumnDeployInput(true, false, formation, false, 0, 0, false, false, withdrawing, false, false, approaching);
+        AssertEqual(ColumnDeployReason.Approaching, ColumnDeployment.Decide(column(true)), "a marked column regiment deploys at the assault range");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(column(false)), "an unmarked one marches on");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(column(true, formation: 0)), "a regiment already in line has nothing to deploy from");
+        AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(column(true, withdrawing: true)), "a withdrawing group keeps its column");
+        AssertEqual(ColumnDeployReason.FiredOn, ColumnDeployment.Decide(new ColumnDeployInput(true, false, 3, true, 0, 0, false, false, false, false, false, true)), "fire is named first");
+        AssertEqual(ColumnDeployReason.Engaged, ColumnDeployment.Decide(new ColumnDeployInput(true, false, 3, false, 0, 0, false, true, false, false, false, true)), "contact before the approach");
+    }
+
+    private static void ApproachWiring()
+    {
+        string patch = FlankResponseTests.SourceText("Patches", "ApproachLineAdvancePatch.cs");
+        FlankResponseTests.AssertPinned(patch, "[HarmonyPatch(typeof(Regiment), \"CheckFormationChange\")]", "the vanilla method, by name (127625)");
+        string prefix = FlankResponseTests.Between(patch, "internal static bool Prefix(", "private static void Warn(");
+        FlankResponseTests.AssertPinned(prefix, "TelemetryPerf.Scope(\"tactical.patch.approach-line-advance\"", "the diagnostic scope");
+        FlankResponseTests.AssertPinned(prefix, "PatchFirstFire.Mark(\"tactical.patch.approach-line-advance\");", "the first-fire marker");
+        FlankResponseTests.AssertPinned(prefix, "Plugin.EnableApproachLineAdvance", "behind its own rollback flag");
+        FlankResponseTests.AssertPinned(prefix, "TacticalWriteGuard.ModeAllowsWrites()", "Commander Mode Active");
+        FlankResponseTests.AssertPinned(prefix, "TacticalWriteGuard.CanWrite(__instance)", "the write guard: AI, not player-owned, not feud");
+        FlankResponseTests.AssertPinned(prefix, "ApproachLine.Skips(", "the one pure decision");
+        FlankResponseTests.AssertPinned(prefix, "return !skip;", "false (skip) only through it");
+        FlankResponseTests.AssertPinned(prefix, "catch", "never throws");
+        FlankResponseTests.AssertPinned(prefix, "return true;", "and a failure runs vanilla");
+        AssertTrue(!System.Text.RegularExpressions.Regex.IsMatch(prefix, @"\bnew\b|\$""|string\.Format|\.ToString\("), "allocation-free per call: no new, no interpolation, no format");
+        AssertTrue(System.Text.RegularExpressions.Regex.Matches(patch, @"OnceLog\.\w+\(\s*""[a-z0-9:-]+""").Count >= 1, "static OnceLog keys");
+
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        string pass = FlankResponseTests.Between(producer, "private static void SubmitColumnDeployments(", "private static bool WithdrawalRecent(");
+        FlankResponseTests.AssertPinned(pass, "Plugin.EnableApproachLineAdvance", "the marks are behind the same flag");
+        FlankResponseTests.AssertPinned(pass, "ApproachLine.Marks(", "the pure marking rule");
+        FlankResponseTests.AssertPinned(pass, "ApproachLineTable.Shared.Begin(", "the table is rebuilt every pass");
+        FlankResponseTests.AssertPinned(pass, "ApproachLineTable.Shared.Mark(", "and filled from the pass");
+        FlankResponseTests.AssertPinned(pass, "g.RouteColumn", "the group's route column is the pipeline's record");
+        FlankResponseTests.AssertPinned(producer, "RouteColumn = roadRoute.Use || columnWait", "recorded where the pipeline decides the route");
+        string posture = FlankResponseTests.SourceText("Tactical", "Battle", "PostureRecords.cs");
+        FlankResponseTests.AssertPinned(posture, "public bool RouteColumn;", "a field of the posture row");
+        string plugin = FlankResponseTests.SourceText("Plugin.cs");
+        FlankResponseTests.AssertPinned(plugin, "\"Enable Approach Line Advance\"", "the flag is declared");
+
+        // One constant for the assault range (BC16's AssaultRangeMeters): defined once, read by the marks and the approach deploy.
+        int definitions = 0;
+        string src = TestFixtures.FindRepoPath("src/WhiskeyRealism");
+        var define = new System.Text.RegularExpressions.Regex(@"const\s+float\s+AssaultRangeMeters\s*=");
+        foreach (string path in System.IO.Directory.GetFiles(src, "*.cs", System.IO.SearchOption.AllDirectories))
+            if (define.IsMatch(System.IO.File.ReadAllText(path))) definitions++;
+        AssertEqual(1, definitions, "AssaultRangeMeters is defined in one place");
+        AssertEqual(500f, ApproachLine.AssaultRangeMeters, "BC16's 500 m");
     }
 }

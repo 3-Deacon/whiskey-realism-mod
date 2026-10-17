@@ -296,6 +296,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleLodState.cs" Link="Battle\BattleLodState.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PostureRecords.cs" Link="Battle\PostureRecords.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ColumnDeployment.cs" Link="Battle\ColumnDeployment.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ApproachLine.cs" Link="Battle\ApproachLine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\LayoutMirror.cs" Link="Battle\LayoutMirror.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\FormationFlipDetector.cs" Link="Battle\FormationFlipDetector.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleProducerRegistry.cs" Link="Battle\BattleProducerRegistry.cs" />

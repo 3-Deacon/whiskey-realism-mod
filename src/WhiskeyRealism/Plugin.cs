@@ -224,6 +224,7 @@ namespace WhiskeyRealism
         public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
         public static ConfigEntry<bool> EnableTacticalContactFacingPulse;
         public static ConfigEntry<bool> EnableColumnDeployment;
+        public static ConfigEntry<bool> EnableApproachLineAdvance;
         public static ConfigEntry<bool> EnableTacticalReinforcementOpportunityDoctrine;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
@@ -1112,6 +1113,16 @@ namespace WhiskeyRealism
                 "deploys to line facing the closest visible enemy, instead of marching on in column until an enemy is within 100 m (vanilla deploys " +
                 "it there, facing the way it was walking). A regiment of a withdrawing group, a routed or mounted one is left alone. Disable for " +
                 "rollback without turning off Tactical Commander Mode.");
+            EnableApproachLineAdvance = Config.Bind(
+                "Tactical",
+                "Enable Approach Line Advance",
+                true,
+                "Default ON. User-approved skipping Prefix on the game's CheckFormationChange (2026-10-17). For an AI infantry regiment that Whiskey commands " +
+                "(Commander Mode Active, never a player's unit, never the W&L feud instance) in a group whose current intent is a line advance or hold (not a " +
+                "road route or a march column) and whose closest perceived enemy is inside 500 m, the game's re-column step is skipped, so the regiment keeps " +
+                "its line and advances in line instead of falling back into march column; with Enable Column Deployment, a column regiment inside 500 m " +
+                "deploys to line first. Every other regiment runs the game's method unchanged. Disable for rollback: vanilla's formation change runs " +
+                "for every regiment.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reinforcement Opportunity Doctrine",

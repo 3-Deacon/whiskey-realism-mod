@@ -8,13 +8,15 @@ namespace WhiskeyRealism.Tactical.Battle
         FiredOn,
         Flanked,
         Engaged,
+        /// <summary>Marked for the approach in line (ApproachLine): the enemy is inside the assault range and the group advances or holds in line.</summary>
+        Approaching,
     }
 
     // What the decision reads about one regiment; everything comes from the snapshot's own-side rows.
     internal readonly struct ColumnDeployInput
     {
         public ColumnDeployInput(bool infantry, bool mounted, int formation, bool receivedFire, int fireFromFlank, int outflanked, bool groupFlankRisk,
-            bool groupCloseEngaged, bool withdrawing, bool routed, bool recentDeploy)
+            bool groupCloseEngaged, bool withdrawing, bool routed, bool recentDeploy, bool approaching = false)
         {
             Infantry = infantry;
             Mounted = mounted;
@@ -27,6 +29,7 @@ namespace WhiskeyRealism.Tactical.Battle
             Withdrawing = withdrawing;
             Routed = routed;
             RecentDeploy = recentDeploy;
+            Approaching = approaching;
         }
 
         public bool Infantry { get; }
@@ -41,6 +44,7 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool Withdrawing { get; }
         public bool Routed { get; }
         public bool RecentDeploy { get; }
+        public bool Approaching { get; }
     }
 
     // Deploying a march column that is being shot at (unit churn, 2026-10-17).
@@ -72,6 +76,7 @@ namespace WhiskeyRealism.Tactical.Battle
             if (i.ReceivedFire) return ColumnDeployReason.FiredOn;
             if (i.FireFromFlank != 0 || i.Outflanked != 0 || i.GroupFlankRisk) return ColumnDeployReason.Flanked;
             if (i.GroupCloseEngaged) return ColumnDeployReason.Engaged;
+            if (i.Approaching) return ColumnDeployReason.Approaching;
             return ColumnDeployReason.None;
         }
 
