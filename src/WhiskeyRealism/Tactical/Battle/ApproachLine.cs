@@ -32,6 +32,17 @@ namespace WhiskeyRealism.Tactical.Battle
         public bool GroupRecorded { get; }
     }
 
+    // What the ancestor walk reads about the groups above a regiment (the producer's host reads the posture table and the executor's outcomes).
+    internal interface IGroupWalkHost
+    {
+        /// <summary>The group at <paramref name="index"/> has a recorded posture row this tick.</summary>
+        bool HasPosture(int index);
+        /// <summary>The task of the posture row at <paramref name="index"/>.</summary>
+        CommandTaskType TaskOf(int index);
+        /// <summary>A withdrawal move was issued for the unit at <paramref name="index"/> inside the withdrawal window.</summary>
+        bool WithdrawalRecent(int index);
+    }
+
     // The approach in line (unit churn, user-approved Prefix-skip 2026-10-17, ApproachLineAdvancePatch).
     //
     // Vanilla anchors (decompile build 14703111):
@@ -45,6 +56,32 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         /// <summary>BC16's assault range (plan § BC16 decision 1): the distance at which an advance forms for the assault, outside rifle range. One constant.</summary>
         public const float AssaultRangeMeters = 500f;
+
+        /// <summary>How many ancestors above a regiment the walk visits: regiment, brigade, division, army, with one to spare for a nested command group.</summary>
+        public const int MaxGroupHops = 4;
+
+        /// <summary>
+        /// The groups above a regiment: <paramref name="group"/> is the nearest one with a recorded posture row (the intent the regiment follows), -1 when
+        /// none is within <see cref="MaxGroupHops"/>; <paramref name="withdrawing"/> when a withdrawal task is recorded on any of them, or a withdrawal move
+        /// was issued recently for any of them or for the regiment. A parent index outside the roster ends the walk.
+        /// </summary>
+        public static void Walk<THost>(UnitRecord[] own, int ownCount, int regiment, ref THost host, out int group, out bool withdrawing)
+            where THost : struct, IGroupWalkHost
+        {
+            group = -1;
+            withdrawing = false;
+            int a = own[regiment].ParentIndex;
+            for (int hops = 0; a >= 0 && a < ownCount && hops < MaxGroupHops; hops++, a = own[a].ParentIndex)
+            {
+                if (host.HasPosture(a))
+                {
+                    if (group < 0) group = a;
+                    if (ColumnDeployment.WithdrawalTask(host.TaskOf(a))) withdrawing = true;
+                }
+                if (host.WithdrawalRecent(a)) withdrawing = true;
+            }
+            if (host.WithdrawalRecent(regiment)) withdrawing = true;
+        }
 
         /// <summary>The tasks that advance or hold in line. Not the marches (assembly, form up, release, fall back, delay) and not the recon screens.</summary>
         public static bool TaskKeepsLine(CommandTaskType task)

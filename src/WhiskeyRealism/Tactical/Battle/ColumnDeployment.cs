@@ -108,7 +108,9 @@ namespace WhiskeyRealism.Tactical.Battle
                 Channel = OrderChannel.Formation,
                 Value = RegimentLine,
                 Heading = heading >= 0f ? heading : -1f,
-                Flags = IntentFlags.Deploy,
+                // The approach in line must keep marching: a stop clears the regiment's path (StopRegiment 132397) and the group's re-issued move is a
+                // duplicate while its other regiments walk (CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint), so a stopped regiment would be left behind.
+                Flags = reason == ColumnDeployReason.Approaching ? IntentFlags.Deploy | IntentFlags.DeployInMarch : IntentFlags.Deploy,
                 Priority = IntentPriority.Executor,
                 Source = IntentSource.FacingPulse,
                 Reason = ReasonLabel(reason),
@@ -126,9 +128,16 @@ namespace WhiskeyRealism.Tactical.Battle
         /// formation and lastformation are both the restored line, so RotateRegiment (StopRegiment, then ChangeRegimentFormation(lastformation), 130165-130167)
         /// re-forms the line it already has. (SetDistanceMarchColumn, 127702, entered the column with a non-manual call, which is how lastformation came to hold the line.)
         /// </summary>
-        public static ColumnDeployApplied Apply<THost>(ref THost host, float heading) where THost : struct, IColumnDeployHost
+        public static ColumnDeployApplied Apply<THost>(ref THost host, float heading, bool keepMarching) where THost : struct, IColumnDeployHost
         {
             if (!host.OffBridgeOrCrossing) return ColumnDeployApplied.HeldOnBridge;
+            // The approach in line keeps its path: vanilla's own deploy in march (127676-127682), which re-lays the line from the regiment's position
+            // and re-targets the last corner of its path (RegimentSetPath, target default with modifylastwaypoint). A stop would clear that path.
+            if (keepMarching)
+            {
+                host.DeployInMarch(heading);
+                return ColumnDeployApplied.DeployedInMarch;
+            }
             host.Stop();
             if (host.Formation == RegimentMarchColumn)
             {
@@ -153,6 +162,8 @@ namespace WhiskeyRealism.Tactical.Battle
         KeptFacing,
         /// <summary>Stopped, out of the column; no threat bearing was known, so the facing is the regiment's own.</summary>
         NoBearing,
+        /// <summary>Not stopped: deployed to line where it stands with its path kept, so it goes on advancing in line (the approach in line).</summary>
+        DeployedInMarch,
     }
 
     /// <summary>The calls the deploy makes on one regiment (OrderExecutorRuntime wraps vanilla's; a test wraps a fake).</summary>
@@ -166,6 +177,8 @@ namespace WhiskeyRealism.Tactical.Battle
         void Stop();
         /// <summary>ChangeRegimentFormation to line with a manual final rotation (the heading may be negative: keep the facing).</summary>
         void ReformToLine(float heading);
+        /// <summary>Vanilla's deploy in march (127677-127682): the same call without the stop, then distancemarchcolumn = false.</summary>
+        void DeployInMarch(float heading);
         /// <summary>The executor's rotate-in-place; false when it did not turn the regiment.</summary>
         bool Rotate(float heading);
     }

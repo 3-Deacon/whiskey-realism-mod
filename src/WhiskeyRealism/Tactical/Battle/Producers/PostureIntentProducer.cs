@@ -1943,32 +1943,22 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
                 bool inColumn = rec.Formation == ColumnDeployment.RegimentMarchColumn;
 
-                bool closeEngaged = false, flankRisk = false, withdrawing = (f & UnitFlags.OnRetreat) != 0;
-                // The group whose intent the regiment follows: the nearest group above it with a recorded posture.
-                bool recorded = false, routeColumn = false;
+                // The group whose intent the regiment follows: the nearest group above it with a recorded posture (ApproachLine.Walk, the one ancestor walk).
+                var walk = new GroupWalkHost(t.Groups, own, executor, s.DoctrineHours);
+                ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);
+                bool withdrawing = (f & UnitFlags.OnRetreat) != 0 || walkWithdrawing;
+                bool recorded = group >= 0;
+                bool closeEngaged = false, flankRisk = false, routeColumn = false;
                 CommandTaskType groupTask = CommandTaskType.None;
-                int groupFormation = -1, group = -1;
-                int a = rec.ParentIndex;
-                for (int hops = 0; a >= 0 && a < s.OwnCount && hops < 4; hops++, a = own[a].ParentIndex)
+                int groupFormation = -1;
+                if (recorded)
                 {
-                    ref GroupPosture g = ref t.Groups[a];
-                    if (g.Has)
-                    {
-                        if (!recorded)
-                        {
-                            recorded = true;
-                            group = a;
-                            groupTask = g.State.Task;
-                            groupFormation = own[a].Formation;
-                            routeColumn = g.RouteColumn;
-                            closeEngaged = g.CloseEngaged;
-                            flankRisk = g.FlankRisk;
-                        }
-                        if (ColumnDeployment.WithdrawalTask(g.State.Task)) withdrawing = true;
-                    }
-                    if (WithdrawalRecent(executor, own[a].InstanceId, s.DoctrineHours)) withdrawing = true;
+                    groupTask = t.Groups[group].State.Task;
+                    groupFormation = own[group].Formation;
+                    routeColumn = t.Groups[group].RouteColumn;
+                    closeEngaged = t.Groups[group].CloseEngaged;
+                    flankRisk = t.Groups[group].FlankRisk;
                 }
-                if (WithdrawalRecent(executor, rec.InstanceId, s.DoctrineHours)) withdrawing = true;
 
                 bool approaching = false;
                 if (approachOn && recorded)
@@ -1999,7 +1989,28 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
         }
 
-        private static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
+        // ApproachLine.Walk over the posture table and the executor's outcomes; a struct, so the walk allocates nothing.
+        private readonly struct GroupWalkHost : IGroupWalkHost
+        {
+            private readonly GroupPosture[] _groups;
+            private readonly UnitRecord[] _own;
+            private readonly OrderExecutor _executor;
+            private readonly double _nowHours;
+
+            public GroupWalkHost(GroupPosture[] groups, UnitRecord[] own, OrderExecutor executor, double nowHours)
+            {
+                _groups = groups;
+                _own = own;
+                _executor = executor;
+                _nowHours = nowHours;
+            }
+
+            public bool HasPosture(int index) => _groups[index].Has;
+            public CommandTaskType TaskOf(int index) => _groups[index].State.Task;
+            public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);
+        }
+
+        internal static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
         {
             return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
                 last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&

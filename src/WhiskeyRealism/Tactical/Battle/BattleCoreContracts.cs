@@ -265,6 +265,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // (BattleWriterPolicy.RestartedAfterOwnCancel) reads back from the executor's outcome; the counter-battery release (8 to 7) and the ammo-conserving
         // cease-fire are also behavior 7 from the same source and are not a cancel of a bombardment.
         CancelsBombard = 65536,
+        // Unit churn, Formation + Deploy: deploy the column regiment in march, as vanilla's own deploy near an enemy does (CheckFormationChange 127676-127682:
+        // ChangeRegimentFormation with a manual line, no stop), so its path survives and it keeps advancing in line. Without it the deploy stops the regiment.
+        DeployInMarch = 131072,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).

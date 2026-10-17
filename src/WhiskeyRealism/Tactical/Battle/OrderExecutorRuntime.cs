@@ -577,7 +577,7 @@ namespace WhiskeyRealism.Tactical.Battle
             GameObject go = ((Component)unit).gameObject;
             if (go == null) return false;
             var host = new DeployHost(bunits, unit, go);
-            ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading);
+            ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading, (w.Flags & IntentFlags.DeployInMarch) != 0);
             EmitColumnDeploy(view, targetIndex, w, applied);
             return applied != ColumnDeployApplied.HeldOnBridge;
         }
@@ -608,6 +608,15 @@ namespace WhiskeyRealism.Tactical.Battle
             public void ReformToLine(float heading)
             {
                 _unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));
+            }
+
+            public void DeployInMarch(float heading)
+            {
+                // Vanilla's own sequence (CheckFormationChange 127678-127681), unitwhogavelastmovingorder kept as it keeps it.
+                Regiment lastOrderUnit = _unit.unitwhogavelastmovingorder;
+                _unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));
+                _unit.distancemarchcolumn = false;
+                _unit.unitwhogavelastmovingorder = lastOrderUnit;
             }
 
             public bool Rotate(float heading) => RotateInPlace(_unit, heading);
