@@ -495,6 +495,7 @@ internal static class DefenderGroundTests
         var picture = new RiverCrossingTests.Picture();
         CommandNodeOperationalState[] nodes = NodesWithOneCrossed(1, out _);
         AssertEqual(2, OwnBank.SideBank(picture, nodes), "four of five stand in region 2");
+        AssertEqual(2, OwnBank.SideBank(picture, NodesWithOneCrossed(0, out _)), "the first node being the crossed one does not make its bank the side's");
         AssertEqual(-1, OwnBank.SideBank(null, nodes), "no picture, no bank");
         AssertEqual(-1, OwnBank.SideBank(new RiverCrossingTests.Picture { Ready = false }, nodes), "an unready picture, no bank");
         AssertEqual(-1, OwnBank.SideBank(picture, EvidenceNodes(placed: false)), "no placed node, no bank");
