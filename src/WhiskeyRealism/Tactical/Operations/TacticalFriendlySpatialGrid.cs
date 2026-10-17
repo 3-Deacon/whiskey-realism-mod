@@ -118,19 +118,28 @@ namespace WhiskeyRealism.Tactical.Operations
     }
 
     // #61 perf: NavMesh path-quality sampling (3 CalculatePath per plan) is
-    // budgeted per Postfix. Groups past the budget defer to the next call; the
-    // start index rotates by the work done so every group is eventually served.
+    // budgeted per Postfix. Groups past the budget defer to the next call.
+    //
+    // BC15 decision 7: the walk is by instance id. The caller keeps the groups sorted by ascending instance id and starts each tick at
+    // StartIndex, the first id above the last one that got a plan, so a roster that changes between ticks neither skips nor repeats a group
+    // (an index cursor modulo the walked count shifted with every death and arrival). With D groups waiting and a budget of B, every waiting
+    // group is planned within ceil(D / B) ticks; a group that is not due is not walked and takes no plan.
     public sealed class NavPlanBudget
     {
         private readonly int _perApply;
         private int _consumed;
-        private int _cursor;
+        private int _lastPlannedId;
+        private bool _hasLastPlanned;
 
         public NavPlanBudget(int perApply)
         {
             _perApply = Math.Max(1, perApply);
         }
 
+        /// <summary>The instance id of the last group that got a plan; meaningful once one has (see <see cref="StartIndex"/>).</summary>
+        public int LastPlannedId => _lastPlannedId;
+
+        /// <summary>A plan for no particular group (the road-route budget): spends the budget, moves no cursor.</summary>
         public bool TryConsume()
         {
             if (_consumed >= _perApply) return false;
@@ -138,15 +147,35 @@ namespace WhiskeyRealism.Tactical.Operations
             return true;
         }
 
-        public void NextApply(int count)
+        /// <summary>A plan for group <paramref name="groupId"/>: spends the budget and moves the cursor to the group.</summary>
+        public bool TryConsume(int groupId)
         {
-            _cursor = count > 0 ? (_cursor + _consumed) % count : 0;
+            if (!TryConsume()) return false;
+            _lastPlannedId = groupId;
+            _hasLastPlanned = true;
+            return true;
+        }
+
+        public void NextApply()
+        {
             _consumed = 0;
         }
 
-        public int StartIndex(int count)
+        /// <summary>
+        /// The index in <paramref name="sortedIds"/> (ascending, <paramref name="count"/> entries) to start the walk at: the first id above
+        /// the last planned one, or 0 with no plan yet or when every id is at or below it.
+        /// </summary>
+        public int StartIndex(int[] sortedIds, int count)
         {
-            return count > 0 ? _cursor % count : 0;
+            if (!_hasLastPlanned || sortedIds == null || count <= 0) return 0;
+            int low = 0, high = count;
+            while (low < high)
+            {
+                int mid = (low + high) >> 1;
+                if (sortedIds[mid] <= _lastPlannedId) low = mid + 1;
+                else high = mid;
+            }
+            return low < count ? low : 0;
         }
     }
 }

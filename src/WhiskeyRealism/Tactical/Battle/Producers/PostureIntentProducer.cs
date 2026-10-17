@@ -79,9 +79,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public GroupPosture[] Groups = new GroupPosture[BattleSnapshot.InitialCapacity];
             public readonly Dictionary<int, int> EnemyIndexById = new Dictionary<int, int>(256);
             public readonly TacticalFriendlySpatialGrid Friendly = new TacticalFriendlySpatialGrid();
-            // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side,
-            // consumed only by this producer (TryNavPlan).
+            // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side, the posture producer's alone: its single
+            // consumer is TryNavPlan. The producer walks the command groups in ascending instance id from the budget's cursor (BC15 decision 7).
             public readonly NavPlanBudget Nav = new NavPlanBudget(4);
+            // The command groups of this snapshot by ascending instance id: GroupIds[k] belongs to own index GroupOrder[k].
+            public int[] GroupIds = new int[64];
+            public int[] GroupOrder = new int[64];
+            public int GroupCount;
             // BC10 decision 4: the NavMesh query filter of the path probe, built once per
             // snapshot from the live area costs plus AddPath's battle costs.
             public NavMeshQueryFilter NavFilter;
@@ -89,7 +93,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC10 decision 6: one road-route plan (a NavMesh path and an A*) per side and snapshot.
             public readonly NavPlanBudget RouteBudget = new NavPlanBudget(1);
             public readonly RoadRouteScratch RouteScratch = new RoadRouteScratch();
-            public int LastOwnCount;
             public bool NavDeferred;
             public readonly List<float> SupportMainX = new List<float>(8);
             public readonly List<float> SupportMainZ = new List<float>(8);
@@ -132,9 +135,26 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             for (int e = 0; e < s.EnemyRecordCount; e++)
                 if (enemy[e].InstanceId != 0) t.EnemyIndexById[enemy[e].InstanceId] = e;
 
+            // The command groups in ascending instance id (the nav budget's walk order).
+            if (t.GroupIds.Length < n)
+            {
+                t.GroupIds = new int[Math.Max(n, t.GroupIds.Length * 2)];
+                t.GroupOrder = new int[t.GroupIds.Length];
+            }
+            int groups = 0;
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < n; i++)
+            {
+                if (!PostureIntentProducer.IsCommandGroup(own[i])) continue;
+                t.GroupIds[groups] = own[i].InstanceId;
+                t.GroupOrder[groups] = i;
+                groups++;
+            }
+            Array.Sort(t.GroupIds, t.GroupOrder, 0, groups);
+            t.GroupCount = groups;
+
             // #61 BuildFriendlyGrid from the snapshot: standing own combat units.
             t.Friendly.Clear();
-            UnitRecord[] own = s.Own;
             for (int i = 0; i < n; i++)
             {
                 UnitFlags f = own[i].Flags;
@@ -143,10 +163,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 t.Friendly.Add(own[i].InstanceId, own[i].X, own[i].Z);
             }
 
-            t.Nav.NextApply(t.LastOwnCount);
+            t.Nav.NextApply();
             t.NavFilterReady = false;
-            t.RouteBudget.NextApply(0);
-            t.LastOwnCount = n;
+            t.RouteBudget.NextApply();
             t.SupportMainBuilt = false;
             t.TickId = s.TickId;
             return t;
@@ -165,7 +184,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             for (int a = 0; a < _states.Length; a++)
             {
                 _states[a].TickId = -1;
-                _states[a].LastOwnCount = 0;
                 _states[a].Friendly.Clear();
                 _states[a].EnemyIndexById.Clear();
             }
@@ -203,16 +221,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (army == null) return;
 
                 UnitRecord[] own = s.Own;
-                int n = s.OwnCount;
                 var leafMap = army.CurrentLeafBrigadeMap;
                 // BC13: the opportunity producer (which runs just before this one) published the side's exploit table.
                 ExploitTable exploits = ExploitTable.ForAlliance(s.Alliance);
-                int start = t.Nav.StartIndex(n);
-                for (int k = 0; k < n; k++)
+                int start = t.Nav.StartIndex(t.GroupIds, t.GroupCount);
+                for (int k = 0; k < t.GroupCount; k++)
                 {
-                    int i = (start + k) % n;
+                    int i = t.GroupOrder[(start + k) % t.GroupCount];
                     ref UnitRecord rec = ref own[i];
-                    if (!IsCommandGroup(rec)) continue;
 
                     // #61 iterated AIBattle.unitsused, then the leaf brigades
                     // outside it; the pool is captured on the coordinator tick.
@@ -1371,7 +1387,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static bool TryNavPlan(BattleSnapshot s, PostureTick.State t, int i, CommandNodeOperationalState state,
             CommandDoctrineOrder order, PostureExecutionTarget kind, ref float x, ref float z)
         {
-            if (!t.Nav.TryConsume())
+            if (!t.Nav.TryConsume(s.Own[i].InstanceId))
             {
                 t.NavDeferred = true;
                 return false;
