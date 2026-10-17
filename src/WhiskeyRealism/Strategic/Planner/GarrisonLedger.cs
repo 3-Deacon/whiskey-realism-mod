@@ -27,6 +27,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public GarrisonPostState State;
         public float Need;
         public float Existing;           // what already stood there (the need is net of it)
+        public float Short;              // the part of the need the seated formations do not meet
     }
 
     public struct GarrisonSyncResult
@@ -34,7 +35,8 @@ namespace WhiskeyRealism.Strategic.Planner
         public int Posts;                // every post of the plan, D8's secession posts and the ordinary ones
         public int Manned;               // posts a formation is seated at
         public int Released;             // posts of the ledger the plan no longer names
-        public int Uncovered;            // ordinary posts with a need that no formation covered
+        public int Uncovered;            // ordinary posts with a need and no formation seated
+        public int Short;                // ordinary posts manned by formations that together do not meet the need
     }
 
     // The one ledger of garrison posts, D8's secession posts and G8's ordinary ones alike (one per alliance, GarrisonLedgers). Written on the
@@ -89,26 +91,34 @@ namespace WhiskeyRealism.Strategic.Planner
                 string name = NameOf(post);
                 GarrisonPostState state = GarrisonPostState.Uncovered;
                 string unit = "none", key = null;
+                float seated = 0f;
+                int members = 0;
+                bool allThere = true;
                 for (int k = 0; k < allocation.Seats.Count; k++)
                 {
                     if (allocation.Seats[k].PostIndex != g) continue;
                     int i = s.IndexOfOwn(allocation.Seats[k].InstanceId);
                     if (i >= 0)
                     {
-                        unit = s.Own[i].Name;
-                        key = s.Own[i].UnitKey;
+                        unit = members == 0 ? s.Own[i].Name : unit + "+" + s.Own[i].Name;
+                        if (key == null) key = s.Own[i].UnitKey;
+                        seated += Math.Max(0f, s.Own[i].Strength);
                     }
-                    state = allocation.Seats[k].AtPost ? GarrisonPostState.Holding : GarrisonPostState.Moving;
-                    break;
+                    members++;
+                    allThere &= allocation.Seats[k].AtPost;
                 }
+                if (members > 0) state = allThere ? GarrisonPostState.Holding : GarrisonPostState.Moving;
+                bool ordinary = post.Kind != GarrisonPostKind.Secession;
+                float shortfall = ordinary && members > 0 ? Math.Max(0f, post.Need - seated) : 0f;
                 result.Posts++;
-                if (state != GarrisonPostState.Uncovered) result.Manned++;
-                else if (post.Kind != GarrisonPostKind.Secession && post.Need > 0f) result.Uncovered++;
+                if (members > 0) result.Manned++;
+                else if (ordinary && post.Need > 0f) result.Uncovered++;
+                if (shortfall > 0f) result.Short++;
 
                 int previous = Find(post.Kind, post.X, post.Z, matched);
                 if (previous >= 0) matched[previous] = true;
                 if (previous < 0 || _entries[previous].State != state || !string.Equals(_entries[previous].Unit, unit, StringComparison.Ordinal))
-                    _transitions.Add(new GarrisonTransition { Name = name, Kind = post.Kind, Unit = unit, State = state, Need = post.Need, Existing = post.ExistingStrength });
+                    _transitions.Add(new GarrisonTransition { Name = name, Kind = post.Kind, Unit = unit, State = state, Need = post.Need, Existing = post.ExistingStrength, Short = shortfall });
                 next.Add(new Entry
                 {
                     Record = new GarrisonPostRecord { Kind = post.Kind, X = post.X, Z = post.Z, AssignedUnitKey = key, QuietSinceDay = post.QuietSinceDay },
@@ -174,13 +184,14 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public static string Summary(int alliance, GarrisonSyncResult r)
         {
-            return "[Garrison] alliance=" + alliance + " posts=" + r.Posts + " manned=" + r.Manned + " released=" + r.Released + " uncovered=" + r.Uncovered;
+            return "[Garrison] alliance=" + alliance + " posts=" + r.Posts + " manned=" + r.Manned + " released=" + r.Released + " uncovered=" + r.Uncovered + " short=" + r.Short;
         }
 
         public static string Transition(int alliance, GarrisonTransition t)
         {
             return "[GarrisonPost] alliance=" + alliance + " post=" + t.Name + " kind=" + t.Kind + " unit=" + t.Unit + " state=" + t.State
-                + " need=" + t.Need.ToString("0", CultureInfo.InvariantCulture) + " existing=" + t.Existing.ToString("0", CultureInfo.InvariantCulture);
+                + " need=" + t.Need.ToString("0", CultureInfo.InvariantCulture) + " existing=" + t.Existing.ToString("0", CultureInfo.InvariantCulture)
+                + " short=" + t.Short.ToString("0", CultureInfo.InvariantCulture);
         }
     }
 }

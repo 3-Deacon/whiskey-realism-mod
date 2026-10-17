@@ -23,6 +23,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float ThreatShare = 0.5f;          // posted strength >= ThreatShare x post threat - existing strength
         public const int MaxPostsPerAlliance = 6;       // ordinary posts (D8's secession posts are bounded by the two states)
         public const int ReleaseQuietDays = 14;         // a manned post is released after this many review days with no belief in range
+        public const int MaxFormationsPerPost = 2;      // a need no single formation covers is met by the nearest two together, short or not
         // Two sites closer than this are one post: a garrison holds from within bugle range, so a fort beside its town guards both.
         public const float SiteRadius = 25f;
 
@@ -44,27 +45,37 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int k = 0; k < posts.Count && k < MaxPostsPerAlliance; k++) into.Add(posts[k]);
         }
 
-        // The formation (index into s.Own) that holds the post, -1 for none. `pool` marks the formations the allocator has left free for it
-        // (never the mass, the capital guard, a recon picket, a recovering or a busy formation, or a formation another post holds). The
-        // incumbent keeps the post while it is still fit and free; otherwise, when the post has a need, the smallest formation that covers it,
-        // nearest first, within the relocation range of the post. A need nobody covers is left unmanned: a partial garrison is not one.
-        public static int PickFormation(CampaignSnapshot s, GarrisonPost post, bool[] pool)
+        // The post's incumbent (index into s.Own) when it is still fit and free in `pool`, -1 for none. The allocator claims it before the depot
+        // and recon steps, so neither can take a seated garrison; its hysteresis does not depend on the post's need.
+        public static int Incumbent(CampaignSnapshot s, GarrisonPost post, bool[] pool)
         {
-            if (s == null || post == null || pool == null || pool.Length < s.Own.Count) return -1;
-            if (post.InstanceIds.Count > 0)
-            {
-                int incumbent = s.IndexOfOwn(post.InstanceIds[0]);
-                if (incumbent >= 0 && pool[incumbent] && Seatable(s, s.Own[incumbent])) return incumbent;
-            }
-            if (post.Need <= 0f) return -1;
+            if (s == null || post == null || pool == null || pool.Length < s.Own.Count || post.InstanceIds.Count == 0) return -1;
+            int incumbent = s.IndexOfOwn(post.InstanceIds[0]);
+            return incumbent >= 0 && pool[incumbent] && Seatable(s, s.Own[incumbent]) ? incumbent : -1;
+        }
+
+        // Adds to `into` the formations (indexes into s.Own) that hold the rest of the post's need, `have` being the strength already seated
+        // there (the incumbent's) and `slots` the formations still allowed (MaxFormationsPerPost less those seated). `pool` marks the
+        // formations the allocator has left free for it (never the mass, the capital guard, a recon picket, a recovering or busy formation,
+        // or a formation another post holds). The smallest single formation that covers the rest, nearest first, within the relocation range
+        // of the post; when none does, the nearest eligible formations together until the need is met or the slots are used, as D8's
+        // flag-alone posts do. What they still fall short of is the post's shortfall (GarrisonLedger.Sync). A post with no need asks nobody.
+        public static void PickFormations(CampaignSnapshot s, GarrisonPost post, bool[] pool, float have, int slots, List<int> into)
+        {
+            if (s == null || post == null || pool == null || into == null || pool.Length < s.Own.Count || slots <= 0) return;
+            float remaining = post.Need - have;
+            if (remaining <= 0f) return;
+            var near = new List<int>();
             int best = -1;
             float bestDistance = float.MaxValue;
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!pool[i] || !Seatable(s, f) || f.Strength < post.Need) continue;
+                if (!pool[i] || !Seatable(s, f)) continue;
                 float d = RiverLines.Distance(f.X, f.Z, post.X, post.Z);
                 if (d > s.RelocationRange) continue;
+                near.Add(i);
+                if (f.Strength < remaining) continue;
                 if (best >= 0)
                 {
                     var b = s.Own[best];
@@ -74,7 +85,22 @@ namespace WhiskeyRealism.Strategic.Planner
                 best = i;
                 bestDistance = d;
             }
-            return best;
+            if (best >= 0)
+            {
+                into.Add(best);
+                return;
+            }
+            near.Sort((a, b) =>
+            {
+                int c = RiverLines.Distance(s.Own[a].X, s.Own[a].Z, post.X, post.Z).CompareTo(RiverLines.Distance(s.Own[b].X, s.Own[b].Z, post.X, post.Z));
+                return c != 0 ? c : s.Own[a].InstanceId.CompareTo(s.Own[b].InstanceId);
+            });
+            float seated = 0f;
+            for (int k = 0; k < near.Count && k < slots && seated < remaining; k++)
+            {
+                into.Add(near[k]);
+                seated += Math.Max(0f, s.Own[near[k]].Strength);
+            }
         }
 
         // Whether the formation stands at the post: within its bugle range (never less than the mover's arrival radius), the distance it

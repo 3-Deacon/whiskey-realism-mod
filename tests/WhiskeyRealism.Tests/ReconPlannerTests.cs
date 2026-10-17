@@ -52,7 +52,7 @@ internal static class ReconPlannerTests
             ("MissionExpiresAfterTwentyDays", MissionExpiresAfterTwentyDays),
             ("ProbeEscalateClearsAndWithdrawRecalls", ProbeEscalateClearsAndWithdrawRecalls),
             ("MissionsKeyedByUnitKey", MissionsKeyedByUnitKey),
-            ("AlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
+            ("ReconAlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
             ("ReconNeverReadsDestinations", ReconNeverReadsDestinations),
             ("ScoutingOrderOnlyForCavalryScreens", ScoutingOrderOnlyForCavalryScreens),
             ("RecallClearsScoutingOrder", RecallClearsScoutingOrder),

@@ -34,13 +34,19 @@ internal static class GarrisonPlannerTests
             ("NeverPlayerCommandOrSoleMapGroupPlayer", NeverPlayerCommandOrSoleMapGroupPlayer),
             ("GarrisonWithheldFromVanillaOperations", GarrisonWithheldFromVanillaOperations),
             ("GarrisonPostsRoundTripInSidecar", GarrisonPostsRoundTripInSidecar),
-            ("AlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
+            ("GarrisonAlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
             ("SecessionAndPostsShareOneRoleOneWithholdOneLedger", SecessionAndPostsShareOneRoleOneWithholdOneLedger),
             ("ASecessionMemberInTheStateIsSeatedAtItsPostAndHolds", ASecessionMemberInTheStateIsSeatedAtItsPostAndHolds),
             ("ASecessionTownIsNeverAlsoAGarrisonPost", ASecessionTownIsNeverAlsoAGarrisonPost),
             ("AFormationHoldsOnePostAtMostAndPostsNeverShareIt", AFormationHoldsOnePostAtMostAndPostsNeverShareIt),
             ("TheIncumbentKeepsItsPostAndIsNotItsOwnExistingStrength", TheIncumbentKeepsItsPostAndIsNotItsOwnExistingStrength),
             ("ANeedNoFormationCoversIsRecordedUncovered", ANeedNoFormationCoversIsRecordedUncovered),
+            ("TwoCorpsTogetherManAPostNoSingleCorpsCovers", TwoCorpsTogetherManAPostNoSingleCorpsCovers),
+            ("ACombinedPostNeverTakesTheMass", ACombinedPostNeverTakesTheMass),
+            ("ADepotBuilderDoesNotTakeASeatedGarrison", ADepotBuilderDoesNotTakeASeatedGarrison),
+            ("AReconPickDoesNotTakeASeatedGarrison", AReconPickDoesNotTakeASeatedGarrison),
+            ("ASeatedGarrisonIsWithheldByItsOwnRule", ASeatedGarrisonIsWithheldByItsOwnRule),
+            ("APlayerFormationIsNeverAPostsIncumbent", APlayerFormationIsNeverAPostsIncumbent),
             ("AFormationAtThePostHoldsInPlaceAndOneAwayMarches", AFormationAtThePostHoldsInPlaceAndOneAwayMarches),
             ("AReserveSurplusMayBePostedButTheMassNever", AReserveSurplusMayBePostedButTheMassNever),
             ("AFormationTheTrackerGaveUpOnIsNotSeated", AFormationTheTrackerGaveUpOnIsNotSeated),
@@ -360,16 +366,17 @@ internal static class GarrisonPlannerTests
         s.Own.Add(Corps(5, 480f, 1500f));                                 // does not cover
         var post = Posts(s)[0];
         AssertTrue(post.Need > 1500f && post.Need < 3000f, "the need " + post.Need + " sits between the small and the middling corps");
-        int pick = GarrisonPlanner.PickFormation(s, post, AllFree(s));
-        AssertEqual(4, s.Own[pick].InstanceId, "the smallest that covers it, the nearer on a tie");
+        var first = Pick(s, post, AllFree(s));
+        AssertEqual(1, first.Count, "one formation covers it");
+        AssertEqual(4, first[0], "the smallest that covers it, the nearer on a tie");
         var pool = AllFree(s);
-        pool[pick] = false;
-        AssertEqual(3, s.Own[GarrisonPlanner.PickFormation(s, post, pool)].InstanceId, "then the other");
+        pool[s.IndexOfOwn(4)] = false;
+        AssertEqual(3, Pick(s, post, pool)[0], "then the other");
         var far = Side();
         far.Objectives.Add(Town(40, 500f));
         far.Beliefs.Add(Seen(560f, 30000f));
         far.Own.Add(Corps(6, 800f, 6000f));                               // beyond the relocation range of the post
-        AssertEqual(-1, GarrisonPlanner.PickFormation(far, Posts(far)[0], AllFree(far)), "a formation beyond the relocation range is not asked");
+        AssertEqual(0, Pick(far, Posts(far)[0], AllFree(far)).Count, "a formation beyond the relocation range is not asked");
     }
 
     // The pool says what the allocator has left free; the pick still asks the formation itself: ready (vanilla refuses to march a readiness 0-1
@@ -388,14 +395,22 @@ internal static class GarrisonPlannerTests
         var player = Corps(3, 490f, 6000f);
         player.Chain = WlChainClass.PlayerMapGroup;
         s.Own.Add(player);
-        var small = Corps(4, 492f, 600f);                                // below the post's need
-        s.Own.Add(small);
         var post = Posts(s)[0];
-        AssertEqual(-1, GarrisonPlanner.PickFormation(s, post, AllFree(s)), "an unready, a shaken, a player's and a too-small formation: none is asked");
+        AssertEqual(0, Pick(s, post, AllFree(s)).Count, "an unready, a shaken and a player's formation: none is asked");
         s.Own.Add(Corps(5, 470f, 6000f));
-        AssertEqual(5, s.Own[GarrisonPlanner.PickFormation(s, post, AllFree(s))].InstanceId, "the one fit formation is");
+        AssertEqual(5, Pick(s, post, AllFree(s))[0], "the one fit formation is");
         var met = new GarrisonPost { Kind = GarrisonPostKind.ObjectiveTown, X = 500f, Z = 0f, Need = 0f };
-        AssertEqual(-1, GarrisonPlanner.PickFormation(s, met, AllFree(s)), "a post with no need and no incumbent asks nobody");
+        AssertEqual(0, Pick(s, met, AllFree(s)).Count, "a post with no need and no incumbent asks nobody");
+        AssertEqual(0, Pick(s, post, AllFree(s), have: post.Need).Count, "nor one whose need the incumbent already meets");
+        AssertEqual(0, Pick(s, post, AllFree(s), slots: 0).Count, "nor one with no slot left");
+    }
+
+    // The instance ids GarrisonPlanner.PickFormations names for a post with nothing seated yet and both slots free.
+    private static List<int> Pick(CampaignSnapshot s, GarrisonPost post, bool[] pool, float have = 0f, int slots = GarrisonPlanner.MaxFormationsPerPost)
+    {
+        var into = new List<int>();
+        GarrisonPlanner.PickFormations(s, post, pool, have, slots, into);
+        return into.Select(i => s.Own[i].InstanceId).ToList();
     }
 
     private static bool[] AllFree(CampaignSnapshot s)
@@ -486,6 +501,106 @@ internal static class GarrisonPlannerTests
         AssertEqual(0, ledger.Posts.Count, "and forgets it");
         allocEnd.TryGet(3, out var free);
         AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost && free.Role == FormationRole.Hold, "the formation holds as any other (no post)");
+    }
+
+    // The verifier's probe: the incumbent holds its town and a depot task sits in its sector. SmallestIn picks the smallest formation of the
+    // sector, which is the garrison; the incumbent is claimed first, so the larger corps builds the depot and the post stays manned.
+    private static void ADepotBuilderDoesNotTakeASeatedGarrison()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        s.Own.Add(Corps(1, 503f, 3000f));                                // the incumbent, the smallest formation of its sector
+        s.Own.Add(Corps(3, 450f, 9000f));
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = HandPlan(s);
+        int sector = sectors.SectorAt(503f, 0f);
+        AssertEqual(sector, sectors.SectorAt(450f, 0f), "both stand in one sector");
+        plan.DepotTasks.Add(new DepotTask { X = 520f, Z = 0f, SectorId = sector, Priority = 1f });
+        var alloc = Allocate(s, plan, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
+        alloc.TryGet(1, out var garrison);
+        alloc.TryGet(3, out var builder);
+        AssertEqual(ForceAllocator.ReasonGarrisonPost, garrison.Reason, "the incumbent keeps the post");
+        AssertEqual(FormationRole.DepotBuilder, builder.Role, "and the other corps builds the depot");
+        AssertEqual(1, alloc.Seats.Count, "one seat, not refilled");
+        AssertEqual(1, alloc.Seats[0].InstanceId, "the incumbent's");
+    }
+
+    // The same for a recon pick: a cavalry-majority incumbent is the formation recon prefers, and a seated garrison is not a scout.
+    private static void AReconPickDoesNotTakeASeatedGarrison()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        var cavalry = Corps(1, 503f, 6000f);
+        cavalry.CavalryShare = 0.9f;
+        s.Own.Add(cavalry);
+        s.Own.Add(Corps(3, 450f, 9000f));
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = HandPlan(s);
+        var task = new ReconTask { Kind = ReconKind.Screen, SectorId = sectors.SectorAt(503f, 0f), FromX = 560f, FromZ = 0f, HoldX = 520f, HoldZ = 0f, Priority = 1f, Reason = "t" };
+        var tasks = new List<ReconTask> { task };
+        plan.Garrisons.AddRange(Posts(s, plan, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") }));
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger());
+        alloc.TryGet(1, out var garrison);
+        AssertEqual(ForceAllocator.ReasonGarrisonPost, garrison.Reason, "the incumbent stays the garrison");
+        AssertTrue(garrison.Role != FormationRole.Recon, "and is not made a scout");
+        alloc.TryGet(3, out var other);
+        AssertEqual(FormationRole.Recon, other.Role, "the other corps takes the recon task (a control: the task is real)");
+
+        // Without the post the cavalry corps is the scout: the task prefers it.
+        var noPost = Side();
+        noPost.Objectives.Add(Town(40, 500f));
+        noPost.Own.Add(cavalry);
+        noPost.Own.Add(Corps(3, 450f, 9000f));
+        var noPostPlan = HandPlan(noPost);
+        var scout = ForceAllocator.Allocate(noPostPlan, noPost, ExecutorFixtures.Sectors(noPost), null, tasks, new ReconMissionLedger());
+        scout.TryGet(1, out var cav);
+        AssertEqual(FormationRole.Recon, cav.Role, "control: with no post the cavalry corps is the one recon prefers");
+    }
+
+    // Seated means withheld by the post's own rule, not by luck: with the sector's hold already met by an immobile formation, the sector's
+    // withhold takes nobody, and the garrison at its post is still out of vanilla's pools.
+    private static void ASeatedGarrisonIsWithheldByItsOwnRule()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        s.Own.Add(Corps(1, 503f, 6000f));                                // the incumbent, at its post
+        var busy = Corps(2, 480f, 30000f);
+        busy.Flags |= FormationFlags.InBattle;                           // immobile: it counts toward the sector's hold, past its target
+        s.Own.Add(busy);
+        var free = Corps(3, 470f, 6000f);                                // an ordinary hold the sector's withhold would leave free
+        s.Own.Add(free);
+        var alloc = Allocate(s, HandPlan(s), new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
+        alloc.TryGet(3, out var ordinary);
+        AssertFalse(ordinary.Withheld, "control: the sector's own withhold takes nobody (its hold is met)");
+        alloc.TryGet(1, out var garrison);
+        AssertEqual(FormationRole.Hold, garrison.Role, "the garrison holds at its post");
+        AssertTrue(garrison.Withheld, "and is withheld by the post's rule alone");
+    }
+
+    // A player's formation can never be a post's incumbent, whatever the ledger says: it would keep a post alive that nobody holds.
+    private static void APlayerFormationIsNeverAPostsIncumbent()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(560f, 30000f));
+        s.Own.Add(Corps(7, 505f, 9000f));                                // an AI corps at the post: existing strength, the need is met
+        var player = Corps(1, 540f, 5000f);
+        player.Chain = WlChainClass.PlayerMapGroup;
+        s.Own.Add(player);
+        var posts = Posts(s, null, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
+        AssertEqual(0, posts.Count, "the player's group named by the ledger holds nothing; the AI corps already covers the threat");
+        var command = Side();
+        command.Objectives.Add(Town(40, 500f));
+        command.Beliefs.Add(Seen(560f, 30000f));
+        var own = Corps(1, 505f, 9000f);
+        own.Chain = WlChainClass.PlayerCommand;
+        command.Own.Add(own);
+        var after = Posts(command, null, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
+        AssertEqual(1, after.Count, "the threat still makes a post");
+        AssertEqual(0, after[0].InstanceIds.Count, "but it names no incumbent");
     }
 
     // A manned post lives on its incumbent: a record whose formation has gone from the map (destroyed, disbanded) keeps nothing, however
@@ -751,22 +866,114 @@ internal static class GarrisonPlannerTests
         AssertTrue(alloc.Seats[0].AtPost, "where it stands");
     }
 
+    // A need no single formation covers is met by the nearest two together (D8's flag-alone rule), as far as they go: the shortfall is
+    // recorded, never taken from the mass, and a post nobody can reach stays uncovered.
     private static void ANeedNoFormationCoversIsRecordedUncovered()
     {
         var s = Side();
         s.Objectives.Add(Town(40, 500f));
         s.Beliefs.Add(Seen(560f, 600000f));                              // a need far above any corps
         s.Own.Add(Corps(1, 450f, 9000f));
+        s.Own.Add(Corps(2, 440f, 9000f));
+        s.Own.Add(Corps(3, 430f, 9000f));
         var plan = HandPlan(s);
         var alloc = Allocate(s, plan);
-        AssertTrue(plan.Garrisons[0].Need > 9000f, "the need " + plan.Garrisons[0].Need + " is above the only corps");
-        AssertEqual(0, alloc.Seats.Count, "no formation covers it, so none is posted (a partial garrison is not a garrison)");
-        alloc.TryGet(1, out var free);
-        AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost, "the corps is kept for no post");
+        float need = plan.Garrisons[0].Need;
+        AssertTrue(need > 18000f, "the need " + need + " is above any two corps");
+        AssertEqual(GarrisonPlanner.MaxFormationsPerPost, alloc.Seats.Count, "the nearest two are posted, no more");
+        AssertTrue(alloc.Seats.All(x => x.InstanceId == 1 || x.InstanceId == 2), "corps 1 and 2 are nearest: " + string.Join(",", alloc.Seats.Select(x => x.InstanceId)));
+        alloc.TryGet(3, out var third);
+        AssertTrue(third.Reason != ForceAllocator.ReasonGarrisonPost, "the third is kept for no post");
         var ledger = new GarrisonLedger();
         var result = ledger.Sync(plan.Garrisons, alloc, s);
-        AssertEqual(1, result.Uncovered, "the post is counted uncovered");
-        AssertEqual(0, result.Manned, "and not manned");
+        AssertEqual(1, result.Manned, "the post is manned");
+        AssertEqual(1, result.Short, "and short");
+        AssertEqual(0, result.Uncovered, "so it is not uncovered");
+        AssertNear(need - 18000f, ledger.Transitions[0].Short, 1f, "by what the two fall short of");
+
+        var nobody = Side();
+        nobody.Objectives.Add(Town(40, 500f));
+        nobody.Beliefs.Add(Seen(560f, 600000f));
+        nobody.Own.Add(Corps(1, 800f, 9000f));                           // beyond the relocation range
+        var nobodyPlan = HandPlan(nobody);
+        var nobodyAlloc = Allocate(nobody, nobodyPlan);
+        var unreached = new GarrisonLedger().Sync(nobodyPlan.Garrisons, nobodyAlloc, nobody);
+        AssertEqual(1, unreached.Uncovered, "a post no formation can reach is uncovered");
+        AssertEqual(0, unreached.Manned, "and not manned");
+    }
+
+    // The verifier's case: a 60000 army fifteen from the town makes a need of about 6657; two 5500 corps nearby cover it only together.
+    private static void TwoCorpsTogetherManAPostNoSingleCorpsCovers()
+    {
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(515f, 60000f));
+        s.Own.Add(Corps(1, 450f, 5500f));
+        s.Own.Add(Corps(2, 460f, 5500f));
+        s.Own.Add(Corps(3, 440f, 5500f));                                // a third, farther: not needed
+        var plan = HandPlan(s);
+        var alloc = Allocate(s, plan);
+        float need = plan.Garrisons[0].Need;
+        AssertNear(6657f, need, 3f, "the verifier's need");
+        AssertEqual(2, alloc.Seats.Count, "two corps together");
+        AssertEqual("1,2", string.Join(",", alloc.Seats.Select(x => x.InstanceId).OrderBy(x => x)), "the nearest two");
+        AssertEqual(0, alloc.Seats.Select(x => x.PostIndex).Distinct().First(), "at the one post");
+        foreach (int id in new[] { 1, 2 })
+        {
+            alloc.TryGet(id, out var a);
+            AssertEqual(FormationRole.Garrison, a.Role, "corps " + id + " marches to the post");
+            AssertTrue(a.Withheld, "withheld");
+            AssertEqual(ForceAllocator.ReasonGarrisonPost, a.Reason, "for the post");
+        }
+        var ledger = new GarrisonLedger();
+        var result = ledger.Sync(plan.Garrisons, alloc, s);
+        AssertEqual(0, result.Short, "11000 meets 6657: no shortfall");
+        AssertEqual("corps1+corps2", ledger.Transitions[0].Unit.Split('+').OrderBy(x => x).Aggregate((a, b) => a + "+" + b), "the ledger names both");
+
+        // A single corps that covers is preferred to two that together would.
+        var single = Side();
+        single.Objectives.Add(Town(40, 500f));
+        single.Beliefs.Add(Seen(515f, 60000f));
+        single.Own.Add(Corps(1, 450f, 5500f));
+        single.Own.Add(Corps(2, 460f, 5500f));
+        single.Own.Add(Corps(4, 300f, 7000f));                           // 200 away: beyond range, so still two
+        AssertEqual(2, Allocate(single, HandPlan(single)).Seats.Count, "a covering corps out of range does not count");
+        single.Own[2] = Corps(4, 380f, 7000f);                           // in range
+        var covered = Allocate(single, HandPlan(single));
+        AssertEqual(1, covered.Seats.Count, "one corps that covers is posted alone");
+        AssertEqual(4, covered.Seats[0].InstanceId, "the 7000");
+
+        // The incumbent counts as one of the two: it keeps the post and one more is added for the rest.
+        var held = Side();
+        held.Objectives.Add(Town(40, 500f));
+        held.Beliefs.Add(Seen(515f, 60000f));
+        held.Own.Add(Corps(1, 503f, 5500f));
+        held.Own.Add(Corps(2, 460f, 5500f));
+        held.Own.Add(Corps(3, 440f, 5500f));
+        var heldAlloc = Allocate(held, HandPlan(held), new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
+        AssertEqual(2, heldAlloc.Seats.Count, "the incumbent and one more");
+        AssertEqual(1, heldAlloc.Seats[0].InstanceId, "the incumbent first");
+        AssertEqual(2, heldAlloc.Seats[1].InstanceId, "then the nearest");
+    }
+
+    // The mass is never a source for the second formation either: only the formations outside it are combined.
+    private static void ACombinedPostNeverTakesTheMass()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.MinStrengthForMovement = 5000f;
+        s.MinMoraleForMovement = 0.3f;
+        s.Objectives.Add(Town(40, 400f));
+        s.Beliefs.Add(Seen(100f, 18000f));
+        s.Beliefs.Add(Seen(415f, 60000f));
+        s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(2, 395f, 9000f));                                // the mass, nearest the post
+        s.Own.Add(Corps(3, 380f, 5500f));
+        s.Own.Add(Corps(4, 370f, 5500f));
+        var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+        var alloc = Allocate(s, plan);
+        AssertEqual("3,4", string.Join(",", alloc.Seats.Select(x => x.InstanceId).OrderBy(x => x)), "the two free corps, not the mass member beside the post");
+        alloc.TryGet(2, out var mass);
+        AssertEqual(FormationRole.MainEffort, mass.Role, "the mass is untouched");
     }
 
     private static void AFormationAtThePostHoldsInPlaceAndOneAwayMarches()
@@ -932,10 +1139,10 @@ internal static class GarrisonPlannerTests
 
     private static void TheGarrisonRowsCarryTheSpecifiedFields()
     {
-        var result = new GarrisonSyncResult { Posts = 3, Manned = 2, Released = 1, Uncovered = 1 };
-        AssertEqual("[Garrison] alliance=0 posts=3 manned=2 released=1 uncovered=1", GarrisonRows.Summary(0, result), "the summary row");
-        var t = new GarrisonTransition { Name = "Port@700,0", Kind = GarrisonPostKind.Port, Unit = "corps6", State = GarrisonPostState.Holding, Need = 2196.4f, Existing = 600.2f };
-        AssertEqual("[GarrisonPost] alliance=1 post=Port@700,0 kind=Port unit=corps6 state=Holding need=2196 existing=600", GarrisonRows.Transition(1, t), "the transition row");
+        var result = new GarrisonSyncResult { Posts = 3, Manned = 2, Released = 1, Uncovered = 1, Short = 1 };
+        AssertEqual("[Garrison] alliance=0 posts=3 manned=2 released=1 uncovered=1 short=1", GarrisonRows.Summary(0, result), "the summary row");
+        var t = new GarrisonTransition { Name = "Port@700,0", Kind = GarrisonPostKind.Port, Unit = "corps6", State = GarrisonPostState.Holding, Need = 2196.4f, Existing = 600.2f, Short = 12.6f };
+        AssertEqual("[GarrisonPost] alliance=1 post=Port@700,0 kind=Port unit=corps6 state=Holding need=2196 existing=600 short=13", GarrisonRows.Transition(1, t), "the transition row");
         var post = new GarrisonPost { Kind = GarrisonPostKind.Fort, X = 500.4f, Z = 3.6f };
         AssertEqual("Fort@500,4", GarrisonLedger.NameOf(post), "an ordinary post is named by kind and place");
         AssertEqual("Kentucky", GarrisonLedger.NameOf(new GarrisonPost { Kind = GarrisonPostKind.Secession, StateName = "Kentucky" }), "a secession post by its state");
