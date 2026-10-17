@@ -396,6 +396,20 @@ namespace WhiskeyRealism.Tactical
                 input.VanillaGroupStance != VanillaStanceUnknown;
         }
 
+        // A group carrying an order (a path, or an order in its superior's queue) is not re-tasked: the
+        // producers that claim its stance stand still while it marches (the order-friction gate, a posture
+        // executor with a pending order), so nothing refreshes the hold. Vanilla's AdjustGroupAIStance (4264,
+        // inverted test: it re-decides whenever the stamp is not ahead) then writes its own stance over
+        // Whiskey's the cycle the hold lapses, and Whiskey writes its own back when the group settles: two
+        // queued stance orders per brigade per hold (the 2026-10-16 smoke: 1st Brigade 1 -> 3 at 0.257 h
+        // after Whiskey's write, the hold being 0.25 h). While the group carries its order, a hold whose
+        // stance is still the ordered one is renewed: the same claim the producers make, through the writer's
+        // own decision (the per-group carve-out still applies). A change of opinion waits for a settled group.
+        public static bool RenewsWhileOrdered(in StanceHoldRecord record, int currentOrderedStance, bool carryingOrder)
+        {
+            return carryingOrder && record.HasValue && record.Stance == currentOrderedStance;
+        }
+
         public static bool ReleasesVanillaHold(in StanceWriteDecision decision)
         {
             return decision.Action == StanceWriteAction.Yield;

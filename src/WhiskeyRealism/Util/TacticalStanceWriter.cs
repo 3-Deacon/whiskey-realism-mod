@@ -158,6 +158,41 @@ namespace WhiskeyRealism.Util
             return EnsureStance(bunits, group, targetStance, contextTag, TacticalStanceOwnership.SourceFor(source));
         }
 
+        // Keeps the holds of groups that carry an order alive (TacticalStanceOwnership.RenewsWhileOrdered): the
+        // producers go quiet while a group marches or waits for its order, and a hold nobody renews lapses
+        // after HoldHours, when vanilla's AdjustGroupAIStance writes its own stance over Whiskey's. Runs once
+        // per arbiter tick after the winners were issued, so a producer's own claim has already refreshed its
+        // record and the cheap path below returns at once. Each renewal is the group's own record through the
+        // full decision (the vanilla weak-group carve-out, the army retreat). Reads the snapshot; writes only
+        // what EnsureStance writes.
+        public static int RenewWhileOrdered(BattleUnits bunits, BattleSnapshot snapshot)
+        {
+            if (bunits == null || snapshot == null || _records.Count == 0) return 0;
+            int renewed = 0;
+            try
+            {
+                UnitRecord[] own = snapshot.Own;
+                for (int i = 0; i < snapshot.OwnCount; i++)
+                {
+                    if ((own[i].Flags & UnitFlags.IsGroup) == 0 || (own[i].Flags & UnitFlags.PlayerOwned) != 0) continue;
+                    bool carrying = own[i].RegimentPaths > 0 || own[i].QueuedOrders > 0;
+                    if (!carrying) continue;
+                    Regiment group = BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
+                    if ((UnityEngine.Object)group == null) continue;
+                    if (!_records.TryGetValue(group.GetInstanceID(), out StanceHoldRecord record)) continue;
+                    if (!TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carrying)) continue;
+                    EnsureStance(bunits, group, record.Stance, "hold-renew", record.Source);
+                    renewed++;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-stance-write:renew-failed",
+                    "[TacticalStanceWrite] RenewWhileOrdered threw: " + ex.GetType().Name + " " + ex.Message);
+            }
+            return renewed;
+        }
+
         // Hand one group back to vanilla: drop ownership and pull a future
         // stamp back so 4264 re-evaluates it on the next macro cycle (raw
         // clock: vanillaNow is GameVars.currenttimefromstart). Only a
