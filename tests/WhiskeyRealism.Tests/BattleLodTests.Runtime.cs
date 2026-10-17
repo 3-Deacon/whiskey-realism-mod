@@ -104,7 +104,8 @@ internal static partial class BattleLodTests
         // condition. The posture producer and the facing pulse carry the NavMesh cost; the group stance reads two more inputs, both signature fields.
         const string gate = "BattleLodRuntime.IsDue(";
         AssertTrue(ClassText(PostureFile, "PostureIntentProducer").Contains(gate), "the posture producer gates");
-        AssertTrue(ClassText(PostureFile, "FacingPulseIntentProducer").Contains(gate), "the facing pulse gates");
+        AssertTrue(Regex.IsMatch(ClassText(PostureFile, "FacingPulseIntentProducer"),
+            @"if \(!g\.Has \|\| g\.Submitted\) continue;\s*(//[^\n]*\s*)*if \(!BattleLodRuntime\.IsDue\(s, i\)\) continue;"), "the facing pulse gates its group loop");
         AssertFalse(ClassText(PostureFile, "FireControlIntentProducer").Contains(gate),
             "fire control is not tiered: it reads the posture record, which a carried group keeps");
         AssertTrue(Source("src/WhiskeyRealism/Tactical/Battle/Producers/GroupStanceIntentProducer.cs").Contains(gate), "the group stance gates");
