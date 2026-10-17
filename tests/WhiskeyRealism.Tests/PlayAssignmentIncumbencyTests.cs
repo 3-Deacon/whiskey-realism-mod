@@ -22,6 +22,7 @@ internal static class PlayAssignmentIncumbencyTests
             ("play assignment a rect whose kind changed (another template) has no incumbent", AChangedTemplateHasNoIncumbent),
             ("play assignment a child holding player-owned strength is not kept in the focal assault's column", APlayerOwnedIncumbentIsNotKeptInTheColumn),
             ("play assignment one minute of marching under the same enemy keeps every corps in one rect", AMinuteOfMarchingKeepsOneRectPerCorps),
+            ("play assignment a Defender's DelayingDefense over eight children keeps every rect with its child while the plan stands", ADelayingDefenseKeepsItsRects),
         });
     }
 
@@ -170,5 +171,41 @@ internal static class PlayAssignmentIncumbencyTests
             held = now;
         }
         AssertTrue(memorylessChanges >= 1, "the closest-corps rule alone would have moved a corps between rects in this minute (" + memorylessChanges + " times)");
+    }
+
+    // Smoke 2026-10-17 (18:51 to 18:55): under DelayingDefense the ForwardScreen went 706122, 705904, 706122; the CenterHold 705250, 706122, 705904, 705250; the
+    // LeftFlank 705468, 705686. Eight children shuffling a few hundred metres each evaluation, the plan unchanged.
+    private static void ADelayingDefenseKeepsItsRects()
+    {
+        var ids = new[] { "c704814", "c705032", "c705250", "c705468", "c705686", "c705904", "c706122", "c706340" };
+        var rng = new Random(23);
+        var xs = new float[8]; var zs = new float[8];
+        for (int i = 0; i < 8; i++) { xs[i] = -700f + 200f * i; zs[i] = 0f; }
+        CorpsAssignment[] held = null;
+        CorpsAssignment[] memorylessPrev = null;
+        int memorylessChanges = 0;
+        for (int step = 0; step < 20; step++)
+        {
+            float cx = 0f, cz = 0f;
+            for (int i = 0; i < 8; i++)
+            {
+                xs[i] += (float)(rng.NextDouble() * 300 - 150);
+                zs[i] += (float)(rng.NextDouble() * 300 - 150);
+                cx += xs[i] / 8f; cz += zs[i] / 8f;
+            }
+            var corps = new List<CorpsPosition>();
+            for (int i = 0; i < 8; i++) corps.Add(new CorpsPosition(ids[i], xs[i], zs[i]));
+            var rects = Rects(BattlePlanId.DelayingDefense, cx, cz);
+            CorpsAssignment[] memoryless = Assign(rects, corps, null, out _);
+            if (memorylessPrev != null)
+                for (int i = 0; i < memoryless.Length; i++) if (RectOf(memoryless, memoryless[i].ChildId) != RectOf(memorylessPrev, memoryless[i].ChildId)) { memorylessChanges++; break; }
+            memorylessPrev = memoryless;
+            CorpsAssignment[] now = Assign(rects, corps, held, out _);
+            AssertEqual(5, now.Length, "DelayingDefense has five rects: ForwardScreen, CenterHold, ReserveLine, LeftFlank, RightFlank");
+            if (held != null)
+                for (int i = 0; i < held.Length; i++) AssertEqual(RectOf(held, held[i].ChildId), RectOf(now, held[i].ChildId), "step " + step + ": " + held[i].ChildId + " keeps its rect");
+            held = now;
+        }
+        AssertTrue(memorylessChanges >= 3, "the closest-corps rule alone re-paired the rects " + memorylessChanges + " times in 20 evaluations");
     }
 }
