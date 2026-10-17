@@ -41,6 +41,7 @@ namespace WhiskeyRealism.Strategic
         static PlayerComplianceRuntime()
         {
             BattleScope.Register("player-compliance-battle", DropBattle);
+            CampaignScope.Register("player-compliance-campaign-sample", ForgetCampaignSample);
         }
 
         internal static bool Enabled()
@@ -166,7 +167,7 @@ namespace WhiskeyRealism.Strategic
             if (!known) return ComplianceChain.Unknown;
             UnityEngine.Vector3 at = carrier.transform.position;
             bool inZone = !ComplianceSampleGate.StartsSample(at.x, at.z, order.position.x, order.position.z, order.arearotation, order.areawidth, order.areadepth);
-            bool moving = carrier.regimentpaths > 0 || carrier.groupsubordinatesmoving > 0f;
+            bool moving = WlMoveQueue.IsMoving(carrier);
             return ComplianceChainReading.Of(true, inZone, carrier.combatstatussubordinates > 0f, moving);
         }
 
@@ -215,6 +216,21 @@ namespace WhiskeyRealism.Strategic
         {
             _careers.Ledger.DropPending(ComplianceScope.Battle);
             _tracked[(int)ComplianceScope.Battle] = null;
+            ForgetSample(ComplianceScope.Battle);
+        }
+
+        // The campaign scope's sample description (the ledger itself is career-keyed and survives a campaign reload).
+        private static void ForgetCampaignSample()
+        {
+            ForgetSample(ComplianceScope.Campaign);
+        }
+
+        private static void ForgetSample(ComplianceScope scope)
+        {
+            int s = (int)scope;
+            _sampleSession[s] = 0;
+            _sampleType[s] = 0;
+            _sampleOrigin[s] = OrderOrigin.Vanilla;
         }
 
         private static Regiment CurrentCommand()

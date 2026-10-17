@@ -43,6 +43,8 @@ internal static class OrderArbiterTests
             ("battle-core FeudNeverExecuted", FeudNeverExecuted),
             ("battle-core GuardRefusalSkipsWithGuardReason", GuardRefusalSkipsWithGuardReason),
             ("battle-core DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly", DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly),
+            ("battle-core MaintenanceMoveOfThePlayersAncestorSendsNoDispatch", MaintenanceMoveOfThePlayersAncestorSendsNoDispatch),
+            ("battle-core RecoveryAndLeafSlotMovesAreMarkedMaintenance", RecoveryAndLeafSlotMovesAreMarkedMaintenance),
             ("battle-core AncestorFanOutDispatchesOnce", AncestorFanOutDispatchesOnce),
             ("battle-core FanOutOutcomeCountsTheOrderedSet", FanOutOutcomeCountsTheOrderedSet),
             ("battle-core GatedOffArbiterPublishesNoClaims", GatedOffArbiterPublishesNoClaims),
@@ -770,6 +772,60 @@ internal static class OrderArbiterTests
         AssertTrue(ordinary.Execute, "an ordinary group");
         AssertEqual(other, ordinary.Targets.TargetIndices[0], "orders itself");
         AssertEqual(OrderExecutor.NoDispatch, ordinary.DispatchType, "no W&L dispatch outside the player's chain");
+    }
+
+    // Smoke 2026-10-17 order 13: an interrupted path the posture executor re-issued for the player's division reached the panel as an order.
+    // A Maintenance move is carried out like any other but sends the player nothing.
+    private static void MaintenanceMoveOfThePlayersAncestorSendsNoDispatch()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(1, 100f, -100f, flags: UnitFlags.AncestorOfPlayerCommand);
+        view.AddGroup(2, 100f, -140f, parentIndex: division,
+            flags: UnitFlags.PlayerCommand | UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached);
+        var executor = NewExecutor();
+
+        BattleOrderIntent maintenance = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective);
+        maintenance.Flags |= IntentFlags.Maintenance;
+        var plan = executor.Plan(view, maintenance, 1.0);
+        AssertTrue(plan.Execute, "the move itself is carried out");
+        AssertEqual(OrderExecutor.NoDispatch, plan.DispatchType, "and the player is sent no order for it");
+        AssertFalse(OrderExecutor.ShouldDispatch(plan, executedTargets: 1), "so nothing is dispatched");
+
+        var control = NewExecutor().Plan(view, Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective), 1.0);
+        AssertEqual(12, control.DispatchType, "control: the same move without the flag dispatches");
+    }
+
+    // The two producers of a re-lay mark their Move: PostureIntentPlan.Submit for RecoverInterruptedOrder, LeafMove for a formation slot.
+    private static void RecoveryAndLeafSlotMovesAreMarkedMaintenance()
+    {
+        var leaf = PostureIntentPlan.LeafMove(5, CommandTaskType.AdvanceToAssembly, 100f, 200f, 90f, inContactWithdrawal: false);
+        AssertEqual(OrderChannel.Move, leaf.Channel, "a leaf slot move is a Move");
+        AssertTrue((leaf.Flags & IntentFlags.Maintenance) != 0, "and a re-lay, not an order for the player");
+
+        foreach (var action in new[] { PostureExecutionAction.RecoverInterruptedOrder, PostureExecutionAction.SetWaypoint, PostureExecutionAction.FallbackToLine })
+        {
+            var sink = new MaintenanceSink();
+            PostureIntentPlan.Submit(sink, new PostureIntentRequest
+            {
+                GroupId = 5, Action = action, Task = CommandTaskType.AdvanceToAssembly, HasTarget = true, TargetX = 100f, TargetZ = 200f,
+                Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test",
+            });
+            int moves = 0;
+            foreach (var intent in sink.Intents)
+            {
+                if (intent.Channel != OrderChannel.Move) continue;
+                moves++;
+                bool marked = (intent.Flags & IntentFlags.Maintenance) != 0;
+                AssertEqual(action == PostureExecutionAction.RecoverInterruptedOrder, marked, action + ": only an interrupted-order recovery is maintenance");
+            }
+            AssertEqual(1, moves, action + " submits one Move");
+        }
+    }
+
+    private sealed class MaintenanceSink : IIntentSink
+    {
+        public readonly System.Collections.Generic.List<BattleOrderIntent> Intents = new System.Collections.Generic.List<BattleOrderIntent>();
+        public void Submit(in BattleOrderIntent intent) => Intents.Add(intent);
     }
 
     private static void AncestorFanOutDispatchesOnce()

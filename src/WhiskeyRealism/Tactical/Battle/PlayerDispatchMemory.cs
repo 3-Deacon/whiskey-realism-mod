@@ -31,6 +31,7 @@ namespace WhiskeyRealism.Tactical.Battle
             public double Since;
         }
 
+        private int _panelSession = int.MinValue;
         private readonly Dictionary<int, Target> _lastTarget = new Dictionary<int, Target>(64);
         private readonly Dictionary<int, TaskNote> _task = new Dictionary<int, TaskNote>(128);
 
@@ -41,6 +42,27 @@ namespace WhiskeyRealism.Tactical.Battle
             float dx = last.X - x;
             float dz = last.Z - z;
             return dx * dx + dz * dz <= SameTargetMeters * SameTargetMeters;
+        }
+
+        // The order on the player's panel changed (a new order session): every remembered target describes an order that is no
+        // longer shown, except the target of the group whose executor dispatch just opened the session. A reissue to a remembered
+        // point after vanilla's or Whiskey's other order took the panel (a ContestReissue, a move back) is a new order, not a repeat.
+        // `ownerGroupId` is that group (0 when the session was opened by anything else). Called at every delivery pass with the
+        // panel's session (owner 0) and when a delivery is accepted (owner for an executor dispatch); a session already noted
+        // changes nothing, so the accepted call keeps its owner's target when the next pass sees the same session.
+        public void NotePanel(int session, int ownerGroupId)
+        {
+            if (session == _panelSession) return;
+            _panelSession = session;
+            if (ownerGroupId != 0 && _lastTarget.TryGetValue(ownerGroupId, out Target keep))
+            {
+                _lastTarget.Clear();
+                _lastTarget[ownerGroupId] = keep;
+            }
+            else
+            {
+                _lastTarget.Clear();
+            }
         }
 
         public void RecordDispatch(int groupId, float x, float z)
@@ -76,6 +98,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public void Clear()
         {
+            _panelSession = int.MinValue;
             _lastTarget.Clear();
             _task.Clear();
         }

@@ -19,6 +19,9 @@ internal static class PlayerDispatchMemoryTests
             ("dispatch memory no task is ignored", NoTaskIsIgnored),
             ("dispatch memory a task never noted does not hold", ATaskNeverNotedDoesNotHold),
             ("dispatch memory flipping task never holds for the older one", FlippingTaskNeverHoldsForTheOlderOne),
+            ("dispatch memory another order taking the panel ends the repeat", AnotherOrderTakingThePanelEndsTheRepeat),
+            ("dispatch memory the accepted dispatch keeps its own target", TheAcceptedDispatchKeepsItsOwnTarget),
+            ("dispatch memory a session already noted changes nothing", ASessionAlreadyNotedChangesNothing),
             ("dispatch memory steady state allocates nothing", SteadyStateAllocatesNothing),
         });
     }
@@ -92,6 +95,44 @@ internal static class PlayerDispatchMemoryTests
         m.NoteTask(7, 3, 10.02);
         AssertTrue(m.TaskHolds(7, 3, 0.02, out double at), "FormUp is the task again");
         AssertNear(10.04f, (float)at, 1e-4f, "but its clock restarted at the third write: the dispatch of the first FormUp waits, and a later flip discards it");
+    }
+
+    // Verify round 1, major 2: an executor order to A, a vanilla order replaces it on the panel, then ContestReissue to A: the reissue is a
+    // new order for the player, not a repeat.
+    private static void AnotherOrderTakingThePanelEndsTheRepeat()
+    {
+        var m = new PlayerDispatchMemory();
+        m.NotePanel(4, 0);
+        m.RecordDispatch(7, 1000f, 0f);
+        m.NotePanel(5, 7);
+        AssertTrue(m.IsRepeat(7, 1000f, 0f), "the executor's own order is on the panel");
+        m.NotePanel(6, 0);
+        AssertFalse(m.IsRepeat(7, 1000f, 0f), "vanilla's order took the panel: the same place again is a new order");
+    }
+
+    private static void TheAcceptedDispatchKeepsItsOwnTarget()
+    {
+        var m = new PlayerDispatchMemory();
+        m.NotePanel(4, 0);
+        m.RecordDispatch(7, 1000f, 0f);
+        m.RecordDispatch(8, 5000f, 0f);
+        m.NotePanel(5, 7);
+        AssertTrue(m.IsRepeat(7, 1000f, 0f), "group 7's dispatch opened the session");
+        AssertFalse(m.IsRepeat(8, 5000f, 0f), "group 8's earlier dispatch is no longer on the panel");
+    }
+
+    private static void ASessionAlreadyNotedChangesNothing()
+    {
+        var m = new PlayerDispatchMemory();
+        m.NotePanel(4, 0);
+        m.RecordDispatch(7, 1000f, 0f);
+        m.NotePanel(5, 7);
+        m.NotePanel(5, 0);
+        AssertTrue(m.IsRepeat(7, 1000f, 0f), "the next pass sees the same session: the accepted dispatch stays remembered");
+        m.Clear();
+        m.RecordDispatch(7, 1000f, 0f);
+        m.NotePanel(5, 0);
+        AssertFalse(m.IsRepeat(7, 1000f, 0f), "a cleared memory notes the panel afresh");
     }
 
     private static void SteadyStateAllocatesNothing()

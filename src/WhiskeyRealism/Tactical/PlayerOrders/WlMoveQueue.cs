@@ -66,8 +66,15 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             // 92067; RegimentSetPath on a regiment, 131254). Read only while a path is held.
             Vector3 last = unit.lastsetwaypointposition;
             float pathEnd = FlatDistance(last.x, last.z, carrier.X, carrier.Z);
-            basis = WlMoveState.BasisAfterGone(unit.regimentpaths > 0, pathEnd, distance, unit.combatstatussubordinates > 0f, carrier.SlackMeters);
+            basis = WlMoveState.BasisAfterGone(IsMoving(unit), pathEnd, distance, unit.combatstatussubordinates > 0f, carrier.SlackMeters);
             return WlMoveState.Classify(false, false, basis != MoveBasis.None);
+        }
+
+        // The unit is on a march (WlMoveState.IsMoving): the one reading of "still moving" for the move gate, the vanilla pursuit
+        // check and compliance.
+        internal static bool IsMoving(Regiment unit)
+        {
+            return WlMoveState.IsMoving(unit.regimentpaths, unit.groupsubordinatesmoving);
         }
 
         private static float FlatDistance(float ax, float az, float bx, float bz)

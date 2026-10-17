@@ -429,7 +429,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private static bool TryPursuit(Regiment unit, int type, Vector3 position, out WlMoveCarrier pursuit)
         {
             pursuit = default(WlMoveCarrier);
-            if (!WlMoveState.VanillaFollowsAWaypoint(type) || (UnityEngine.Object)unit == null || unit.regimentpaths <= 0) return false;
+            if (!WlMoveState.VanillaFollowsAWaypoint(type) || (UnityEngine.Object)unit == null || !WlMoveQueue.IsMoving(unit)) return false;
+            // The player is never his own chain: an order to his own command asks nothing of anyone else.
+            if ((UnityEngine.Object)unit == (UnityEngine.Object)_command) return false;
             pursuit = new WlMoveCarrier
             {
                 UnitId = unit.gameObject.GetInstanceID(), OrderType = WlMoveCarrier.NoQueueEntry, X = position.x, Z = position.z,
@@ -613,6 +615,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
             if (_isCic) return;
             Age.Observe(DLC_WL.GivenOrders.givenorderssession, TacticalDoctrineTime.NowBattleHours);
+            // An order that took the panel without a Whiskey delivery (vanilla's pass-through 13/14, a scene load) ends what the
+            // executor remembers having told the player.
+            Tactical.Battle.TacticalPlayerDispatchRuntime.Memory.NotePanel(DLC_WL.GivenOrders.givenorderssession, 0);
             DLC_WL.GivenOrders slot = DLC_WL.givenorder;
             if (slot == null || slot.type != 13) Latch.Reset();
             Flow.RunPass();
@@ -919,13 +924,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, in e.Carrier, out basis);
             }
 
-            // The release is stale when contact has resumed (or the hysteresis no longer holds) while its
-            // courier rode: the same test that derived it, on fresh facts.
             public bool TaskHolds(in CourierEntry e, out double heldAtHours)
             {
                 return Tactical.Battle.TacticalPlayerDispatchRuntime.TaskHolds(e.UnitId, e.DispatchTask, out heldAtHours);
             }
 
+            // The release is stale when contact has resumed (or the hysteresis no longer holds) while its
+            // courier rode: the same test that derived it, on fresh facts.
             public bool ReleaseStillDue(in CourierEntry e)
             {
                 if (_isCic || !ReadmitOn()) return false;
@@ -958,6 +963,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 _originSession = Session;
                 _originOfSession = e.Origin;
                 Age.Accepted(Session, NowHours);
+                // The panel now shows this order: the executor's earlier dispatches to other places no longer stand; its own does.
+                Tactical.Battle.TacticalPlayerDispatchRuntime.Memory.NotePanel(Session, e.Origin == OrderOrigin.Executor ? e.UnitId : 0);
                 WlOrderTextRuntime.OnAccepted(in e);
                 OnceLog.Info("wl-order:first-delivery", "[W&LOrder] first order delivered type=" + e.Type + " origin=" + e.Origin);
             }

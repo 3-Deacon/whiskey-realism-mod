@@ -248,8 +248,9 @@ namespace WhiskeyRealism.Tactical.Battle
         RoadRoute = 2048,
         // W&L dispatch, Move only: the move re-lays a group where it was already bound (recovery of an interrupted path, a leaf
         // brigade's move to its formation slot). It is not a new order, so the player's panel is not told of it
-        // (OrderExecutor.PlanCore step 9). (Declared here, not at the end: sibling branches append there.)
-        Maintenance = 65536,
+        // (OrderExecutor.PlanCore step 9). Declared here, not at the end, where sibling branches append; 524288 is the lowest bit no
+        // branch used (65536 CancelsBombard, 131072 DeployInMarch, 262144 StandingClaim).
+        Maintenance = 524288,
         // BC14W, CombatBehavior only (behavior 9): the artillery doctrine starts a bombardment of the focal assault's focal point as vanilla's
         // CheckAIBombardment does (3897-3900): the behavior, then the battery's bombardposition (the intent's target) and bombardrange. The executor's
         // OrderExecutorRuntime.StartBombard is its one writer.

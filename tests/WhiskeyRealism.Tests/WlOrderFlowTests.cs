@@ -145,6 +145,8 @@ internal static partial class WlOrderFlowTests
             ("wl order vanilla only the waypoint types are armed", OnlyTheWaypointTypesAreArmed),
             ("wl order vanilla pursuit tolerates the callers waypoint offset", VanillaPursuitToleratesTheCallersWaypointOffset),
             ("wl order move executor carriers carry no slack", ExecutorCarriersCarryNoSlack),
+            ("wl order move a group whose regiments march is still moving", AGroupWhoseRegimentsMarchIsStillMoving),
+            ("wl order pin the player is never his own chain", ThePlayerIsNeverHisOwnChain),
             ("wl order pin runtime arms vanilla orders from the called unit", RuntimeArmsVanillaOrdersFromTheCalledUnit),
             ("wl order pin executor voids the groups old orders before queueing the new one", ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne),
             // follow-up

@@ -100,7 +100,12 @@ internal static partial class WlOrderFlowTests
     private static void MaintenanceMovesAreNotDispatched()
     {
         string contracts = Code("src/WhiskeyRealism/Tactical/Battle/BattleCoreContracts.cs");
-        AssertTrue(Regex.IsMatch(contracts, @"Maintenance = 65536,"), "the intent flag exists");
+        AssertTrue(Regex.IsMatch(contracts, @"Maintenance = \d+,"), "the intent flag exists");
+        int maintenance = (int)WhiskeyRealism.Tactical.Battle.IntentFlags.Maintenance;
+        AssertTrue(maintenance > 0 && (maintenance & (maintenance - 1)) == 0, "a single bit");
+        foreach (WhiskeyRealism.Tactical.Battle.IntentFlags other in Enum.GetValues(typeof(WhiskeyRealism.Tactical.Battle.IntentFlags)))
+            if (other != WhiskeyRealism.Tactical.Battle.IntentFlags.Maintenance)
+                AssertTrue(((int)other & maintenance) == 0, "no other intent flag shares the Maintenance bit: " + other);
         string exec = Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutor.cs");
         AssertTrue(Regex.IsMatch(exec, @"if \(w\.Channel == OrderChannel\.Move && !immediate && \(w\.Flags & IntentFlags\.Maintenance\) == 0 && plan\.Targets\.PlayerShareNeedsDispatch\)"),
             "step 9 dispatches only a move that is not maintenance");
@@ -117,6 +122,10 @@ internal static partial class WlOrderFlowTests
         string flowCode = Code(FlowRuntime);
         AssertTrue(Regex.IsMatch(BodyOf(flowCode, "private static CaptureVerdict Route("), @"entry\.DispatchTask = call\.DispatchTask;"), "the capture puts the dispatch's task on the entry");
         AssertTrue(Regex.IsMatch(BodyOf(flowCode, "internal static bool EnqueueWhiskey("), @"Carrier = carrier, DispatchTask = dispatchTask,"), "and Whiskey's emitter hands it to the capture");
+        AssertTrue(BodyOf(flowCode, "public void Accepted(in CourierEntry e)").Contains("Memory.NotePanel(Session, e.Origin == OrderOrigin.Executor ? e.UnitId : 0);"),
+            "an accepted order tells the memory what is on the panel, and whose it is when the executor sent it");
+        AssertTrue(BodyOf(flowCode, "internal static void OnDeliveryPass(").Contains("Memory.NotePanel(DLC_WL.GivenOrders.givenorderssession, 0);"),
+            "every pass notes the panel's session, so an order that took the panel without a Whiskey delivery is seen");
         string rowBody = BodyOf(flowCode, "public void Row(in CourierEntry e, string action, string reason)");
         AssertTrue(Regex.IsMatch(rowBody, @"if \(action == ""discard"" && e\.Origin == OrderOrigin\.Executor\)\s*Tactical\.Battle\.TacticalPlayerDispatchRuntime\.Memory\.ForgetDispatch\(e\.UnitId\);"),
             "an executor dispatch that was discarded is forgotten, so the next order to that place is sent");
@@ -195,7 +204,8 @@ internal static partial class WlOrderFlowTests
         AssertTrue(WlMoveState.VanillaFollowsAWaypoint(2), "support");
         AssertTrue(WlMoveState.VanillaFollowsAWaypoint(3), "attack isolated target");
         AssertTrue(WlMoveState.VanillaFollowsAWaypoint(4), "assault");
-        foreach (int t in new[] { 1, 5, 11, 12, 13, 14, 15 })
+        AssertTrue(WlMoveState.VanillaFollowsAWaypoint(12), "defend an own-held objective: UpdateMovingTargets sets one waypoint, then orders 0 or 12 (6958-7002)");
+        foreach (int t in new[] { 1, 5, 11, 13, 14, 15 })
             AssertFalse(WlMoveState.VanillaFollowsAWaypoint(t), "type " + t + " describes no move of the called unit (engage is the halt itself, 117383)");
     }
 
@@ -206,7 +216,7 @@ internal static partial class WlOrderFlowTests
         AssertTrue(Regex.IsMatch(route, @"else if \(call\.Origin == OrderOrigin\.Vanilla && CouriersOn\(\) && TryPursuit\(unit, type, position, out WlMoveCarrier pursuit\)\)\s*\{\s*entry\.Pursuit = true;\s*entry\.Carrier = pursuit;\s*\}"),
             "Route arms only a vanilla-origin order, only while couriers are on");
         string pursuit = BodyOf(code, "private static bool TryPursuit(");
-        AssertTrue(pursuit.Contains("unit.regimentpaths <= 0") && pursuit.Contains("X = position.x, Z = position.z") && pursuit.Contains("WlMoveCarrier.NoQueueEntry"),
+        AssertTrue(pursuit.Contains("!WlMoveQueue.IsMoving(unit)") && pursuit.Contains("X = position.x, Z = position.z") && pursuit.Contains("WlMoveCarrier.NoQueueEntry"),
             "the called unit must hold a path now; its target is the order's position, not the waypoint read at capture; no queue entry is waited for");
         AssertFalse(pursuit.Contains("lastsetwaypointposition"), "the waypoint read at capture can be the previous move's (BlockedMovingOrder sets it two frames later, 3382)");
         AssertTrue(pursuit.Contains("SlackMeters = WlMoveState.VanillaWaypointSlackMeters"), "with the callers' waypoint slack");
@@ -259,5 +269,26 @@ internal static partial class WlOrderFlowTests
         AssertEqual(0f, carrier.SlackMeters, "an executor carrier is exact");
         string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
         AssertTrue(queue.Contains("unit.combatstatussubordinates > 0f, carrier.SlackMeters)"), "the reading uses the carrier's slack");
+    }
+
+    // Verify round 1, major 3 (smoke14): the brigade read paths 0 on 6 of 18 marching rows more than 280 m from its waypoint; its regiments
+    // held the paths. The group's own path is not the only sign of a march.
+    private static void AGroupWhoseRegimentsMarchIsStillMoving()
+    {
+        AssertTrue(WlMoveState.IsMoving(1, 0f), "the group holds a path");
+        AssertTrue(WlMoveState.IsMoving(0, 0.4f), "no path of its own, a share of its regiments marching (groupsubordinatesmoving)");
+        AssertFalse(WlMoveState.IsMoving(0, 0f), "neither");
+        AssertEqual(MoveBasis.Path, WlMoveState.BasisAfterGone(WlMoveState.IsMoving(0, 0.4f), 20f, 600f, false), "so a march whose group path is empty still reads as pursuing a point it is heading for");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(WlMoveState.IsMoving(0, 0f), 20f, 600f, false), "control: stopped, it does not");
+        string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
+        AssertTrue(queue.Contains("WlMoveState.IsMoving(unit.regimentpaths, unit.groupsubordinatesmoving)"), "the runtime reads vanilla's recomputed share, not groupsubordinatesmovingnonai (only regiments this group ordered)");
+        AssertTrue(Code(FlowRuntime).Contains("!WlMoveQueue.IsMoving(unit)") && Code("src/WhiskeyRealism/Strategic/PlayerComplianceRuntime.cs").Contains("WlMoveQueue.IsMoving(carrier)"),
+            "arming, the pursuit reading and compliance share the one reading");
+    }
+
+    private static void ThePlayerIsNeverHisOwnChain()
+    {
+        string pursuit = BodyOf(Code(FlowRuntime), "private static bool TryPursuit(");
+        AssertTrue(pursuit.Contains("(UnityEngine.Object)unit == (UnityEngine.Object)_command) return false;"), "an order to the player's own command is not armed");
     }
 }

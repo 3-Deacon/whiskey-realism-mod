@@ -135,13 +135,24 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         }
 
         // The vanilla order types whose caller sets the called unit's waypoint just before the call, so the order says
-        // where the chain is going: the objective take (0, UpdateMovingTargets 6970-6998), march to the sound of
+        // where the chain is going: the objective take (0) and the objective defend (12) of UpdateMovingTargets (6958-7002: one
+        // waypoint, then 0 for an enemy-held objective and 12 for an own-held one, both move the unit to it), march to the sound of
         // guns (2, 3759-3766), an assault on an isolated target (3, 8185-8210) and an assault move (4, 3640-3646).
-        // The others describe no move of the called unit: engage (1, 117383) is the halt itself, defend (12) and
-        // reserve (11) hold, 13-15 are the player's contact state and retreat.
+        // The others describe no move of the called unit: engage (1, 117383) is the halt itself, reserve (11) only shows the
+        // zone (6813-6834), 13-15 are the player's contact state and retreat. The other caller of type 12 (CheckGlobalAIStrategy,
+        // 6463) sets no waypoint: its order names the unit's own last waypoint, so an armed one passes while the unit pursues it.
         public static bool VanillaFollowsAWaypoint(int type)
         {
-            return type == 0 || type == 2 || type == 3 || type == 4;
+            return type == 0 || type == 2 || type == 3 || type == 4 || type == 12;
+        }
+
+        // The unit is on a march: it holds a path, or its subordinate regiments do. A group's own path can be empty while its
+        // regiments walk (smoke14: the brigade read paths 0 on 6 of 18 marching rows). groupsubordinatesmoving is the share of
+        // the group's regiments (types up to 13) that hold a path, recomputed on every group-stat pass (120197-120677), so it
+        // stays set for the whole march; groupsubordinatesmovingnonai counts only regiments this group ordered itself.
+        public static bool IsMoving(int paths, float subordinatesMoving)
+        {
+            return paths > 0 || subordinatesMoving > 0f;
         }
 
         // The verdict for an entry that is gone: why the move counts as carried out, or None (lost).

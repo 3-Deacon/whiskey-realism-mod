@@ -26,7 +26,7 @@ namespace WhiskeyRealism.Strategic
         Unknown,   // no carrier to read (a campaign order, the carrier is the player's own command): the old clock from issue
         Marching,  // outside the zone, moving
         Arrived,   // the carrier stands in the zone
-        Halted,    // outside the zone, stopped, in contact: vanilla's CheckEnemyContact cut the move short
+        Halted,    // outside the zone, in contact (moving or stopped): vanilla's CheckEnemyContact cut the move short
         Abandoned, // outside the zone, stopped, not in contact: the chain is no longer carrying the order out
     }
 

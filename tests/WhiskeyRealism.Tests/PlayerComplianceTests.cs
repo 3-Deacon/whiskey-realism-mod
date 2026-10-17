@@ -587,5 +587,7 @@ internal static class PlayerComplianceTests
         AssertTrue(runtime.Contains("ComplianceMeasure.Accepts(saved.Measure)") && runtime.Contains("Measure = PlayerComplianceLedger.MeasureVersion"), "the measure version is written and checked");
         AssertTrue(runtime.Contains("\" session=\" + session + \" type=\" + type + \" origin=\""), "every [PlayerCompliance] line names session, type and origin");
         AssertTrue(runtime.Contains("(UnityEngine.Object)carrier != (UnityEngine.Object)command"), "the player's own command is never his own chain");
+        AssertTrue(runtime.Contains("BattleScope.Register(\"player-compliance-battle\", DropBattle);") && runtime.Contains("CampaignScope.Register(\"player-compliance-campaign-sample\", ForgetCampaignSample);")
+            && runtime.Contains("ForgetSample(ComplianceScope.Battle);"), "the per-scope sample description is reset with its scope");
     }
 }
