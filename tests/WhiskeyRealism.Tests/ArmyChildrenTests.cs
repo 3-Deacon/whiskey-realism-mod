@@ -392,10 +392,10 @@ internal static class ArmyChildrenTests
 
     private static TacticalFrontAxis FacingPlusZ() => TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 1000f).WithOwnExtent(0f, 500f, 5);
 
-    private static IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> HoldingMap(int n, bool defender, List<DefenderReserveRecord> report)
+    private static IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> HoldingMap(int n, bool defender, List<DefenderReserveRecord> report, float aggression01 = 0.5f)
     {
         var (tree, id) = DivisionOf(n);
-        return TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) }, 0.5f,
+        return TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) }, aggression01,
             CascadeEnvelopmentMode.None, FacingPlusZ(), null, defender, report);
     }
 
@@ -415,6 +415,12 @@ internal static class ArmyChildrenTests
             AssertEqual(reserves, report[0].Held, "and what it holds back");
             AssertEqual("reserved", report[0].Reason, "and why");
         }
+        // An aggressive commander widens the support band to two, so with five brigades every one is SupportMain or the anchor
+        // and the two ends are candidates too; the interior ones still go first (the ends hold the line's wings).
+        var five = HoldingMap(5, defender: true, null, aggression01: 0.9f);
+        AssertEqual(1, five.Values.Count(a => a.LeafRole == DirectChildRole.Reserve), "five brigades keep one back");
+        AssertTrue(five[100].LeafRole != DirectChildRole.Reserve && five[104].LeafRole != DirectChildRole.Reserve,
+            "even when the ends are candidates the interior goes first: " + string.Join(",", five.Values.OrderBy(a => a.InstanceId).Select(a => a.InstanceId + ":" + a.LeafRole)));
         // Rearmost first: with six brigades the interior brigades farthest back (the highest index here) go to reserve.
         var six = HoldingMap(6, defender: true, null);
         AssertEqual(DirectChildRole.Reserve, six[104].LeafRole, "the rearmost interior brigade is in reserve");

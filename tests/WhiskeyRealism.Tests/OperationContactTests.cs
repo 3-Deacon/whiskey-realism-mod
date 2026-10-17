@@ -19,7 +19,7 @@ internal static class OperationContactTests
             ("operation no contact anywhere still scouts", NoContactAnywhereStillScouts),
             ("operation weak contact elsewhere is reconnaissance contact, not a commitment", WeakContactElsewhereIsReconnaissance),
             ("operation an active operation on its own objective keeps its rules when contact appears elsewhere", AnActiveOperationKeepsItsObjective),
-            ("operation a committed attacker on the empty objective is not retargeted by contact elsewhere", ACommittedAttackerIsNotRetargeted),
+            ("operation an attacker forming on the empty objective is not retargeted by contact elsewhere", ACommittedAttackerIsNotRetargeted),
         });
     }
 
@@ -73,9 +73,9 @@ internal static class OperationContactTests
 
     private static void ACommittedAttackerIsNotRetargeted()
     {
-        var active = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "Applepie_Ridge", 10000f);
+        var active = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "Applepie_Ridge", 0f);
         var decision = Decide(BattleStance.Attacker, active, EmptyStrongGround(), FormedEnemyLine(9000f, 0.9f));
-        AssertEqual("Applepie_Ridge", decision.Operation.PrimaryObjectiveId, "a committed advance on its objective is not pulled to another");
+        AssertEqual("Applepie_Ridge", decision.Operation.PrimaryObjectiveId, "an attacker forming on its objective is not pulled to another");
     }
 
     private static void AnActiveOperationKeepsItsObjective()
