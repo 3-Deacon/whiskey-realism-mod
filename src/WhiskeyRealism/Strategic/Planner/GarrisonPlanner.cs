@@ -153,6 +153,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // The post at a site, null when the site wants none: no need and no manned post still inside its quiet fortnight.
         private static GarrisonPost PlanOne(CampaignSnapshot s, TheaterPlan plan, in Site site, IReadOnlyList<GarrisonPostRecord> retained)
         {
+            // No terrain probe: vanilla's own weighting (11735) has no river term, and a post's threat is the straight-line one it states. The capital
+            // floor passes the review's probe, so a river detour discounts the capital's threat and not a post's: a post is cheaper to man than to miss.
             float threat = ReserveRules.VanillaThreat(s, site.X, site.Z, s.RelocationRange, null);
             bool threatened = threat > 0f;
 
