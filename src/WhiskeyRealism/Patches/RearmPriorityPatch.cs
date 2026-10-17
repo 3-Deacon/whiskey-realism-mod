@@ -17,6 +17,8 @@ namespace WhiskeyRealism.Patches
     // support, reserve, hold, capital guard, depot builder, recon, garrison, unassigned, then Recover and formations in transit), and
     // saves vanilla's order in __state; the Finalizer writes it back into the same list object even when vanilla threw. Vanilla's
     // per-unit rule, stock checks, cascade and W&L skip run unchanged and no unit is re-armed by Whiskey. No skip.
+    // `out __state` in the Prefix and the same type in the Finalizer is the shape of shipped patches: WlWeaponBudgetPatch.OrderScope
+    // (a float, on PlaceWeaponOrder) and SeparatedEnemyOwnershipPatch (a struct). No other patch is on CheckWeaponUpgrades.
     //
     // Vanilla runs unchanged for the new-campaign pass (isinitialization), alliances other than 0 and 1, the player's alliance
     // outside ai_vs_ai, the W&L commander-in-chief's own alliance, while vanilla's job machine is paused (11368), with no fresh

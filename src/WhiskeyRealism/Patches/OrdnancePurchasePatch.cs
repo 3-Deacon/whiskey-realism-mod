@@ -19,6 +19,12 @@ namespace WhiskeyRealism.Patches
     // the scope is open for that alliance: the best of vanilla's own candidates for the lane that the order screen would allow
     // (OrdnancePicker). The amount, the trigger, the rating gate, the one-open-order rule, the capital check and the charge stay
     // vanilla's; with no orderable candidate vanilla's pick stands. Neither patch skips anything.
+    //
+    // Co-owners of the two surfaces, none of which cares for the model id: AiWeaponPurchaseOrderablePatch (BUG-AI-017) hides the
+    // alliance's research of unorderable models for the whole CheckPurchaseWeapons call, so IsResearched, read inside the call, sees
+    // the same world whichever Prefix runs first (and WeaponOrderability agrees with it); WlWeaponBudgetPatch.OrderScope (BUG-WL-016)
+    // snapshots and restores the career budget around PlaceWeaponOrder by the ordering alliance, which a different model leaves as it
+    // is. Both are non-skipping, so the order of the Prefixes does not change what vanilla places.
     [HarmonyPatch(typeof(AICampaign), "CheckPurchaseWeapons")]
     internal static class OrdnancePurchaseScopePatch
     {
