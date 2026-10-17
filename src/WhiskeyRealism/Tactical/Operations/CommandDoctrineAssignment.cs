@@ -29,17 +29,6 @@ namespace WhiskeyRealism.Tactical.Operations
                 out objectiveMatched);
             float odds = ResolveOdds(ownStrength, objective.EnemyStrength);
             TacticalBattlefrontSnapshot battlefront = TacticalBattlefrontGeometry.Build(nodes, objective);
-            TacticalMassingDecision massing = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
-                operation.Phase,
-                CountRole(nodes, CommandNodeRole.MainEffort),
-                CountRole(nodes, CommandNodeRole.SupportingAttack),
-                CountRole(nodes, CommandNodeRole.Reserve),
-                artilleryReady: true,
-                objectiveExposed: objective.MainLineExposed,
-                objectiveConfidence01: objective.Confidence01,
-                ownStrength: ownStrength,
-                enemyStrength: objective.EnemyStrength,
-                reserveFraction: reserveFraction));
             var orders = new List<CommandDoctrineOrder>(nodes.Length);
             // BC12: the line is planned once; an anchored end keeps the line task instead of guarding a flank.
             TacticalDefensiveLineAnchor anchor = objectiveMatched
@@ -78,7 +67,6 @@ namespace WhiskeyRealism.Tactical.Operations
                     objective,
                     ownStrength,
                     reserveFraction);
-                sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
                 CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
@@ -140,60 +128,6 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return task;
-        }
-
-        private static TacticalSopDecision ApplyOperationalGates(
-            TacticalSopDecision sop,
-            CommandTaskType task,
-            TacticalMassingDecision massing,
-            TacticalBattlefrontSnapshot battlefront)
-        {
-            bool assaultTask = task == CommandTaskType.AttackObjective ||
-                task == CommandTaskType.SupportAttack;
-
-            if (!assaultTask) return sop;
-            if (sop.Authority == TacticalSopAuthority.Probe ||
-                sop.Authority == TacticalSopAuthority.Screen ||
-                sop.Authority == TacticalSopAuthority.Fallback)
-            {
-                return sop;
-            }
-
-            if (massing.Phase == TacticalMassingPhase.MassSupport && !massing.MayCommitAssault)
-            {
-                return new TacticalSopDecision(
-                    TacticalSopAuthority.Attack,
-                    true,
-                    true,
-                    Math.Min(sop.RiskBudget01, 0.45f),
-                    Math.Max(45f, sop.ReacquireSeconds),
-                    "massing-" + massing.Reason);
-            }
-
-            if (battlefront.Gap == TacticalBattlefrontGap.WideUnsupportedGap &&
-                sop.Authority == TacticalSopAuthority.Attack)
-            {
-                return new TacticalSopDecision(
-                    TacticalSopAuthority.Attack,
-                    true,
-                    true,
-                    Math.Min(sop.RiskBudget01, 0.40f),
-                    Math.Max(45f, sop.ReacquireSeconds),
-                    "battlefront-wide-gap");
-            }
-
-            return sop;
-        }
-
-        private static int CountRole(CommandNodeOperationalState[] nodes, CommandNodeRole role)
-        {
-            int count = 0;
-            for (int i = 0; i < nodes.Length; i++)
-            {
-                if (nodes[i].Role == role) count++;
-            }
-
-            return count;
         }
 
         private static CommandTaskType ResolveTask(

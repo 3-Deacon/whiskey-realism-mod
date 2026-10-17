@@ -54,6 +54,8 @@ internal static class MainFlankGuardTests
             ("flank guard a guard in transit keeps the main holding and one that is not moving does not", TheSnapshotSeesTransit),
             ("flank guard the guard is sent to the post by a Move and not again while its order leads there", TheGuardIsSentToThePost),
             ("flank guard the guard pass hands back a unit with no post and one in contact", TheGuardPassHandsBack),
+            ("flank guard a stopped unit whose last waypoint is the post is sent again and is not in transit", AStoppedUnitIsResentAndNotInTransit),
+            ("flank guard the post is right on a rotated axis", ThePostOnARotatedAxis),
             ("flank guard the posture producer calls the guard and the hold and the exploit producer sees it held", ThePostureProducerWiring),
         });
     }
@@ -629,16 +631,19 @@ internal static class MainFlankGuardTests
         AssertEqual(101, intent.GroupId, "to the guard");
         AssertTrue(Math.Abs(intent.TargetX - -450f) < 0.5f && Math.Abs(intent.TargetZ - -150f) < 0.5f, "to the post at the main's left flank: " + intent.TargetX + "," + intent.TargetZ);
         AssertTrue(Math.Abs(intent.Heading - 315f) < 0.5f, "facing outward: " + intent.Heading);
-        AssertEqual(IntentPriority.Executor, intent.Priority, "through the executor path");
+        AssertEqual(IntentPriority.Post, intent.Priority, "above the posture executor, so its division's own move fans out around it");
         AssertEqual(IntentSource.PostureExecutor, intent.Source, "as the posture executor's");
+        AssertEqual(IntentFlags.None | IntentFlags.UseOrderDelay, intent.Flags, "a real order, through the courier delay like the other moves");
 
         // its order already leads there: not sent again
         int at = s.IndexOfOwn(101);
         s.Own[at].RegimentPaths = 1;
         s.Own[at].LastWaypointX = -440f;
         s.Own[at].LastWaypointZ = -140f;
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, out _, out string toward), "on its way: " + toward);
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, out BattleOrderIntent claim, out string toward), "on its way: " + toward);
         AssertEqual("toward-post", toward, "the reason says so");
+        AssertTrue((claim.Flags & IntentFlags.StandingClaim) != 0 && claim.Priority == IntentPriority.Post && claim.Channel == OrderChannel.Move,
+            "it keeps its claim: a standing Move claim at Post priority, so its division's move fans out around it");
 
         // the main moved forward 600 m: the post moved, the old order no longer leads to it
         var moved = Field(5.0, (100, 0f, 600f), (101, -1500f, -300f));
@@ -650,8 +655,10 @@ internal static class MainFlankGuardTests
         AssertTrue(Math.Abs(follow.TargetZ - 450f) < 0.5f, "to the new post: " + follow.TargetZ);
 
         var at3 = Field(5.0, (100, 0f, 0f), (101, -440f, -140f));
-        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(at3, at3.IndexOfOwn(101), in leaf, false, false, out _, out string atPost), "at its post it stays");
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Handled, FlankGuardLeaf.PlanGuard(at3, at3.IndexOfOwn(101), in leaf, false, false, out BattleOrderIntent held, out string atPost), "at its post it stays");
         AssertEqual("at-post", atPost, "the reason says so");
+        AssertTrue((held.Flags & IntentFlags.StandingClaim) != 0 && held.Priority == IntentPriority.Post,
+            "and holds its claim: a guard at its post submits a standing claim every tick, not nothing");
     }
 
     private static void TheGuardPassHandsBack()
@@ -668,6 +675,70 @@ internal static class MainFlankGuardTests
         AssertEqual(FlankGuardLeaf.GuardOutcome.NoPost, FlankGuardLeaf.PlanGuard(s, s.IndexOfOwn(101), in leaf, false, false, out _, out _), "a routed main leaves no post");
     }
 
+    // A unit whose order ended (no path, no queued order, not moving) with its last waypoint still the post is not on its way: it is sent again, and the
+    // main it guards does not count it as in transit.
+    private static void AStoppedUnitIsResentAndNotInTransit()
+    {
+        var s = Field(5.0, (100, 0f, 0f), (101, -1500f, -150f));
+        int at = s.IndexOfOwn(101);
+        s.Own[at].RegimentPaths = 0;
+        s.Own[at].QueuedOrders = 0;
+        s.Own[at].MovementMode = 0;
+        s.Own[at].LastWaypointX = -450f;
+        s.Own[at].LastWaypointZ = -150f;
+        var leaf = Leaf(101, DirectChildRole.RefuseLeft, postMain: 100, postLeft: true);
+        AssertEqual(FlankGuardLeaf.GuardOutcome.Move, FlankGuardLeaf.PlanGuard(s, at, in leaf, false, false, out BattleOrderIntent resent, out string why), "re-sent: " + why);
+        AssertTrue(Math.Abs(resent.TargetX - -450f) < 0.5f, "to the post");
+
+        var map = LeafMap(Leaf(100, DirectChildRole.Main), leaf);
+        AssertTrue(Holds(s, 100, map, new Dictionary<int, MainFlankGuard.HoldState>(), out string reason, out _), "the main holds");
+        AssertEqual(MainFlankGuard.HoldReason, reason, "with nobody on the way: a stopped unit is no guard in transit");
+
+        // the same unit with a path under way is in transit
+        s.Own[at].RegimentPaths = 1;
+        Holds(s, 100, map, new Dictionary<int, MainFlankGuard.HoldState>(), out string moving, out _);
+        AssertEqual(MainFlankGuard.HoldReason, moving, "(the right flank still has nobody, so the reason stays unguarded)");
+        AssertTrue(FlankGuardLeaf.MovingToPost(in s.Own[at], FacingPlusZ(), 0f, 0f, true), "with a path it is moving to its post");
+        s.Own[at].RegimentPaths = 0;
+        AssertFalse(FlankGuardLeaf.MovingToPost(in s.Own[at], FacingPlusZ(), 0f, 0f, true), "without one it is not");
+        s.Own[at].QueuedOrders = 1;
+        AssertTrue(FlankGuardLeaf.MovingToPost(in s.Own[at], FacingPlusZ(), 0f, 0f, true), "a queued order counts");
+        s.Own[at].QueuedOrders = 0;
+        s.Own[at].MovementMode = 1;
+        AssertTrue(FlankGuardLeaf.MovingToPost(in s.Own[at], FacingPlusZ(), 0f, 0f, true), "so does a movement mode");
+    }
+
+    // The post computed by the formula with the axis's own vectors, checked against an independent computation on axes facing +X and diagonally.
+    private static void ThePostOnARotatedAxis()
+    {
+        // facing +X: forward (1,0), right (0,-1)
+        var east = TacticalFrontAxis.FromCentroids(0f, 0f, 1000f, 0f);
+        MainFlankGuard.PostOf(in east, 100f, 200f, left: false, out float rx, out float rz, out float rh);
+        AssertTrue(Math.Abs(rx - -50f) < 0.5f && Math.Abs(rz - -250f) < 0.5f, "right post facing east: 150 m back along x, 450 m out along -z: " + rx + "," + rz);
+        AssertTrue(Math.Abs(rh - 135f) < 0.5f, "facing outward to the right of an eastward front: " + rh);
+        MainFlankGuard.PostOf(in east, 100f, 200f, left: true, out float lx, out float lz, out float lh);
+        AssertTrue(Math.Abs(lx - -50f) < 0.5f && Math.Abs(lz - 650f) < 0.5f, "left post facing east: " + lx + "," + lz);
+        AssertTrue(Math.Abs(lh - 45f) < 0.5f, "facing outward to the left: " + lh);
+
+        // diagonal: forward (0.6, 0.8), right (0.8, -0.6)
+        var diagonal = TacticalFrontAxis.FromCentroids(0f, 0f, 300f, 400f);
+        foreach (bool left in new[] { false, true })
+        {
+            float side = left ? -1f : 1f;
+            double ex = 100 + 0.8 * side * 450 - 0.6 * 150, ez = 200 - 0.6 * side * 450 - 0.8 * 150;
+            double dx = 0.6 * Math.Cos(Math.PI / 4) + 0.8 * side * Math.Sin(Math.PI / 4), dz = 0.8 * Math.Cos(Math.PI / 4) - 0.6 * side * Math.Sin(Math.PI / 4);
+            double eh = Math.Atan2(dx, dz) * 180.0 / Math.PI;
+            if (eh < 0) eh += 360.0;
+            MainFlankGuard.PostOf(in diagonal, 100f, 200f, left, out float x, out float z, out float h);
+            AssertTrue(Math.Abs(x - ex) < 0.5 && Math.Abs(z - ez) < 0.5, (left ? "left" : "right") + " post on the diagonal: " + x + "," + z + " expected " + ex + "," + ez);
+            AssertTrue(Math.Abs(h - eh) < 0.5, (left ? "left" : "right") + " heading on the diagonal: " + h + " expected " + eh);
+            // and the post is a frontage out sideways and 150 m back, whatever the axis
+            float lateral = diagonal.LateralOf(x, z) - diagonal.LateralOf(100f, 200f);
+            float depth = diagonal.DepthOf(x, z) - diagonal.DepthOf(100f, 200f);
+            AssertTrue(Math.Abs(lateral - side * 450f) < 0.5f && Math.Abs(depth - -150f) < 0.5f, "lateral " + lateral + " depth " + depth);
+        }
+    }
+
     // ---- wiring: ProduceLeaf is Unity-bound and runs only in game; it must call the two pure halves tested above ----
 
     private static void ThePostureProducerWiring()
@@ -680,7 +751,8 @@ internal static class MainFlankGuardTests
         FlankResponseTests.AssertPinned(body, "task = CommandTaskType.HoldObjective;", "an open flank holds the main in place");
         FlankResponseTests.AssertPinned(body, "army.CurrentBattleStance != BattleStance.Defender", "a Defender's main advances nowhere and is not gated");
         FlankResponseTests.AssertPinned(body, "FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, out BattleOrderIntent guardMove", "a flank guard is planned before the slot path");
-        FlankResponseTests.AssertPinned(body, "if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) sink.Submit(guardMove);", "and its Move is submitted to the executor");
+        FlankResponseTests.AssertPinned(body, "if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)", "a posted guard is handled here and never runs the slot path");
+        FlankResponseTests.AssertPinned(body, "sink.Submit(guardMove);", "its Move to the post, or its standing claim, is submitted every tick it is posted");
         FlankResponseTests.AssertPinned(producer, "FlankGuardLeaf.MainHolds(s, mainIndex, leafMap, _flankHold", "the hold is the pure half's");
         FlankResponseTests.AssertPinned(producer, "return _flankHold.TryGetValue(groupId, out MainFlankGuard.HoldState hold) && hold.Holding", "a main held on its flank is no exploit asset");
         FlankResponseTests.AssertPinned(producer, "if (change != null) EmitFlankHold(", "one row per change of the hold, advance included");

@@ -18,9 +18,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         {
             /// <summary>It has no post to go to (no main, or no axis): the normal leaf pass runs.</summary>
             NoPost = 0,
-            /// <summary>It is at its post or on its way to it, in contact, or its orders are pending: nothing to submit.</summary>
+            /// <summary>It is at its post or on its way to it, in contact, or its orders are pending: its standing claim is the intent to submit.</summary>
             Handled,
-            /// <summary>A Move to the post is to be submitted.</summary>
+            /// <summary>A Move to the post is the intent to submit.</summary>
             Move,
         }
 
@@ -91,8 +91,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         /// <summary>
-        /// The flank guard's move: to the post at its main's flank. Nothing is submitted for a unit in contact, with a pending order, already at the post or
-        /// whose order already leads there; a unit whose main is gone or routed has no post and runs the normal leaf pass.
+        /// The flank guard's move: to the post at its main's flank, at <see cref="IntentPriority.Post"/>. A unit in contact, with a pending order, already at the
+        /// post or whose order already leads there writes nothing, but it keeps its claim: <paramref name="intent"/> is then the standing claim, renewed every
+        /// tick the guard is posted, so the move of the division it sits in fans out around it (the executor's claim model: a descendant's higher claim shields
+        /// it). A unit whose main is gone or routed has no post, no claim, and runs the normal leaf pass.
         /// </summary>
         internal static GuardOutcome PlanGuard(
             BattleSnapshot s,
@@ -114,12 +116,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             MainFlankGuard.PostOf(in axis, main.X, main.Z, leaf.FlankPostLeft, out float px, out float pz, out float heading);
             ref UnitRecord guard = ref s.Own[guardIndex];
+            intent = PostureIntentPlan.FlankPostClaim(guard.InstanceId, px, pz);
             if (PostureSense.Distance(guard.X, guard.Z, px, pz) <= MainFlankGuard.PostToleranceMeters) { why = "at-post"; return GuardOutcome.Handled; }
             if (closeEngaged) { why = "close-engaged"; return GuardOutcome.Handled; }
             if (MovingToPost(in guard, in axis, main.X, main.Z, leaf.FlankPostLeft)) { why = "toward-post"; return GuardOutcome.Handled; }
             if (pending) { why = "order-pending"; return GuardOutcome.Handled; }
 
-            intent = PostureIntentPlan.LeafMove(guard.InstanceId, CommandTaskType.GuardFlank, px, pz, heading, inContactWithdrawal: false);
+            intent = PostureIntentPlan.FlankPostMove(guard.InstanceId, px, pz, heading);
             why = "move-to-post";
             return GuardOutcome.Move;
         }

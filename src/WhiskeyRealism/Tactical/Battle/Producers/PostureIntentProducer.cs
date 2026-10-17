@@ -363,9 +363,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (leaf.HasFlankPost)
             {
                 FlankGuardLeaf.GuardOutcome guardOutcome = FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, out BattleOrderIntent guardMove, out string guardWhy);
-                if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) sink.Submit(guardMove);
                 if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)
                 {
+                    // The Move to the post, or the standing claim that keeps the division's own move from re-pathing the guard back.
+                    sink.Submit(guardMove);
                     PostureTelemetry.Leaf(s, i, leaf, task, guardWhy, guardOutcome == FlankGuardLeaf.GuardOutcome.Move);
                     return;
                 }

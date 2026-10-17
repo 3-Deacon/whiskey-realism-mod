@@ -164,7 +164,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return new Bundle(
                     ownEvidence,
                     enemyVisible,
-                    Math.Max(1f, ownActive),
+                    ownActive,
                     ownMoraleRatio,
                     ownReservesCommitted,
                     ReinforcementsArrivingWithin(arrivals, GamePrefs.reinforcementmaxtimeforairetreatdecisions),

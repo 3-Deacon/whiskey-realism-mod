@@ -652,6 +652,8 @@ namespace WhiskeyRealism.Tactical.Battle
             if (_guard == null) return Skip(plan, SkipReason.ModeNotActive);
             int idx = s.IndexOfOwn(w.GroupId);
             if (idx < 0) return Skip(plan, SkipReason.Inactive);
+            // A standing claim is a claim and nothing more: BeginTickClaims already raised it from the winners; there is nothing to write.
+            if ((w.Flags & IntentFlags.StandingClaim) != 0) return Skip(plan, SkipReason.StandingClaim);
             UnitRecord[] own = s.Own;
             ref UnitRecord rec = ref own[idx];
 
@@ -970,7 +972,7 @@ namespace WhiskeyRealism.Tactical.Battle
         /// </summary>
         public void NoteRefusal(int groupId, SkipReason reason)
         {
-            if (reason == SkipReason.None || reason == SkipReason.Duplicate) return;
+            if (reason == SkipReason.None || reason == SkipReason.Duplicate || reason == SkipReason.StandingClaim) return;
             if (!_refusedLastTick.Contains(groupId)) _refusedLastTick.Add(groupId);
         }
 

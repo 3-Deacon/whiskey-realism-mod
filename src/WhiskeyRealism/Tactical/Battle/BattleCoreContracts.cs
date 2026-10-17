@@ -195,7 +195,12 @@ namespace WhiskeyRealism.Tactical.Battle
         Support = 2,
         Play = 3,
         Executor = 4,
-        Safety = 5,
+        /// <summary>
+        /// A posted flank guard's claim (MainFlankGuard): above the posture executor, so its parent's posture move fans out around the guard instead of
+        /// re-pathing it (SetWaypoint with groupmoveonly false re-paths every attached unit), and below Safety, so a withdrawal still moves it.
+        /// </summary>
+        Post = 5,
+        Safety = 6,
     }
 
     public enum IntentSource
@@ -258,6 +263,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
         // still applies. (4096 is the BC14W bombard start's.)
         Contest = 16384,
+        // Move only: a standing claim and nothing more. It raises the unit's Move claim for the tick, so a lower-priority move of an ancestor fans out around
+        // the unit (OrderExecutor.BeginTickClaims), and the executor writes nothing for it (SkipReason.StandingClaim). A posted flank guard holds one for as
+        // long as it is posted.
+        StandingClaim = 32768,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -344,6 +353,8 @@ namespace WhiskeyRealism.Tactical.Battle
         LowerPriorityThanClaim,
         /// <summary>A move across a river with no crossing the side knows (RiverCrossingRule).</summary>
         NoKnownCrossing,
+        /// <summary>A standing claim (IntentFlags.StandingClaim): raised for the tick, nothing to write.</summary>
+        StandingClaim,
     }
 
     public struct OrderOutcome
