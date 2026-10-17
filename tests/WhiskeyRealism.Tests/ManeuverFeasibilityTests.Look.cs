@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
@@ -20,6 +21,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14 LOOK-PRIORITY the selected route's unknown crossing first, then the best candidates' routes, a Defender's threats last; at most two; a request ends when the crossing is seen", LookPriority),
         ("bc14 GATE-LOOK a Screen move across an unseen ford is refused and asks for it through the look requests; it is made once the ford reads Clear", GateLook),
         ("bc14 GATE-LOOK-SLOT the gate's look keeps one of the two look slots and the requests stay at two", GateLookSlot),
+        ("bc14 GATE-LOOK-ORDER the selected plan's looks first, then the gate's, then the other candidates'; an unresolved gate look is not overwritten", GateLookOrder),
         ("bc14 GATE-PLANNED the selected plan's crossings are planned links and the gate leaves a move over one to the plan", GatePlannedLinks),
         ("bc14 FEAS-SCN-5 the Defender's options: turning exposure, a look at the unknown ford, and a reserve released to guard it", FeasScn5),
     };
@@ -96,8 +98,8 @@ internal static partial class ManeuverFeasibilityTests
             _picture = new LedgerCrossingPicture(f.Crossings, ledger);
             _picture.Bind(f.Regions);
         }
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, out CrossingRoute route)
-            => RiverCrossingRule.Decide(_picture, x0, z0, x1, z1, out route);
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, out CrossingRoute route)
+            => RiverCrossingRule.Decide(_picture, x0, z0, x1, z1, attack, out route);
     }
 
     // A leg across the band from the own line (depth 0) to the far bank (depth 500) at the given lateral.
@@ -150,7 +152,7 @@ internal static partial class ManeuverFeasibilityTests
         FeasField f = LookField();
         FeasibilityLedger ledger = UnselectedLedger(f);
         List<int> before = Looks(ledger, f.Regions);
-        AssertEqual(ManeuverFeasibility.MaxLookRequests, before.Count, "the plan's looks fill both slots");
+        AssertEqual(ManeuverFeasibility.MaxLookRequests, before.Count, "the candidates' looks fill both slots");
         int far = LinkAtPoint(f.Regions, FeasField.X(900f), FeasField.Z(250f));
         AssertTrue(far >= 0 && !before.Contains(far), "(the 900 ford is not among them)");
 
@@ -158,9 +160,55 @@ internal static partial class ManeuverFeasibilityTests
         GateScreenMove(f, ledger, 700f);
         List<int> after = Looks(ledger, f.Regions);
         AssertEqual(ManeuverFeasibility.MaxLookRequests, after.Count, "the gate's look does not raise the bound");
-        AssertEqual(before[0], after[0], "the best candidate's crossing still leads");
-        AssertEqual(far, after[1], "and the gate's look keeps the second slot");
-        AssertEqual(1, ledger.LookRequests(new float[1], new float[1]), "with room for one the plan's crossing is kept ahead of the gate's");
+        AssertEqual(far, after[0], "the gate's look comes before the other candidates'");
+        AssertEqual(before[0], after[1], "and the best candidate's crossing keeps the other slot");
+        AssertEqual(1, ledger.LookRequests(new float[1], new float[1]), "with room for one the gate's look is the one asked for");
+    }
+
+    static void GateLookOrder()
+    {
+        // The selected plan first: ManeuverAndFix crosses at one ford, then the gate's, then a candidate's.
+        FeasField f = LookField();
+        FeasibilityLedger ledger = LookLedger(f, BattlePlanId.ManeuverAndFix, false);
+        int fix = RouteLinks(ledger, BattlePlanId.ManeuverAndFix)[0];
+        int far = LinkAtPoint(f.Regions, FeasField.X(900f), FeasField.Z(250f));
+        ledger.PostGateLook(far);
+        List<int> two = Looks(ledger, f.Regions);
+        AssertEqual(fix, two[0], "the selected plan's crossing first");
+        AssertEqual(far, two[1], "the gate's look second, ahead of the other candidates'");
+
+        // A selected plan that fills the slots keeps them: the gate waits.
+        FeasField g = LookField();
+        FeasibilityLedger envelop = LookLedger(g, BattlePlanId.DoubleEnvelopment, false);
+        List<int> route = RouteLinks(envelop, BattlePlanId.DoubleEnvelopment);
+        envelop.PostGateLook(far);
+        AssertTrue(Looks(envelop, g.Regions).SequenceEqual(route.Take(2)), "a selected plan with two Unknown crossings keeps both slots");
+
+        // An unresolved gate look is not overwritten by a newer refusal for another ford; it ends when its crossing is seen.
+        FeasField h = LookField();
+        FeasibilityLedger gate = UnselectedLedger(h);
+        GateScreenMove(h, gate, 700f);
+        int first = gate.GateLookLink;
+        AssertEqual(far, first, "(the first refusal asked for the 900 ford)");
+        GateScreenMove(h, gate, -700f);
+        AssertEqual(first, gate.GateLookLink, "a newer refusal for the -900 ford does not replace the unresolved one");
+        h.Perceived = (x, z) => x > FeasField.X(800f);
+        h.Build(LookPlans);
+        AssertTrue(h.Crossings.StateOf(first) != CrossingState.Unknown, "(the 900 ford is seen)");
+        Looks(gate, h.Regions);
+        AssertEqual(-1, gate.GateLookLink, "the request ended when its crossing was seen");
+        int west = LinkAtPoint(h.Regions, FeasField.X(-900f), FeasField.Z(250f));
+        gate.PostGateLook(west);
+        AssertEqual(west, gate.GateLookLink, "and the next refusal is taken");
+
+        // Time is up: an unresolved look is dropped on the evaluation's clock and a newer refusal takes its place.
+        FeasField t = LookField();
+        FeasibilityLedger old = UnselectedLedger(t);
+        GateScreenMove(t, old, 700f);
+        t.Now += FeasibilityLedger.GateLookTtlHours + 0.5;
+        ManeuverFeasibility.Evaluate(t.Build(LookPlans), old);
+        GateScreenMove(t, old, -700f);
+        AssertTrue(old.GateLookLink >= 0 && old.GateLookLink != first, "after the look's time a newer refusal replaces it");
     }
 
     static void GatePlannedLinks()

@@ -116,6 +116,11 @@ namespace WhiskeyRealism.Tactical.Battle
         // The ledger's reserve stand-off and lane (TacticalBattleLinePlanner), one place for both.
         public const float ReserveDepthMeters = (float)TacticalBattleLinePlanner.ReserveDistance;
         public const float MinReserveDepthMeters = 150f;
+        /// <summary>
+        /// How far behind its line a division's support stands (BC16 decision 5's <c>DivisionSupportMeters</c>): the depth of the slot a Defender's
+        /// reserve brigade holds behind its holding command's line. BC16's support-line clamp reads this one constant.
+        /// </summary>
+        public const float DivisionSupportMeters = 200f;
         public const float ReserveLaneMeters = (float)TacticalBattleLinePlanner.ReserveLaneMeters;
         public const float ObjectiveDetectionMeters = 50f;
         public const float SpacingPerBrigadeMeters = 25f;

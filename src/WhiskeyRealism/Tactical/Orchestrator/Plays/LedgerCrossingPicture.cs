@@ -26,10 +26,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool Ready => _regions != null && _regions.Ready;
         public int RegionAt(float x, float z) => _regions.RegionAt(x, z);
         public int LinkCount => _regions.LinkCount;
-        public bool LinkTouches(int link, int region) => _regions.LinkTouches(link, region);
         public int RegionsOfLink(int link, Span<int> regions) => _regions.RegionsOfLink(link, regions);
         public void LinkPoint(int link, out float x, out float z) => _regions.LinkCrossing(link, out x, out z, out _, out _);
         public CrossingState StateOf(int link) => _watch.StateOf(link);
+        public object Topology => _regions;
         public bool IsPlanned(int link) => _ledger.IsPlannedLink(link);
         public void RequestLook(int link) => _ledger.PostGateLook(link);
     }

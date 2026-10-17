@@ -584,7 +584,7 @@ internal static partial class ManeuverFeasibilityTests
     {
         string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         FlankResponseTests.AssertPinned(army, "if (!staggered && !feasible) return new ReserveReleaseContext(_lastGlobalOdds, flank);", "the shipped context stays when both flags are off");
-        FlankResponseTests.AssertPinned(army, "staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren);", "the threats reach the context");
+        FlankResponseTests.AssertPinned(army, "staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis);", "the threats reach the context");
         FlankResponseTests.AssertPinned(army, "string reason = released.HasGuardPoint ? \"crossing-threat\" : \"flank-threat\";", "the release row names the crossing");
         FlankResponseTests.AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents)", "the guard point reaches the doctrine order");
         string maneuver = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "EnvelopmentManeuver.cs");

@@ -682,19 +682,31 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.X = x;
             plan.Z = z;
             if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
-            // 8. A move with no via of its own (a planned or road via is kept: the plan chose its crossing) whose straight leg crosses a
-            //    river takes a chain of crossings the side knows, or is not made; a crossing the selected plan chose is not the gate's to refuse.
-            if (!immediate && Crossings != null && plan.ViaCount == 0 && SubjectToCrossingGate(w))
+            // 8. Every leg of a doctrine move (start, vias, target) that crosses a river takes a chain of crossings the side knows, or the move is not
+            //    made. A via the move already has (a planned or road via) is kept; the leg after it is still checked. A crossing the selected plan chose
+            //    is not refused for an attack (a Screen or Probe never crosses a Held one).
+            if (!immediate && Crossings != null && SubjectToCrossingGate(w))
             {
-                CrossingVerdict crossing = Crossings.Check(s.Alliance, rec.X, rec.Z, x, z, out CrossingRoute route);
-                if (crossing == CrossingVerdict.NoKnownCrossing) { plan.Execute = false; plan.Skip = SkipReason.NoKnownCrossing; return plan; }
-                if (crossing == CrossingVerdict.ViaCrossing)
+                bool attack = IsCrossingAttackTask(w.Task);
+                bool insertable = plan.ViaCount == 0;
+                int legs = plan.ViaCount + 1;
+                float fromX = rec.X, fromZ = rec.Z;
+                for (int leg = 0; leg < legs; leg++)
                 {
-                    plan.ViaCount = route.ViaCount;
-                    plan.ViaX0 = route.ViaX0;
-                    plan.ViaZ0 = route.ViaZ0;
-                    plan.ViaX1 = route.ViaX1;
-                    plan.ViaZ1 = route.ViaZ1;
+                    float toX = leg < plan.ViaCount ? (leg == 0 ? plan.ViaX0 : plan.ViaX1) : x;
+                    float toZ = leg < plan.ViaCount ? (leg == 0 ? plan.ViaZ0 : plan.ViaZ1) : z;
+                    CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack, out CrossingRoute route);
+                    if (crossing == CrossingVerdict.NoKnownCrossing) { plan.Execute = false; plan.Skip = SkipReason.NoKnownCrossing; return plan; }
+                    if (crossing == CrossingVerdict.ViaCrossing && insertable)
+                    {
+                        plan.ViaCount = route.ViaCount;
+                        plan.ViaX0 = route.ViaX0;
+                        plan.ViaZ0 = route.ViaZ0;
+                        plan.ViaX1 = route.ViaX1;
+                        plan.ViaZ1 = route.ViaZ1;
+                    }
+                    fromX = toX;
+                    fromZ = toZ;
                 }
             }
             plan.UseOrderDelay = UsesOrderDelay(w);
@@ -954,6 +966,10 @@ namespace WhiskeyRealism.Tactical.Battle
                 plan.ViaCount++;
             }
         }
+
+        /// <summary>The tasks that may cross a Held crossing the plan chose: the ones that map to the attack stance (an attack, a support attack, a fixing force, a counterstroke); a Screen, a Probe or a march never does.</summary>
+        internal static bool IsCrossingAttackTask(CommandTaskType task)
+            => TacticalCommandTaskToStanceMapper.Map(task) == TacticalCommandTaskToStanceMapper.StanceAttack;
 
         // The doctrine movers whose planned moves cross land: the posture executor (Screen, Probe, the leaf slots, maneuver legs),
         // division-play and the reserve release. A withdrawal, a fallback, a deployment placement, a scout's look and vanilla's

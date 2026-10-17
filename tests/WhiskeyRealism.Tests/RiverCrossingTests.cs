@@ -28,6 +28,9 @@ internal static class RiverCrossingTests
             ("river crossing a screen move over two rivers goes by both crossings", AScreenMoveOverTwoRiversGoesByBoth),
             ("river crossing a planned or road via is kept and the gate does not touch the move", APlannedViaIsKept),
             ("river crossing an attack the plan sent across a held crossing is made", AnAttackAcrossAPlannedHeldCrossingIsMade),
+            ("river crossing a Screen or Probe never crosses a Held crossing, even one the plan chose; an attack may", OnlyAnAttackCrossesAHeldCrossingThePlanChose),
+            ("river crossing every leg of a move with a via is gated", EveryLegOfAMoveWithAViaIsGated),
+            ("river crossing the search over 252 links is bounded", TheSearchOver252LinksIsBounded),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
             ("river crossing no gate leaves the move as validated", NoGateLeavesTheMove),
@@ -44,7 +47,7 @@ internal static class RiverCrossingTests
         public bool Ready { get; set; } = true;
         public int RegionAt(float x, float z) => x < 0f ? -1 : x < 500f ? 0 : x < 1000f ? 1 : x < 1500f ? 2 : 3;
         public int LinkCount => Links.Count;
-        public bool LinkTouches(int link, int region) => Links[link].a == region || Links[link].b == region;
+        public object Topology => this;
         public int RegionsOfLink(int link, Span<int> regions) { regions[0] = Links[link].a; regions[1] = Links[link].b; return 2; }
         public void LinkPoint(int link, out float x, out float z) { x = Links[link].x; z = Links[link].z; }
         public CrossingState StateOf(int link) => Links[link].state;
@@ -55,8 +58,8 @@ internal static class RiverCrossingTests
     internal sealed class Gate : ICrossingGate
     {
         internal readonly Picture Picture = new Picture();
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, out CrossingRoute route)
-            => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, out route);
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, out CrossingRoute route)
+            => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, out route);
     }
 
     private static CrossingVerdict Decide(Picture p, float x0, float z0, float x1, float z1) => RiverCrossingRule.Decide(p, x0, z0, x1, z1, out _);
@@ -161,15 +164,95 @@ internal static class RiverCrossingTests
         AssertEqual(0, p.Looks.Count, "none requested");
 
         p.Planned.Add(0);
-        var held = RiverCrossingRule.Decide(p, 100f, 100f, 700f, 100f, out CrossingRoute byPlan);
-        AssertEqual(CrossingVerdict.ViaCrossing, held, "the plan chose that crossing: not the gate's to refuse, and the move goes by it");
+        AssertEqual(CrossingVerdict.NoKnownCrossing, Decide(p, 100f, 100f, 700f, 100f), "a Held crossing the plan chose is still no way across for a move that is not an attack");
+        var held = RiverCrossingRule.Decide(p, 100f, 100f, 700f, 100f, attack: true, out CrossingRoute byPlan);
+        AssertEqual(CrossingVerdict.ViaCrossing, held, "an attack goes by the Held crossing the plan chose");
         AssertEqual(500f, byPlan.ViaX0, "by that crossing");
-        AssertEqual(0, p.Looks.Count, "and nothing to look at for it");
+        AssertEqual(0, p.Looks.Count, "with nothing to look at for it");
         p.Links[0] = (500f, 100f, CrossingState.Unknown, 0, 1);
-        AssertEqual(CrossingVerdict.ViaCrossing, Decide(p, 100f, 100f, 700f, 100f), "nor an unknown one the plan chose");
+        AssertEqual(CrossingVerdict.ViaCrossing, Decide(p, 100f, 100f, 700f, 100f), "an unknown crossing the plan chose is not refused");
         AssertEqual(0, p.Looks.Count, "which needs no look of the gate's");
         p.Links[0] = (500f, 100f, CrossingState.Clear, 0, 1);
         AssertEqual(CrossingVerdict.ViaCrossing, Decide(p, 100f, 100f, 700f, 100f), "a planned crossing the side knows is a via like any other");
+    }
+
+    private static void OnlyAnAttackCrossesAHeldCrossingThePlanChose()
+    {
+        var gate = new Gate();
+        gate.Picture.Links.Add((500f, 100f, CrossingState.Held, 0, 1));
+        gate.Picture.Planned.Add(0);
+        foreach (CommandTaskType task in new[] { CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.AdvanceToAssembly, CommandTaskType.Scout, CommandTaskType.ReleaseReserve })
+            AssertEqual(SkipReason.NoKnownCrossing, Executor(gate).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.PostureExecutor, task), 1.0).Skip,
+                task + " never crosses a Held crossing, planned or not");
+        foreach (CommandTaskType task in new[] { CommandTaskType.AttackObjective, CommandTaskType.SupportAttack, CommandTaskType.FixEnemy, CommandTaskType.Counterstroke })
+        {
+            ExecutionPlan plan = Executor(gate).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.DivisionPlay, task), 1.0);
+            AssertTrue(plan.Execute, task + " may cross the Held crossing the plan chose");
+            AssertEqual(1, plan.ViaCount, "by it");
+        }
+    }
+
+    // verify r2: the gate skipped a move that had a via, so the leg after a road via was never checked.
+    private static void EveryLegOfAMoveWithAViaIsGated()
+    {
+        BattleOrderIntent WithVia(float vx, float vz, float tx)
+        {
+            BattleOrderIntent m = Move(tx, 100f, IntentSource.PostureExecutor, CommandTaskType.Screen);
+            m.ViaCount = 1;
+            m.ViaX0 = vx;
+            m.ViaZ0 = vz;
+            return m;
+        }
+        var none = new Gate();
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(none).Plan(new View(100f, 100f), WithVia(300f, -200f, 700f), 1.0).Skip,
+            "a via on the own bank does not excuse the leg after it across an unbridged river");
+        AssertTrue(Executor(none).Plan(new View(100f, 100f), WithVia(300f, -200f, 450f), 1.0).Execute, "legs that cross nothing are made, via kept");
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(none).Plan(new View(100f, 100f), WithVia(700f, -200f, 400f), 1.0).Skip, "nor the leg before it");
+
+        var ford = new Gate();
+        ford.Picture.Links.Add((500f, 600f, CrossingState.Clear, 0, 1));
+        ExecutionPlan kept = Executor(ford).Plan(new View(100f, 100f), WithVia(300f, -200f, 700f), 1.0);
+        AssertTrue(kept.Execute, "with a known ford the leg after the via is crossable");
+        AssertEqual(1, kept.ViaCount, "the via the mover chose stays");
+        AssertEqual(300f, kept.ViaX0, "as it was");
+    }
+
+    // Four banks joined by 63 parallel links each (252 links), every link Clear: the worst the rule meets on a real map is far smaller (verify r2: 2 links).
+    private sealed class Wide : ICrossingPicture
+    {
+        private readonly List<(float x, float z, int a, int b)> _links = new List<(float, float, int, int)>();
+        public Wide()
+        {
+            for (int bank = 0; bank < 3; bank++)
+                for (int k = 0; k < 84; k++) _links.Add((500f * (bank + 1), 10f * k, bank, bank + 1));
+        }
+        public bool Ready => true;
+        public int RegionAt(float x, float z) => x < 0f ? -1 : Math.Min((int)(x / 500f), 3);
+        public int LinkCount => _links.Count;
+        public int RegionsOfLink(int link, Span<int> regions) { regions[0] = _links[link].a; regions[1] = _links[link].b; return 2; }
+        public void LinkPoint(int link, out float x, out float z) { x = _links[link].x; z = _links[link].z; }
+        public CrossingState StateOf(int link) => CrossingState.Clear;
+        public bool IsPlanned(int link) => false;
+        public void RequestLook(int link) { }
+        public object Topology => this;
+    }
+
+    private static void TheSearchOver252LinksIsBounded()
+    {
+        var wide = new Wide();
+        AssertEqual(252, wide.LinkCount, "(fixture) 252 links");
+        RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out CrossingRoute warm);
+        AssertEqual(3, warm.Crossings, "the leg over three rivers is routed link by link");
+        const int calls = 400;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < calls; i++) RiverCrossingRule.Decide(wide, 100f + i % 7, 400f, 1700f, 400f, out _);
+        watch.Stop();
+        double ms = watch.Elapsed.TotalMilliseconds / calls;
+        Console.WriteLine("INFO RIVER-ROUTE 252 links, 3 crossings: " + ms.ToString("0.000") + " ms a call (adjacency built once per map)");
+        AssertTrue(ms < 1.0, "a call over 252 links stays under a millisecond: " + ms);
+        long begin = TestFixtures.BeginAllocationWindow();
+        for (int i = 0; i < 100; i++) RiverCrossingRule.Decide(wide, 100f, 400f, 1700f, 400f, out _);
+        AssertEqual(0L, TestFixtures.AllocatedSince(begin), "and allocates nothing once the adjacency is built");
     }
 
     // ---- the executor ----
@@ -272,7 +355,8 @@ internal static class RiverCrossingTests
         AssertEqual(-200f, plan.ViaZ0, "which is the intent's, not the gate's crossing");
         AssertEqual(0, gate.Picture.Looks.Count, "and nothing asked for");
         var none = new Gate();
-        AssertTrue(Executor(none).Plan(new View(100f, 100f), withVia, 1.0).Execute, "a via is kept even when the side knows no crossing: the mover chose it");
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(none).Plan(new View(100f, 100f), withVia, 1.0).Skip,
+            "a via is kept, but the leg after it across a river the side knows no crossing for is still gated");
     }
 
     // verify F1: a planned attack across a Held crossing (Burnside's bridge) is the plan's decision.
@@ -283,6 +367,8 @@ internal static class RiverCrossingTests
         AssertEqual(SkipReason.NoKnownCrossing, Executor(gate).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.PostureExecutor, CommandTaskType.Screen), 1.0).Skip,
             "an unplanned move over a held crossing is refused");
         gate.Picture.Planned.Add(0);
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(gate).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.PostureExecutor, CommandTaskType.Screen), 1.0).Skip,
+            "and so is a Screen, even over a crossing the plan chose");
         ExecutionPlan plan = Executor(gate).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.DivisionPlay, CommandTaskType.AttackObjective), 1.0);
         AssertTrue(plan.Execute, "once the plan chose the crossing the attack is made");
         AssertEqual(1, plan.ViaCount, "by the crossing the plan chose");

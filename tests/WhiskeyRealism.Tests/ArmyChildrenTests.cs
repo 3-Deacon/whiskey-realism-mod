@@ -41,6 +41,7 @@ internal static class ArmyChildrenTests
             ("army children an exposed wing in perceived contact draws the last reserve to guard it", AnExposedWingInPerceivedContactDrawsTheLastReserve),
             ("army children the leaf map applies the released reserves and takes them back when the crisis ends", TheLeafMapAppliesTheReleasedReservesAndTakesThemBack),
             ("army children the orchestrator releases a Defender's leaf reserve on a perceived crisis", TheOrchestratorReleasesALeafReserveOnAPerceivedCrisis),
+            ("army children a new plan drops the leaf releases", ANewPlanDropsTheLeafReleases),
             ("army children the Defender reserve row throttle is battle-scoped state", TheDefenderReserveThrottleResetsWithTheBattle),
             ("army children an attacking division keeps no cascade reserve", AnAttackingDivisionKeepsNoCascadeReserve),
             ("army children the orchestrator's defender leaf map keeps a reserve and rebuilds on a stance change", TheOrchestratorDefenderLeafMapKeepsAReserve),
@@ -497,6 +498,15 @@ internal static class ArmyChildrenTests
         TacticalBattlePlan? plan = null)
         => release.Compute(records, plan ?? DefensePlan(), FacingPlusZ(), enemy, odds, now, 0.5f, 0.5f, 0.5f, flankRelease: true, staggered: true);
 
+    // The picture held across three looks 0.02 h apart: the hysteresis' confirmation (two observations spanning 0.03 h).
+    private static bool Settle(LeafReserveRelease release, List<DefenderReserveRecord> records, EnemyVisibleState enemy, double now = 5.0, float odds = 0.7f,
+        TacticalBattlePlan? plan = null)
+    {
+        bool changed = false;
+        for (int k = 0; k < 3; k++) changed |= Compute(release, records, enemy, now + 0.02 * k, odds, plan);
+        return changed;
+    }
+
     private static void AReserveIsReleasedToAPerceivedCrisisOnly()
     {
         var records = RecordsFor(6);
@@ -511,7 +521,8 @@ internal static class ArmyChildrenTests
 
         // The enemy perceived in force on a line sector next to a reserve, with fire on it: one reserve goes to the line, as Fix.
         var release = new LeafReserveRelease();
-        AssertTrue(Compute(release, records, Seen(CrisisAt(5))), "a perceived crisis releases");
+        AssertFalse(Compute(release, records, Seen(CrisisAt(5))), "one look releases nothing: the picture has to hold");
+        AssertTrue(Settle(release, records, Seen(CrisisAt(5)), now: 5.0), "a perceived crisis that holds releases");
         AssertEqual(1, release.Released.Count, "one reserve per crisis sector");
         int sent = release.Released.Keys.Single();
         AssertEqual(104, sent, "the reserve next to the crisis sector (the anchor and the ends hold the line; 102 and 104 are held back)");
@@ -521,12 +532,12 @@ internal static class ArmyChildrenTests
         AssertEqual(1, release.NewReleases.Count, "a new release for the trace");
 
         // A second look at the same picture changes nothing and is not new.
-        AssertFalse(Compute(release, records, Seen(CrisisAt(5))), "the same crisis, the same release");
+        AssertFalse(Compute(release, records, Seen(CrisisAt(5)), now: 6.0), "the same crisis, the same release");
         AssertEqual(0, release.NewReleases.Count, "nothing new to report");
 
         // Contact without a margin (the enemy is not stronger) is not a crisis.
         var calm = new LeafReserveRelease();
-        Compute(calm, records, Seen(new EnemyVisibleSector(SectorOfBrigade(5), 3000f, 3000f, true)));
+        Settle(calm, records, Seen(new EnemyVisibleSector(SectorOfBrigade(5), 3000f, 3000f, true)));
         AssertEqual(0, calm.Released.Count, "a line holding its own sends for nothing");
     }
 
@@ -538,18 +549,18 @@ internal static class ArmyChildrenTests
         TacticalBattlePlan plan = DefensePlan(1.4f);
 
         // Odds at the plan's trigger, nothing in contact: the stagger. One reserve, then wait for the interval.
-        Compute(release, records, Seen(), now: 5.0, odds: 2.0f, plan: plan);
+        Settle(release, records, Seen(), now: 5.0, odds: 2.0f, plan: plan);
         AssertEqual(1, release.Released.Count, "the first reserve goes when the odds reach the trigger");
         AssertEqual(DirectChildRole.SupportMain, release.Released.Values.Single(), "to support the line");
-        Compute(release, records, Seen(), now: 5.02, odds: 2.0f, plan: plan);
+        Compute(release, records, Seen(), now: 5.06, odds: 2.0f, plan: plan);
         AssertEqual(1, release.Released.Count, "no second one inside the release interval");
-        Compute(release, records, Seen(), now: 5.5, odds: 2.0f, plan: plan);
+        Settle(release, records, Seen(), now: 5.5, odds: 2.0f, plan: plan);
         AssertEqual(2, release.Released.Count, "the next after it");
-        Compute(release, records, Seen(), now: 9.0, odds: 2.0f, plan: plan);
+        Settle(release, records, Seen(), now: 9.0, odds: 2.0f, plan: plan);
         AssertEqual(2, release.Released.Count, "but never below the floor: one stays held");
 
-        // The trigger stops: they revert.
-        Compute(release, records, Seen(), now: 9.5, odds: 0.7f, plan: plan);
+        // The trigger stops: they revert (after the minimum hold, long past here).
+        Settle(release, records, Seen(), now: 9.5, odds: 0.7f, plan: plan);
         AssertEqual(0, release.Released.Count, "below the trigger every reserve is back");
     }
 
@@ -559,10 +570,10 @@ internal static class ArmyChildrenTests
         var records = RecordsFor(6, threat: threat);
         AssertEqual(1, records[0].Held, "the cascade already sent one to the exposed end: one reserve left");
         var release = new LeafReserveRelease();
-        Compute(release, records, Seen(), now: 5.0);
+        Settle(release, records, Seen(), now: 5.0);
         AssertEqual(0, release.Released.Count, "no contact perceived on the wing: the last reserve stays");
         var wing = SectorOfBrigade(5);
-        Compute(release, records, Seen(new EnemyVisibleSector(wing, 3000f, 3000f, true)), now: 5.0);
+        Settle(release, records, Seen(new EnemyVisibleSector(wing, 3000f, 3000f, true)), now: 5.2);
         AssertEqual(1, release.Released.Count, "fire perceived on the exposed wing draws the last reserve");
         AssertEqual(DirectChildRole.RefuseRight, release.Released.Values.Single(), "to guard that wing");
         AssertEqual("flank-threat", release.Releases[0].Reason, "and says flank-threat");
@@ -572,7 +583,7 @@ internal static class ArmyChildrenTests
     {
         var records = RecordsFor(6);
         var release = new LeafReserveRelease();
-        Compute(release, records, Seen(CrisisAt(5)));
+        Settle(release, records, Seen(CrisisAt(5)));
         var (tree, id) = DivisionOf(6);
         var held = new List<DefenderReserveRecord>();
         var map = TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) }, 0.5f, CascadeEnvelopmentMode.None,
@@ -584,9 +595,9 @@ internal static class ArmyChildrenTests
         AssertEqual(1, held[0].Released, "and one was released");
         AssertTrue(held[0].BaseRoles[4] == DirectChildRole.Reserve, "the release works from the roles before it, so it can take the reserve back");
 
-        var after = new LeafReserveRelease();
-        Compute(after, held, Seen());
-        AssertEqual(0, after.Released.Count, "the crisis over, the next look releases nothing");
+        var after = release;
+        Settle(after, held, Seen(), now: 6.0);
+        AssertEqual(0, after.Released.Count, "the crisis over (and the minimum hold past), the brigade is let back");
         var back = TacticalLeafBrigadeMap.BuildMap(tree, new[] { new TacticalLeafBrigadeMap.TopAssignment(id, DirectChildRole.Main) }, 0.5f, CascadeEnvelopmentMode.None,
             FacingPlusZ(), null, true, null, after.Released);
         AssertEqual(DirectChildRole.Reserve, back[104].LeafRole, "and the brigade is a reserve again");
@@ -597,6 +608,8 @@ internal static class ArmyChildrenTests
         var h = UnionWithLooseDivision();
         var children = h.Discover(-1);
         var army = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        double clock = 5.0;
+        army.HoursSource = () => clock;
         army.SetPlanForTesting(DefensePlan());
         army.UpdateBattleStance(BattleStance.Defender);
         army.RegisterDirectChildren(children);
@@ -607,8 +620,15 @@ internal static class ArmyChildrenTests
             new DirectChildEvidence(1, 2, false, 4, 0, 0.9f),
         }, null, null);
         TacticalFrontAxis axis = TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 1000f).WithOwnExtent(0f, 1100f, 5);
-        army.ObserveFrontGeometry(new EnemyVisibleState(new EnemyVisibleSector[0], 0f, false, false, axis));
-        h.Cascade(army);
+        var calm = new EnemyVisibleState(new EnemyVisibleSector[0], 0f, false, false, axis);
+        army.ObserveFrontGeometry(calm);
+        // The picture held over three cascades 0.02 h apart.
+        void Cascades(EnemyVisibleState picture)
+        {
+            army.ObserveFrontGeometry(picture);
+            for (int k = 0; k < 3; k++) { h.Cascade(army); clock += 0.02; }
+        }
+        Cascades(calm);
         var reserved = army.CurrentLeafBrigadeMap.Values.Where(a => a.InstanceId >= 11 && a.InstanceId <= 14 && a.LeafRole == DirectChildRole.Reserve).Select(a => a.InstanceId).ToList();
         AssertEqual(1, reserved.Count, "the Defender's four-brigade division holds one brigade back");
         int held = reserved[0];
@@ -617,23 +637,55 @@ internal static class ArmyChildrenTests
         int neighbour = army.CurrentLeafBrigadeMap.Values.Where(a => a.InstanceId >= 11 && a.InstanceId <= 14 && a.InstanceId != held)
             .OrderBy(a => Math.Abs(a.InstanceId - held)).First().InstanceId;
         float nx = 100f * (neighbour - 11);
-        var crisis = new EnemyVisibleSector(axis.SectorOf(nx, 0f), 500f, 4000f, true);
-        army.ObserveFrontGeometry(new EnemyVisibleState(new[] { crisis }, 0f, true, false, axis));
+        var crisis = new EnemyVisibleState(new[] { new EnemyVisibleSector(axis.SectorOf(nx, 0f), 500f, 4000f, true) }, 0f, true, false, axis);
         h.Cascade(army);
+        army.ObserveFrontGeometry(crisis);
+        h.Cascade(army);
+        AssertEqual(DirectChildRole.Reserve, army.CurrentLeafBrigadeMap[held].LeafRole, "one look at the crisis does not let the brigade go");
+        clock += 0.02;
+        Cascades(crisis);
         AssertTrue(army.CurrentLeafBrigadeMap[held].LeafRole != DirectChildRole.Reserve,
-            "the held brigade is let go when the line beside it is in perceived crisis: " + army.CurrentLeafBrigadeMap[held].LeafRole);
+            "the held brigade is let go when the line beside it stays in perceived crisis: " + army.CurrentLeafBrigadeMap[held].LeafRole);
         AssertEqual(1, army.LeafRelease.Released.Count, "one release");
 
-        // The crisis ends (the picture empties): the brigade is a reserve again.
-        army.ObserveFrontGeometry(new EnemyVisibleState(new EnemyVisibleSector[0], 0f, false, false, axis));
-        h.Cascade(army);
-        AssertEqual(DirectChildRole.Reserve, army.CurrentLeafBrigadeMap[held].LeafRole, "and held again once the crisis is gone");
+        // The crisis ends (the picture empties): the brigade stays out for the minimum hold, then is a reserve again.
+        Cascades(calm);
+        AssertTrue(army.CurrentLeafBrigadeMap[held].LeafRole != DirectChildRole.Reserve, "it does not come back the moment the picture empties");
+        clock += 0.4;
+        Cascades(calm);
+        AssertEqual(DirectChildRole.Reserve, army.CurrentLeafBrigadeMap[held].LeafRole, "and is held again once the crisis has been gone for a while");
 
         // A side that is not the Defender releases nothing: it holds nothing back.
         army.UpdateBattleStance(BattleStance.Attacker);
-        army.ObserveFrontGeometry(new EnemyVisibleState(new[] { crisis }, 0f, true, false, axis));
-        h.Cascade(army);
+        Cascades(crisis);
         AssertEqual(0, army.LeafRelease.Released.Count, "an attacker's leaf map has no reserve to release");
+    }
+
+    // verify r2 W13: a re-picked plan starts the releases over, the leaf ones with the army's.
+    private static void ANewPlanDropsTheLeafReleases()
+    {
+        var h = UnionWithLooseDivision();
+        var army = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        double clock = 5.0;
+        army.HoursSource = () => clock;
+        army.SetPlanForTesting(DefensePlan());
+        army.UpdateBattleStance(BattleStance.Defender);
+        army.RegisterDirectChildren(h.Discover(-1));
+        army.ObserveGlobalOdds(0.7f);
+        army.ObserveDirectChildEvidenceWithZones(new[]
+        {
+            new DirectChildEvidence(2, 2, true, 0, 0, 0.9f),
+            new DirectChildEvidence(1, 2, false, 4, 0, 0.9f),
+        }, null, null);
+        TacticalFrontAxis axis = TacticalFrontAxis.FromCentroids(0f, 0f, 0f, 1000f).WithOwnExtent(0f, 1100f, 5);
+        var crisis = new EnemyVisibleState(new[] { new EnemyVisibleSector(axis.SectorOf(0f, 0f), 500f, 4000f, true), new EnemyVisibleSector(axis.SectorOf(100f, 0f), 500f, 4000f, true),
+            new EnemyVisibleSector(axis.SectorOf(200f, 0f), 500f, 4000f, true), new EnemyVisibleSector(axis.SectorOf(300f, 0f), 500f, 4000f, true) }, 0f, true, false, axis);
+        army.ObserveFrontGeometry(crisis);
+        for (int k = 0; k < 4; k++) { h.Cascade(army); clock += 0.02; }
+        AssertEqual(1, army.LeafRelease.Released.Count, "a reserve is out");
+
+        army.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1));
+        AssertEqual(0, army.LeafRelease.Released.Count, "a new plan starts the releases over");
     }
 
     // The row throttle keys on the trace signature, so it grows with the battle unless it is reset with it (BattleScope).

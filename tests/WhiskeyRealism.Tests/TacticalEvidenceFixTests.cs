@@ -1225,6 +1225,8 @@ internal static class TacticalEvidenceFixTests
         var orch = new ArmyOrchestrator(allianceId: 0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
         orch.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.GenericMethodical, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
         orch.RegisterDirectChildren(new[] { Snap("a"), Snap("b"), Snap("reserve") });
+        double clock = 5.0;
+        orch.HoursSource = () => clock;
 
         orch.ObserveGlobalOdds(1.0f);
         orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 3), Ev(1, 1), Ev(3, 3) }, null, null);
@@ -1237,7 +1239,13 @@ internal static class TacticalEvidenceFixTests
 
         orch.ObserveGlobalOdds(1.5f);
         orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 3), Ev(1, 1), Ev(3, 3) }, null, null);
-        TestHarness.AssertEqual(DirectChildRole.SupportMain, orch.GetDirectChildRole("reserve"), "reserve released at the plan's commit odds");
+        TestHarness.AssertEqual(DirectChildRole.Reserve, orch.GetDirectChildRole("reserve"), "one tick at the commit odds does not release (the release hysteresis)");
+        for (int k = 0; k < 3; k++)
+        {
+            clock += 0.02;
+            orch.ObserveDirectChildEvidenceWithZones(new[] { Ev(0, 3), Ev(1, 1), Ev(3, 3) }, null, null);
+        }
+        TestHarness.AssertEqual(DirectChildRole.SupportMain, orch.GetDirectChildRole("reserve"), "reserve released at the plan's commit odds once they hold");
     }
 
     // ArmyEvidenceBuilder.MeanFlankThreatByGroup over one group (own index 0) whose
