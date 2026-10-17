@@ -564,8 +564,8 @@ namespace WhiskeyRealism.Tactical.Operations
                         "fallback-line",
                         PostureExecutionTarget.DoctrineFallbackTarget,
                         clearInterruptedPaths: true);
-                case CommandTaskType.HoldObjective when holdLane && WorksHoldGuard.Holds(order.Task, order.Reason) && order.PreGuardTask == CommandTaskType.FixEnemy:
-                    // BC14W: a former fix whose lane lies outside the works band still goes to its lane and holds and fires there.
+                case CommandTaskType.HoldObjective when holdLane && WorksHoldGuard.Holds(order.Task, order.Reason) && WorksHoldGuard.HasLane(in order):
+                    // BC14W: a former fix whose lane lies outside the works band still goes to its lane and holds and fires there; so does a pinned exploit at the band's edge.
                     return FormationAndWaypoint("fix-lane-hold", PostureExecutionTarget.DoctrinePrimaryTarget);
                 default:
                     return Decide(
@@ -1197,12 +1197,15 @@ namespace WhiskeyRealism.Tactical.Operations
         public static bool Holds(CommandTaskType task, string reason)
             => task == CommandTaskType.HoldObjective && string.Equals(reason, Reason, StringComparison.Ordinal);
 
+        /// <summary>A guarded order that goes to a point outside the works band and holds there: a former fix (its lane) or an exploit held at the band's edge (requirement-works-pin).</summary>
+        public static bool HasLane(in CommandDoctrineOrder order) => order.PreGuardTask == CommandTaskType.FixEnemy || order.ExploitId >= 0;
+
         /// <summary>
         /// A guarded former fix whose lane (the order's primary target, 170 units from the line objective) lies outside the works band still goes to
         /// it and holds and fires there; every other guarded order holds where it stands.
         /// </summary>
         public static bool LaneOpen(in CommandDoctrineOrder order, IWorksQuery works)
-            => works != null && Holds(order.Task, order.Reason) && order.PreGuardTask == CommandTaskType.FixEnemy && order.PrimaryTarget.HasValue
+            => works != null && Holds(order.Task, order.Reason) && HasLane(in order) && order.PrimaryTarget.HasValue
                && !works.InWorksBand(order.PrimaryTarget.X, order.PrimaryTarget.Z);
 
         /// <summary>
@@ -1519,6 +1522,24 @@ namespace WhiskeyRealism.Tactical.Operations
             {
                 GroupId = groupId, Channel = OrderChannel.Stance, Value = stance, Heading = -1f, Task = CommandTaskType.HoldObjective,
                 Priority = priority, Source = source, Flags = IntentFlags.WorksHold, Reason = WorksHoldGuard.Reason, ExploitId = exploitId,
+            });
+            return 1;
+        }
+
+        public const string WorksPinReason = "works-pin";
+
+        /// <summary>
+        /// BC14W (requirement-works-pin): the stance of a fix facing unbroken works, submitted every posture tick like the works hold's: the mapper's
+        /// pinned stance (2) for the task's attack stance, flagged <see cref="IntentFlags.WorksHold"/> so vanilla's own attack (3, 4) is taken. A task
+        /// that maps to no attack stance gets none (a Screen keeps its screen).
+        /// </summary>
+        public static int SubmitWorksPinStance(IIntentSink sink, int groupId, CommandTaskType task, IntentPriority priority, IntentSource source, int exploitId)
+        {
+            if (sink == null || groupId == 0 || !TacticalCommandTaskToStanceMapper.WorksPinHolds(task, true)) return 0;
+            sink.Submit(new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stance, Value = TacticalCommandTaskToStanceMapper.Map(task, true), Heading = -1f, Task = task,
+                Priority = priority, Source = source, Flags = IntentFlags.WorksHold, Reason = WorksPinReason, ExploitId = exploitId,
             });
             return 1;
         }

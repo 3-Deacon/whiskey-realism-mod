@@ -9,20 +9,20 @@ namespace WhiskeyRealism.Strategic.Planner
     // builds no string.
     internal struct ReconCounts : IEquatable<ReconCounts>
     {
-        public int Screens, Pickets, AdvanceGuards, Probes, Recalled, UnwatchedApproaches, OldestBeliefDays;
+        public int Screens, Pickets, AdvanceGuards, Probes, Recalled, UnwatchedApproaches, OldestBeliefDays, Pool;
 
         public bool Equals(ReconCounts other)
         {
             return Screens == other.Screens && Pickets == other.Pickets && AdvanceGuards == other.AdvanceGuards &&
                    Probes == other.Probes && Recalled == other.Recalled && UnwatchedApproaches == other.UnwatchedApproaches &&
-                   OldestBeliefDays == other.OldestBeliefDays;
+                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool;
         }
 
         public string Row(int alliance)
         {
             return "[Recon] alliance=" + alliance + " screens=" + Screens + " pickets=" + Pickets + " advanceGuards=" + AdvanceGuards +
                    " probes=" + Probes + " recalled=" + Recalled + " unwatchedApproaches=" + UnwatchedApproaches +
-                   " oldestBeliefDays=" + OldestBeliefDays;
+                   " oldestBeliefDays=" + OldestBeliefDays + " pool=" + Pool;
         }
     }
 
@@ -139,6 +139,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (s != null)
             {
+                counts.Pool = ReconPlanner.ScoutPool(s);
                 for (int i = 0; i < s.Beliefs.Count; i++)
                 {
                     if (s.Beliefs[i].Confidence01 <= 0f) continue;

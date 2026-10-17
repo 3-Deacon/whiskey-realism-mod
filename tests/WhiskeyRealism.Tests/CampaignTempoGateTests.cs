@@ -12,7 +12,7 @@ using static TestFixtures;
 // Stage G slice G5a, chapters decisions 5 and 8 (docs/superpowers/plans/2026-10-15-campaign-planner.md § G5a, the
 // chapter tempo gate and the pre-war gate): vanilla's tempo roll as pure arithmetic, the tempo clock, the first-move
 // gate and its release predicate (TempoReleasedDecision == DecisionSerial), the offense-only withhold of the mass
-// and of a deferred decision's Support, the map-group player's Support order, and the 001 pre-war idle.
+// and of a deferred decision's Support and the 001 pre-war idle.
 internal static class CampaignTempoGateTests
 {
     public static void Run()
@@ -38,8 +38,7 @@ internal static class CampaignTempoGateTests
             ("NonMainRolesNeverGated", NonMainRolesNeverGated),
             ("DeferredMoveLeavesPlanPublished", DeferredMoveLeavesPlanPublished),
             ("SupportWaitsForMainEffortLaunchIntoEnemyGround", SupportWaitsForMainEffortLaunchIntoEnemyGround),
-            ("SupportRepositionsFreelyInOwnGround", SupportRepositionsFreelyInOwnGround),
-            ("PlayerSupportOrderFollowsAiSupportRule", PlayerSupportOrderFollowsAiSupportRule),
+            ("StagedGatheringIsNotGatedByTheLaunch", StagedGatheringIsNotGatedByTheLaunch),
             ("EmptyDispatchableMassIsNotKept", EmptyDispatchableMassIsNotKept),
             ("DefendingMassMemberIsBusyAtNextReview", DefendingMassMemberIsBusyAtNextReview),
             ("DeferredMassWithheldFromVanillaOffense", DeferredMassWithheldFromVanillaOffense),
@@ -317,27 +316,20 @@ internal static class CampaignTempoGateTests
         public FakeMoverHost Host = new FakeMoverHost();
     }
 
-    private static Gate GateWith(bool believedEnemy, bool supportInEnemyGround = true, bool playerSupport = false, int dayOffset = 0)
+    // D6: Support is the one reinforcement the mass took from outside its theater (TheaterPlan.ReinforcementInstanceId); every other
+    // formation outside the mass holds (D3). Corps 3 is the reinforcement, kept small so the mass has no Reserve to carve.
+    private static Gate GateWith(bool believedEnemy, int dayOffset = 0)
     {
         var g = new Gate();
         var s = g.S = ExecutorFixtures.Wide(dayOffset);
-        // 6000 + 5000 against a believed 5000: the required force is 5500, so no part of the mass is Reserve (kept at 1.3 x 5500).
+        // 6000 + 5000 + 1000 against a believed 5000: the required force is 5500, so no part of the mass is Reserve (kept at 1.3 x 5500).
         s.Own.Add(ExecutorFixtures.Corps(1, 350f, 6000f));           // MainEffort
         s.Own.Add(ExecutorFixtures.Corps(2, 360f, 5000f));           // MainEffort
-        s.Own.Add(ExecutorFixtures.Corps(3, 330f, 9000f));           // Support
-        if (playerSupport)
-        {
-            var player = ExecutorFixtures.Corps(4, 335f, 6000f);
-            player.Chain = WlChainClass.PlayerMapGroup;
-            s.Own.Add(player);
-        }
+        s.Own.Add(ExecutorFixtures.Corps(3, 330f, 1000f));           // Support: the reinforcement
         if (believedEnemy) s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
-        var plan = g.Plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
-        var sectors = ExecutorFixtures.Sectors(s);
-        int support = sectors.SectorAt(330f, 0f);
-        float supportX = supportInEnemyGround ? 100f : 300f;
-        plan.Sectors.Add(new SectorPlan { SectorId = support, Posture = TheaterPosture.Support, TargetObjectiveId = 98, TargetX = supportX, TargetZ = 0f });
-        g.Alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var plan = g.Plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2, 3 });
+        plan.ReinforcementInstanceId = 3;
+        g.Alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         return g;
     }
 
@@ -475,35 +467,30 @@ internal static class CampaignTempoGateTests
         AssertTrue(neutral.Host.Moves.Exists(m => m.id == 3), "...and ground whose owner is not at war with us is not enemy-held (63127): Support is not held");
     }
 
-    private static void SupportRepositionsFreelyInOwnGround()
+    // D1: an unscouted main effort gathers at its start line, and a gathering in own ground is not a march: the whole mass and its
+    // reinforcement go out while the launch is still unreleased and no tempo roll has been evaluated (the roll is the march's).
+    private static void StagedGatheringIsNotGatedByTheLaunch()
     {
-        var g = GateWith(believedEnemy: true, supportInEnemyGround: false);
+        var g = GateWith(believedEnemy: true);
+        g.Plan.MainStaged = true;
+        g.Plan.StartLineX = 300f;           // own ground in the fake host (the west, x <= 150, is alliance 1's)
+        g.Plan.StartLineZ = 0f;
+        g.Alloc = ForceAllocator.Allocate(g.Plan, g.S, ExecutorFixtures.Sectors(g.S), null, null, null);
         var tally = Run(g, ExecutorFixtures.ClosedTempo());
-        AssertFalse(g.State.TempoReleasedDecision == g.State.DecisionSerial, "the main effort is still deferred");
-        AssertEqual("3", string.Join(",", g.Host.Moves.ConvertAll(m => m.id)), "Support in own ground goes out while the decision is deferred, the main effort does not");
-        AssertEqual(2, tally.Deferred, "the two MainEffort formations wait");
-    }
+        AssertEqual("1,2,3", string.Join(",", g.Host.Moves.ConvertAll(m => m.id)), "all three go to the start line");
+        foreach (var m in g.Host.Moves) AssertNear(300f, m.x, 0.01f, "the start line, not the objective");
+        AssertEqual(0, tally.Deferred, "nothing is held");
+        AssertFalse(tally.Tempo.NeedsRoll, "no tempo roll was evaluated for a gathering");
+        AssertTrue(g.State.TempoReleasedDecision != g.State.DecisionSerial, "and the launch is not released");
 
-    private static void PlayerSupportOrderFollowsAiSupportRule()
-    {
-        // In enemy ground: both wait; in own ground: both go out; on release: both go out.
-        var held = GateWith(believedEnemy: true, playerSupport: true);
-        AssertEqual(FormationRole.Support, held.Alloc.TryGet(4, out var p) ? p.Role : FormationRole.Hold, "the real allocator gave the map-group player a Support assignment");
-        Run(held, ExecutorFixtures.ClosedTempo());
-        AssertFalse(held.Host.Moves.Exists(m => m.id == 3), "the AI Support formation waits");
-        AssertEqual(0, held.Host.Orders.Count, "...and so does the map-group player's order");
-
-        var own = GateWith(believedEnemy: true, supportInEnemyGround: false, playerSupport: true);
-        Run(own, ExecutorFixtures.ClosedTempo());
-        AssertTrue(own.Host.Moves.Exists(m => m.id == 3), "the AI Support formation moves in own ground");
-        AssertEqual(1, own.Host.Orders.Count, "...and the player's Support order goes out on exactly the same review");
-
-        var released = GateWith(believedEnemy: true, playerSupport: true, dayOffset: 1);
-        released.State = held.State;
-        Run(released, ExecutorFixtures.OpenTempo());
-        AssertTrue(released.Host.Moves.Exists(m => m.id == 3), "the AI Support moves on the release review");
-        AssertEqual(1, released.Host.Orders.Count, "and so does the player's order");
-        AssertFalse(released.Host.Moves.Exists(m => m.id == 4), "never as a move");
+        // A start line in enemy-held ground (x <= 150) is a march and waits for the release.
+        var enemyGround = GateWith(believedEnemy: true);
+        enemyGround.Plan.MainStaged = true;
+        enemyGround.Plan.StartLineX = 120f;
+        enemyGround.Alloc = ForceAllocator.Allocate(enemyGround.Plan, enemyGround.S, ExecutorFixtures.Sectors(enemyGround.S), null, null, null);
+        var held = Run(enemyGround, ExecutorFixtures.ClosedTempo());
+        AssertEqual(0, enemyGround.Host.Moves.Count, "a start line inside enemy ground waits like any march");
+        AssertEqual(3, held.Deferred, "counted as deferred");
     }
 
     // ---- the plan side: the mass, busy formations ----
@@ -512,15 +499,17 @@ internal static class CampaignTempoGateTests
     {
         var state = new PlannerState { CampaignSeed = 1861L };
         var day1 = ExecutorFixtures.Wide();
-        day1.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
+        day1.Own.Add(ExecutorFixtures.Corps(1, 200f, 10000f));
         day1.Own.Add(ExecutorFixtures.Corps(2, 350f, 15000f));
+        day1.Beliefs.Add(ExecutorFixtures.Belief(150f, 0f, 20000f)); // scouted: the need is 20000 x 1.1 x 1.25 = 27500, more than corps 1 alone
         var plan1 = ExecutorFixtures.RealPlan(day1, state);
         AssertEqual(98, plan1.MainObjectiveId, "day 1: a main effort");
         AssertEqual(2, plan1.MassInstanceIds.Count, "over a mass of two");
         int decision = state.DecisionSerial;
 
         var day2 = ExecutorFixtures.Wide(1);
-        foreach (var f in new[] { ExecutorFixtures.Corps(1, 200f, 20000f), ExecutorFixtures.Corps(2, 350f, 15000f) })
+        day2.Beliefs.Add(ExecutorFixtures.Belief(150f, 0f, 20000f));
+        foreach (var f in new[] { ExecutorFixtures.Corps(1, 200f, 10000f), ExecutorFixtures.Corps(2, 350f, 15000f) })
         {
             var busy = f;
             busy.Flags |= FormationFlags.InDefensiveOps;     // vanilla's defence took both
@@ -539,7 +528,7 @@ internal static class CampaignTempoGateTests
         CampaignScope.ResetAll();
         PlanFreshness.NoteToday(day2.DaySerial);
         CampaignPlanStore.Publish(0, plan2, alloc2, ExecutorFixtures.Sectors(day2));
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 1), "so no Support stays withheld for it, and vanilla's own pool is vanilla's");
         CampaignScope.ResetAll();
     }
@@ -548,14 +537,16 @@ internal static class CampaignTempoGateTests
     {
         var state = new PlannerState { CampaignSeed = 1861L };
         var s = ExecutorFixtures.Wide();
-        s.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(150f, 0f, 20000f)); // scouted; need 27500, more than corps 1 and 2 (25000) together
+        s.Own.Add(ExecutorFixtures.Corps(1, 200f, 10000f));
         s.Own.Add(ExecutorFixtures.Corps(2, 250f, 15000f));
         s.Own.Add(ExecutorFixtures.Corps(3, 300f, 12000f));
         var first = ExecutorFixtures.RealPlan(s, state);
         AssertEqual(3, first.MassInstanceIds.Count, "all three massed on the first review");
 
         var next = ExecutorFixtures.Wide(1);
-        var defending = ExecutorFixtures.Corps(1, 200f, 20000f);
+        next.Beliefs.Add(ExecutorFixtures.Belief(150f, 0f, 20000f));
+        var defending = ExecutorFixtures.Corps(1, 200f, 10000f);
         defending.Flags |= FormationFlags.InDefensiveOps;        // vanilla's CheckForDefensiveOperations took it (13716-13717)
         next.Own.Add(defending);
         var attacking = ExecutorFixtures.Corps(2, 250f, 15000f);
@@ -589,7 +580,7 @@ internal static class CampaignTempoGateTests
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Main), "and after the release (an undispatched member is launched only by the mover)");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "a Hold formation above its sector's need is not");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "nor Support once the decision is released");
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Main), "with the pre-war gate nothing is");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Reserve), "not even a Reserve formation");
         CampaignScope.ResetAll();
@@ -612,7 +603,6 @@ internal static class CampaignTempoGateTests
         var w = ExecutorFixtures.PublishedWorld(out _);
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "an AI Support formation of a deferred decision is withheld from offense");
         AssertFalse(CampaignWithholdView.WithheldFromDefense(0, w.Support, 100f, 0f), "never from defense");
-        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.MapGroupSupport), "the map-group player's Support formation is never withheld");
         ExecutorFixtures.Release(0);
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "on the release review the clause drops");
         CampaignScope.ResetAll();
@@ -623,7 +613,7 @@ internal static class CampaignTempoGateTests
         var alloc = g.Alloc;
         PlanFreshness.NoteToday(g.S.DaySerial);
         CampaignPlanStore.Publish(0, g.Plan, alloc, ExecutorFixtures.Sectors(g.S));
-        CampaignPlanStore.PublishExecutorContext(0, ExecutorContext.From(g.State, true, -1));
+        CampaignPlanStore.PublishExecutorContext(0, ExecutorContext.From(g.State, true));
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 3), "released at the first dispatch: Support is vanilla's");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, 1), "while the mass stays the mover's");
         CampaignScope.ResetAll();
@@ -690,9 +680,9 @@ internal static class CampaignTempoGateTests
     private static void AnOlderDecisionsReleaseDoesNotReleaseTheCurrentOne()
     {
         var w = ExecutorFixtures.PublishedWorld(out _);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "decision 3 is deferred though decision 2 was released: Support stays withheld");
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true });
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.Support), "released: vanilla's again");
         CampaignScope.ResetAll();
 
@@ -794,7 +784,7 @@ internal static class CampaignTempoGateTests
     {
         var w = ExecutorFixtures.PublishedWorld(out var tracker);
         tracker.RecordIssued(w.FreeHold, 300f, 0f, 100f, 0f, ExecutorFixtures.Day, queued: false);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false, MapGroupInstanceId = -1 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = false });
         foreach (int id in new[] { w.Main, w.Support, w.Reserve, w.CapitalGuard, w.FreeHold, w.HoldAtNeed })
         {
             AssertFalse(CampaignWithholdView.WithheldFromOffense(0, id), "pre-war: formation " + id + " is vanilla's");

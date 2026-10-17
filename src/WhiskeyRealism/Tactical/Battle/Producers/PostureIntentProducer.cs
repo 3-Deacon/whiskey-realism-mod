@@ -510,8 +510,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     followed.CloseEngaged = closeEngaged;
                     followed.FlankRisk = flankRisk;
                 }
+                // BC14W (requirement-works-pin): a follower of a non-breach exploit aimed at unbroken works is held at stance 2 as its asset is.
+                int followerStance = recordTick && ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId)
+                    ? PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, 0)
+                    : 0;
                 PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, ExploitLifecycle.FollowReason),
-                    0, ExploitLifecycle.FollowReason);
+                    followerStance, ExploitLifecycle.FollowReason);
+                // A stance is no order that moves or re-lays the group: the follower keeps its facing pulse and fire control (BC13).
                 return false;
             }
 
@@ -588,10 +593,27 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC14W (requirement-works-hold): a group the works hold guard holds gets the hold's one stance (the mapper's, 2, flagged WorksHold) before
             // the posture decision and whatever it returns, so an idle group already in formation is still held out of vanilla's assault. A former
             // fix whose lane lies outside the works band still goes to its lane (its decision is the fix's) and holds and fires there.
+            // BC14W (requirement-works-pin): the asset of a non-breach exploit aimed at unbroken works does not march onto them. Its order becomes the
+            // works hold with a lane: a hold at the band's edge on its approach line (where it stands if already in the band), keeping the exploit's heading
+            // toward the aim, so it fires and faces the works from outside. When the aim is broken in the table stops pinning it and the strike resumes.
+            if (exploit && hasOrder && order.PrimaryTarget.HasValue && army?.Feasibility?.HeldWorks != null &&
+                (TacticalCommandTaskToStanceMapper.WorksPinHolds(order.Task, true) || WorksHoldGuard.Holds(order.Task, order.Reason)) &&
+                ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId))
+            {
+                MoveContest.PinHoldPoint(rec.X, rec.Z, order.PrimaryTarget.X, order.PrimaryTarget.Z, army.Feasibility.HeldWorks, out float pinX, out float pinZ);
+                order = order.WithWorksHold(WorksHoldGuard.Holds(order.Task, order.Reason) ? order.PreGuardTask : order.Task, null, DoctrineTargetPoint.From(pinX, pinZ));
+                WorksHoldGuard.ApplyState(in state, new WorksGuardContext { WorksHold = true, IsExploit = true, ExploitKind = OpeningKind.IsolatedCluster, ExploitAimOnWorks = true },
+                    out state);
+            }
             bool worksHeld = WorksHoldGuard.Holds(state.Task, state.Reason) || (hasOrder && WorksHoldGuard.Holds(order.Task, order.Reason));
             int worksStance = worksHeld && recordTick
                 ? PostureIntentPlan.SubmitWorksHoldStance(sink, rec.InstanceId, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId))
                 : 0;
+            // BC14W (requirement-works-pin): a fix facing unbroken works that the hold does not guard is pinned at stance 2 the same way: it keeps its
+            // task, lane and fire, but is never given the attack stance vanilla escalates to an assault, until the strike it pins for has broken in. (An
+            // exploit asset on unbroken works was made a hold above, so it has the hold's stance; its followers are pinned before their early return.)
+            if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId))
+                worksStance = PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId));
             bool worksLane = worksHeld && hasOrder && WorksHoldGuard.LaneOpen(in order, army?.Feasibility?.HeldWorks);
 
             // BC14W: a held group is not left to walk into the works band by a move Whiskey did not issue (vanilla's chain move, its micro cycle): the
@@ -672,7 +694,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 {
                     PostureRoutes.Forget(rec.InstanceId);
                     PostureTelemetry.Group(s, i, reason, state, decision, worksStance, decision.Reason);
-                    return worksStance > 0;
+                    return false;
                 }
             }
 
@@ -689,7 +711,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (!hasTarget && t.NavDeferred)
             {
                 PostureTelemetry.Group(s, i, reason, state, decision, worksStance, "nav-budget-deferred");
-                return worksStance > 0;
+                return false;
             }
             string targetReason = hasTarget ? decision.Reason : "target-unresolved";
             if (hasTarget && holding && BattleRecon.HoldBlocks(decision.Target, holdX, holdZ, holdDirX, holdDirZ, x, z))
@@ -716,7 +738,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (PostureRoutes.Resolve(s, t, i, x, z, avoidCovered, out roadRoute, out columnWait) == PostureRoutes.Outcome.Deferred)
                 {
                     PostureTelemetry.Group(s, i, reason, state, decision, worksStance, "road-route-deferred");
-                    return worksStance > 0;
+                    return false;
                 }
                 if (roadRoute.Use || columnWait) targetFormation = RoadRoutePlanner.ColumnGroupFormation;
                 if (columnWait) targetReason = "road-column-wait";
@@ -786,7 +808,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
             PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason, facingSource);
-            return submitted > 0;
+            return submitted > worksStance;
         }
 
         // BC14W: one group's turn of the works contest (MoveContest): the memory is asked every tick for a held group, a recon mission group is neither

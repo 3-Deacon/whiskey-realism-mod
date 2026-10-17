@@ -58,7 +58,7 @@ namespace WhiskeyRealism.Strategic
         // (points >= 0 | distancepoints > source | importance > source) (10984).
         // The plan target may replace vanilla's pick only when it passes the same
         // gates and the source area lies in a sector the plan steers (a MainEffort
-        // or Support sector, SteeringRules.ImportanceSteers; G5a re-keyed the old
+        // sector, SteeringRules.ImportanceSteers (the main sector only, never while staged); G5a re-keyed the old
         // same-theater clause on the plan), so other fronts keep vanilla's local
         // targets and nothing is pulled cross-map.
         internal static bool ShouldRedirectToPlanTarget(

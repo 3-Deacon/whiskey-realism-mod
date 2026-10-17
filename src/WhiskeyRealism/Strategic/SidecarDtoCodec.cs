@@ -442,9 +442,15 @@ namespace WhiskeyRealism.Strategic
                 CapitalThreatLatched = s.CapitalThreatLatched,
                 TempoReleasedDecision = s.TempoReleasedDecision,
                 LastFullReviewDay = s.LastFullReviewDay,
+                ReinforcementKey = s.ReinforcementKey,
+                ReinforcementDecision = s.ReinforcementDecision,
+                ScoutedDecision = s.ScoutedDecision,
                 UnreliableDays = p.UnreliableDays,
                 UnreliableLastDay = p.UnreliableLastDay
             };
+            foreach (var pair in s.Departments)
+                dto.Departments.Add(new DepartmentDto { UnitKey = pair.Key, Department = pair.Value.ToString() });
+            dto.Departments.Sort((a, b) => string.CompareOrdinal(a.UnitKey, b.UnitKey));   // a stable file for the same state
             foreach (var b in p.Beliefs)
             {
                 if (string.IsNullOrEmpty(b.UnitKey)) continue;
@@ -489,7 +495,17 @@ namespace WhiskeyRealism.Strategic
             if (dto == null) return null;
             var p = new PlannerSnapshot { UnreliableDays = dto.UnreliableDays, UnreliableLastDay = dto.UnreliableLastDay };
             p.State.Restore(dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
-                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay);
+                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision, dto.ScoutedDecision);
+            if (dto.Departments != null)
+            {
+                var departments = new List<KeyValuePair<string, Theater>>();
+                foreach (var d in dto.Departments)
+                {
+                    if (d == null || string.IsNullOrEmpty(d.UnitKey) || !Enum.TryParse<Theater>(d.Department, out var theater)) continue;
+                    departments.Add(new KeyValuePair<string, Theater>(d.UnitKey, theater));
+                }
+                p.State.RestoreDepartments(departments);
+            }
             if (dto.Beliefs != null)
                 foreach (var b in dto.Beliefs)
                 {

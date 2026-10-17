@@ -115,6 +115,27 @@ namespace WhiskeyRealism.Tactical.Battle
         public static bool RecoveryAllowed(bool holds, float x, float z, IWorksQuery works)
             => !holds || !InBand(works, x, z);
 
+        /// <summary>
+        /// Where a pinned exploit holds (requirement-works-pin): the last point outside the works band on the line from the group to its aim, so it
+        /// goes up to the band's edge on its approach line and no further. A group already in the band holds where it stands.
+        /// </summary>
+        public static void PinHoldPoint(float groupX, float groupZ, float aimX, float aimZ, IWorksQuery works, out float holdX, out float holdZ)
+        {
+            holdX = groupX;
+            holdZ = groupZ;
+            if (works == null || InBand(works, groupX, groupZ) || !InBand(works, aimX, aimZ)) return;
+            float lo = 0f, hi = 1f;
+            for (int i = 0; i < BandSearchSteps; i++)
+            {
+                float mid = 0.5f * (lo + hi);
+                if (InBand(works, groupX + (aimX - groupX) * mid, groupZ + (aimZ - groupZ) * mid)) hi = mid; else lo = mid;
+            }
+            holdX = groupX + (aimX - groupX) * lo;
+            holdZ = groupZ + (aimZ - groupZ) * lo;
+        }
+
+        private const int BandSearchSteps = 16;
+
         internal static float Distance(float ax, float az, float bx, float bz)
         {
             float dx = ax - bx, dz = az - bz;

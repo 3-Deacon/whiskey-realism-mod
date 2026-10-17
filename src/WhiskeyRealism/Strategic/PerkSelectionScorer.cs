@@ -77,6 +77,7 @@ namespace WhiskeyRealism.Strategic
             switch (role)
             {
                 case FormationRole.CapitalGuard:
+                case FormationRole.Garrison:
                 case FormationRole.Hold:
                 case FormationRole.Reserve:
                     return ArmyPerkRole.CapitalDefense;

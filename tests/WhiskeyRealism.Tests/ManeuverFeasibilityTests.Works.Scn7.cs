@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 using WhiskeyRealism.Strategic;
 using static TestHarness;
@@ -10,14 +11,18 @@ using static TestFixtures;
 using static ManeuverFeasibilityFixtures;
 using static WorksFixtures;
 
-// BC14W task 8: the § 6 scenario 7 end to end (spec § 13.2 FEAS-SCN-7): an entrenched line with both ends anchored. The aggressive commander assaults the
-// junction and his column launches; the cautious and the mid commanders are held by the works hold, whichever plan wins, and no assaulting child leaves
-// its Hold. The runtime (BuildInput, the executor) is the harness's stand-in here: the ledger's own release and focal point feed BC11's machine.
+// BC14W task 8: the § 6 scenario 7 end to end (spec § 13.2 FEAS-SCN-7): an entrenched line with both ends anchored. The aggressive commander's selection is
+// the mirrored ManeuverAndFix: its wing strikes the weak 6,000-man end at odds 2.67 and its Center fix is pinned at stance 2 until the break-in (the
+// works-pin rule, § 7A). FocalAssault is priced Feasible for him too and its column launches when it is the plan (forced here, as it is not his pick); the
+// cautious and the mid commanders are held by the works hold, whichever plan wins, and no assaulting child leaves its Hold. The runtime (BuildInput, the
+// executor) is the harness's stand-in here: the ledger's own release and focal point feed BC11's machine.
 internal static partial class ManeuverFeasibilityTests
 {
     static (string, Action)[] WorksScn7Tests() => new (string, Action)[]
     {
-        ("bc14w FEAS-SCN-7 the junction is the focal point; the aggressive commander's column launches, the cautious and mid commanders are held for 3 hours with no release", WScn7),
+        ("bc14w FEAS-SCN-7 the junction is the focal point at odds 2.34; FocalAssault is Feasible for the aggressive commander and, as the plan, its column launches", WScn7),
+        ("bc14w FEAS-SCN-7 the aggressive commander selects the mirrored ManeuverAndFix: the wing strikes the weak end at 2.67, the Center is pinned at stance 2 until the break-in and takes 3 after", WScn7Selection),
+        ("bc14w FEAS-SCN-7 the cautious and the mid commanders are held for 3 hours with no release, whichever plan wins", WScn7Held),
     };
 
     // Steps a maneuver the way the runtime feeds it: the ledger's planned release (when not held), the vias, the focal point, the works hold's flag.
@@ -66,10 +71,8 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(PlayRectKind.AssaultColumn, column.Kind, "the assault body is the column");
         AssertTrue(column.AssaultsWorks, "and assaults the works");
 
-        // The aggressive commander's assault is the shipped selection, and no hold stands in its way.
-        // Selected over the whole army's frontal assault, as the spec says (the shipped scores at jitter seed 7). The authored ManeuverAndFix, whose wings
-        // are works assaults too, is priced the same for this commander (detail 0, no term) and scores 0.654 against FocalAssault's 0.638: the spec's
-        // "selected" is read against the frontal plays, and the ManeuverAndFix margin is recorded in the build record.
+        // FocalAssault is priced Feasible for him and scores above every frontal play; it is not his pick (the next test): the mirrored ManeuverAndFix
+        // scores 0.654 against its 0.638.
         var report = new SelectionReport();
         SeedCatalog.AllHistoricalAndGeneric().Select(WorksContext(aggressive, 51000f / 25000f, false, AggressiveVector()), report);
         float focalScore = float.NaN;
@@ -87,7 +90,7 @@ internal static partial class ManeuverFeasibilityTests
         aggressive.RefreshWorksHold(new FakeWorld());
         AssertFalse(aggressive.WorksHold(out _), "his assault is priced worth making: no works hold");
 
-        // His column launches: Hold at the release, March in column to the form-up point, Turn, Attack on the focal point.
+        // Were FocalAssault the plan (forced here), his column launches: Hold at the release, March in column to the form-up point, Turn, Attack on the focal point.
         ManeuverInput input = RuntimeInput(aggressive, BattlePlanId.FocalAssault, column, 10.0);
         AssertTrue(input.HasPlannedRelease, "the ledger published the column's release");
         var state = default(ManeuverState);
@@ -110,24 +113,90 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(order.HasFormation && order.Formation == 4, "the Attack is in column");
         AssertNear(focal.X, order.TargetX, 1f, "on the focal point (x)");
         AssertNear(focal.Z, order.TargetZ, 1f, "on the focal point (z)");
+    }
 
+    // The real outcome of the aggressive commander (verify round 2): what Select() picks, the side the evaluation chose, and what the works doctrine does to
+    // it. The Center fix faces the works too (its strike point is on them, E 0), so it is pinned at stance 2 until the strike it pins for has broken in.
+    static void WScn7Selection()
+    {
+        const float centerLateral = 18f;
+        FeasField field = Scenario7(Aggressive());
+        FeasibilityLedger aggressive = field.Evaluate(WorksPlans);
+        var report = new SelectionReport();
+        BattlePlanId chosen = SeedCatalog.AllHistoricalAndGeneric().Select(WorksContext(aggressive, 51000f / 25000f, false, AggressiveVector()), report).Id;
+        AssertEqual(BattlePlanId.ManeuverAndFix, chosen, "the aggressive commander selects ManeuverAndFix, not FocalAssault");
+        float mafScore = float.NaN, focalScore = float.NaN;
+        for (int r = 0; r < report.Count; r++)
+        {
+            if (report[r].Plan == BattlePlanId.ManeuverAndFix) mafScore = report[r].Score;
+            if (report[r].Plan == BattlePlanId.FocalAssault) focalScore = report[r].Score;
+        }
+        AssertNear(0.654f, mafScore, 0.01f, "at 0.654");
+        AssertNear(0.638f, focalScore, 0.01f, "against FocalAssault's 0.638");
+
+        CandidateResult result = Result(aggressive, chosen);
+        AssertTrue(result.Mirrored, "on the mirrored side: the better-side rule takes the 6,000-man end, not the authored 13,000-man one");
+        AssertEqual(FeasibilityVerdict.Feasible, result.Verdict, "Feasible");
+        BodyEstimate[] bodies = BodiesArray(aggressive, chosen);
+        BodyEstimate wing = FirstWing(bodies);
+        BodyEstimate center = bodies[Array.FindIndex(bodies, b => b.Main)];
+        AssertNear(FeasField.X(-450f), wing.StrikeX, 30f, "the wing strikes the weak end at lateral -450");
+        AssertNear(2.67f, wing.IsolatedOdds, 0.05f, "at odds 2.67");
+        AssertNear(0f, wing.Detail, 0.02f, "the aggressive commander's bar of three: detail 0");
+        AssertTrue(wing.StrikeOnWorks && wing.AssaultsWorks, "a works assault");
+        AssertTrue(center.StrikeOnWorks && !center.AssaultsWorks, "the Center's strike point lies on the works and it assaults nothing");
+        AssertNear(0f, center.EnemyAgainst, 1f, "it is a pin: no enemy against it (E 0)");
+        AssertNear(FeasField.X(centerLateral), center.StrikeX, 30f, "at the middle of the line");
+
+        aggressive.CaptureSelection(chosen, result.Mirrored);
+        aggressive.RefreshWorksHold(new FakeWorld());
+        AssertFalse(aggressive.WorksHold(out _), "the wing is priced worth making: no works hold");
+        AssertTrue(aggressive.AssaultsWorks(wing.ChildId) && !aggressive.PinsWorks(wing.ChildId), "the wing assaults and is not pinned");
+        AssertTrue(aggressive.FacesWorks(center.ChildId) && !aggressive.AssaultsWorks(center.ChildId), "the Center faces works and assaults none");
+
+        // Before the break-in: the Center holds at stance 2, whatever task BC11's release gives it.
+        AssertTrue(aggressive.PinsWorks(center.ChildId), "the Center is pinned: the works its strike point lies on are unbroken");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceDefend, TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy, aggressive.PinsWorks(center.ChildId)),
+            "its FixEnemy takes stance 2");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack, TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy, false),
+            "control: without the pin the same task takes the attack stance");
+
+        // After: the 6,000-man end the wing struck is shaken (morale 0.3 is below 0.45, 6,000 of the 11,000 within 300 of the strike).
+        FeasField shaken = Scenario7(Aggressive());
+        EnemyObservation end = shaken.Enemies[0];
+        AssertNear(FeasField.X(-450f), end.X, 1f, "control: the first enemy is the weak end");
+        end.Morale = 0.3f;
+        shaken.Enemies[0] = end;
+        FeasibilityLedger after = shaken.Evaluate(WorksPlans);
+        after.CaptureSelection(chosen, result.Mirrored);
+        after.RefreshWorksHold(new FakeWorld());
+        BodyEstimate[] afterBodies = BodiesArray(after, chosen);
+        BodyEstimate afterCenter = afterBodies[Array.FindIndex(afterBodies, b => b.Main)];
+        AssertTrue(after.FacesWorks(afterCenter.ChildId), "control: the Center still faces the works");
+        AssertFalse(after.PinsWorks(afterCenter.ChildId), "the strike it pins for has broken in: no pin");
+        AssertEqual(TacticalCommandTaskToStanceMapper.StanceAttack, TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy, after.PinsWorks(afterCenter.ChildId)),
+            "its FixEnemy takes stance 3");
+    }
+
+    static void WScn7Held()
+    {
         // The cautious commander: FocalAssault is declined, and whatever wins is held.
         FeasibilityLedger cautious = Scenario7(Cautious()).Evaluate(WorksPlans);
         AssertEqual("declined", Result(cautious, BattlePlanId.FocalAssault).Reason, "FocalAssault is declined");
         HeldRun(cautious, SeedCatalog.AllHistoricalAndGeneric().Select(WorksContext(cautious, 51000f / 25000f, true, new PersonalityVector(-0.6f, 0.8f, -0.6f, 0f, 0f))).Id, "cautious");
 
-        // The mid commander: with EnvelopmentPressure the authored ManeuverAndFix (its wings strike the works), without it FocalAssault (detail ~ 0.88).
+        // The mid commander: with EnvelopmentPressure ManeuverAndFix (on its mirrored side: its wing strikes the works), without it, by the spec's scores, FocalAssault (detail ~ 0.88).
         FeasibilityLedger mid = Scenario7().Evaluate(WorksPlans);
         BattlePlanId withPressure = SeedCatalog.AllHistoricalAndGeneric().Select(MidContext(mid, 51000f / 25000f, true)).Id;
         AssertEqual(BattlePlanId.ManeuverAndFix, withPressure, "with EnvelopmentPressure the mid commander selects ManeuverAndFix");
-        // The spec says detail 1; the evaluation picks the cheaper side (the left, the 6,000 body: E 6,600, odds 2.58 against the bar of three) and reads
-        // 0.57. Either way the wing's works assault is Risky, at or above RiskyPenalty, which is what the hold keys on.
+        // The spec's sentence prices the right wing, detail 1; the evaluation picks the cheaper side by its own rule (the left, the 6,000 body: E 6,600, odds
+        // 2.58 against the bar of three) and reads 0.57. Either way the wing's works assault is Risky, at or above RiskyPenalty, which is what the hold keys on.
         AssertTrue(FirstWing(BodiesArray(mid, BattlePlanId.ManeuverAndFix)).Detail >= ManeuverFeasibility.RiskyPenalty, "whose wings strike the works: a Risky detail");
         HeldRun(mid, withPressure, "mid with pressure");
-        // Without it the spec expects FocalAssault (0.52 - 0.35 = 0.172 against ContinuousAttrition's 0.156). The scores are the spec's. What differs is
-        // the wing of ManeuverAndFix: the spec prices it on the authored (right) side, detail 1, term -0.4 (E 13,200, odds 1.29), but the evaluation selects the
-        // cheaper mirrored side (the left, 6,000 body: detail 0.57, term -0.23), which scores 0.321 and wins. The fixture is not symmetrical, so the spec's
-        // sentence and its side-selection rule disagree; recorded in the build record. Either selection is held by the works hold.
+        // Without it the spec's FocalAssault scores are reproduced (0.52 - 0.35 = 0.172 against ContinuousAttrition's 0.156). What differs is the wing of
+        // ManeuverAndFix: the spec prices the right side, detail 1, term -0.4 (E 13,200, odds 1.29), but the evaluation selects the cheaper mirrored side
+        // (the left, 6,000 body: detail 0.57, term -0.23), which scores 0.321 and wins. The fixture is not symmetrical, so the spec's sentence and its
+        // better-side rule disagree and the rule governs (spec § 7A, SCN-7 as restated). Either selection is held by the works hold.
         var without = new SelectionReport();
         BattlePlanId chosen = SeedCatalog.AllHistoricalAndGeneric().Select(MidContext(mid, 51000f / 25000f, false), without).Id;
         float focalMid = float.NaN, attritionMid = float.NaN;
@@ -147,12 +216,12 @@ internal static partial class ManeuverFeasibilityTests
     // A selection the works hold keeps: hopeless-assault, the assaulting children HoldForWorks, none leaves its Hold over 3 doctrine-h, none is published a release.
     static void HeldRun(FeasibilityLedger ledger, BattlePlanId plan, string who)
     {
-        ledger.CaptureSelection(plan, false);
+        ledger.CaptureSelection(plan, Result(ledger, plan).Mirrored);
         ledger.RefreshWorksHold(new FakeWorld());
         AssertTrue(ledger.WorksHold(out string reason), who + ": " + plan + " is held");
         AssertEqual("hopeless-assault", reason, who + ": for a hopeless assault");
         // The TacticalWorksHold row's facts: the worst works assault's detail and the bar it was held to, and who assaults.
-        ledger.WorksReport(out float reportDetail, out float reportBar, out int assaulting, out int facing);
+        ledger.WorksReport(out float reportDetail, out float reportBar, out int assaulting, out int facing, out _);
         AssertTrue(reportDetail >= ManeuverFeasibility.RiskyPenalty, who + ": the row's detail is the hopeless one: " + reportDetail);
         AssertTrue(reportBar > 0f, who + ": and names the bar it was held to: " + reportBar);
         AssertTrue(assaulting > 0 && facing >= assaulting, who + ": " + assaulting + " children assault, " + facing + " face works");

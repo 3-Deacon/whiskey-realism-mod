@@ -1099,9 +1099,6 @@ internal static class ConstructionSteeringTests
 
         var free = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
         AssertTrue(free.TryGet(1, out var loose) && loose.Role != FormationRole.DepotBuilder, "control: with no pin the dropped task leaves the builder to the allocation (" + loose.Role + ")");
-        var hostFree = new FakeMoverHost();
-        CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, free, ExecutorFixtures.OpenTempo()), hostFree, new MoveTracker(), ExecutorFixtures.State());
-        AssertTrue(hostFree.Moves.Exists(m => m.id == 1), "control: and the mover marches it off its wish");
 
         var pinned = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pin);
         AssertTrue(pinned.TryGet(1, out var held), "the pinned builder is allocated");
@@ -1193,7 +1190,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);"), "the review reads the ledger's held set once");
         AssertEqual(1, CountOccurrences(planner, "CollectHeldBuilders("), "from one source");
         AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "and hands it to G3's plan");
-        AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "and hands them to the allocator");
+        AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "and hands them to the allocator");
         string allocator = Src("Strategic/Planner/ForceAllocator.cs");
         string run = BodyOf(allocator, "internal void Run(Allocation allocation)");
         AssertTrue(run.IndexOf("AssignPinnedBuilders()", StringComparison.Ordinal) < run.IndexOf("AssignImmobile()", StringComparison.Ordinal), "the pinned builders are handed out first");

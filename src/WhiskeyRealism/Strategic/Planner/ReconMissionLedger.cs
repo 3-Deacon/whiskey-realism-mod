@@ -342,12 +342,16 @@ namespace WhiskeyRealism.Strategic.Planner
             return false;
         }
 
-        // G4 copies the task's SectorId and hold point into the Recon assignment (SectorId, TargetX/Z).
+        // G4 copies the task's SectorId, hold point and Reason into the Recon assignment (SectorId, TargetX/Z, Reason). The reason is part of
+        // the pairing (D7, smoke amendments 2026-10-16): the main-axis screen and the probe both end at the standoff short of the main
+        // objective, the same sector and the same point, and by sector and point alone the probe's formation was bound to the screen's task
+        // (a second Screen mission, no Probe ever).
         private static int TaskFor(IReadOnlyList<ReconTask> tasks, in Assignment a)
         {
             if (tasks == null) return -1;
             for (int i = 0; i < tasks.Count; i++)
-                if (tasks[i].SectorId == a.SectorId && tasks[i].HoldX == a.TargetX && tasks[i].HoldZ == a.TargetZ) return i;
+                if (tasks[i].SectorId == a.SectorId && tasks[i].HoldX == a.TargetX && tasks[i].HoldZ == a.TargetZ
+                    && string.Equals(tasks[i].Reason, a.Reason, StringComparison.Ordinal)) return i;
             return -1;
         }
 

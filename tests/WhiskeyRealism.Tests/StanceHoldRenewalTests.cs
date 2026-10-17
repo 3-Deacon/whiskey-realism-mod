@@ -25,6 +25,7 @@ internal static class StanceHoldRenewalTests
             ("stance renewal is bounded on the doctrine clock", RenewalIsBounded),
             ("stance renewal pin wired after the winners and through the writer", RenewalIsWiredAfterTheWinnersAndThroughTheWriter),
             ("stance renewal start is cleared at battle end and on a yield", RenewalStartIsClearedAtBattleEndAndOnAYield),
+            ("stance renewal carries the works-hold flag of the record it renews", RenewalCarriesTheWorksHoldFlag),
         });
     }
 
@@ -176,7 +177,7 @@ internal static class StanceHoldRenewalTests
             "the pure candidate test decides (group, not player-owned, path or queued order), from the snapshot record");
         AssertTrue(body.Contains("TacticalStanceOwnership.RenewsWhileOrdered(record, own[i].AiStanceOrdered, carryingOrder: true)"), "the pure predicate decides");
         AssertTrue(Regex.IsMatch(body, @"if \(!_renewSince\.TryGetValue\(id, out float since\)\) _renewSince\[id\] = since = now;\s*if \(!TacticalStanceOwnership\.RenewalLive\(since, now\)\) continue;"), "bounded, from the first renewal after a producer's claim");
-        AssertTrue(Regex.IsMatch(body, @"EnsureStance\(bunits, group, record\.Stance, RenewTag, record\.Source\)"), "through EnsureStance with the record's own stance and source");
+        AssertTrue(Regex.IsMatch(body, @"EnsureStance\(bunits, group, record\.Stance, RenewTag, record\.Source, record\.WorksHold\)"), "through EnsureStance with the record's own stance, source and works-hold flag");
         string ensure = writer.Substring(writer.IndexOf("public static bool EnsureStance(", StringComparison.Ordinal));
         AssertTrue(ensure.Contains("if (!ReferenceEquals(contextTag, RenewTag)) _renewSince.Remove(id);"), "a producer's claim restarts the bound; a renewal does not");
         AssertFalse(body.Contains("ChangeStance("), "the renewal itself never writes a stance order (EnsureStance owns that)");
@@ -197,5 +198,35 @@ internal static class StanceHoldRenewalTests
         AssertTrue(yield >= 0, "the yield exists");
         string yieldBody = writer.Substring(yield, writer.IndexOf("_records.Remove(id)", yield, StringComparison.Ordinal) - yield);
         AssertTrue(yieldBody.Contains("_renewSince.Remove(id);"), "a yield drops the group's renewal start before anything can return early");
+    }
+
+    // BC14W verify round 2: a renewal is the group's own record through the full decision, so the record has to
+    // carry the works-hold flag the producer wrote it with. A renewal that wrote the flag-less record back would
+    // turn a works hold into an ordinary defend hold until the producer next resubmitted it, and the producers go
+    // quiet while the group marches.
+    private static void RenewalCarriesTheWorksHoldFlag()
+    {
+        const int Defend = 2;
+        var hold = new StanceWriteInput(true, Defend, 3, 0, Written, default(StanceHoldRecord), StanceWriteSource.Executor, 3, Written, worksHold: true);
+        StanceWriteDecision write = TacticalStanceOwnership.Decide(hold);
+        AssertEqual(StanceWriteAction.Write, write.Action, "the works hold's first write");
+        StanceHoldRecord record = TacticalStanceOwnership.Next(write, hold);
+        AssertTrue(record.WorksHold, "the record a works-hold write stamps carries the flag");
+        AssertFalse(TacticalStanceOwnership.Next(TacticalStanceOwnership.Decide(Input(default(StanceHoldRecord), Written, ordered: 3)),
+            Input(default(StanceHoldRecord), Written, ordered: 3)).WorksHold, "an ordinary write stamps no flag");
+
+        // The renewal, as EnsureStance builds it from the record: same flag, a later hour, the stance now ordered.
+        float now = Written + 0.12f;
+        var renew = new StanceWriteInput(true, record.Stance, Defend, 0, now, record, record.Source, 3, now, worksHold: record.WorksHold);
+        StanceWriteDecision claim = TacticalStanceOwnership.Decide(renew);
+        AssertEqual(StanceWriteAction.Claim, claim.Action, "the renewal claims the hold it already has");
+        StanceHoldRecord renewed = TacticalStanceOwnership.Next(claim, renew);
+        AssertTrue(renewed.WorksHold, "the renewed record still carries the works-hold flag");
+
+        // Control: the flag-less renewal the writer used to make claims the same hold and stamps a plain record.
+        var plain = new StanceWriteInput(true, record.Stance, Defend, 0, now, record, record.Source, 3, now);
+        StanceWriteDecision plainClaim = TacticalStanceOwnership.Decide(plain);
+        AssertEqual(StanceWriteAction.Claim, plainClaim.Action, "control: the same decision without the flag");
+        AssertFalse(TacticalStanceOwnership.Next(plainClaim, plain).WorksHold, "control: a renewal that does not pass the flag drops it");
     }
 }

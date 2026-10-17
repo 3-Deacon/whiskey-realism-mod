@@ -23,6 +23,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14w WORKS-FOG a hidden entrenched regiment and an unperceived piece change nothing, the same perceived change the picture", WFog),
         ("bc14w WORKS-LINES the pieces of several lines, one per model object, build one picture; a piece below half done or destroyed is absent", WLines),
         ("bc14w WORKS-OWN a Defender's own works are its regiments in works cover and the pieces within the gap of them or in its zone", WOwn),
+        ("bc14w WORKS-BROKEN-IN a strike point is broken in only on positive perceived evidence: own regiments on the works or 40% of the perceived strength within 300 shaken; faded or absent holders are a fade that wants a look", WBrokenIn),
         ("bc14w FEAS-PIN-W the BC14W sources read no enemy record, scheduledarrival, durationleft, occupiedby, fortificationpoints or march literal", WFeasPin),
     };
 
@@ -42,8 +43,10 @@ internal static partial class ManeuverFeasibilityTests
             AssertEqual(1, BuildEnemy(Snapshot(Sample(0f, 600f, 1000f, coverObject: works)), new Points()).WorksSamples, "cover object " + works + " is works");
 
         // A remembered sample counts at confidence 0.5 and not below; it counts at its confidence-weighted strength.
-        AssertEqual(0, BuildEnemy(Snapshot(Sample(0f, 600f, 1000f, state: ObservationState.Remembered, confidence: 0.4f)), new Points()).WorksSamples,
-            "a remembered regiment at confidence 0.4 is not a sample");
+        WorksPicture fadedSample = BuildEnemy(Snapshot(Sample(0f, 600f, 1000f, state: ObservationState.Remembered, confidence: 0.4f)), new Points());
+        AssertEqual(1, fadedSample.WorksSamples, "a remembered regiment at confidence 0.4 is a faded holder: never seen to leave, it still holds its segment");
+        AssertTrue(fadedSample.HasHeldWorks, "so the segment stays held");
+        AssertNear(400f, fadedSample.Segment(0).HeldStrength, 1e-3f, "at its confidence-weighted strength");
         WorksPicture remembered = BuildEnemy(Snapshot(Sample(0f, 600f, 1000f, state: ObservationState.Remembered, confidence: 0.5f)), new Points());
         AssertEqual(1, remembered.WorksSamples, "at 0.5 it is");
         AssertNear(500f, remembered.Segment(0).HeldStrength, 1e-3f, "at half its strength");
@@ -418,5 +421,82 @@ internal static partial class ManeuverFeasibilityTests
             string literal = FirstMarchLiteral(text);
             AssertTrue(literal == null, Path.GetFileName(file) + " carries a vanilla literal: " + literal);
         }
+    }
+
+    static BattleSnapshot SnapshotWithOwn(EnemyObservation[] observations, params (float lateral, float depth)[] own)
+    {
+        var tree = new ManeuverFeasibilityFixtures.TreeFixture();
+        foreach ((float lateral, float depth) in own) tree.Add(TacticalUnitType.Infantry, X(lateral), Z(depth), -1, UnitFlags.IsInfantry, 500f);
+        return tree.Build(10.0, observations);
+    }
+
+    // The integrator's ruling (verify round 2), as corrected the same day: a fix facing works is pinned at stance 2 until the strike it pins for has
+    // broken in, and a break-in needs positive perceived evidence. Own regiments stand on the works at the strike point, or at least 40% of the perceived
+    // strength within 300 of it is below morale 0.45. A holder that faded from perception (a memory below confidence 0.5) and was never seen to leave is
+    // neither: the works stay unbroken and a look is wanted. Fog-honest by construction (accepted and remembered observations, own data).
+    static void WBrokenIn()
+    {
+        var points = new Points().Line(-600f, 600f, 50f, l => 600f);
+        float sx = X(-300f), sz = Z(600f);
+
+        // Control: a line of healthy holders is not broken in at any point, and shows no fade.
+        WorksPicture healthy = BuildEnemy(Snapshot(Sample(-300f, 600f, 1000f), Sample(0f, 600f, 1000f), Sample(300f, 600f, 1000f)), points);
+        AssertTrue(healthy.OnHeldWorks(sx, sz), "control: the strike point is on held works");
+        AssertFalse(healthy.StrikeBrokenIn(sx, sz), "healthy holders: not broken in");
+        AssertFalse(healthy.StrikeFaded(sx, sz), "and not faded: a perceived holder is within reach");
+
+        // Shaken: 40% of the perceived strength within reach is below 0.45; 30% is not; exactly 0.45 is not shaken.
+        WorksPicture shaken = BuildEnemy(Snapshot(Sample(-300f, 600f, 400f, morale: 0.3f), Sample(-250f, 600f, 600f), Sample(300f, 600f, 1000f)), points);
+        AssertTrue(shaken.StrikeBrokenIn(sx, sz), "40% of the strength near the strike shaken: broken in");
+        WorksPicture most = BuildEnemy(Snapshot(Sample(-300f, 600f, 300f, morale: 0.3f), Sample(-250f, 600f, 700f), Sample(300f, 600f, 1000f)), points);
+        AssertFalse(most.StrikeBrokenIn(sx, sz), "30% shaken: not broken in");
+        WorksPicture edge = BuildEnemy(Snapshot(Sample(-300f, 600f, 400f, morale: 0.45f), Sample(-250f, 600f, 600f)), points);
+        AssertFalse(edge.StrikeBrokenIn(sx, sz), "morale exactly 0.45 is not shaken");
+        WorksPicture far = BuildEnemy(Snapshot(Sample(-300f, 600f, 1000f), Sample(500f, 600f, 1000f, morale: 0.1f)), points);
+        AssertFalse(far.StrikeBrokenIn(sx, sz), "shaken holders 800 away: not this strike's");
+        AssertTrue(far.StrikeBrokenIn(X(500f), Z(600f)), "and broken in at their own");
+
+        // Absence is no evidence: nobody perceived near the strike point on known works is a fade, not a carried segment.
+        WorksPicture absent = BuildEnemy(Snapshot(Sample(450f, 600f, 1000f)), points);
+        AssertFalse(absent.StrikeBrokenIn(sx, sz), "known works, nobody perceived within 300: not broken in");
+        AssertTrue(absent.StrikeFaded(sx, sz), "a look is wanted");
+        AssertFalse(absent.StrikeFaded(X(450f), Z(600f)), "control: where the holder stands there is none");
+
+        // Faded: the holders are memories at confidence 0.4. They still hold the segment (never seen to leave), say nothing of morale, and want a look.
+        EnemyObservation memory = Sample(-300f, 600f, 1000f, state: ObservationState.Remembered, confidence: 0.4f, morale: 0.1f);
+        WorksPicture faded = BuildEnemy(Snapshot(memory, Sample(450f, 600f, 1000f)), points);
+        AssertTrue(faded.HasHeldWorks && faded.OnHeldWorks(sx, sz), "the faded holder still holds the works at the strike point");
+        AssertFalse(faded.StrikeBrokenIn(sx, sz), "a faded holder with a shaken last report is not shaken evidence");
+        AssertTrue(faded.StrikeFaded(sx, sz), "and the fade wants a look");
+        EnemyObservation steady = Sample(-300f, 600f, 1000f, state: ObservationState.Remembered, confidence: 0.5f, morale: 0.1f);
+        AssertTrue(BuildEnemy(Snapshot(steady, Sample(450f, 600f, 1000f)), points).StrikeBrokenIn(sx, sz),
+            "control: the same memory at confidence 0.5 is perceived, and shaken");
+        AssertEqual(0, BuildEnemy(Snapshot(Sample(-300f, 600f, 1000f, state: ObservationState.Remembered, confidence: 0f)), new Points()).WorksSamples,
+            "a memory at confidence 0 is no holder at all");
+
+        // Own regiments on the works are positive evidence, faded or not: on the line, past it, but not in front of it or far off.
+        EnemyObservation[] fadedObs = { memory, Sample(450f, 600f, 1000f) };
+        AssertTrue(BuildEnemy(SnapshotWithOwn(fadedObs, (-300f, 600f)), points).StrikeBrokenIn(sx, sz), "an own regiment on the strike point: broken in");
+        AssertTrue(BuildEnemy(SnapshotWithOwn(fadedObs, (-250f, 650f)), points).StrikeBrokenIn(sx, sz), "one 50 past it, 50 aside: broken in");
+        AssertFalse(BuildEnemy(SnapshotWithOwn(fadedObs, (-300f, 540f)), points).StrikeBrokenIn(sx, sz), "one 60 in front of the line is in contact, not on the works");
+        AssertFalse(BuildEnemy(SnapshotWithOwn(fadedObs, (-300f, 400f)), points).StrikeBrokenIn(sx, sz), "one 200 in front: no");
+        AssertFalse(BuildEnemy(SnapshotWithOwn(fadedObs, (500f, 600f)), points).StrikeBrokenIn(sx, sz), "one far along the line: no");
+        AssertFalse(BuildEnemy(SnapshotWithOwn(fadedObs, (-300f, 600f)), points).StrikeFaded(sx, sz), "and with it standing there no look is wanted");
+        AssertTrue(BuildEnemy(SnapshotWithOwn(new[] { Sample(-300f, 600f, 1000f), Sample(0f, 600f, 1000f) }, (-300f, 600f)), points).StrikeBrokenIn(sx, sz),
+            "an own regiment on the works breaks in healthy holders too: it is inside them");
+
+        // Fog and bounds: no known works at the point says nothing; an empty picture breaks in nothing and wants nothing.
+        WorksPicture unknown = BuildEnemy(Snapshot(Sample(450f, 600f, 1000f)), new Points());
+        AssertFalse(unknown.StrikeBrokenIn(sx, sz), "no works known at the strike: not broken in");
+        AssertFalse(unknown.StrikeFaded(sx, sz), "and nothing to look at");
+        AssertFalse(healthy.StrikeFaded(X(1500f), Z(600f)), "beyond the segment's extent: nothing to look at");
+        AssertFalse(new WorksPicture().StrikeBrokenIn(sx, sz) || new WorksPicture().StrikeFaded(sx, sz), "an empty picture reads nothing");
+
+        // The look point is drawn back from the strike point, outside the works band.
+        AssertTrue(healthy.TryLookPoint(sx, sz, out float lx, out float lz), "a look point exists");
+        AssertNear(sx, lx, 0.5f, "on the same lateral");
+        AssertNear(sz - (WorksRules.WorksBandMeters + WorksRules.WorksEndMeters), lz, 0.5f, "the band and the end allowance back from the strike point");
+        AssertFalse(healthy.InWorksBand(lx, lz), "outside the works band the recon producer refuses looks in");
+        AssertFalse(new WorksPicture().TryLookPoint(sx, sz, out _, out _), "no axis, no look point");
     }
 }

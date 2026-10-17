@@ -115,18 +115,22 @@ namespace WhiskeyRealism.Tactical
 
     public readonly struct StanceHoldRecord
     {
-        public StanceHoldRecord(int stance, float writtenAtHours, StanceWriteSource source)
+        public StanceHoldRecord(int stance, float writtenAtHours, StanceWriteSource source, bool worksHold = false)
         {
             Stance = stance;
             WrittenAtHours = writtenAtHours;
             Source = source;
             HasValue = source != StanceWriteSource.None;
+            WorksHold = worksHold;
         }
 
         public int Stance { get; }
         public float WrittenAtHours { get; }
         public StanceWriteSource Source { get; }
         public bool HasValue { get; }
+        // BC14W: the stance was written as a works hold (IntentFlags.WorksHold). A renewal carries it, so the producer going quiet does not
+        // turn the hold into an ordinary defend stance.
+        public bool WorksHold { get; }
     }
 
     public readonly struct StanceWriteInput
@@ -349,14 +353,14 @@ namespace WhiskeyRealism.Tactical
             switch (decision.Action)
             {
                 case StanceWriteAction.Write:
-                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source);
+                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source, input.WorksHold);
                 case StanceWriteAction.Claim:
                     if (record.HasValue &&
                         IsInsideHold(record, input.NowHours) &&
                         record.Stance == input.TargetStance &&
                         record.Source > input.Source)
                         return record;
-                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source);
+                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source, input.WorksHold);
                 case StanceWriteAction.Yield:
                     return default(StanceHoldRecord);
                 default:

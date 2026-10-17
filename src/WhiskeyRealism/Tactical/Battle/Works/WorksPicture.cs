@@ -31,6 +31,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>The point is in the works band of a held segment: within <see cref="WorksRules.WorksBandMeters"/> in front of its profile, or past it.</summary>
         bool InWorksBand(float x, float z);
+
+        /// <summary>The works at the point have been broken in on positive perceived evidence (<see cref="WorksPicture.StrikeBrokenIn"/>).</summary>
+        bool StrikeBrokenIn(float x, float z);
     }
 
     public struct WorksSegment
@@ -73,7 +76,14 @@ namespace WhiskeyRealism.Tactical.Battle
         private readonly float[] _hvalue = new float[WorksRules.MaxHolders], _hw = new float[WorksRules.MaxHolders];
         private readonly float[] _hcover = new float[WorksRules.MaxHolders], _hmorale = new float[WorksRules.MaxHolders];
         private readonly int[] _hseg = new int[WorksRules.MaxHolders];
+        // A faded holder: a remembered works sample whose confidence has fallen below EnemySamples.RememberedMinConfidence. It still holds its segment (it
+        // was never seen to leave) but is no evidence of morale, so it neither shakes nor reassures a strike point.
+        private readonly bool[] _hfaded = new bool[WorksRules.MaxHolders];
         private int _holderCount;
+
+        // The own regiments standing on a battlefield (own data, no fog), for the break-in read: where they are.
+        private readonly float[] _ox = new float[WorksRules.MaxHolders], _oz = new float[WorksRules.MaxHolders];
+        private int _ownCount;
 
         // ---- the holders sorted by lateral, for attributing a point to the works around it
         private readonly int[] _sorder = new int[WorksRules.MaxHolders];
@@ -159,6 +169,7 @@ namespace WhiskeyRealism.Tactical.Battle
             Dropped = 0;
             _itemCount = 0;
             _holderCount = 0;
+            _ownCount = 0;
             _profileCount = 0;
             _hasBest = false;
             _best = default(FocalPoint);
@@ -183,11 +194,13 @@ namespace WhiskeyRealism.Tactical.Battle
             EnemyObservation[] obs = s.Observations;
             for (int k = 0; k < s.ObservationCount; k++)
             {
-                if (!EnemySamples.Accepts(in obs[k]) || !IsWorksSample(in obs[k])) continue;
+                if (!Perceives(in obs[k]) || !IsWorksSample(in obs[k])) continue;
                 float strength = obs[k].State == ObservationState.Visible ? obs[k].Strength : obs[k].Strength * obs[k].Confidence01;
                 if (!(strength > 0f)) continue;
-                AddHolder(obs[k].X, obs[k].Z, strength, obs[k].Morale > 0f ? obs[k].Morale : 1f, obs[k].CoverValue);
+                AddHolder(obs[k].X, obs[k].Z, strength, obs[k].Morale > 0f ? obs[k].Morale : 1f, obs[k].CoverValue,
+                    faded: obs[k].State == ObservationState.Remembered && obs[k].Confidence01 < EnemySamples.RememberedMinConfidence);
             }
+            RecordOwnRegiments(s);
             AddPoints(points, ownRule: false);
             Finish(bodyX, bodyZ, bodyCount, picture);
         }
@@ -217,14 +230,36 @@ namespace WhiskeyRealism.Tactical.Battle
             Finish(default(ReadOnlySpan<float>), default(ReadOnlySpan<float>), 0, picture);
         }
 
+        // An observation the side still holds of a regiment: Visible, or Remembered at any confidence above zero (a faded memory is still a memory; it
+        // is dropped only when the observation is). EnemySamples.Accepts is this at confidence 0.5.
+        private static bool Perceives(in EnemyObservation o)
+            => !o.IsReinforcement && o.UnitTyp >= 0 && o.UnitTyp <= 2 &&
+               (o.State == ObservationState.Visible || (o.State == ObservationState.Remembered && o.Confidence01 > 0f));
+
+        private void RecordOwnRegiments(BattleSnapshot s)
+        {
+            UnitRecord[] own = s.Own;
+            const UnitFlags live = UnitFlags.Alive | UnitFlags.Active;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                UnitFlags f = own[i].Flags;
+                if ((f & live) != live || (f & (UnitFlags.IsGroup | UnitFlags.Routed)) != 0 || own[i].UnitTyp < 0 || own[i].UnitTyp > 2 || !(own[i].Strength > 0)) continue;
+                if (_ownCount >= _ox.Length) { Dropped++; continue; }
+                _ox[_ownCount] = own[i].X;
+                _oz[_ownCount] = own[i].Z;
+                _ownCount++;
+            }
+        }
+
         private static bool IsWorksSample(in EnemyObservation o)
             => o.Standing && o.CoverValue > CoveredCrossings.MinCoverValue && WorksRules.IsWorksCover(o.CoverObject);
 
         // Holders are added before any point, so holder h is item h.
-        private void AddHolder(float x, float z, float strength, float morale, float cover)
+        private void AddHolder(float x, float z, float strength, float morale, float cover, bool faded = false)
         {
             if (_holderCount >= WorksRules.MaxHolders) { Dropped++; return; }
             int h = _holderCount++;
+            _hfaded[h] = faded;
             _hw[h] = strength;
             _hcover[h] = cover;
             _hmorale[h] = morale;
@@ -551,6 +586,79 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (Math.Abs(depth - ProfileDepthAt(sg, lateral)) > WorksRules.SecondLineMeters) continue;
                 segment = sg;
                 return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// The works at a strike point have been broken in, on positive perceived evidence only (the integrator's ruling, verify round 2): an own
+        /// regiment stands on the works there (within <see cref="WorksRules.SecondLineMeters"/> of the point and not in front of the line by more than
+        /// <see cref="WorksRules.WorksEndMeters"/>), or at least <see cref="WorksRules.ShakenShareMin"/> of the perceived strength within
+        /// <see cref="WorksRules.FrontageReachMeters"/> stands below <see cref="WorksRules.ShakenMorale"/>. A faded holder (a memory below confidence 0.5) is
+        /// neither: holders that fade from perception and were never seen to leave leave the works unbroken. Fails toward the pin.
+        /// </summary>
+        public bool StrikeBrokenIn(float x, float z)
+        {
+            if (!_axis.IsValid || SegmentCount == 0 || !CoversLateral(_axis.LateralOf(x, z))) return false;
+            if (OwnStandsOn(x, z)) return true;
+            PerceivedNear(_axis.LateralOf(x, z), out float perceived, out float shaken);
+            return perceived > 0f && shaken / perceived >= WorksRules.ShakenShareMin;
+        }
+
+        /// <summary>
+        /// The strike point lies on known works and nothing perceived says what became of them: no own regiment stands there and no perceived (not
+        /// faded) holder is within <see cref="WorksRules.FrontageReachMeters"/> of it. The works are then still presumed held, and a look is wanted to
+        /// settle it. False for a point off every known segment, for a broken-in point and for one a perceived holder still shows.
+        /// </summary>
+        public bool StrikeFaded(float x, float z)
+        {
+            if (!_axis.IsValid || SegmentCount == 0 || !CoversLateral(_axis.LateralOf(x, z)) || OwnStandsOn(x, z)) return false;
+            PerceivedNear(_axis.LateralOf(x, z), out float perceived, out _);
+            return !(perceived > 0f);
+        }
+
+        /// <summary>
+        /// Where a scout is asked to look to settle a faded strike point: the point drawn back from it toward the own side by the works band and the
+        /// end allowance, outside the band the recon producer refuses looks in. False with no valid axis.
+        /// </summary>
+        public bool TryLookPoint(float x, float z, out float lookX, out float lookZ)
+        {
+            lookX = x;
+            lookZ = z;
+            if (!_axis.IsValid) return false;
+            float back = WorksRules.WorksBandMeters + WorksRules.WorksEndMeters;
+            lookX = x - _axis.ForwardX * back;
+            lookZ = z - _axis.ForwardZ * back;
+            return true;
+        }
+
+        private bool CoversLateral(float lateral)
+        {
+            for (int sg = 0; sg < SegmentCount; sg++)
+                if (lateral >= _segments[sg].LateralMin - WorksRules.WorksEndMeters && lateral <= _segments[sg].LateralMax + WorksRules.WorksEndMeters) return true;
+            return false;
+        }
+
+        private void PerceivedNear(float lateral, out float perceived, out float shaken)
+        {
+            perceived = 0f;
+            shaken = 0f;
+            for (int h = 0; h < _holderCount; h++)
+            {
+                if (_hfaded[h] || Math.Abs(_ilat[h] - lateral) > WorksRules.FrontageReachMeters) continue;
+                perceived += _hw[h];
+                if (_hmorale[h] < WorksRules.ShakenMorale) shaken += _hw[h];
+            }
+        }
+
+        // An own regiment on the works at the point: near it, and on or past its line (not merely in front of it, where an attacker stands in contact).
+        private bool OwnStandsOn(float x, float z)
+        {
+            float depth = _axis.DepthOf(x, z), reach2 = WorksRules.SecondLineMeters * WorksRules.SecondLineMeters;
+            for (int i = 0; i < _ownCount; i++)
+            {
+                float dx = _ox[i] - x, dz = _oz[i] - z;
+                if (dx * dx + dz * dz <= reach2 && _axis.DepthOf(_ox[i], _oz[i]) >= depth - WorksRules.WorksEndMeters) return true;
             }
             return false;
         }

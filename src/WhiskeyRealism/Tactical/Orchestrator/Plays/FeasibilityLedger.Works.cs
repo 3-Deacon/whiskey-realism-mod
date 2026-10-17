@@ -14,6 +14,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             public string ChildId;
             public bool Assaults, Faces;
+            /// <summary>A holding fix facing unbroken works: it is held at stance 2 (the integrator's rule, spec § 7A requirement-works-pin).</summary>
+            public bool Pins;
         }
 
         private FocalPoint _focalFront, _focalBack;
@@ -26,6 +28,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private float _worksDetail, _worksBarUsed;
         private int _worksAssaultCount;
         private int _worksHash;
+        // The looks a pinned fix is waiting on (verify round 2): the strike points whose works have faded from perception, as scout points outside the
+        // works band. Recomputed at every refresh, so a look ends when a holder is seen again or the works are broken in.
+        private readonly float[] _worksLookX = new float[ManeuverFeasibility.MaxLookRequests], _worksLookZ = new float[ManeuverFeasibility.MaxLookRequests];
+        private int _worksLookCount;
         // The world the last heavy tick read BC11's phases from: a publish or a new selection recomputes the hold with it, so the hold of a wing
         // that has reached its Attack does not flip back to turn-not-struck every time an evaluation publishes.
         private IMonitorWorld _worksWorld;
@@ -73,18 +79,29 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         /// <inheritdoc />
+        public bool PinsWorks(string childId)
+        {
+            for (int i = 0; i < _worksChildCount; i++)
+                if (string.Equals(_worksChildren[i].ChildId, childId, StringComparison.Ordinal)) return _worksChildren[i].Pins;
+            return false;
+        }
+
+        /// <inheritdoc />
         public int WorksHoldHash => _worksHash;
 
         /// <inheritdoc />
         public float Willingness => Plugin.EnemyWorksDoctrineEnabled() && HasEvaluation ? WorksRules.Willingness(in _job.Input.Army) : -1f;
 
-        /// <summary>What the works hold row says of the selected plan: the worst works assault's detail term and the bar it was held to, and the children that assault or face works.</summary>
-        internal void WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren)
+        /// <summary>What the works hold row says of the selected plan: the worst works assault's detail term and the bar it was held to, the children that assault or face works and how many of them are pinned.</summary>
+        internal void WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren, out int pinnedChildren)
         {
             detail = _worksDetail;
             barUsed = _worksBarUsed;
             assaultChildren = _worksAssaultCount;
             facingChildren = _worksChildCount;
+            pinnedChildren = 0;
+            for (int i = 0; i < _worksChildCount; i++)
+                if (_worksChildren[i].Pins) pinnedChildren++;
         }
 
         // ---- the Defender's works station (requirement-defender-works-reserve), published with the candidates ----
@@ -192,6 +209,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _worksHold = false;
             _worksReason = null;
             _worksHash = 0;
+            _worksLookCount = 0;
             if (!Plugin.EnemyWorksDoctrineEnabled() || !HasSelection) return;
             int found = -1;
             for (int r = 0; r < _front.ResultCount; r++)
@@ -202,17 +220,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             ReadOnlySpan<MemberEstimate> members = Members(in result);
 
             // Which children assault or face works: the members of a works-assaulting body (a support follows its column into the body), and a holding
-            // fix whose strike point lies on held works.
+            // fix whose strike point lies on held works. A fix pins (stance 2) while the works it faces are not broken in at its own strike point or
+            // at the strike point of any enveloping body of the plan: the strike it pins for.
+            WorksPicture works = _job.WorksActive ? _job.Works : null;
+            bool envelopBrokenIn = false;
+            for (int b = 0; works != null && b < bodies.Length && !envelopBrokenIn; b++)
+                envelopBrokenIn = bodies[b].Envelops && works.StrikeBrokenIn(bodies[b].StrikeX, bodies[b].StrikeZ);
+            bool anyPinned = false;
             for (int m = 0; m < members.Length && _worksChildCount < _worksChildren.Length; m++)
             {
                 BodyEstimate body = bodies[members[m].Body];
                 bool reserve = members[m].Kind == ManeuverFeasibility.MemberOther && body.Main;
                 bool assaults = body.AssaultsWorks && !reserve;
-                bool faces = assaults || (members[m].Kind == ManeuverFeasibility.MemberFix && body.StrikeOnWorks);
-                if (!faces) continue;
-                _worksChildren[_worksChildCount++] = new WorksChild { ChildId = members[m].ChildId, Assaults = assaults, Faces = true };
+                bool fixFaces = !assaults && members[m].Kind == ManeuverFeasibility.MemberFix && body.StrikeOnWorks;
+                if (!assaults && !fixFaces) continue;
+                bool pins = fixFaces && !envelopBrokenIn && !(works != null && works.StrikeBrokenIn(body.StrikeX, body.StrikeZ));
+                _worksChildren[_worksChildCount++] = new WorksChild { ChildId = members[m].ChildId, Assaults = assaults, Faces = true, Pins = pins };
                 if (assaults) _worksAssaultCount++;
+                anyPinned |= pins;
             }
+            if (anyPinned) PostFadedLooks(works, bodies);
 
             bool hopeless = false;
             for (int b = 0; b < bodies.Length; b++)
@@ -237,6 +264,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int hash = _worksHold ? (hopeless ? 1 : 2) : 0;
             for (int i = 0; i < _worksChildCount; i++) hash = unchecked(hash * 31 + StableHash(_worksChildren[i].ChildId) + (_worksChildren[i].Assaults ? 1 : 0));
             _worksHash = hash;
+        }
+
+        // A pin holds until positive evidence breaks it in. Where the works a pin rests on (a fix's strike point, an enveloping body's) have faded from
+        // perception and no own regiment stands there, the ledger asks for a look: a scout point drawn back from the strike point, outside the band.
+        private void PostFadedLooks(WorksPicture works, ReadOnlySpan<BodyEstimate> bodies)
+        {
+            for (int b = 0; works != null && b < bodies.Length && _worksLookCount < _worksLookX.Length; b++)
+            {
+                if (!bodies[b].Envelops && !bodies[b].StrikeOnWorks) continue;
+                if (!works.StrikeFaded(bodies[b].StrikeX, bodies[b].StrikeZ) || !works.TryLookPoint(bodies[b].StrikeX, bodies[b].StrikeZ, out float lx, out float lz)) continue;
+                bool seen = false;
+                for (int k = 0; k < _worksLookCount; k++) seen |= _worksLookX[k] == lx && _worksLookZ[k] == lz;
+                if (seen) continue;
+                _worksLookX[_worksLookCount] = lx;
+                _worksLookZ[_worksLookCount++] = lz;
+            }
         }
 
         private static int StableHash(string s)

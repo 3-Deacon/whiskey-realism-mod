@@ -19,7 +19,7 @@ internal static class ForceAllocatorTests
     {
         TestHarness.RunAll(new (string name, Action run)[]
         {
-            ("RemainderGoesToMainEffort", RemainderGoesToMainEffort),
+            ("OnlyTheNeededMassGoesToTheMainEffort", OnlyTheNeededMassGoesToTheMainEffort),
             ("MainEffortIsExactlyThePlannedMass", MainEffortIsExactlyThePlannedMass),
             ("EveryFormationGetsExactlyOneAssignment", EveryFormationGetsExactlyOneAssignment),
             ("BusyFormationsKeepHold", BusyFormationsKeepHold),
@@ -63,13 +63,13 @@ internal static class ForceAllocatorTests
             ("ReserveRulesHoldIgnoresRecoveringFormations", ReserveRulesHoldIgnoresRecoveringFormations),
             ("StarvedMapGroupPlayerIsNeverRecover", StarvedMapGroupPlayerIsNeverRecover),
             ("SectorHeldOnlyByThePlayerIsHeldUntilHeIsShort", SectorHeldOnlyByThePlayerIsHeldUntilHeIsShort),
-            ("MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted", MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted),
+            ("MapGroupPlayerKeepsHisFrontsRoleAndIsNeverCounted", MapGroupPlayerKeepsHisFrontsRoleAndIsNeverCounted),
             ("PlannerCountsThePlayersGroupWhereItsWaypointLies", PlannerCountsThePlayersGroupWhereItsWaypointLies),
             ("ReserveRulesHoldCountsTheMapGroupPlayerNotHisCommand", ReserveRulesHoldCountsTheMapGroupPlayerNotHisCommand),
             ("NonComplianceCounterCountsConsecutiveUnreliableDays", NonComplianceCounterCountsConsecutiveUnreliableDays),
             ("CicPlayerYieldsEmptyAllocation", CicPlayerYieldsEmptyAllocation),
-            ("HomeTheaterBreaksTies", HomeTheaterBreaksTies),
-            ("HomeTheaterPriorRows", HomeTheaterPriorRows),
+            ("HomeDepartmentBreaksTies", HomeDepartmentBreaksTies),
+            ("HomeDepartmentOutweighsADistanceMargin", HomeDepartmentOutweighsADistanceMargin),
             ("AllocationDeterministic", AllocationDeterministic),
             ("ReconAssignedBeforeSupportAndMainEffort", ReconAssignedBeforeSupportAndMainEffort),
             ("ReconPrefersCavalryFormations", ReconPrefersCavalryFormations),
@@ -80,7 +80,7 @@ internal static class ForceAllocatorTests
             ("AllocatorReportsShortfallAgainstRoleNeed", AllocatorReportsShortfallAgainstRoleNeed),
             ("ShortfallsListWorstFirst", ShortfallsListWorstFirst),
             ("SurplusNeverFromMainEffortOrCapitalGuard", SurplusNeverFromMainEffortOrCapitalGuard),
-            ("SupportFollowsTheSupportSectorsTarget", SupportFollowsTheSupportSectorsTarget),
+            ("SupportIsTheReinforcementAndNothingElse", SupportIsTheReinforcementAndNothingElse),
             ("AllianceTwoAndEmptyInputsYieldEmptyAllocation", AllianceTwoAndEmptyInputsYieldEmptyAllocation),
             ("AllocationSummaryNamesTheRoles", AllocationSummaryNamesTheRoles),
             ("NearestSourceIgnoresRangeAndInvalidSources", NearestSourceIgnoresRangeAndInvalidSources),
@@ -95,9 +95,11 @@ internal static class ForceAllocatorTests
 
     // ---- the main effort and the mass ----
 
-    // Three corps and a main target, no believed enemy anywhere: nothing to hold, no reserve to carve,
-    // so every movable formation goes to the main effort (spec component 6: "the remainder goes to the main effort").
-    private static void RemainderGoesToMainEffort()
+    // D3 (smoke amendments 2026-10-16): the mass is the force the objective needs, not everything movable. Three corps and a main target
+    // nobody has scouted: the presumed enemy is 5000 x (1 + 1.0, the objective's importance) = 10000, the need 10000 x 1.1 x 1.25 = 13750, and
+    // corps 1 (20000, nearest the target) is all of it. The other two keep their own front's role: they are not "the remainder to the main
+    // effort". The staged main effort gathers at its start line, the position of its forward-most member.
+    private static void OnlyTheNeededMassGoesToTheMainEffort()
     {
         var s = Wide();
         s.Own.Add(Corps(1, 200f, 20000f));
@@ -105,16 +107,23 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(3, 550f, 10000f));
         var plan = PlanOf(s);
         AssertEqual(98, plan.MainObjectiveId, "main effort at x 100");
+        AssertNear(13750f, plan.MainNeedStrength, 1f, "the need: presumed 10000 x required 1.1 x (1 + 0.25)");
+        AssertEqual("1", string.Join(",", plan.MassInstanceIds), "the mass is the nearest corps, which is enough");
         var a = Alloc(plan, s);
         var sectors = Sectors(s);
-        foreach (int id in new[] { 1, 2, 3 })
+        var one = Of(a, 1);
+        AssertEqual(FormationRole.MainEffort, one.Role, "corps 1 is the main effort");
+        AssertEqual(plan.MainSectorId, one.SectorId, "main sector");
+        AssertTrue(plan.MainStaged, "unscouted: staged");
+        AssertNear(200f, one.TargetX, 0.01f, "it gathers at the start line (its own position), not at the objective");
+        AssertFalse(one.Withheld, "the main effort is not withheld");
+        AssertEqual(ForceAllocator.ReasonMass, one.Reason, "reason");
+        foreach (int id in new[] { 2, 3 })
         {
             var x = Of(a, id);
-            AssertEqual(FormationRole.MainEffort, x.Role, "corps " + id + " is the main effort");
-            AssertEqual(plan.MainSectorId, x.SectorId, "corps " + id + " main sector");
-            AssertNear(100f, x.TargetX, 0.01f, "corps " + id + " target x");
-            AssertFalse(x.Withheld, "the main effort is not withheld");
-            AssertEqual(ForceAllocator.ReasonMass, x.Reason, "reason");
+            AssertEqual(FormationRole.Hold, x.Role, "corps " + id + " keeps its own front's role");
+            AssertTrue(x.Role != FormationRole.Support, "never 'the remainder to main'");
+            AssertNear(id == 2 ? 350f : 550f, x.TargetX, 0.01f, "corps " + id + " stays where it stands");
         }
         AssertEqual(sectors.SectorAt(100f, 0f), plan.MainSectorId, "the main sector is the target's");
     }
@@ -123,6 +132,7 @@ internal static class ForceAllocatorTests
     private static void MainEffortIsExactlyThePlannedMass()
     {
         var s = Wide();
+        s.Beliefs.Add(Belief(150f, 0f, 30000f)); // scouted (50 from the objective, 150 from the capital: outside its range), need 30000 x 1.1 x 1.25 > both corps
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 350f, 15000f));
         var far = Corps(3, 20000f, 9000f); // beyond MarchHorizonDays: not massed, not a main-effort formation
@@ -329,7 +339,7 @@ internal static class ForceAllocatorTests
     // allocator's hold: with 0 the second corps masses, with +0.2 (8000 needed) it holds.
     private static void TempoHoldModifierRaisesHoldNeed()
     {
-        int Role8(DirectorPosture tempo)
+        string Role8(DirectorPosture tempo)
         {
             var s = Wide();
             s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, tempo);
@@ -351,10 +361,11 @@ internal static class ForceAllocatorTests
             s.Own.Add(Corps(8, 540f, 3000f));
             s.Beliefs.Add(Belief(600f, 0f, 10000f));
             var plan = PlanOf(s);
-            return (int)Of(Alloc(plan, s), 8).Role;
+            return Of(Alloc(plan, s), 8).Reason;
         }
-        AssertEqual((int)FormationRole.MainEffort, Role8(new DirectorPosture { MinimumHoldRatioModifier = 0f }), "0.6 x 10000: corps 7 holds alone, corps 8 masses");
-        AssertEqual((int)FormationRole.Hold, Role8(new DirectorPosture { MinimumHoldRatioModifier = 0.2f }), "0.8 x 10000: both hold");
+        // D3 sizes the push to its need, so corps 8 is no longer "massed"; what the hold modifier changes is whether the hold reserve keeps it.
+        AssertEqual(ForceAllocator.ReasonGarrison, Role8(new DirectorPosture { MinimumHoldRatioModifier = 0f }), "0.6 x 10000: corps 7 holds alone, corps 8 is free");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Role8(new DirectorPosture { MinimumHoldRatioModifier = 0.2f }), "0.8 x 10000: both hold");
     }
 
     private static void NullTempoIsNeutral()
@@ -536,6 +547,7 @@ internal static class ForceAllocatorTests
     private static void RecoverUsesRawSupplyNotVanillaCap()
     {
         var s = Wide();
+        s.Beliefs.Add(Belief(100f, 0f, 25000f)); // a scouted enemy whose need (34375) takes every corps in reach into the mass
         s.Own.Add(Corps(1, 200f, 20000f));
         var fine = Corps(2, 250f, 8000f);
         fine.Supply01 = 0.45f;
@@ -666,6 +678,7 @@ internal static class ForceAllocatorTests
     private static void CarryingGroupIsMovable()
     {
         var s = Wide();
+        s.Beliefs.Add(Belief(100f, 0f, 25000f)); // need 34375: both corps
         s.Own.Add(Corps(1, 200f, 20000f));
         var carrying = Corps(2, 350f, 15000f);
         carrying.Chain = WlChainClass.CarryingGroup;
@@ -750,8 +763,11 @@ internal static class ForceAllocatorTests
             var x = Of(a, 4);
             if (withPlayer)
             {
-                AssertTrue(plan.MassInstanceIds.Contains(4), "with the player there the planner masses corps 4");
-                AssertEqual(FormationRole.MainEffort, x.Role, "corps 4 is the main effort");
+                // D3: the push is sized to its need (corps 1 alone), so corps 4 is not massed; what the player's presence changes is
+                // that corps 4 is no longer the sector's hold reserve and is not withheld from vanilla.
+                AssertEqual(FormationRole.Hold, x.Role, "corps 4 is not needed by the push");
+                AssertTrue(x.Reason != ForceAllocator.ReasonHoldReserve, "with the player there corps 4 is released from the hold reserve");
+                AssertFalse(x.Withheld, "and is not withheld: the player's group covers the sector");
                 AssertFalse(Of(a, 5).Withheld, "the player's own group is never withheld");
                 AssertEqual(FormationRole.Hold, Of(a, 5).Role, "and holds in place");
             }
@@ -801,7 +817,7 @@ internal static class ForceAllocatorTests
         home.Beliefs.Add(Belief(600f, 0f, 10000f));
         var homePlan = PlanOf(home);
         var b = Alloc(homePlan, home);
-        AssertTrue(homePlan.MassInstanceIds.Contains(4) && homePlan.MassInstanceIds.Contains(8), "with him staying, both AI corps are free for the mass");
+        AssertTrue(Of(b, 4).Reason != ForceAllocator.ReasonHoldReserve && Of(b, 8).Reason != ForceAllocator.ReasonHoldReserve, "with him staying, both AI corps are released from the hold reserve");
 
         // Too weak a holder after he leaves: the sector reports its shortfall at the AI holder.
         var weak = Wide();
@@ -815,7 +831,7 @@ internal static class ForceAllocatorTests
     }
 
     // The player's group counts, but never as mass, never pledged, never given a must-hold role: whatever the
-    // posture, his formation is Hold-in-place or a dispatch-only Support order, never withheld.
+    // posture, his formation is Hold-in-place (the planner sends him nothing), never withheld.
     private static void PlayerIsNeverInTheMassOrAMustHold()
     {
         var s = Wide();
@@ -1222,9 +1238,9 @@ internal static class ForceAllocatorTests
         AssertEqual(0, quietAllocation.Surpluses.Count, "and his unwithheld formation in a quiet sector is not a surplus either");
     }
 
-    // M1: the player may receive his sector's role as an order: Support toward the main target in a Support
-    // sector (dispatch-only), never withheld, never a reinforcement target or surplus.
-    private static void MapGroupPlayerMayReceiveASupportOrderButIsNeverCounted()
+    // M1 (D3, smoke amendments 2026-10-16): outside the mass the map-group player's group keeps its own front's role like any
+    // formation: Hold in place. He is never ordered toward the main target, never withheld, never a reinforcement target or a surplus.
+    private static void MapGroupPlayerKeepsHisFrontsRoleAndIsNeverCounted()
     {
         var s = Wide();
         s.Own.Add(Corps(1, 200f, 20000f));
@@ -1241,9 +1257,10 @@ internal static class ForceAllocatorTests
         plan.MassInstanceIds.Add(1);
         var a = Alloc(plan, s);
         var x = Of(a, 2);
-        AssertEqual(FormationRole.Support, x.Role, "an order toward the main target");
-        AssertNear(100f, x.TargetX, 0.01f, "...with the main target");
-        AssertFalse(x.Withheld, "Support is vanilla's to use");
+        AssertEqual(FormationRole.Hold, x.Role, "in place: no order toward the main target");
+        AssertEqual(ForceAllocator.ReasonPlayerMapGroup, x.Reason, "reason");
+        AssertNear(350f, x.TargetX, 0.01f, "at his own position");
+        AssertFalse(x.Withheld, "never withheld");
         AssertTrue(!a.Shortfalls.Contains(2) && !a.Surpluses.Contains(2), "never a reinforcement target or a surplus");
         AssertFalse(plan.MassInstanceIds.Contains(2), "and never in the mass");
     }
@@ -1386,52 +1403,40 @@ internal static class ForceAllocatorTests
             "the enemy side of a CIC career keeps its allocation although the snapshot's Player class is global");
     }
 
-    // ---- home theater ----
+    // ---- home department ----
 
-    private static void HomeTheaterBreaksTies()
+    // D6 detail (c): the allocator's lookup is the planner state's home department by unit key; a formation whose department is the
+    // sector's theater is treated as 25% closer to the sector's army when the hold is ordered. Equal distances: the lower id first.
+    private static void HomeDepartmentBreaksTies()
     {
-        bool NamedCorpsWithheld(bool useHome)
+        bool DepartmentCorpsWithheld(bool useHome)
         {
             var s = Wide();
             var plain = Corps(7, 520f, 6000f);
-            plain.Name = "1st Corps";
-            var ohio = Corps(8, 580f, 6000f);
-            ohio.Name = "Army of the Ohio";
+            var west = Corps(8, 580f, 6000f);
             s.Own.Add(plain);
-            s.Own.Add(ohio);
-            var a = Alloc(ManualPlan(s), s, useHome ? HomeTheaterPrior.ForAlliance(0) : null);
+            s.Own.Add(west);
+            var departments = new Dictionary<string, Theater> { { west.UnitKey, Theater.West } };
+            var a = Alloc(ManualPlan(s), s, useHome ? (Func<string, Theater>)(key => departments.TryGetValue(key, out var d) ? d : Theater.Unknown) : null);
             AssertTrue(Of(a, 7).Withheld != Of(a, 8).Withheld, "exactly one of the two reaches the 5000 garrison (useHome " + useHome + ")");
             return Of(a, 8).Withheld;
         }
-        AssertFalse(NamedCorpsWithheld(false), "equal distance: the lower instance id is withheld first");
-        AssertTrue(NamedCorpsWithheld(true), "the Army of the Ohio (home West) sits in a West sector and is withheld first");
+        AssertFalse(DepartmentCorpsWithheld(false), "equal distance: the lower instance id is withheld first");
+        AssertTrue(DepartmentCorpsWithheld(true), "corps 8 (home department West) sits in a West sector and is withheld first");
     }
 
-    // The historical army-to-home-theater table, row by row (the registry it was reduced from went in G6): the primary
-    // areas lie East (Virginia capital corridor, Shenandoah Valley) or West (Ohio valley, north-west Virginia) by
-    // TheaterClassifier at a point inside each area, and every historical name maps to its doctrine's home.
-    private static void HomeTheaterPriorRows()
+    // The home discount is a real preference, not a tie-break: a corps 20% farther from the sector's army is still withheld first when
+    // it belongs to the sector's department.
+    private static void HomeDepartmentOutweighsADistanceMargin()
     {
-        AssertEqual(Theater.East, TheaterClassifier.FromPosition(1300f, -1000f), "Virginia capital corridor");
-        AssertEqual(Theater.East, TheaterClassifier.FromPosition(1087f, -580f), "Shenandoah Valley");
-        AssertEqual(Theater.West, TheaterClassifier.FromPosition(0f, 0f), "Ohio valley");
-        AssertEqual(Theater.West, TheaterClassifier.FromPosition(575f, -650f), "north-west Virginia");
-        var rows = new (int Alliance, string Name, Theater Home)[]
-        {
-            (0, "Army of the Potomac", Theater.East), (0, "Army of Virginia", Theater.East), (0, "Shenandoah Corps", Theater.East),
-            (0, "Army of the Ohio", Theater.West), (0, "Army of Northern Virginia", Theater.Unknown), (0, "Army of the Valley", Theater.Unknown),
-            (0, "Army of the Northwest", Theater.Unknown), (0, "Porterfield's Column", Theater.Unknown), (0, "Army of the Tennessee", Theater.Unknown),
-            (0, "3rd Corps", Theater.Unknown), (0, "", Theater.Unknown),
-            (1, "Army of the Potomac", Theater.East), (1, "Army of Virginia", Theater.East), (1, "Army of Northern Virginia", Theater.East),
-            (1, "Army of the Valley", Theater.East), (1, "Army of the Northwest", Theater.West), (1, "Porterfield's Column", Theater.West),
-            (1, "Shenandoah Corps", Theater.Unknown), (1, "Army of the Ohio", Theater.Unknown), (1, "Army of the Tennessee", Theater.Unknown),
-            (1, "3rd Corps", Theater.Unknown), (1, "", Theater.Unknown)
-        };
-        foreach (var row in rows)
-            AssertEqual(row.Home, HomeTheaterPrior.For(row.Alliance, row.Name), "alliance " + row.Alliance + " '" + row.Name + "'");
-        AssertEqual(Theater.Unknown, HomeTheaterPrior.For(2, "Army of the Potomac"), "no home for alliance 2");
-        AssertEqual(Theater.Unknown, HomeTheaterPrior.ForAlliance(5)("Army of the Potomac"), "no delegate for an unplanned alliance");
-        AssertEqual(Theater.Unknown, HomeTheaterPrior.For(0, null), "null name");
+        var s = Wide();
+        var near = Corps(7, 505f, 6000f);        // 45 from the sector's centroid (550)
+        var home = Corps(8, 600f, 6000f);        // 50 from it, 11% farther, but the sector's own department: 50 x 0.75 = 37.5
+        s.Own.Add(near);
+        s.Own.Add(home);
+        var departments = new Dictionary<string, Theater> { { home.UnitKey, Theater.West }, { near.UnitKey, Theater.East } };
+        var a = Alloc(ManualPlan(s), s, key => departments.TryGetValue(key, out var d) ? d : Theater.Unknown);
+        AssertTrue(Of(a, 8).Withheld && !Of(a, 7).Withheld, "the sector's own department is kept to hold it");
     }
 
     // ---- determinism ----
@@ -1641,11 +1646,14 @@ internal static class ForceAllocatorTests
         }
     }
 
-    private static void SupportFollowsTheSupportSectorsTarget()
+    // D6: Support is the one reinforcement the mass took from another theater, marching to the same point as the mass; a formation
+    // outside the mass in a Support sector is not Support (D3), it holds where it stands.
+    private static void SupportIsTheReinforcementAndNothingElse()
     {
         var s = Wide();
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 350f, 6000f));
+        s.Own.Add(Corps(3, 360f, 6000f));
         var plan = ManualPlan(s);
         int main = Sectors(s).SectorAt(100f, 0f);
         int support = Sectors(s).SectorAt(350f, 0f);
@@ -1653,13 +1661,25 @@ internal static class ForceAllocatorTests
         plan.MainObjectiveId = 98;
         plan.Sectors.Add(new SectorPlan { SectorId = main, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
         plan.Sectors.Add(new SectorPlan { SectorId = support, Posture = TheaterPosture.Support, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
-        plan.MassInstanceIds.Add(1);
+        plan.MassInstanceIds.AddRange(new[] { 1, 2 });
+        plan.ReinforcementInstanceId = 2;
         var a = Alloc(plan, s);
         var x = Of(a, 2);
-        AssertEqual(FormationRole.Support, x.Role, "outside the mass, in a Support sector");
-        AssertNear(100f, x.TargetX, 0.01f, "toward the main target");
-        AssertEqual(support, x.SectorId, "its own sector");
+        AssertEqual(FormationRole.Support, x.Role, "the reinforcement is the push's Support");
+        AssertNear(100f, x.TargetX, 0.01f, "toward the main target, as the mass");
+        AssertEqual(main, x.SectorId, "its role sector is the main sector (the objective it was brought for)");
         AssertFalse(x.Withheld, "Support is vanilla's to use");
+        AssertEqual(FormationRole.MainEffort, Of(a, 1).Role, "the rest of the mass is MainEffort");
+        var other = Of(a, 3);
+        AssertEqual(FormationRole.Hold, other.Role, "a formation outside the mass in the same Support sector holds");
+        AssertNear(360f, other.TargetX, 0.01f, "where it stands");
+
+        // Staged: the reinforcement joins the mass at the start line.
+        plan.MainStaged = true;
+        plan.StartLineX = 200f;
+        var staged = Alloc(plan, s);
+        AssertNear(200f, Of(staged, 2).TargetX, 0.01f, "staged: the start line");
+        AssertNear(200f, Of(staged, 1).TargetX, 0.01f, "for the whole mass");
     }
 
     private static void AllianceTwoAndEmptyInputsYieldEmptyAllocation()
@@ -1691,7 +1711,7 @@ internal static class ForceAllocatorTests
         plan.MassStrength = 24000f;
         var a = Alloc(plan, s);
         string row = ForceAllocator.Summary(a, plan, PlayerCommandClass.MapGroup, 0.756f, 3);
-        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 short=0 surplus=1", row,
+        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 need=0 cap=0 staged=no garrison=none short=0 surplus=1", row,
             "the [Allocation] row");
     }
 
@@ -1734,7 +1754,7 @@ internal static class ForceAllocatorTests
     // and snapshot beliefs (never a destination, an omniscient list or a vanilla aggregate).
     private static void AllocatorIsPureAndFogHonestBySource()
     {
-        foreach (string file in new[] { "ForceAllocator.cs", "HomeTheaterPrior.cs", "ReserveRules.cs" })
+        foreach (string file in new[] { "ForceAllocator.cs", "ReserveRules.cs" })
         {
             string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/" + file);
             foreach (string forbidden in new[] { "System.Random", "new Random(", "DateTime", "Environment.TickCount", "Time.realtimeSinceStartup", "UnityEngine",
@@ -1761,7 +1781,7 @@ internal static class ForceAllocatorTests
         AssertTrue(bookkeeping >= 0 && plan > bookkeeping && scope > plan && allocate > scope && publish > allocate && emit > publish,
             "bookkeeping return, plan, allocate scope, allocate, publish of that allocation, row");
         AssertEqual(1, review.Split(new[] { "ForceAllocator.Allocate(" }, StringSplitOptions.None).Length - 1, "one allocation per review");
-        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);", "the plan, its snapshot and sectors, the home theaters, this alliance's recon tasks and ledger; reliability and the unreliable days are telemetry only");
+        AssertContains(review, "ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);", "the plan, its snapshot and sectors, the home theaters, this alliance's recon tasks and ledger; reliability and the unreliable days are telemetry only");
         AssertContains(review, "float reliability = PlayerComplianceRuntime.Reliability;", "stage F's live reliability (1 outside a career)");
         AssertContains(review, "NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);", "one count per review day, only with a map-group player");
         AssertFalse(review.Contains("new Allocation"), "no empty allocation stands in for the real one");

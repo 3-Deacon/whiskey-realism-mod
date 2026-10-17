@@ -343,9 +343,9 @@ namespace WhiskeyRealism.Tactical.Operations
         /// <paramref name="reason"/>: an exploit follower keeps the follow reason, which is how it is recognised), and the task it replaced is kept
         /// in <see cref="PreGuardTask"/>. Every other field is forwarded.
         /// </summary>
-        public CommandDoctrineOrder WithWorksHold(CommandTaskType preGuardTask, string reason = null)
+        public CommandDoctrineOrder WithWorksHold(CommandTaskType preGuardTask, string reason = null, DoctrineTargetPoint? holdPoint = null)
         {
-            return new CommandDoctrineOrder(NodeId, Role, CommandTaskType.HoldObjective, ObjectiveId, PrimaryTarget, SupportTarget, FallbackTarget, AllowedIdle,
+            return new CommandDoctrineOrder(NodeId, Role, CommandTaskType.HoldObjective, ObjectiveId, holdPoint ?? PrimaryTarget, SupportTarget, FallbackTarget, AllowedIdle,
                 MinCommitUntilSeconds, IssuedAtSeconds, Confidence01, TacticalSopDecision.ForAssignedTask(Role, CommandTaskType.HoldObjective), Delivery,
                 ParentNodeId, CourierIntervalSeconds, reason ?? WorksHoldGuard.Reason, ManeuverHeading, ManeuverHold, ExploitId,
                 HasVia, _viaX, _viaZ, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ, preGuardTask);

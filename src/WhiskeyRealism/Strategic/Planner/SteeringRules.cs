@@ -110,20 +110,23 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // Spec C7: an AI area (vanilla's aiarea index) lying in a MainEffort or Support sector with a target is pointed at the
-        // area holding that target; any other area keeps vanilla's pick.
+        // Spec C7, narrowed by the smoke amendments 2026-10-16 (verify round 1, F3): an AI area (vanilla's aiarea index) lying in the MAIN
+        // sector is pointed at the area holding its target, and only once the main effort is not staged (TheaterPlan.MainStaged: the
+        // objective is unscouted and the mass is gathering at its start line, so nothing may be pulled at it yet). A Support sector, with
+        // its single reinforcement, no longer points vanilla's own offensive gather at the main target from the rest of the map; any
+        // other area keeps vanilla's pick.
         public static bool ImportanceSteers(TheaterPlan plan, SectorModel sectors, int sourceAreaIndex, out float targetX, out float targetZ)
         {
             targetX = 0f;
             targetZ = 0f;
-            if (plan == null || sectors == null) return false;
+            if (plan == null || sectors == null || plan.MainStaged) return false;
             int sector = sectors.SectorOfArea(sourceAreaIndex);
             if (sector < 0) return false;
             for (int i = 0; i < plan.Sectors.Count; i++)
             {
                 var sp = plan.Sectors[i];
                 if (sp == null || sp.SectorId != sector) continue;
-                if ((sp.Posture != TheaterPosture.MainEffort && sp.Posture != TheaterPosture.Support) || sp.TargetObjectiveId < 0) return false;
+                if (sp.Posture != TheaterPosture.MainEffort || sp.TargetObjectiveId < 0) return false;
                 targetX = sp.TargetX;
                 targetZ = sp.TargetZ;
                 return true;

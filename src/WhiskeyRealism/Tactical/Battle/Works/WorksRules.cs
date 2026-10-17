@@ -53,6 +53,13 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>The strip in front of a held segment's profile a works-held group is kept out of.</summary>
         public const float WorksBandMeters = 100f;
 
+        /// <summary>
+        /// A strike point is broken in (<see cref="WorksPicture.StrikeBrokenIn"/>) when this share of the perceived holders' strength within
+        /// <see cref="FrontageReachMeters"/> of it stands below this morale: the opening detector's shaken line (<c>OpeningRules.ShakenMorale</c>
+        /// 0.45, <c>OpeningDetector.ShakenShareMin</c> 0.4), restated here because the works picture is pure and reads no opening rules.
+        /// </summary>
+        public const float ShakenMorale = 0.45f, ShakenShareMin = 0.4f;
+
         public const int MaxWorksPoints = 2048, MaxWorksProbesPerTick = 16, MaxSegments = 32, MaxFocalPoints = 256;
 
         /// <summary>Profile points kept across all segments (a lateral bin each); past it the farthest bins are not kept and are counted.</summary>

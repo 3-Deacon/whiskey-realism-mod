@@ -23,6 +23,7 @@ internal static partial class ManeuverFeasibilityTests
         into.AddRange(WorksColumnTests());       // ManeuverFeasibilityTests.Works.Column.cs (task 8)
         into.AddRange(WorksExecTests());         // ManeuverFeasibilityTests.Works.Exec.cs (task 8)
         into.AddRange(WorksScn7Tests());         // ManeuverFeasibilityTests.Works.Scn7.cs (task 8)
+        into.AddRange(WorksTurnTests());         // ManeuverFeasibilityTests.Works.Turn.cs (verify round 2)
         into.AddRange(WorksStationTests());      // ManeuverFeasibilityTests.Works.Station.cs (task 9)
         into.AddRange(WorksRowTests());          // ManeuverFeasibilityTests.Works.Rows.cs (task 10)
         into.AddRange(WorksAllocTests());        // ManeuverFeasibilityTests.Works.Alloc.cs (task 10)
