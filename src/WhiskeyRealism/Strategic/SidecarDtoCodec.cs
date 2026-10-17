@@ -563,13 +563,14 @@ namespace WhiskeyRealism.Strategic
             return p;
         }
 
-        // A post's members: "unitKeys" when the file has them, else the one "unitKey" an older file wrote.
+        // A post's members: "unitKeys" when the file has them, else the one "unitKey" an older file wrote; never more than a post may hold
+        // (GarrisonPlanner.MaxFormationsPerPost), whatever a hand-edited file lists.
         private static string[] KeysOf(GarrisonPostDto g)
         {
             var keys = new List<string>();
             if (g.UnitKeys != null)
                 foreach (string key in g.UnitKeys)
-                    if (!string.IsNullOrEmpty(key)) keys.Add(key);
+                    if (!string.IsNullOrEmpty(key) && keys.Count < GarrisonPlanner.MaxFormationsPerPost) keys.Add(key);
             if (keys.Count == 0 && !string.IsNullOrEmpty(g.UnitKey)) keys.Add(g.UnitKey);
             return keys.ToArray();
         }

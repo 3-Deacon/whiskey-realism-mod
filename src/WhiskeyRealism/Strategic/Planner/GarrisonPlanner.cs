@@ -212,6 +212,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (incumbents.Contains(i) || !WlChainRules.MayMove(f.Chain) || (f.Flags & FormationFlags.FightingForce) == 0) continue;
+                if (ReserveRules.Recovers(f, s.MinMoraleForMovement)) continue;   // leaving for supply: no garrison (as the hold sums count it)
                 if (plan.MassInstanceIds.Contains(f.InstanceId) || !AtPost(f, site.X, site.Z)) continue;
                 existing += Math.Max(0f, f.Strength);
             }

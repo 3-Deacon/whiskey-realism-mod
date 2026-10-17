@@ -48,6 +48,8 @@ internal static class GarrisonPlannerTests
             ("ASeatedGarrisonIsWithheldByItsOwnRule", ASeatedGarrisonIsWithheldByItsOwnRule),
             ("EveryMemberOfAPostIsItsIncumbent", EveryMemberOfAPostIsItsIncumbent),
             ("ATwoFormationPostHoldsBothMembersForTenDays", ATwoFormationPostHoldsBothMembersForTenDays),
+            ("AMemberWhoWentUnfitAtThePostIsNotItsGarrison", AMemberWhoWentUnfitAtThePostIsNotItsGarrison),
+            ("ARecordReadBackLoadsAtMostTwoMembers", ARecordReadBackLoadsAtMostTwoMembers),
             ("APlayerFormationIsNeverAPostsIncumbent", APlayerFormationIsNeverAPostsIncumbent),
             ("AFormationAtThePostHoldsInPlaceAndOneAwayMarches", AFormationAtThePostHoldsInPlaceAndOneAwayMarches),
             ("AReserveSurplusMayBePostedButTheMassNever", AReserveSurplusMayBePostedButTheMassNever),
@@ -652,6 +654,68 @@ internal static class GarrisonPlannerTests
             }
             AssertEqual(2, ledger.Posts[0].AssignedUnitKeys.Length, "day " + day + ": the ledger holds both keys");
         }
+    }
+
+    // The verifier's drop probe: corps 2, a member standing at the post, goes unfit (starving, so Recover) on day 3 and stays there through days
+    // 4-5. A formation that is leaving for supply is no garrison: it does not count as the post's existing strength, so the need stands, the
+    // free corps 3 is picked once, and it stays seated on the days after.
+    private static void AMemberWhoWentUnfitAtThePostIsNotItsGarrison()
+    {
+        var ledger = new GarrisonLedger();
+        ledger.Restore(new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1", "corps2:2") });   // both members seated and at the post
+        string members = "";
+        for (int day = 0; day < 6; day++)
+        {
+            var s = ExecutorFixtures.Line(0, 11, day);
+            s.MinStrengthForMovement = 5000f;
+            s.MinMoraleForMovement = 0.3f;
+            s.Objectives.Add(Town(40, 500f));
+            s.Beliefs.Add(Seen(515f, 60000f));
+            s.Own.Add(Corps(1, 503f, 5500f));
+            var two = Corps(2, 497f, 5500f);
+            if (day >= 3) two.Supply01 = 0.1f;                              // unfit from day 3, still standing at the post
+            s.Own.Add(two);
+            s.Own.Add(Corps(3, 440f, 9000f));
+            var plan = HandPlan(s);
+            var alloc = Allocate(s, plan, ledger.Posts);
+            ledger.Sync(plan.Garrisons, alloc, s);
+            var post = plan.Garrisons[0];
+            string seated = string.Join(",", alloc.Seats.Select(x => x.InstanceId).OrderBy(x => x));
+            if (day < 3)
+            {
+                AssertEqual("1,2", seated, "day " + day + ": the two members hold the post");
+                continue;
+            }
+            alloc.TryGet(2, out var unfit);
+            AssertEqual(FormationRole.Recover, unfit.Role, "day " + day + ": corps 2 recovers");
+            AssertNear(0f, post.ExistingStrength, 0.01f, "day " + day + ": an unfit formation at the post is not existing strength");
+            AssertTrue(post.Need > 6000f, "day " + day + ": the need stands (" + post.Need + ")");
+            AssertEqual("1,3", seated, "day " + day + ": corps 3 is picked and stays; corps 2 is not a member");
+            if (members == "") members = seated;
+            AssertEqual(members, seated, "day " + day + ": the seats do not change after the pick");
+        }
+    }
+
+    // A hand-edited sidecar record with three keys loads as at most two members, and a record handed straight to PlanPosts names at most two
+    // incumbents (the cap is the post's, MaxFormationsPerPost, wherever the keys come from).
+    private static void ARecordReadBackLoadsAtMostTwoMembers()
+    {
+        const string json = "{\"version\":3,\"factions\":[{\"factionId\":0,\"currentEra\":\"Operational1862\",\"planner\":{\"garrisonPosts\":[{\"kind\":\"Fort\",\"x\":500,\"z\":0,"
+            + "\"unitKeys\":[\"corps1:1\",\"corps2:2\",\"corps3:3\"],\"quietSinceDay\":-1}]}}]}";
+        AssertTrue(SidecarDtoCodec.TryDeserialize(json, out var dto, out var reason), "deserialize: " + reason);
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var snap, out reason), "decode: " + reason);
+        var record = snap.Planner[0].GarrisonPosts[0];
+        AssertEqual(GarrisonPlanner.MaxFormationsPerPost, record.AssignedUnitKeys.Length, "three hand-edited keys load as two members");
+        AssertEqual("corps1:1,corps2:2", string.Join(",", record.AssignedUnitKeys), "the first two, in order");
+
+        var s = Side();
+        s.Objectives.Add(Town(40, 500f));
+        s.Beliefs.Add(Seen(515f, 60000f));
+        s.Own.Add(Corps(1, 503f, 5500f));
+        s.Own.Add(Corps(2, 497f, 5500f));
+        s.Own.Add(Corps(3, 500f, 5500f));
+        var post = Posts(s, null, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1", "corps2:2", "corps3:3") })[0];
+        AssertEqual("1,2", string.Join(",", post.InstanceIds), "a record with three keys names two incumbents");
     }
 
     // A player's formation can never be a post's incumbent, whatever the ledger says: it would keep a post alive that nobody holds.
