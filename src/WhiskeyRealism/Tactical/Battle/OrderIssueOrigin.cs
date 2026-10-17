@@ -24,19 +24,29 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>The source of the intent being carried out, or null when no executor write is in progress.</summary>
         public static string Current => _depth > 0 ? NameOf(_source) : null;
 
-        /// <summary>Starts an executor write for <paramref name="source"/>; returns the source to restore on <see cref="Exit"/>.</summary>
-        public static IntentSource Enter(IntentSource source)
+        /// <summary>
+        /// The scope of one executor write: <c>using var origin = OrderIssueOrigin.Scope(winner.Source);</c> names the source until the method leaves
+        /// (a throw included), then restores the outer source.
+        /// </summary>
+        public static OriginScope Scope(IntentSource source)
         {
             IntentSource outer = _source;
             _source = source;
             _depth++;
-            return outer;
+            return new OriginScope(outer);
         }
 
-        public static void Exit(IntentSource restore)
+        public readonly struct OriginScope : IDisposable
         {
-            if (_depth > 0) _depth--;
-            _source = restore;
+            private readonly IntentSource _restore;
+
+            internal OriginScope(IntentSource restore) => _restore = restore;
+
+            public void Dispose()
+            {
+                if (_depth > 0) _depth--;
+                _source = _restore;
+            }
         }
 
         public static string NameOf(IntentSource source)

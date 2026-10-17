@@ -11,7 +11,7 @@ internal static class OrderIssueOriginTests
         RunAll(new (string name, Action run)[]
         {
             ("order origin: the executor's source is current only while it writes", TheSourceIsCurrentOnlyWhileTheExecutorWrites),
-            ("order origin: a nested write restores the outer source and an extra exit leaves none", ANestedWriteRestoresTheOuterSource),
+            ("order origin: a nested write restores the outer source and a throw leaves none", ANestedWriteRestoresTheOuterSource),
             ("order origin: every intent source has a name", EverySourceHasAName),
             ("order origin: the executor wraps every winner and the observer rows print origin=", TheExecutorAndTheObserverAreWired),
         });
@@ -20,27 +20,32 @@ internal static class OrderIssueOriginTests
     private static void TheSourceIsCurrentOnlyWhileTheExecutorWrites()
     {
         AssertTrue(OrderIssueOrigin.Current == null, "outside an executor write there is no origin");
-        IntentSource outer = OrderIssueOrigin.Enter(IntentSource.ReserveRelease);
-        AssertEqual("ReserveRelease", OrderIssueOrigin.Current, "inside, the intent's source");
-        OrderIssueOrigin.Exit(outer);
+        using (OrderIssueOrigin.Scope(IntentSource.ReserveRelease))
+            AssertEqual("ReserveRelease", OrderIssueOrigin.Current, "inside, the intent's source");
         AssertTrue(OrderIssueOrigin.Current == null, "after, none again");
     }
 
     private static void ANestedWriteRestoresTheOuterSource()
     {
-        IntentSource a = OrderIssueOrigin.Enter(IntentSource.PostureExecutor);
-        IntentSource b = OrderIssueOrigin.Enter(IntentSource.ReserveCourierParity);
-        AssertEqual("ReserveCourierParity", OrderIssueOrigin.Current, "the inner write");
-        OrderIssueOrigin.Exit(b);
-        AssertEqual("PostureExecutor", OrderIssueOrigin.Current, "the outer write again");
-        OrderIssueOrigin.Exit(a);
+        using (OrderIssueOrigin.Scope(IntentSource.PostureExecutor))
+        {
+            using (OrderIssueOrigin.Scope(IntentSource.ReserveCourierParity))
+                AssertEqual("ReserveCourierParity", OrderIssueOrigin.Current, "the inner write");
+            AssertEqual("PostureExecutor", OrderIssueOrigin.Current, "the outer write again");
+        }
         AssertTrue(OrderIssueOrigin.Current == null, "none");
-        // An unbalanced exit never leaves the flag stuck on or counts below zero.
-        OrderIssueOrigin.Exit(IntentSource.PostureExecutor);
-        AssertTrue(OrderIssueOrigin.Current == null, "an extra exit leaves it inactive");
-        IntentSource c = OrderIssueOrigin.Enter(IntentSource.Recon);
-        AssertEqual("Recon", OrderIssueOrigin.Current, "and it still works after");
-        OrderIssueOrigin.Exit(c);
+        // A write that throws leaves no source behind.
+        try
+        {
+            using (OrderIssueOrigin.Scope(IntentSource.Recon))
+                throw new InvalidOperationException("vanilla threw");
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        AssertTrue(OrderIssueOrigin.Current == null, "a throw leaves none");
+        using (OrderIssueOrigin.Scope(IntentSource.Recon))
+            AssertEqual("Recon", OrderIssueOrigin.Current, "and it still works after");
     }
 
     private static void EverySourceHasAName()
@@ -53,8 +58,7 @@ internal static class OrderIssueOriginTests
     private static void TheExecutorAndTheObserverAreWired()
     {
         string runtime = FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
-        FlankResponseTests.AssertPinned(runtime, "IntentSource outer = OrderIssueOrigin.Enter(winner.Source);", "Execute names the winner's source");
-        FlankResponseTests.AssertPinned(runtime, "finally { OrderIssueOrigin.Exit(outer); }", "and always leaves it");
+        FlankResponseTests.AssertPinned(runtime, "using var origin = OrderIssueOrigin.Scope(winner.Source);", "Execute names the winner's source until it returns");
         string observer = FlankResponseTests.SourceText("Patches", "TacticalObserverPatch.cs");
         FlankResponseTests.AssertPinned(observer, "string origin = WhiskeyRealism.Tactical.Battle.OrderIssueOrigin.Current ?? \"other\";", "the observer reads it");
         FlankResponseTests.AssertPinned(observer, "\"[TacticalPlayerOrder] event=queued relation=\" + relation + \" origin=\" + origin", "the player-order row prints origin=");

@@ -47,6 +47,7 @@ internal static class RiverCrossingTests
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
             ("river crossing no gate leaves the move as validated", NoGateLeavesTheMove),
             ("river crossing a pending river map refuses the gated move for now and asks again, an ungated move goes", APendingMapRefusesTheGatedMoveForNow),
+            ("river crossing the gate runtime waits only on a terrain with fords while the build can still arrive, and writes its rows", TheGateRuntimeWaitsOnlyWhileTheMapCanArrive),
         });
     }
 
@@ -147,6 +148,9 @@ internal static class RiverCrossingTests
         AssertEqual(CrossingVerdict.NoKnownCrossing, RiverCrossingRule.Decide(none, 100f, -100f, 705f, -100f, out CrossingRoute ford), "region 0 to the block, no crossing known");
         AssertEqual(1, ford.ToRegion, "the bank the leg reaches the block from");
         AssertTrue(ford.ToResolved, "resolved along the leg");
+        // A target laid on the river line itself, reached from the east: its bank is the east one (the bank the leg reaches it from), so no river is crossed.
+        AssertEqual(CrossingVerdict.SameBank, RiverCrossingRule.Decide(none, 800f, -100f, 500f, -100f, out CrossingRoute line), "a target on the river line, reached from the east bank");
+        AssertEqual(1, line.ToRegion, "the east bank, not the far one");
         // The known crossing carries that leg, with the end resolved: before, a block target read no region and the leg passed as one bank.
         var known = new Picture { Water = water };
         known.Links.Add((500f, -100f, CrossingState.Clear, 0, 1));
@@ -810,5 +814,17 @@ internal static class RiverCrossingTests
         AssertEqual(SkipReason.CrossingPending, plan.Skip, "and says why, so the producer asks again next tick");
         AssertTrue(Executor(new PendingGate()).Plan(new View(100f, 100f), Move(700f, 100f, IntentSource.Withdrawal, CommandTaskType.FallBackToLine), 1.0).Execute,
             "a withdrawal is not gated");
+    }
+
+    private static void TheGateRuntimeWaitsOnlyWhileTheMapCanArrive()
+    {
+        string gate = FlankResponseTests.SourceText("Tactical", "Battle", "RiverCrossingGateRuntime.cs");
+        FlankResponseTests.AssertPinned(gate, "pending = grid != null && !grid.Frozen && grid.CrossingCount > 0 && RiverRegionsRuntime.Pending();", "a river terrain whose build can still arrive");
+        FlankResponseTests.AssertPinned(gate, "bool wait = Wait.Waits(pending, TacticalDoctrineTime.NowBattleHours);", "bounded, on the doctrine clock");
+        FlankResponseTests.AssertPinned(gate, "CrossingVerdict verdict = wait ? CrossingVerdict.Pending : CrossingVerdict.SameBank;", "wait or open");
+        FlankResponseTests.AssertPinned(gate, "if (picture == null) return NoPicture(alliance, x0, z0, x1, z1, out route);", "no picture goes through the wait");
+        FlankResponseTests.AssertPinned(gate, "EmitRow(alliance, verdict, in route, x0, z0, x1, z1);", "and every verdict writes its row");
+        string regions = FlankResponseTests.SourceText("Tactical", "Battle", "RiverRegionsRuntime.cs");
+        FlankResponseTests.AssertPinned(regions, "internal static bool Pending() => !_failed && Plugin.ManeuverFeasibilityEnabled() && (_regions == null || !_regions.Ready);", "off or failed is not pending");
     }
 }
