@@ -41,6 +41,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private float _operationAssignedStrength;
         private TacticalCommanderMode _commanderMode = TacticalCommanderMode.Off;
 
+        // The assigned points of this side's nodes, held while the line they were planned on has not really moved (DoctrineTargetHold).
+        private readonly DoctrineTargetHold _targetHold = new DoctrineTargetHold();
+
         public TacticalCommanderMode CommanderMode => _commanderMode;
         public bool RunsLedger => TacticalCommanderModePolicy.RunsLedger(_commanderMode);
         public IReadOnlyList<ObjectiveRecord> CurrentObjectives => _currentObjectives;
@@ -149,6 +152,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (!RunsLedger)
             {
+                _targetHold.Clear();
                 StoreDoctrine(new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>()), Array.Empty<CommandDoctrineOrder>());
                 return;
             }
@@ -186,7 +190,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     _currentForce.ReserveFraction,
                     stance,
                     maneuvers,
-                    reverseSlope);
+                    reverseSlope,
+                    _targetHold);
             }
             NoteFirstTerrainLine(orders);
             StoreDoctrine(picture, orders);

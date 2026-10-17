@@ -16,9 +16,11 @@ namespace WhiskeyRealism.Tactical.Operations
             float reserveFraction = 0f,
             BattleStance stance = BattleStance.Meeting,
             ManeuverNodeTable maneuvers = null,
-            bool reverseSlope = false)
+            bool reverseSlope = false,
+            DoctrineTargetHold targetHold = null)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
+            targetHold?.BeginBuild();
 
             bool objectiveMatched;
             BattlefieldObjectiveEstimate objective = ResolveObjective(
@@ -67,6 +69,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     battlefront,
                     nodes.Length,
                     anchor);
+                // The points stand while the line they were planned on has not really moved (DoctrineTargetHold).
+                if (targetHold != null) linePlan = targetHold.Apply(node.NodeId, task, objective.ObjectiveId, linePlan);
                 TacticalSopDecision sop = TacticalSopDoctrine.Resolve(
                     node.Role,
                     task,
@@ -102,6 +106,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 orders.Add(order);
             }
 
+            targetHold?.EndBuild();
             return orders.ToArray();
         }
 
