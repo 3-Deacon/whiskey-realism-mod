@@ -384,8 +384,10 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public ManeuverNodeEntry(string nodeId, WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase, CommandTaskType task,
             bool hasTarget, float targetX, float targetZ, float heading, string reason, bool hasVia = false, float viaX = 0f, float viaZ = 0f,
-            bool isGuard = false)
+            bool isGuard = false, bool hasFormation = false, int formation = -1)
         {
+            HasFormation = hasFormation && formation >= 0;
+            Formation = HasFormation ? formation : -1;
             IsGuard = isGuard;
             HasVia = hasVia;
             ViaX = viaX;
@@ -413,6 +415,10 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool HasVia { get; }
         public float ViaX { get; }
         public float ViaZ { get; }
+
+        /// <summary>BC14W: the group formation the node's order asks for (the focal assault's March Column); HasFormation false is none.</summary>
+        public bool HasFormation { get; }
+        public int Formation { get; }
 
         /// <summary>
         /// BC14: the entry is a reserve's crossing guard (requirement-defender-crossing-release), not a BC11 maneuver: the doctrine build applies it

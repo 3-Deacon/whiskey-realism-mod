@@ -96,6 +96,8 @@ namespace WhiskeyRealism.Tactical.Operations
                         idle, maneuver.Heading, maneuver.Holds, "maneuver-" + maneuver.Reason);
                     // BC14: the maneuver's crossing via rides on the node's order (every lane node passes the same crossing).
                     if (maneuver.HasVia) order = order.WithVia(maneuver.ViaX, maneuver.ViaZ);
+                    // BC14W: the column's formation rides on the node's order too (requirement-focal-execution).
+                    if (maneuver.HasFormation) order = order.WithFormation(maneuver.Formation);
                 }
                 orders.Add(order);
             }

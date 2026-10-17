@@ -621,7 +621,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 out holdX, out holdZ, out holdDirX, out holdDirZ);
 
             int targetFormation = rec.UnitTyp > TacticalUnitType.MaxCombat
-                ? CommandFormationCorrection.TargetFormationForTask(state.Task, rec.Formation)
+                ? CommandFormationCorrection.TargetFormationForTask(state.Task, rec.Formation, hasOrder && order.HasFormation, order.Formation)
                 : -1;
             bool orderPending = PostureSense.PendingOrder(rec, physical.ActiveMove, CanBypassStaleQueuedOrder(state.Task));
             bool alreadyCorrect = !physical.PathInterrupted &&
