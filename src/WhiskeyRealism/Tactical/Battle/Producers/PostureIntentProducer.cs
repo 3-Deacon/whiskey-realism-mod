@@ -601,6 +601,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, army, physical, priority, source, sink);
                 if (contested > 0)
                 {
+                    // Like every early exit, the group's posture is recorded for the producers that read it this tick (recon's ledger-task test, the
+                    // facing pulse, fire control).
+                    ref GroupPosture contestedGroup = ref t.Groups[i];
+                    contestedGroup.Has = true;
+                    contestedGroup.State = state;
+                    contestedGroup.CloseEngaged = closeEngaged;
+                    contestedGroup.FlankRisk = flankRisk;
                     PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, PostureIntentPlan.ContestReason),
                         worksStance + contested, PostureIntentPlan.ContestReason);
                     return true;

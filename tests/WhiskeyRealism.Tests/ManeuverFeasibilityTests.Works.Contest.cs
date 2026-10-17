@@ -200,6 +200,12 @@ internal static partial class ManeuverFeasibilityTests
         int contest = run.IndexOf("= WorksContest(", StringComparison.Ordinal);
         int decide = run.IndexOf("CommandPostureExecutor.Decide(order", StringComparison.Ordinal);
         AssertTrue(stance >= 0 && contest > stance && decide > contest, "the contest runs after the works-hold stance and before the posture decision");
+        // Regression: the contest's early return recorded no posture for the group (recon's ledger-task test, the facing pulse and fire control read it).
+        string contested = FlankResponseTests.Between(run, "= WorksContest(", "// BC9: a probe that ended short");
+        FlankResponseTests.AssertPinned(contested, "contestedGroup.Has = true;", "the contest branch records the group's posture");
+        FlankResponseTests.AssertPinned(contested, "contestedGroup.State = state;", "its state");
+        AssertTrue(contested.IndexOf("contestedGroup.Has = true;", StringComparison.Ordinal) < contested.IndexOf("return true;", StringComparison.Ordinal),
+            "before the contest returns");
         FlankResponseTests.AssertPinned(run, "MoveContestState.ForAlliance(s.Alliance)", "the side's memory");
         FlankResponseTests.AssertPinned(run, ".Evaluate(rec.InstanceId, s.TickId,", "asked for each held group once per arbiter tick");
         FlankResponseTests.AssertPinned(run, "PostureIntentPlan.ContestStop(", "a stop near the hold point");
