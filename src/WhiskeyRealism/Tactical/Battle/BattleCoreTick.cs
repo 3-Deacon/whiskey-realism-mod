@@ -41,7 +41,7 @@ namespace WhiskeyRealism.Tactical.Battle
     internal static class BattleCoreTick
     {
         private const float TelemetryIntervalRealSeconds = 30f;
-        private const int SkipReasonCount = (int)SkipReason.NoKnownCrossing + 1;
+        private const int SkipReasonCount = (int)SkipReason.CrossingPending + 1;
 
         private static readonly BattleProducerRegistry Producers = new BattleProducerRegistry(CreateProducer);
 

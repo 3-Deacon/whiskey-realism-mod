@@ -736,6 +736,13 @@ namespace WhiskeyRealism.Tactical.Battle
                         if (count == viaX.Length) tooMany = true;
                         else { viaX[count] = toX; viaZ[count] = toZ; count++; }
                     }
+                    if (crossing == CrossingVerdict.Pending)
+                    {
+                        // The river map is not built yet: the move waits for it instead of passing unchecked.
+                        plan.Execute = false;
+                        plan.Skip = SkipReason.CrossingPending;
+                        return plan;
+                    }
                     if (crossing == CrossingVerdict.NoKnownCrossing || tooMany)
                     {
                         // No crossing the side knows, or more vias than the executor can carry: the move is not made.

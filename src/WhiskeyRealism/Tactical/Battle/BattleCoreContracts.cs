@@ -344,6 +344,8 @@ namespace WhiskeyRealism.Tactical.Battle
         LowerPriorityThanClaim,
         /// <summary>A move across a river with no crossing the side knows (RiverCrossingRule).</summary>
         NoKnownCrossing,
+        /// <summary>A move the river map has not been built for yet: it waits (CrossingPictureWait) rather than passing unchecked.</summary>
+        CrossingPending,
     }
 
     public struct OrderOutcome
