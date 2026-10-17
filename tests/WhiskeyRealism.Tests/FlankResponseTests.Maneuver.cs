@@ -16,7 +16,7 @@ internal static partial class FlankResponseTests
         {
             ("bc11 NonEnvelopmentWingNeverManeuvers", NonEnvelopmentWingNeverManeuvers),
             ("bc11 StartDelayWingHoldsThenReleases", StartDelayWingHoldsThenReleases),
-            ("bc11 EnvelopsSetOnExactlySixRects", EnvelopsSetOnExactlySixRects),
+            ("bc11 EnvelopsSetOnExactlySevenRects", EnvelopsSetOnExactlySevenRects),
             ("bc11 HoldUntilOffsetAfterCenterContact", HoldUntilOffsetAfterCenterContact),
             ("bc11 MarchTargetsRectAnchorOnLanes", MarchTargetsRectAnchorOnLanes),
             ("bc11 DeepRaidMarchesAroundLessPressuredEnd", DeepRaidMarchesAroundLessPressuredEnd),
@@ -135,7 +135,7 @@ internal static partial class FlankResponseTests
         }
     }
 
-    private static void EnvelopsSetOnExactlySixRects()
+    private static void EnvelopsSetOnExactlySevenRects()
     {
         var found = new List<string>();
         foreach (BattlePlanId id in Enum.GetValues(typeof(BattlePlanId)))
@@ -148,7 +148,7 @@ internal static partial class FlankResponseTests
         found.Sort(StringComparer.Ordinal);
         string[] expected =
         {
-            "CavalryRaid:DeepRaid", "DoubleEnvelopment:LeftWing", "DoubleEnvelopment:RightWing", "ManeuverAndFix:RightWing",
+            "CavalryRaid:DeepRaid", "DoubleEnvelopment:LeftWing", "DoubleEnvelopment:RightWing", "FocalAssault:AssaultColumn", "ManeuverAndFix:RightWing",
             "MobileFlankMarch:FlankMarch", "WideFlankApproach:FlankMarch",
         };
         AssertEqual(string.Join(",", expected), string.Join(",", found), "the enveloping rects");

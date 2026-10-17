@@ -847,7 +847,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ);
             // BC14 requirement-synchronized-release: in a template with an enveloping rect the Center and the Demonstration fix, and a fix
             // goes in when the common plan says (a start-delay spec with no offset of its own and the ledger's release as its gate).
-            bool fixes = zone.RectKind == PlayRectKind.Center || zone.RectKind == PlayRectKind.Demonstration;
+            // BC14W: the focal assault's support is the same kind of spec; it is released behind the column's strike (EchelonDelayHours),
+            // not at a published hour, and the play executor sets that gate.
+            bool fixes = zone.RectKind == PlayRectKind.Center || zone.RectKind == PlayRectKind.Demonstration || zone.RectKind == PlayRectKind.AssaultSupport;
             return fixes && zone.TemplateEnvelops
                 ? new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false,
                     zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ, holdsForRelease: true)
@@ -976,7 +978,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return best;
         }
 
-        private static bool AllowsProvisionalAttackAxis(TacticalBattlePlan plan)
+        internal static bool AllowsProvisionalAttackAxis(TacticalBattlePlan plan)
         {
             if (plan.Phase == BattlePhase.Withdraw || plan.Phase == BattlePhase.Consolidate) return false;
             switch (plan.PlanId)
@@ -986,6 +988,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
                 case BattlePlanId.CavalryRaid:
+                case BattlePlanId.FocalAssault:
                     return true;
                 default:
                     return false;

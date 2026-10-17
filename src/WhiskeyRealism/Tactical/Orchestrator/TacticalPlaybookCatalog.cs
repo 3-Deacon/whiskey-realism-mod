@@ -314,7 +314,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.ForcedFrontalAttack:
                 case BattlePlanId.CavalryRaid:
                 case BattlePlanId.GenericAggressive:
-                case BattlePlanId.GenericDesperate:          return 0.00f;
+                case BattlePlanId.GenericDesperate:
+                case BattlePlanId.FocalAssault:              return 0.00f;
                 default:                                     return 0.20f;
             }
         }
@@ -337,6 +338,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.HesitatedCommit:    return 0.20f;
                 case BattlePlanId.FrontalShockAssault:       return 0.10f;
                 case BattlePlanId.ForcedFrontalAttack:    return 0.10f;
+                case BattlePlanId.FocalAssault:           return 0.10f;   // a frontal assault on the works, not a turn
                 case BattlePlanId.GenericCautious:          return 0.10f;
                 case BattlePlanId.DelayingDefense:      return 0.10f;
                 case BattlePlanId.PreparedDefense: return 0.00f;
@@ -353,7 +355,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return 1f - Math.Min(1f, Math.Abs(target - hint) * 2f);
         }
 
-        private static float ResponseTargetFor(BattlePlanId id)
+        internal static float ResponseTargetFor(BattlePlanId id)
         {
             switch (id)
             {
@@ -377,6 +379,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
                 case BattlePlanId.CavalryRaid:
+                case BattlePlanId.FocalAssault:
                     return 0.6f;
                 default:
                     return 0.4f;

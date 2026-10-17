@@ -372,12 +372,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     }
 
                     bool templateHasCenterRect = false;
-                    int envelopRects = 0;
                     for (int r = 0; r < template.Rects.Count; r++)
-                    {
                         if (template.Rects[r].Kind == PlayRectKind.Center) templateHasCenterRect = true;
-                        if (template.Rects[r].Envelops) envelopRects++;
-                    }
                     // Wait for the Center child's contact only when a child really acts as the Center (see CenterChildId).
                     string centerChildId = templateHasCenterRect ? EnvelopmentManeuver.CenterChildId(_lastResult[allianceId], intents) : null;
                     bool templateHasCenter = centerChildId != null;
@@ -403,7 +399,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         bool wasMirrored = state.Mirrored;
 
                         ManeuverInput input = BuildInput(snapshot, grid, axis, spec, intents[i].ChildId, index, i < evidence.Count ? evidence[i].OwnStrengthBucket : 1,
-                            state.Mirrored, state.OutflankReached, templateHasCenter, envelopRects == 1, side, enemyX, enemyZ, stance, now,
+                            state.Mirrored, state.OutflankReached, templateHasCenter, PlayExecutorRules.CanMirror(template), side, enemyX, enemyZ, stance, now,
                             planId, feasibility, in state);
                         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
                         side.States[intents[i].ChildId] = state;

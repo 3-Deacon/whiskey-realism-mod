@@ -257,6 +257,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 case PlayRectKind.ReserveLine:     return DirectChildRole.Reserve;
                 case PlayRectKind.DeepRaid:        return DirectChildRole.Main;
                 case PlayRectKind.Demonstration:   return DirectChildRole.Screen;
+                case PlayRectKind.AssaultColumn:   return DirectChildRole.Main;
+                case PlayRectKind.AssaultSupport:  return DirectChildRole.SupportMain;
                 case PlayRectKind.Unknown:
                 default:                           return DirectChildRole.Unknown;
             }

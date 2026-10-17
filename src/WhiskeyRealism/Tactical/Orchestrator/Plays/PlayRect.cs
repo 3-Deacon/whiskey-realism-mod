@@ -36,6 +36,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         FlankMarch,
         /// <summary>Demonstration / feint rect — brigades become Screen with light pressure.</summary>
         Demonstration,
+        /// <summary>BC14W: the focal assault's column, a BC11 maneuver (March Column) that attacks the works' focal point — brigades become Main.</summary>
+        AssaultColumn,
+        /// <summary>BC14W: the focal assault's echeloned support, released behind the column's strike — brigades become SupportMain.</summary>
+        AssaultSupport,
     }
 
     /// <summary>
@@ -81,7 +85,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>
         /// BC11 decision 4: the child assigned to this rect executes an envelopment (EnvelopmentManeuver: hold, march
-        /// round the enemy line end, face it, attack it). True on exactly six rects of the catalog; every other
+        /// round the enemy line end, face it, attack it). True on exactly seven rects of the catalog (BC14W: the focal assault column is the seventh); every other
         /// wing rect is a plain role assignment whose StartTimeOffsetSeconds is only a start delay.
         /// </summary>
         public bool Envelops { get; }
