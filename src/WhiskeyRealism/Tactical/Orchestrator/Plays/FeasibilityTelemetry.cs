@@ -414,12 +414,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         /// <summary>
-        /// The works hold row is due on each change of the gate (none, hopeless-assault, turn-not-struck) and every 0.1 doctrine-h while it holds; the gate
-        /// and the time are taken when it is.
+        /// The works hold row is due on each change of the gate (none, hopeless-assault, turn-not-struck, each with or without a pinned fix) and every 0.1
+        /// doctrine-h while it holds; the gate and the time are taken when it is.
         /// </summary>
-        internal static bool WorksHoldRowDue(int side, bool hold, string reason, double nowHours)
+        internal static bool WorksHoldRowDue(int side, bool hold, string reason, double nowHours, bool pinned = false)
         {
             int state = !hold ? 0 : (string.Equals(reason, FeasibilityLedger.ReasonHopelessAssault, StringComparison.Ordinal) ? 1 : 2);
+            if (pinned) state += 3;
             bool changed = state != WorksHoldState[side];
             if (!changed && !(hold && nowHours - WorksHoldAt[side] >= WorksRowSpacingHours)) return false;
             WorksHoldState[side] = state;
@@ -437,18 +438,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 int side = Side(alliance);
                 bool hold = ledger.WorksHold(out string reason);
-                if (!WorksHoldRowDue(side, hold, reason, nowHours)) return;
+                ledger.WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren, out int pinnedChildren);
+                if (!WorksHoldRowDue(side, hold, reason, nowHours, pinnedChildren > 0)) return;
                 if (!Wanted(TelemetryCategory.Decision)) return;
                 MoveContestState contest = MoveContestState.ForAlliance(alliance);
                 int chain = 0, onset = 0, advances = 0, entries = 0;
                 contest?.TakeCounts(out chain, out onset, out advances, out entries);
-                ledger.WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren);
                 BattlePlanId plan = ledger.HasSelection ? ledger.SelectedPlan : BattlePlanId.Unknown;
                 string why = reason ?? string.Empty, planName = plan.ToString();
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalWorksHold", TelemetrySeverity.Info,
                     ev => ev
                         .WithSide(alliance)
-                        .WithDecision("TacticalWorksHold", hold ? why : "released", "side=" + alliance + "|hold=" + hold + "|reason=" + why)
+                        .WithDecision("TacticalWorksHold", hold ? why : (pinnedChildren > 0 ? "pinned" : "released"), "side=" + alliance + "|hold=" + hold + "|reason=" + why)
                         .WithField("hold", hold)
                         .WithField("reason", why)
                         .WithField("plan", planName)
@@ -456,6 +457,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("barUsed", barUsed)
                         .WithField("assaultChildren", assaultChildren)
                         .WithField("facingChildren", facingChildren)
+                        .WithField("pinnedChildren", pinnedChildren)
                         .WithField("guarded", guarded)
                         .WithField("advancesOnWorks", advances)
                         .WithField("bandEntries", entries)

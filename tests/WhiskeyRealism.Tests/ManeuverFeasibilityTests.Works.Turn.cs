@@ -109,6 +109,10 @@ internal static partial class ManeuverFeasibilityTests
         AssertFalse(ledger.PinsWorks(wing.ChildId), "the wing faces no works and is not");
         AssertFalse(ledger.PinsWorks("child-unknown"), "an unknown child is not");
         AssertFalse(ledger.PinsWorks(null), "nor is a missing id");
+        ledger.WorksReport(out _, out _, out int assaulting, out int facing, out int pinned);
+        AssertTrue(facing >= 1, "control: children face works");
+        AssertEqual(facing, pinned, "the works hold row counts every holding fix that faces them as pinned");
+        AssertEqual(0, assaulting, "none of which assaults");
 
         // The pin does not wait for the works hold: the wing reaching its Attack lifts the hold and the fix is pinned still.
         world.Phases[wing.ChildId] = ManeuverPhase.Attack;
@@ -129,6 +133,9 @@ internal static partial class ManeuverFeasibilityTests
         broken.RefreshWorksHold(world);
         AssertTrue(broken.FacesWorks(MainOf(brokenBodies).ChildId), "control: the fix still faces works");
         AssertFalse(broken.PinsWorks(MainOf(brokenBodies).ChildId), "shaken holders: the works are broken in and the pin lifts");
+        broken.WorksReport(out _, out _, out _, out int brokenFacing, out int brokenPinned);
+        AssertTrue(brokenFacing >= 1, "control: the children still face works");
+        AssertEqual(0, brokenPinned, "and the row counts none pinned");
 
         // Flag off: no works doctrine, no pin.
         bool saved = WhiskeyRealism.Plugin.EnemyWorksDoctrine;

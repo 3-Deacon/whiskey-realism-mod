@@ -45,6 +45,11 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(FeasibilityTelemetry.EnemyWorksRowDue(0, 0.0), "the battle's end resets the throttles");
         AssertTrue(FeasibilityTelemetry.WorksHoldRowDue(0, true, hopeless, 0.0), "(the hold row's too)");
         BattleScope.ResetAll();
+        // A pin changes the gate too: a row when the first fix is pinned with no hold, none while it stays so, a row when the pin lifts.
+        AssertTrue(FeasibilityTelemetry.WorksHoldRowDue(1, false, null, 20.0, pinned: true), "a pin with no hold is a change of the gate: a row");
+        AssertFalse(FeasibilityTelemetry.WorksHoldRowDue(1, false, null, 20.5, pinned: true), "and then none while it stays pinned");
+        AssertTrue(FeasibilityTelemetry.WorksHoldRowDue(1, false, null, 20.6), "the pin lifts: a row");
+        BattleScope.ResetAll();
     }
 
     static void WRowFields()
@@ -59,7 +64,7 @@ internal static partial class ManeuverFeasibilityTests
 
         string hold = FlankResponseTests.Between(telemetry, "public static void WorksHold(", "/// <summary>The first wing routed");
         AssertTrue(hold.Contains("\"TacticalWorksHold\""), "TacticalWorksHold is emitted");
-        foreach (string field in new[] { "hold", "reason", "plan", "detail", "barUsed", "assaultChildren", "facingChildren", "guarded", "advancesOnWorks", "bandEntries",
+        foreach (string field in new[] { "hold", "reason", "plan", "detail", "barUsed", "assaultChildren", "facingChildren", "pinnedChildren", "guarded", "advancesOnWorks", "bandEntries",
             "vanillaChainContest", "onsetContests", "doctrineHours" })
             AssertTrue(hold.Contains("WithField(\"" + field + "\""), "TacticalWorksHold carries " + field);
         FlankResponseTests.AssertPinned(hold, "TelemetryCategory.Decision", "a Decision row");

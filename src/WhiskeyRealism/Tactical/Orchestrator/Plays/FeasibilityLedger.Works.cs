@@ -88,13 +88,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <inheritdoc />
         public float Willingness => Plugin.EnemyWorksDoctrineEnabled() && HasEvaluation ? WorksRules.Willingness(in _job.Input.Army) : -1f;
 
-        /// <summary>What the works hold row says of the selected plan: the worst works assault's detail term and the bar it was held to, and the children that assault or face works.</summary>
-        internal void WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren)
+        /// <summary>What the works hold row says of the selected plan: the worst works assault's detail term and the bar it was held to, the children that assault or face works and how many of them are pinned.</summary>
+        internal void WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren, out int pinnedChildren)
         {
             detail = _worksDetail;
             barUsed = _worksBarUsed;
             assaultChildren = _worksAssaultCount;
             facingChildren = _worksChildCount;
+            pinnedChildren = 0;
+            for (int i = 0; i < _worksChildCount; i++)
+                if (_worksChildren[i].Pins) pinnedChildren++;
         }
 
         // ---- the Defender's works station (requirement-defender-works-reserve), published with the candidates ----
