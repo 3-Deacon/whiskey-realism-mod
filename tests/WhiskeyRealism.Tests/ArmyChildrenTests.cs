@@ -30,6 +30,7 @@ internal static class ArmyChildrenTests
             ("army children vanilla depth finds corps under the army", VanillaDepthFindsCorpsUnderTheArmy),
             ("army children union division child cascades a role to every brigade", UnionDivisionChildCascadesARoleToEveryBrigade),
             ("army children csa brigade children each own a leaf assignment", CsaBrigadeChildrenEachOwnALeafAssignment),
+            ("army children union defender line holds with a flank guard and leaves the detached reserve division to the tree default", UnionDefenderLineHoldsWithAFlankGuard),
         });
     }
 
@@ -262,6 +263,49 @@ internal static class ArmyChildrenTests
         foreach (int id in brigades) AssertTrue(map.ContainsKey(id), "brigade " + id + " is commanded");
         AssertTrue(map.Values.Any(a => a.LeafRole == DirectChildRole.Main), "one brigade carries the main effort");
         AssertTrue(map.Values.Select(a => a.LeafRole).Distinct().Count() > 1, "roles differ by brigade, not one role for the army");
+    }
+
+    // The Union side's real shape (tree row 16:1,15:2,14:6): Department(16) -> 1st_Division(15) -> four
+    // brigades, plus a second division (15) with two brigades that sits in no army (noParent=2 in the
+    // probe health row). As the Defender: the army's one child is the first division, its brigades all
+    // hold or guard (the stance guard turns attack, support and fix tasks into HoldObjective), the
+    // left wing brigade guards the flank, and the second division is not a child: it gets the command
+    // tree's default (Reserve/Hold, the log's node--225274), not a role from the allocator.
+    // Pinned as delivered today; a reserve brigade inside a holding division is a later slice (BC16).
+    private static void UnionDefenderLineHoldsWithAFlankGuard()
+    {
+        var h = new Hierarchy();
+        h.Add(1, 16, UnitFlags.PermanentlyDetached, 10, 11, 12, 13, 14, 20, 21, 22, 23);
+        h.Add(10, 15, UnitFlags.PermanentlyDetached, 11, 12, 13, 14, 20, 21, 22, 23);
+        for (int b = 0; b < 4; b++) h.Add(11 + b, 14, UnitFlags.PermanentlyDetached, 20 + b);
+        for (int b = 0; b < 4; b++) h.Add(20 + b, TacticalUnitType.Infantry, UnitFlags.None);
+        h.Add(30, 15, UnitFlags.PermanentlyDetached, 31, 32, 40, 41);
+        h.Add(31, 14, UnitFlags.PermanentlyDetached, 40);
+        h.Add(32, 14, UnitFlags.PermanentlyDetached, 41);
+        h.Add(40, TacticalUnitType.Infantry, UnitFlags.None);
+        h.Add(41, TacticalUnitType.Infantry, UnitFlags.None);
+        for (int b = 0; b < 4; b++) h.SetPosition(11 + b, 100f * b, 0f);
+        h.SetPosition(31, 900f, 0f);
+        h.SetPosition(32, 1000f, 0f);
+        h.Assemble();
+        var children = h.Discover(-1);
+        AssertEqual(1, children.Count, "the army's one child is the first division");
+        AssertEqual("child-10", children[0].ChildId, "1st_Division");
+
+        var army = new ArmyOrchestrator(0, BuiltInPlaybooks.SeedCatalog(), default(WhiskeyRealism.Strategic.PersonalityVector));
+        army.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.PreparedDefense, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
+        army.UpdateBattleStance(BattleStance.Defender);
+        army.RegisterDirectChildren(children);
+        army.ObserveGlobalOdds(0.7f);
+        army.ObserveDirectChildEvidenceWithZones(new[] { new DirectChildEvidence(2, 2, true, 0, 0, 0.9f) }, null, null);
+        h.Cascade(army);
+        var map = army.CurrentLeafBrigadeMap;
+        AssertEqual(4, map.Count, "the four brigades of the first division, not the second division's");
+        AssertFalse(map.ContainsKey(31) || map.ContainsKey(32), "the division in no army is left to the tree default");
+        var tasks = map.Values.Select(a => PostureStanceGuard.Task(a.LeafTask, BattleStance.Defender)).ToList();
+        AssertTrue(tasks.All(t => t == CommandTaskType.HoldObjective || t == CommandTaskType.GuardFlank || t == CommandTaskType.ReserveWait),
+            "a Defender's brigades hold, guard a flank or wait: " + string.Join(",", tasks));
+        AssertTrue(tasks.Contains(CommandTaskType.GuardFlank), "one brigade guards the open flank");
     }
 
     private static ArmyOrchestrator ArmyWithPlan(IReadOnlyList<DirectChildSnapshot> children)
