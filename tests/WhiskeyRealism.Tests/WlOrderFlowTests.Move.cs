@@ -474,6 +474,7 @@ internal static partial class WlOrderFlowTests
         AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.processingtime, carrierProcessingTime)"), "only an entry that carries the order counts");
         AssertTrue(queue.Contains("line.type == 1") && queue.Contains("line.targetunit") && queue.Contains("line.courierref == null"),
             "lost is vanilla's own test (125281-125286) on the entry's primary mounted courier line");
+        AssertTrue(queue.Contains("if (latest == null || entry.processingtime > latest.processingtime) latest = entry;"), "the carrier entry of a unit is its latest pending move");
         AssertTrue(queue.Contains("unit.transform.parent"), "the scene parent is the queue owner");
         AssertTrue(TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs").Contains("SetWaypoint 91461-91504"),
             "and the comment names the vanilla lines it mirrors (SetWaypoint 91461-91504)");
