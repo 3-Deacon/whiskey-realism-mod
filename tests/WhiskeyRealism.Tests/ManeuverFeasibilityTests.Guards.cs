@@ -101,6 +101,7 @@ internal static partial class ManeuverFeasibilityTests
         public bool AssaultsWorks(string childId) => false;
         public bool FacesWorks(string childId) => false;
         public int WorksHoldHash => 0;
+        public float Willingness => -1f;
         public IWorksQuery HeldWorks => null;
         public bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount) { station = default(StationPoint); childCount = 0; return false; }
         public string StationChildId(int column) => null;

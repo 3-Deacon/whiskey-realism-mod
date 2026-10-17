@@ -126,6 +126,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // (no earlier than the first battery's bombardment plus PreparationHours). Each value beside its flag.
         public bool HasFocal;
         public float FocalX, FocalZ;
+        /// <summary>The focal point's kind (<c>FocalKind</c>), for the row only.</summary>
+        public byte FocalKind;
         public int GroupFormation;
         public bool HasPreparationFloor;
         public double PreparationFloorHours;
@@ -164,6 +166,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>BC14W: the focal point latched at the March (a column's Turn heading and Attack target); a later evaluation's focal point does not move it.</summary>
         public bool HasFocal;
         public float FocalX, FocalZ;
+        public byte FocalKind;
     }
 
     public struct ManeuverOrder
@@ -411,6 +414,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 state.HasFocal = input.Kind == PlayRectKind.AssaultColumn && input.HasFocal;
                 state.FocalX = input.FocalX;
                 state.FocalZ = input.FocalZ;
+                state.FocalKind = input.FocalKind;
                 state.HasVia = input.HasVia;
                 state.ViaX = input.ViaX;
                 state.ViaZ = input.ViaZ;

@@ -62,6 +62,7 @@ namespace WhiskeyRealism.Tactical.Battle
         static OrderExecutorRuntime()
         {
             BattleScope.Register("order-executor-runtime", Reset);
+            BattleScope.Register("order-executor-bombard-rows", () => _lastBombardRowAt.Clear());
         }
 
         // Step 1 over the snapshot flags: Commander Mode Active, not PlayerOwned,
@@ -503,11 +504,45 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool StartBombard(BattleUnits bunits, Regiment unit, float x, float z)
         {
             if (bunits == null || unit == null) return false;
-            if (!TacticalWriteGuard.ModeAllowsWrites() || !TacticalWriteGuard.CanWrite(unit)) return false;
+            if (!TacticalWriteGuard.ModeAllowsWrites() || !TacticalWriteGuard.CanWrite(unit))
+            {
+                EmitBombardStart(unit, x, z, "refused-by-guard");
+                return false;
+            }
             if (!TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, BattleWriterPolicy.CombatBehaviorBombard, perRegiment: false)) return false;
             unit.bombardposition = TacticalTerrainProbe.WithTerrainHeight(new Vector3(x, 0f, z));
             unit.bombardrange = GamePrefs.bombardmentmaxrangesize;
+            EmitBombardStart(unit, x, z, "issued");
             return true;
+        }
+
+        // One TacticalBombardStart row per executed start (BC14W requirement-telemetry); a start the guard refused is throttled per battery. The plan is
+        // always FocalAssault: the artillery producer submits a BombardStart only for that plan's preparation point.
+        private static readonly Dictionary<string, float> _lastBombardRowAt = new Dictionary<string, float>();
+
+        private static void EmitBombardStart(Regiment unit, float x, float z, string outcome)
+        {
+            try
+            {
+                int battery = unit.GetInstanceID();
+                if (!TacticalTelemetry.ShouldEmit(_lastBombardRowAt, "tactical-bombard-start:" + battery, outcome, Environment.TickCount * 0.001f, 30f, false)) return;
+                int side = unit.alliance;
+                float range = GamePrefs.bombardmentmaxrangesize;
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalBombardStart", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(side)
+                        .WithDecision("TacticalBombardStart", outcome, "side=" + side + "|battery=" + battery)
+                        .WithField("battery", battery)
+                        .WithField("pointX", x)
+                        .WithField("pointZ", z)
+                        .WithField("range", range)
+                        .WithField("plan", BattlePlanId.FocalAssault.ToString())
+                        .WithField("outcome", outcome));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:bombard-start-row", "[BombardStart] row failed: " + ex.GetType().Name);
+            }
         }
 
         // Artillery limber / unlimber: BattleUnits.MountUnits (90860-90890; formation

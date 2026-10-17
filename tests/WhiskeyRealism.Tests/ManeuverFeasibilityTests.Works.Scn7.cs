@@ -151,6 +151,11 @@ internal static partial class ManeuverFeasibilityTests
         ledger.RefreshWorksHold(new FakeWorld());
         AssertTrue(ledger.WorksHold(out string reason), who + ": " + plan + " is held");
         AssertEqual("hopeless-assault", reason, who + ": for a hopeless assault");
+        // The TacticalWorksHold row's facts: the worst works assault's detail and the bar it was held to, and who assaults.
+        ledger.WorksReport(out float reportDetail, out float reportBar, out int assaulting, out int facing);
+        AssertTrue(reportDetail >= ManeuverFeasibility.RiskyPenalty, who + ": the row's detail is the hopeless one: " + reportDetail);
+        AssertTrue(reportBar > 0f, who + ": and names the bar it was held to: " + reportBar);
+        AssertTrue(assaulting > 0 && facing >= assaulting, who + ": " + assaulting + " children assault, " + facing + " face works");
         BodyEstimate[] bodies = BodiesArray(ledger, plan);
         int held = 0;
         foreach (BodyEstimate body in bodies)

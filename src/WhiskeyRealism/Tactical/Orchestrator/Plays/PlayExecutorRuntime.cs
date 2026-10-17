@@ -540,12 +540,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 FocalPoint focalPoint = default(FocalPoint);
                 bool latched = state.HasFocal;
-                if (latched) { focalPoint.X = state.FocalX; focalPoint.Z = state.FocalZ; }
+                if (latched) { focalPoint.X = state.FocalX; focalPoint.Z = state.FocalZ; focalPoint.Kind = (FocalKind)state.FocalKind; }
                 if (latched || (feasibility != null && feasibility.TryFocalPoint(out focalPoint)))
                 {
                     input.HasFocal = true;
                     input.FocalX = focalPoint.X;
                     input.FocalZ = focalPoint.Z;
+                    input.FocalKind = (byte)focalPoint.Kind;
                     input.HasEnemyExtent = true;
                     input.EnemyEndX = focalPoint.X;
                     input.EnemyEndZ = focalPoint.Z;
@@ -861,6 +862,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     predictedArrival = predicted.arrival;
                     predictedMarch = predicted.march;
                 }
+                // BC14W: the focal assault's column row names the focal point's kind, the preparation its bombardment buys (the floor's hours, 0 with none
+                // passed; preparationFloorHours is the doctrine hour the Attack waits for, -1 with none) and the formation it marches in (-1: the posture's).
+                bool column = input.Kind == PlayRectKind.AssaultColumn;
+                string focalKind = column && state.HasFocal ? ((FocalKind)state.FocalKind).ToString() : string.Empty;
+                double preparationHours = column && input.HasPreparationFloor ? WorksRules.PreparationHours : 0.0;
+                double preparationFloor = column && input.HasPreparationFloor ? input.PreparationFloorHours : -1.0;
+                int formation = order.HasFormation ? order.Formation : -1;
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalEnvelopment", TelemetrySeverity.Info,
                     ev => ev
                         .WithSide(allianceId)
@@ -887,7 +895,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("attackViaZ", attackViaZ)
                         .WithField("arrivedHours", turn ? now : -1.0)
                         .WithField("predictedArrivalHours", predictedArrival)
-                        .WithField("predictedMarchHours", predictedMarch));
+                        .WithField("predictedMarchHours", predictedMarch)
+                        .WithField("focalKind", focalKind)
+                        .WithField("preparationHours", preparationHours)
+                        .WithField("preparationFloorHours", preparationFloor)
+                        .WithField("formation", formation));
             }
             catch { }
         }

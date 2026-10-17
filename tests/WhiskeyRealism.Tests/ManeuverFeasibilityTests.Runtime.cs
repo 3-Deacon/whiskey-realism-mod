@@ -199,7 +199,7 @@ internal static partial class ManeuverFeasibilityTests
         AssertFalse(FlankResponseTests.Flat(runtime).Contains("EnemyRecords") || runtime.Contains("scheduledarrival") || runtime.Contains("durationleft"), "the runtime reads no hidden enemy state");
 
         string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
-        FlankResponseTests.AssertPinned(army, "Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now);",
+        FlankResponseTests.AssertPinned(army, "Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now, _feasibility != null ? _feasibility.Willingness : -1f);",
             "every pick writes its selection row, with the flag off too");
         FlankResponseTests.AssertPinned(army, "PickInitialPlan(ArmyEvidence evidence)", "the initial pick");
         string catalog = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalPlaybookCatalog.cs");

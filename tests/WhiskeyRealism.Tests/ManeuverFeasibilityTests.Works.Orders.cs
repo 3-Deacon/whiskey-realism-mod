@@ -54,6 +54,7 @@ internal static partial class ManeuverFeasibilityTests
         public bool AssaultsWorks(string childId) => Faces.Contains(childId);
         public bool FacesWorks(string childId) => Faces.Contains(childId);
         public int WorksHoldHash => Hash;
+        public float Willingness => -1f;
         public IWorksQuery HeldWorks => null;
         public bool HasStation;
         public StationPoint Station;

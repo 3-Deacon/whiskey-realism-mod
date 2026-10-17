@@ -629,6 +629,20 @@ namespace WhiskeyRealism.Tactical.Battle
 
         public bool Perceived(int i) => _entries[i].Perceived;
 
+        /// <summary>The pieces the side has perceived (a perceived piece stays perceived).</summary>
+        public int PerceivedCount
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < _count; i++) if (_entries[i].Perceived) n++;
+                return n;
+            }
+        }
+
+        /// <summary>Pieces probed by the last <see cref="ProbeStep"/>.</summary>
+        public int ProbesLastTick { get; private set; }
+
         public bool InOwnZone(int i) => _entries[i].InOwnZone;
 
         /// <summary>
@@ -688,6 +702,7 @@ namespace WhiskeyRealism.Tactical.Battle
         /// </summary>
         public int ProbeStep(IPerceivedGround ground, int budget)
         {
+            ProbesLastTick = 0;
             if (ground == null || _count == 0) return 0;
             int allowed = Math.Min(budget, WorksRules.MaxWorksProbesPerTick);
             int probed = 0;
@@ -704,6 +719,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 _entries[pick].Stamp = _clock;
                 _entries[pick].Perceived = ground.IsPerceived(_entries[pick].X, _entries[pick].Z);
             }
+            ProbesLastTick = probed;
             return probed;
         }
     }

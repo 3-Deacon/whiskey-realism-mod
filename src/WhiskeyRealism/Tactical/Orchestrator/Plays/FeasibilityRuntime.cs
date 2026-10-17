@@ -169,6 +169,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 st.World.Bind(snapshot, regions);
                 st.Ledger.RefreshWorksHold(st.World);
                 ExploitTable.ForAlliance(army.AllianceId).SetWorksView(st.Ledger.WorksHold(out _), st.Ledger.HeldWorks);
+                if (Plugin.EnemyWorksDoctrineEnabled())
+                {
+                    FeasibilityTelemetry.EnemyWorks(army.AllianceId, st.Ledger, FortificationPointsRuntime.TableOf(army.AllianceId), now);
+                    FeasibilityTelemetry.WorksHold(army.AllianceId, st.Ledger, army.WorksGuarded, now);
+                }
 
                 if (forced) return;
 
@@ -216,9 +221,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static void Classify(SideState st, BattleSnapshot snapshot, RiverRegions regions, double now)
         {
-            if (regions == null) return;
+            // BC14W: the works probes share the crossing probes' handle, scope and slice (spec § 7A): the side's works pieces, oldest first.
+            WorksPointTable works = FortificationPointsRuntime.TableOf(st.Alliance);
+            if (regions == null && works == null) return;
             using (PerceivedGroundRuntime.Handle ground = PerceivedGroundRuntime.Open(snapshot))
-                st.Crossings.Classify(snapshot, regions, BattleTerrainGridRuntime.Get(), ground.Oracle, _reach, now);
+            {
+                if (regions != null) st.Crossings.Classify(snapshot, regions, BattleTerrainGridRuntime.Get(), ground.Oracle, _reach, now);
+                works?.ProbeStep(ground.Oracle, WorksRules.MaxWorksProbesPerTick);
+            }
         }
 
         private static void Evaluate(SideState st, TacticalBattleOrchestrator side, ArmyOrchestrator army, BattleUnits bunits, BattleSnapshot snapshot, ArmyEvidence evidence,
@@ -358,6 +368,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int candidates = withCandidates ? army.EligiblePlans(evidence, st.Candidates) : 0;
             TacticalEnemyContactLedger contact = ArmyEvidenceBuilder.ContactLedgerFor(st.Alliance);
             bool assumed = DeploymentPlanRuntime.TryAssumedEnemyPoint(st.Alliance, axis.OriginX, axis.OriginZ, out float assumedX, out float assumedZ, out _);
+            // BC14W: the side's works pieces, re-read from the battle's ObstacleLines at each new evaluation (null with the flag off); the monitor's run
+            // reads the table as that evaluation left it.
+            WorksPointTable works = withCandidates
+                ? FortificationPointsRuntime.Refresh(bunits, st.Alliance, axis.OriginX, axis.OriginZ)
+                : FortificationPointsRuntime.TableOf(st.Alliance);
             input = new FeasibilityInput
             {
                 Snapshot = snapshot, Axis = axis, Stance = army.EffectiveStance, Grid = BattleTerrainGridRuntime.Get(), Picture = TerrainPictureRuntime.Get(),
@@ -369,7 +384,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ChildIds = st.ChildIds, ChildCount = children, DeployedReserve = st.Deployed, ChildMoving = st.Moving,
                 BoundGuardChildIds = st.BoundGuards, BoundGuardCount = bound,
                 Candidates = st.Candidates, CandidateCount = candidates, Crest = evidence.CrestLine, ReachByUnitType = _reach,
-                HasAssumedEnemy = assumed, AssumedEnemyX = assumedX, AssumedEnemyZ = assumedZ, Cache = st.Cache,
+                HasAssumedEnemy = assumed, AssumedEnemyX = assumedX, AssumedEnemyZ = assumedZ, Cache = st.Cache, Works = works,
             };
         }
 

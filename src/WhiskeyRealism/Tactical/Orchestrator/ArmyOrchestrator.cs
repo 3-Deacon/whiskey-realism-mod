@@ -190,7 +190,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             double now = TacticalDoctrineTime.NowBattleHours;
             double ledgerAge = _feasibility != null && _feasibility.HasEvaluation ? now - _feasibility.EvaluatedHours : double.PositiveInfinity;
             bool kept = hysteresis && HasPlan && pb.Id == _plan.PlanId;
-            Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now);
+            Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now, _feasibility != null ? _feasibility.Willingness : -1f);
 
             // Envelopment-active tightening: commit reserves sooner when the
             // doctrine signaled AttackNow + clear advantage. Caps to the
@@ -1172,6 +1172,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (ReferenceEquals(_guardedLeafSource, _leafBrigadeMap) && _guardedLeafHoldHash == hash && _guardedLeafManeuverHash == _maneuverHash)
                 return _guardedLeafMap;
             _guardedLeafMap.Clear();
+            _guardedLeaves = 0;
             foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in _leafBrigadeMap)
             {
                 TacticalLeafBrigadeMap.LeafAssignment leaf = pair.Value;
@@ -1183,7 +1184,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     context.InManeuverTable = _worksManeuverNodes.TryGet(
                         WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_leafTopChildIds[top]), out _);
                 }
-                WorksHoldGuard.ApplyLeaf(in leaf, in context, out TacticalLeafBrigadeMap.LeafAssignment guarded);
+                if (WorksHoldGuard.ApplyLeaf(in leaf, in context, out TacticalLeafBrigadeMap.LeafAssignment guarded)) _guardedLeaves++;
                 _guardedLeafMap[pair.Key] = guarded;
             }
             _guardedLeafSource = _leafBrigadeMap;
@@ -1648,6 +1649,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents);
             _worksManeuverNodes = maneuverNodes;
             bool worksHold = WorksHoldOn;
+            _guardedStates = 0;
+            _guardedOrderCount = 0;
             if (worksHold) GuardStates(copiedCommandOperations);
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance, maneuverNodes,
                 HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
@@ -1658,22 +1661,34 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // ---- BC14W: the works hold on the stored products (requirement-works-hold) ----
 
         private ManeuverNodeTable _worksManeuverNodes = new ManeuverNodeTable();
+        private int _guardedStates, _guardedOrderCount, _guardedLeaves;
+
+        /// <summary>The stored states, built orders and leaf entries the works hold guard rewrote at the last store (the TacticalWorksHold row's <c>guarded</c>).</summary>
+        internal int WorksGuarded => _guardedStates + _guardedOrderCount + _guardedLeaves;
         private readonly List<CommandDoctrineOrder> _guardedOrders = new List<CommandDoctrineOrder>(64);
         private string[] _childNodeIds = Array.Empty<string>();
 
         /// <summary>The ledger's works hold is on and Enable Enemy Works Doctrine is: the stored orders, states and leaf entries of the children that face works are guarded.</summary>
         internal bool WorksHoldOn => Plugin.EnemyWorksDoctrineEnabled() && _feasibility != null && _feasibility.WorksHold(out _);
 
-        // The node id of each direct child ("node-" + the child's instance id), refreshed when the children change.
+        // The node id of each direct child ("node-" + the child's instance id), refreshed when the children change. The child ids the table was made from are
+        // kept beside it: comparing them allocates nothing, where making each node id again to compare would allocate a string per child per call.
+        private string[] _childNodeSources = Array.Empty<string>();
+
         private string[] ChildNodeIds()
         {
             int n = _directChildIntents.Count;
-            bool same = _childNodeIds.Length == n;
+            bool same = _childNodeSources.Length == n;
             for (int i = 0; same && i < n; i++)
-                same = string.Equals(_childNodeIds[i], WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_directChildIntents[i].ChildId), StringComparison.Ordinal);
+                same = string.Equals(_childNodeSources[i], _directChildIntents[i].ChildId, StringComparison.Ordinal);
             if (same) return _childNodeIds;
             _childNodeIds = new string[n];
-            for (int i = 0; i < n; i++) _childNodeIds[i] = WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_directChildIntents[i].ChildId);
+            _childNodeSources = new string[n];
+            for (int i = 0; i < n; i++)
+            {
+                _childNodeSources[i] = _directChildIntents[i].ChildId;
+                _childNodeIds[i] = WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_directChildIntents[i].ChildId);
+            }
             return _childNodeIds;
         }
 
@@ -1706,16 +1721,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             };
         }
 
-        private void GuardStates(CommandNodeOperationalState[] states)
+        internal void GuardStates(CommandNodeOperationalState[] states)
         {
             for (int i = 0; i < states.Length; i++)
                 if (WorksHoldGuard.ApplyState(in states[i], WorksContextOfNode(states[i].NodeId), out CommandNodeOperationalState guarded))
+                {
                     states[i] = guarded;
+                    _guardedStates++;
+                }
         }
 
         // The ledger's built orders, finished into the army's own array when the works hold guards them or the focal assault prepares its bombardment; the
         // ledger's own list is returned as it is when neither applies.
-        private IReadOnlyList<CommandDoctrineOrder> FinishOrders(IReadOnlyList<CommandDoctrineOrder> orders, bool worksHold)
+        internal IReadOnlyList<CommandDoctrineOrder> FinishOrders(IReadOnlyList<CommandDoctrineOrder> orders, bool worksHold)
         {
             bool prepare = PreparationPoint(out float preparationX, out float preparationZ);
             if (!worksHold && !prepare) return orders;
@@ -1723,7 +1741,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < orders.Count; i++)
             {
                 CommandDoctrineOrder order = orders[i];
-                if (worksHold) WorksHoldGuard.Apply(in order, WorksContextOfNode(order.NodeId), out order);
+                if (worksHold && WorksHoldGuard.Apply(in order, WorksContextOfNode(order.NodeId), out order)) _guardedOrderCount++;
                 if (prepare && ChildIndexOfNode(order.NodeId) >= 0) order = order.WithPreparation(preparationX, preparationZ);
                 _guardedOrders.Add(order);
             }

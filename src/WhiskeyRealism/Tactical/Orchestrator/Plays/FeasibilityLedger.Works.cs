@@ -22,6 +22,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private int _worksChildCount;
         private bool _worksHold;
         private string _worksReason;
+        // The row of the works hold (TacticalWorksHold): the worst works assault's detail term and the bar it was held to, and how many children assault or face.
+        private float _worksDetail, _worksBarUsed;
+        private int _worksAssaultCount;
         private int _worksHash;
         // The world the last heavy tick read BC11's phases from: a publish or a new selection recomputes the hold with it, so the hold of a wing
         // that has reached its Attack does not flip back to turn-not-struck every time an evaluation publishes.
@@ -71,6 +74,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <inheritdoc />
         public int WorksHoldHash => _worksHash;
+
+        /// <inheritdoc />
+        public float Willingness => Plugin.EnemyWorksDoctrineEnabled() && HasEvaluation ? WorksRules.Willingness(in _job.Input.Army) : -1f;
+
+        /// <summary>What the works hold row says of the selected plan: the worst works assault's detail term and the bar it was held to, and the children that assault or face works.</summary>
+        internal void WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren)
+        {
+            detail = _worksDetail;
+            barUsed = _worksBarUsed;
+            assaultChildren = _worksAssaultCount;
+            facingChildren = _worksChildCount;
+        }
 
         // ---- the Defender's works station (requirement-defender-works-reserve), published with the candidates ----
 
@@ -171,6 +186,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private void RefreshWorks(IMonitorWorld world)
         {
             _worksChildCount = 0;
+            _worksAssaultCount = 0;
+            _worksDetail = 0f;
+            _worksBarUsed = 0f;
             _worksHold = false;
             _worksReason = null;
             _worksHash = 0;
@@ -193,11 +211,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 bool faces = assaults || (members[m].Kind == ManeuverFeasibility.MemberFix && body.StrikeOnWorks);
                 if (!faces) continue;
                 _worksChildren[_worksChildCount++] = new WorksChild { ChildId = members[m].ChildId, Assaults = assaults, Faces = true };
+                if (assaults) _worksAssaultCount++;
             }
 
             bool hopeless = false;
             for (int b = 0; b < bodies.Length; b++)
-                if (bodies[b].AssaultsWorks && bodies[b].Detail >= ManeuverFeasibility.RiskyPenalty) hopeless = true;
+            {
+                if (!bodies[b].AssaultsWorks) continue;
+                if (bodies[b].Detail >= _worksDetail) { _worksDetail = bodies[b].Detail; _worksBarUsed = bodies[b].BarUsed; }
+                if (bodies[b].Detail >= ManeuverFeasibility.RiskyPenalty) hopeless = true;
+            }
             bool unstruck = false, fixFacesWorks = false;
             for (int m = 0; m < members.Length; m++)
             {
