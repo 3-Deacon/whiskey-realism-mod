@@ -18,13 +18,19 @@ internal static class ReserveReleasePacingTests
             ("reserve release: a role the evidence tiers gave moves nothing", AnEvidenceRoleIsNoRelease),
             ("reserve release: the allocator marks only a base reserve it released", TheAllocatorMarksOnlyItsOwnReleases),
             ("reserve release: a Defender never releases a held reserve into Main or SupportMain", ADefenderNeverReleasesIntoAnAttackRole),
-            ("reserve release hold: the role must stand HoldMinutes in one role", TheHoldNeedsOneRoleForTheWholeHold),
+            ("reserve release hold: a release stands HoldMinutes, whatever the release role, and the move is for the role standing then", TheHoldIsOnTheReleaseNotOnOneRole),
+            ("reserve release hold: a release that swaps between release roles still goes within the hold (19:27 smoke)", AReleaseThatSwapsRolesStillGoes),
             ("reserve release hold: a crisis release is not held", ACrisisReleaseIsNotHeld),
             ("reserve release dead-band: a courier still waiting holds the next move", ACourierStillWaitingHoldsTheNextMove),
             ("reserve release dead-band: a target inside the dedupe radius of the last is no new release", ATargetInsideTheDedupeRadiusIsNoNewRelease),
             ("reserve release dead-band: a move the executor never took is retried", AMoveTheExecutorNeverTookIsRetried),
-            ("reserve release replay: the smoke's role churn sends no order", TheSmokeRoleChurnSendsNoOrder),
+            ("reserve release dead-band: a release that lost the arbitration is not delivered and is retried", ALostArbitrationIsRetried),
+            ("reserve release dead-band: a second release to the same line is judged afresh, the courier wait outlives the first", ASecondReleaseIsJudgedAfresh),
+            ("reserve release replay: the smoke's role churn sends no order, a swapping release goes once per courier cycle", TheSmokeRoleChurnSendsNoOrder),
             ("reserve commit #59: only a real release lets vanilla commit a ledger-held group's reserve", OnlyARealReleaseAllowsVanillasCommit),
+            ("reserve commit #59: a Defender's Main or SupportMain release allows no commit; the patch reads the stance", ADefenderAttackRoleAllowsNoCommit),
+            ("reserve release marks: re-derived from this tick's allocation, never carried by a kept intent (replan-thrash seam)", TheMarkIsReDerivedEachTick),
+            ("reserve release rows: the throttle is decided before anything is built", TheRowsAreThrottledBeforeAnythingIsBuilt),
             ("reserve release: the allocator reads the base reserves from the one pooled array, allocating none", TheAllocatorSharesTheOnePooledArray),
             ("reserve release producer: pinned to the real release, the hold and the dead-band", TheProducerIsWiredToTheRules),
         });
@@ -119,7 +125,11 @@ internal static class ReserveReleasePacingTests
 
     private static readonly double Minute = 1.0 / 60.0;
 
-    private static void TheHoldNeedsOneRoleForTheWholeHold()
+    // The executor's last Move for the group, as the producer reads it back.
+    private static ExecutorMove Mine(double hours, float x, float z) => new ExecutorMove(true, hours, x, z);
+
+
+    private static void TheHoldIsOnTheReleaseNotOnOneRole()
     {
         var pacing = new ReserveReleasePacing();
         double t = 10.0;
@@ -128,12 +138,11 @@ internal static class ReserveReleasePacingTests
         AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, t + ReserveReleasePacing.HoldHours), "the hold stood");
         AssertTrue(Math.Abs(ReserveReleasePacing.HoldHours - pacing.HeldFor(Group, t + ReserveReleasePacing.HoldHours)) < 1e-9, "held for");
 
-        // A swap of the role restarts the hold.
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 4 * Minute), "another role starts afresh");
-        AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 6 * Minute), "inside the new hold");
-        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 4 * Minute + ReserveReleasePacing.HoldHours), "the new hold stood");
+        // A swap between release roles is the same release: the hold keeps counting from its start.
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 4 * Minute), "another release role: the hold has stood");
 
         // The allocation takes the release back inside the hold: nothing goes out, and the next release starts afresh.
+        pacing.HoldElapsed(Group, false, DirectChildRole.Unknown, false, t + 10 * Minute);
         double u = 20.0;
         AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u), "start");
         AssertFalse(pacing.HoldElapsed(Group, false, DirectChildRole.Unknown, false, u + 2 * Minute), "taken back");
@@ -141,6 +150,28 @@ internal static class ReserveReleasePacingTests
         AssertFalse(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u + 2.5 * Minute + 2.9 * Minute), "the old start does not count");
         AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.SupportMain, false, u + 2.5 * Minute + ReserveReleasePacing.HoldHours), "the new start counts");
         AssertTrue(pacing.HeldFor(999, u) == 0.0, "an unknown group has held nothing");
+    }
+
+    // 19:27 in the smoke: 2nd Brigade's real release alternated RefuseLeft and RefuseRight (and SupportMain) every few seconds to a minute. Held on one
+    // role, it never went out; held as a release, it goes once the hold is over, for the role standing at that tick.
+    private static void AReleaseThatSwapsRolesStillGoes()
+    {
+        var pacing = new ReserveReleasePacing();
+        DirectChildRole[] roles = { DirectChildRole.RefuseLeft, DirectChildRole.RefuseRight, DirectChildRole.SupportMain };
+        int goes = 0;
+        DirectChildRole standing = DirectChildRole.Unknown;
+        double firstGo = double.NaN;
+        for (int s = 0; s < 600; s += 5)
+        {
+            DirectChildRole role = roles[(s / 20) % roles.Length];
+            double now = 10.0 + s / 3600.0;
+            if (!pacing.HoldElapsed(Group, true, role, false, now)) continue;
+            goes++;
+            if (double.IsNaN(firstGo)) { firstGo = now; standing = role; }
+        }
+        AssertTrue(goes > 0, "a release that swaps roles every 20 s goes within ten minutes");
+        AssertTrue(Math.Abs(firstGo - (10.0 + ReserveReleasePacing.HoldHours)) < 6.0 / 3600.0, "at the end of the hold (" + (firstGo - 10.0) * 60.0 + " min)");
+        AssertTrue(standing != DirectChildRole.Unknown, "for the role standing when the hold completed: " + standing);
     }
 
     private static void ACrisisReleaseIsNotHeld()
@@ -156,15 +187,16 @@ internal static class ReserveReleasePacingTests
     private static void ACourierStillWaitingHoldsTheNextMove()
     {
         var pacing = new ReserveReleasePacing();
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1131f, -1399.5f, 10.0, 0, double.NaN), "nothing sent yet");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1131f, -1399.5f, 10.0, 0, ExecutorMove.None), "nothing sent yet");
         pacing.NoteSubmitted(Group, 1131f, -1399.5f, 10.0);
         // The executor took it in the tick it was submitted; its courier is queued.
         double later = 10.0 + 0.015;
-        AssertEqual(ReserveReleasePacing.Admission.CourierWait, pacing.Admit(Group, 900f, -1100f, later, 1, 10.0), "another target while the courier is queued");
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 900f, -1100f, later + 0.02, 0, 10.0), "the courier delivered: a far target goes");
+        AssertEqual(ReserveReleasePacing.Admission.CourierWait, pacing.Admit(Group, 900f, -1100f, later, 1, Mine(10.0, 1131f, -1399.5f)), "another target while the courier is queued");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 900f, -1100f, later + 0.02, 0, Mine(10.0, 1131f, -1399.5f)), "the courier delivered: a far target goes");
         pacing.NoteSubmitted(Group, 900f, -1100f, later + 0.02);
-        AssertEqual(ReserveReleasePacing.Admission.CourierWait, pacing.Admit(Group, 700f, -900f, later + 0.04, 2, later + 0.02), "queued again");
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 700f, -900f, later + 0.02 + ReserveReleasePacing.CourierWaitCapHours + 0.01, 2, later + 0.02),
+        AssertEqual(ReserveReleasePacing.Admission.CourierWait, pacing.Admit(Group, 700f, -900f, later + 0.04, 2, Mine(later + 0.02, 900f, -1100f)), "queued again");
+        AssertEqual(ReserveReleasePacing.Admission.Go,
+            pacing.Admit(Group, 700f, -900f, later + 0.02 + ReserveReleasePacing.CourierWaitCapHours + 0.01, 2, Mine(later + 0.02, 900f, -1100f)),
             "a queue entry that outlasts the cap holds nothing back");
     }
 
@@ -174,10 +206,11 @@ internal static class ReserveReleasePacingTests
         pacing.NoteSubmitted(Group, 1000f, -1000f, 10.0);
         double now = 10.5;
         float edge = OrderArbiter.DedupeMeters;
-        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f + edge, -1000f, now, 0, 10.0), "on the radius");
-        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f, -1000f, now, 0, 10.0), "the same target");
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f + edge + 1f, -1000f, now, 0, 10.0), "beyond the radius");
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group + 1, 1000f, -1000f, now, 0, double.NaN), "another group has its own record");
+        ExecutorMove took = Mine(10.0, 1000f, -1000f);
+        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f + edge, -1000f, now, 0, took), "on the radius");
+        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f, -1000f, now, 0, took), "the same target");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f + edge + 1f, -1000f, now, 0, took), "beyond the radius");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group + 1, 1000f, -1000f, now, 0, ExecutorMove.None), "another group has its own record");
     }
 
     private static void AMoveTheExecutorNeverTookIsRetried()
@@ -185,13 +218,70 @@ internal static class ReserveReleasePacingTests
         var pacing = new ReserveReleasePacing();
         pacing.NoteSubmitted(Group, 1000f, -1000f, 10.0);
         // The next tick: the executor has issued nothing for the group since (a cooldown, a refused crossing), so the same target is not a repeat.
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 10.015, 0, 9.0), "never issued: retried");
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 10.03, 0, 9.0), "and stays retried");
-        // Control: the executor's move was issued at the submission's hour.
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 10.015, 0, Mine(9.0, 1000f, -1000f)), "never issued: retried");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 10.03, 0, Mine(9.0, 1000f, -1000f)), "and stays retried");
+        // The record was dropped at the first tick that saw nothing: an executor move at that target a tick later (a retry of its own) is not read back into it.
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 10.045, 0, Mine(10.04, 1000f, -1000f)), "a record dropped for want of a move is not revived by a later one");
+        // Control: the executor's move was issued at the submission's hour, to the target.
         pacing.NoteSubmitted(Group, 1000f, -1000f, 11.0);
-        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f, -1000f, 11.015, 0, 11.0), "issued: a repeat");
+        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f, -1000f, 11.015, 0, Mine(11.0, 1000f, -1000f)), "issued: a repeat");
         pacing.Clear();
-        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 11.03, 0, 11.0), "a cleared record forgets");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1000f, 11.03, 0, Mine(11.0, 1000f, -1000f)), "a cleared record forgets");
+    }
+
+    // Verify round 1: a move counted as delivered on its hour alone. The release intent lost the arbitration to another producer's Move for the group
+    // (or a parent's fanned move) at the same tick: the executor's last move is that tick's, but not this producer's and not at the recorded target.
+    private static void ALostArbitrationIsRetried()
+    {
+        var pacing = new ReserveReleasePacing();
+        double t = 10.0;
+        pacing.NoteSubmitted(Group, 1000f, -1400f, t);
+        var posture = new ExecutorMove(false, t, 400f, -2000f);
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1400f, t + 0.015, 0, posture), "another producer's move at the same hour confirms nothing");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1400f, t + 1.0, 0, posture), "and the target is not dead-banded an hour later");
+
+        pacing.NoteSubmitted(Group, 1000f, -1400f, t);
+        var sameSpotOtherProducer = new ExecutorMove(false, t, 1000f, -1400f);
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1400f, t + 0.015, 0, sameSpotOtherProducer),
+            "another producer's move to the same spot is not this producer's order");
+        pacing.NoteSubmitted(Group, 1000f, -1400f, t);
+        var elsewhere = new ExecutorMove(true, t, 400f, -2000f);
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1400f, t + 0.015, 0, elsewhere),
+            "a release-sourced move to another target (an earlier release's) confirms nothing");
+        pacing.NoteSubmitted(Group, 1000f, -1400f, t);
+        var nearTarget = new ExecutorMove(true, t, 1000f + OrderArbiter.DedupeMeters, -1400f);
+        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f, -1400f, t + 0.015, 0, nearTarget), "control: this producer's move within the dedupe radius confirms");
+    }
+
+    // Verify round 1: the dead-band outlived its release, so a second real release to within 60 m of the first was held for ever.
+    private static void ASecondReleaseIsJudgedAfresh()
+    {
+        var pacing = new ReserveReleasePacing();
+        double t = 10.0;
+        pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, t);
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, t + 3 * Minute), "the first release stood");
+        double sent = t + 3 * Minute;
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1000f, -1400f, sent, 0, ExecutorMove.None), "first move goes");
+        pacing.NoteSubmitted(Group, 1000f, -1400f, sent);
+        AssertEqual(ReserveReleasePacing.Admission.DeadBand, pacing.Admit(Group, 1000f, -1400f, t + 4 * Minute, 0, Mine(sent, 1000f, -1400f)), "while it stands, a repeat is dead-banded");
+        for (int m = 5; m < 35; m++) pacing.HoldElapsed(Group, false, DirectChildRole.Unknown, false, t + m * Minute);
+        double u = t + 35 * Minute;
+        pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, u);
+        AssertTrue(pacing.HoldElapsed(Group, true, DirectChildRole.RefuseRight, false, u + 3 * Minute), "the second release stood");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1020f, -1410f, u + 3 * Minute, 0, Mine(sent, 1000f, -1400f)),
+            "a second release to the same line, 30 minutes on, goes");
+        AssertEqual(ReserveReleasePacing.Admission.Go, pacing.Admit(Group, 1020f, -1410f, u + 60 * Minute, 0, Mine(sent, 1000f, -1400f)), "and is not held an hour later");
+
+        // The courier wait outlives the release: a release that ends and starts again while the first order is still queued waits for it.
+        var quick = new ReserveReleasePacing();
+        quick.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t);
+        quick.HoldElapsed(Group, true, DirectChildRole.RefuseLeft, false, t + 3 * Minute);
+        quick.NoteSubmitted(Group, 700f, -900f, sent);
+        quick.Admit(Group, 700f, -900f, sent + 0.001, 1, Mine(sent, 700f, -900f));
+        quick.HoldElapsed(Group, false, DirectChildRole.Unknown, false, sent + 0.002);
+        quick.HoldElapsed(Group, true, DirectChildRole.Fix, false, sent + 0.01);
+        AssertEqual(ReserveReleasePacing.Admission.CourierWait, quick.Admit(Group, 300f, -300f, sent + 0.01, 1, Mine(sent, 700f, -900f)),
+            "a new release does not queue behind an order still in transit");
     }
 
     // The smoke, as the producer sees it: for forty doctrine minutes the ledger holds the brigade while the allocator flips its role every
@@ -203,7 +293,8 @@ internal static class ReserveReleasePacingTests
     {
         var pacing = new ReserveReleasePacing();
         int submitted = 0;
-        double lastIssued = double.NaN;
+        ExecutorMove lastIssued = ExecutorMove.None;
+        double lastIssuedHours = double.NaN;
         for (int s = 0; s < seconds; s += stepSeconds)
         {
             double now = 10.0 + s / 3600.0;
@@ -211,10 +302,11 @@ internal static class ReserveReleasePacingTests
             bool released = TacticalReserveCommitGate.TryReleasedDirectChild(intents, Group, defender, out _, out DirectChildRole role, out bool guard);
             if (!pacing.HoldElapsed(Group, released, role, guard, now)) continue;
             float x = 1000f + driftMeters * submitted;
-            int queued = !double.IsNaN(lastIssued) && now - lastIssued < CourierHours ? 1 : 0;
+            int queued = !double.IsNaN(lastIssuedHours) && now - lastIssuedHours < CourierHours ? 1 : 0;
             if (pacing.Admit(Group, x, -1400f, now, queued, lastIssued) != ReserveReleasePacing.Admission.Go) continue;
             pacing.NoteSubmitted(Group, x, -1400f, now);
-            lastIssued = now;
+            lastIssued = Mine(now, x, -1400f);
+            lastIssuedHours = now;
             submitted++;
         }
         return submitted;
@@ -225,8 +317,12 @@ internal static class ReserveReleasePacingTests
         var churn = new[] { DirectChildRole.SupportMain, DirectChildRole.Main, DirectChildRole.RefuseRight, DirectChildRole.RefuseLeft, DirectChildRole.SupportMain };
         // Every change an evidence role: no release at all.
         AssertEqual(0, Replay(s => churn[(s / 40) % churn.Length], s => false, defender: true, seconds: 2400, stepSeconds: 5, driftMeters: 90f), "evidence roles: nothing sent");
-        // Even if every role were a real release, a role that changes every 40 s never stands the 3-minute hold.
-        AssertEqual(0, Replay(s => churn[(s / 40) % churn.Length], s => true, defender: false, seconds: 2400, stepSeconds: 5, driftMeters: 90f), "a release that flips every 40 s: nothing sent");
+        // A release the allocation takes back every 40 s never stands the 3-minute hold: nothing sent.
+        AssertEqual(0, Replay(s => churn[(s / 40) % churn.Length], s => (s / 40) % 2 == 0, defender: false, seconds: 2400, stepSeconds: 5, driftMeters: 90f),
+            "a release taken back every 80 s: nothing sent");
+        // A release that swaps between release roles is one release: it goes, paced by the courier (verify round 1).
+        int swapping = Replay(s => churn[(s / 40) % churn.Length], s => true, defender: false, seconds: 2400, stepSeconds: 5, driftMeters: 90f);
+        AssertTrue(swapping >= 1 && swapping <= 14, "a release that swaps release roles is carried out, not per tick: " + swapping);
         // A release that stands, its target steady: one order, then the dead-band.
         AssertEqual(1, Replay(s => DirectChildRole.RefuseRight, s => true, defender: true, seconds: 2400, stepSeconds: 5, driftMeters: 0f), "a steady release is carried out once");
         // A release whose target drifts 90 m between orders: never an order while the last is queued (at most one per hold-plus-courier cycle).
@@ -255,7 +351,7 @@ internal static class ReserveReleasePacingTests
             CommandIntentResolution viaTree = CommandIntentResolver.ResolveForInstance(300, nodes);
             AssertTrue(viaTree.Found, "the division resolves through the tree");
             AssertEqual(released, viaTree.Intent.ReleasedFromReserve, "the division carries its corps' mark (" + released + ")");
-            AssertEqual(released, TacticalReserveCommitGate.ReleasedByAllocator(held, viaTree),
+            AssertEqual(released, TacticalReserveCommitGate.ReleasedByAllocator(held, viaTree, defender: false),
                 "vanilla's commit is allowed " + (released ? "for a real release" : "never for a role from the evidence"));
 
             CommandIntentResolution viaFallback = CommandIntentResolver.ResolveForInstance(200, Array.Empty<CommandNodeIntent>(),
@@ -264,8 +360,84 @@ internal static class ReserveReleasePacingTests
         }
         var decision = TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(playerControlled: false,
             reserveReleased: TacticalReserveCommitGate.ReleasedByAllocator(held,
-                CommandIntentResolver.ResolveForInstance(300, CommandTreeIntentAllocator.Allocate(tree, new[] { Intent(DirectChildRole.SupportMain, false, groupId: 200) })))));
+                CommandIntentResolver.ResolveForInstance(300, CommandTreeIntentAllocator.Allocate(tree, new[] { Intent(DirectChildRole.SupportMain, false, groupId: 200) })),
+                defender: false)));
         AssertEqual(TacticalReserveCommitGate.Action.Deny, decision.Action, "the gate denies the evidence-tier role");
+    }
+
+    private static CommandIntentResolution Node(DirectChildRole role, bool released)
+        => new CommandIntentResolution(true, new CommandNodeIntent("node-300", "node-300", role, DirectChildAxis.Hold, 2, 50, 1, released), "test");
+
+    private static void ADefenderAttackRoleAllowsNoCommit()
+    {
+        var held = new CommandIntentResolution(true, new CommandNodeIntent("node-300", "node-300", DirectChildRole.Reserve, DirectChildAxis.Hold, 0, 0, 0), "ledger");
+        foreach (DirectChildRole role in new[] { DirectChildRole.Main, DirectChildRole.SupportMain })
+        {
+            AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Node(role, true), defender: false), role + ": a real release on an attacking side commits");
+            AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Node(role, true), defender: true), role + ": never on a Defender side");
+        }
+        foreach (DirectChildRole role in new[] { DirectChildRole.Fix, DirectChildRole.RefuseLeft, DirectChildRole.RefuseRight })
+            AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Node(role, true), defender: true), role + ": a Defender's crisis or guard release commits");
+        // The patch reads the stance from the side's orchestrator, read-only state (CurrentBattleStance), and hands it to the rule.
+        string patch = FlankResponseTests.SourceText("Patches", "BattleReserveCommitGatePatch.cs");
+        FlankResponseTests.AssertPinned(patch, "defender = side.Army.CurrentBattleStance == BattleStance.Defender;", "the stance comes from the army orchestrator");
+        FlankResponseTests.AssertPinned(patch, "ReleasedByAllocator(resolution, allocator, defender)", "and reaches the rule");
+    }
+
+    // The replan-thrash branch's DirectChildRoleHold.Apply keeps an old intent (its old role and, with it, its old mark) when a role is held. The mark is
+    // a fact about the allocation that just ran: the army restamps every kept intent from the fresh one.
+    private static void TheMarkIsReDerivedEachTick()
+    {
+        DirectChildIntent heldOld = Intent(DirectChildRole.SupportMain, released: true);           // kept from an earlier tick, released then
+        DirectChildIntent freshNotReleased = Intent(DirectChildRole.Reserve, released: false);     // this tick: the release was taken back
+        var restamped = DirectChildAllocator.RestampReleases(new[] { heldOld }, new[] { freshNotReleased });
+        AssertFalse(restamped[0].ReleasedFromReserve, "a release the allocation took back is not carried by the intent a role hold keeps");
+        AssertEqual(DirectChildRole.SupportMain, restamped[0].Role, "the role the hold keeps is untouched");
+
+        DirectChildIntent evidenceFresh = Intent(DirectChildRole.Main, released: false);
+        AssertFalse(DirectChildAllocator.RestampReleases(new[] { heldOld }, new[] { evidenceFresh })[0].ReleasedFromReserve, "nor one the evidence tiers replaced");
+        DirectChildIntent releasedFresh = Intent(DirectChildRole.RefuseLeft, released: true);
+        AssertTrue(DirectChildAllocator.RestampReleases(new[] { Intent(DirectChildRole.Main, released: false) }, new[] { releasedFresh })[0].ReleasedFromReserve,
+            "a child the fresh allocation released is marked even when a hold keeps another committed role for it");
+        AssertFalse(DirectChildAllocator.RestampReleases(new[] { Intent(DirectChildRole.Reserve, released: true) }, new[] { releasedFresh })[0].ReleasedFromReserve,
+            "a kept Reserve is released from nothing");
+        // Matched by child id, not by position; a child missing from the fresh list is unmarked.
+        var kept = new[] { Intent(DirectChildRole.Main, true, groupId: 11), Intent(DirectChildRole.Main, true, groupId: 12) };
+        var fresh = new[] { Intent(DirectChildRole.Main, false, groupId: 12), Intent(DirectChildRole.Main, true, groupId: 11) };
+        var byId = DirectChildAllocator.RestampReleases(kept, fresh);
+        AssertTrue(byId[0].ReleasedFromReserve && !byId[1].ReleasedFromReserve, "matched by child id");
+        AssertFalse(DirectChildAllocator.RestampReleases(new[] { heldOld }, new DirectChildIntent[0])[0].ReleasedFromReserve, "absent from the fresh allocation: unmarked");
+        // Nothing to change: the same list comes back (no allocation in the steady state).
+        var stable = new[] { Intent(DirectChildRole.Main, false) };
+        AssertTrue(ReferenceEquals(stable, DirectChildAllocator.RestampReleases(stable, new[] { Intent(DirectChildRole.Main, false) })), "unchanged marks: the list itself");
+        string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
+        FlankResponseTests.AssertPinned(army, "DirectChildAllocator.RestampReleases(DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis), allocated)", "the army restamps after every pass that keeps an intent");
+    }
+
+    private static void TheRowsAreThrottledBeforeAnythingIsBuilt()
+    {
+        var rows = new RowThrottle(30f);
+        long key = RowThrottle.Key(1, 705032, 2, 7, 12);
+        AssertTrue(rows.Due(key, 100f), "the first row is due");
+        AssertFalse(rows.Due(key, 110f), "inside the throttle");
+        AssertTrue(rows.Due(RowThrottle.Key(1, 705032, 2, 7, 13), 110f), "another identity (a new target cell) is due at once");
+        AssertTrue(rows.Due(key, 131f), "due again after the throttle");
+        long begin = TestFixtures.BeginAllocationWindow();
+        for (int i = 0; i < 1000; i++) rows.Due(key, 131.5f);
+        AssertEqual(0L, TestFixtures.AllocatedSince(begin), "a row that is not due allocates nothing");
+        // Bounded: past the cap the table clears rather than growing.
+        for (int i = 0; i < RowThrottle.MaxKeys * 3; i++) rows.Due(RowThrottle.Key(i), 500f);
+        AssertTrue(rows.Count <= RowThrottle.MaxKeys, "the table stayed bounded: " + rows.Count);
+        // The runtimes decide the throttle before they build a string or a closure: the closure lives in the method that is called once due.
+        string gate = FlankResponseTests.SourceText("Tactical", "Battle", "RiverCrossingGateRuntime.cs");
+        string due = FlankResponseTests.Between(gate, "private static void EmitRow(", "private static void WriteRow(");
+        AssertFalse(due.Contains("=>"), "EmitRow creates no lambda (a closure would be allocated before the throttle)");
+        AssertTrue(due.IndexOf("Rows.Due(", StringComparison.Ordinal) >= 0 && due.IndexOf("WriteRow(", StringComparison.Ordinal) > due.IndexOf("Rows.Due(", StringComparison.Ordinal), "the throttle comes first");
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ReserveReleaseIntentProducer.cs");
+        string moveDue = FlankResponseTests.Between(producer, "private static void EmitMoveRow(", "private static void WriteMoveRow(");
+        AssertFalse(moveDue.Contains("=>"), "EmitMoveRow creates no lambda");
+        AssertFalse(moveDue.Contains("signature"), "and builds no signature string");
+        AssertTrue(moveDue.IndexOf("_moveRows.Due(", StringComparison.Ordinal) >= 0, "the throttle decides first");
     }
 
     private static void TheAllocatorSharesTheOnePooledArray()
@@ -299,6 +471,8 @@ internal static class ReserveReleasePacingTests
         FlankResponseTests.AssertPinned(producer, "pacing.HoldElapsed(id, released, role, guardPoint, snapshot.DoctrineHours)", "the hold, on the snapshot's doctrine clock");
         FlankResponseTests.AssertPinned(producer, "pacing.Admit(id,", "the dead-band");
         FlankResponseTests.AssertPinned(producer, "pacing.NoteSubmitted(id,", "the producer records what it sent");
+        FlankResponseTests.AssertPinned(producer, "snapshot.Own[index].QueuedOrders, ExecutorMoveOf(executor, id));", "the executor's last move is read back with its target");
+        FlankResponseTests.AssertPinned(producer, "outcome.Source == IntentSource.ReserveRelease", "and only this producer's move confirms");
         FlankResponseTests.AssertPinned(producer, "BattleScope.Register(\"reserve-release-producer\"", "the pacing is battle-scoped");
     }
 }

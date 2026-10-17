@@ -270,6 +270,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\RiverCrossingRule.cs" Link="Battle\RiverCrossingRule.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\CrossingPictureWait.cs" Link="Battle\CrossingPictureWait.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OrderIssueOrigin.cs" Link="Battle\OrderIssueOrigin.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\RowThrottle.cs" Link="Battle\RowThrottle.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\SingleLinkClusters.cs" Link="Battle\SingleLinkClusters.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\OpeningTerrain.cs" Link="Battle\OpeningTerrain.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PerceivedGroundLattice.cs" Link="Battle\PerceivedGroundLattice.cs" />

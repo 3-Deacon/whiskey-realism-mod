@@ -95,12 +95,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// (<see cref="CommandNodeIntent.ReleasedFromReserve"/>). A role the evidence tiers gave a group the ledger still holds is a disagreement the
         /// ledger resolves, not a release (the rule of <see cref="TryReleasedDirectChild"/>): vanilla's reserve commit stays denied for it.
         /// </summary>
-        public static bool ReleasedByAllocator(CommandIntentResolution held, CommandIntentResolution allocator)
+        public static bool ReleasedByAllocator(CommandIntentResolution held, CommandIntentResolution allocator, bool defender)
         {
             if (!held.Found || held.Intent.Role != DirectChildRole.Reserve) return false;
             if (!allocator.Found) return false;
             DirectChildRole role = allocator.Intent.Role;
-            return role != DirectChildRole.Reserve && role != DirectChildRole.Unknown && allocator.Intent.ReleasedFromReserve;
+            if (role == DirectChildRole.Reserve || role == DirectChildRole.Unknown || !allocator.Intent.ReleasedFromReserve) return false;
+            // On a Defender side Main and SupportMain are attack roles and never release a held reserve (the rule of TryReleasedDirectChild).
+            return !(defender && (role == DirectChildRole.Main || role == DirectChildRole.SupportMain));
         }
 
         /// <summary>CheckUseOfReserves 6084: vanilla returns for an inactive group or a regiment-level unit (unittyp &lt;= 13).</summary>

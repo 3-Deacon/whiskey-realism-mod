@@ -27,7 +27,7 @@ namespace WhiskeyRealism.Tactical.Battle
         private static bool _firstViaLogged;
         private static bool _waitCapLogged;
         private static readonly CrossingPictureWait Wait = new CrossingPictureWait();
-        private static readonly Dictionary<int, float> LastRowAt = new Dictionary<int, float>();
+        private static readonly RowThrottle Rows = new RowThrottle(RowSeconds);
 
         static RiverCrossingGateRuntime()
         {
@@ -37,7 +37,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 _firstViaLogged = false;
                 _waitCapLogged = false;
                 Wait.Clear();
-                LastRowAt.Clear();
+                Rows.Clear();
             });
         }
 
@@ -97,39 +97,42 @@ namespace WhiskeyRealism.Tactical.Battle
             return route.FromRegion == route.ToRegion ? "same-region" : "regions";
         }
 
-        // One row per (side, region pair, basis, verdict): the endpoints are those of the row's first leg after the throttle. The key is an int so the
-        // steady state allocates nothing; the strings are built only for a row that is written.
+        // One row per (side, region pair, basis, verdict): the endpoints are those of the row's first leg after the throttle. The throttle is decided on a
+        // numeric key before anything is built, so a row that is not due allocates nothing (no string, no closure: the lambda lives in WriteRow).
         private static void EmitRow(int alliance, CrossingVerdict verdict, in CrossingRoute route, float x0, float z0, float x1, float z1)
         {
             try
             {
                 int basisCode = route.PictureNotReady ? 1 : route.EndUnresolved ? 2 : (route.FromResolved || route.ToResolved) ? 3 : 4;
-                int key = ((((alliance & 3) * 257 + (route.FromRegion + 1)) * 257 + (route.ToRegion + 1)) * 8 + basisCode) * 8 + (int)verdict;
-                float now = Environment.TickCount * 0.001f;
-                if (LastRowAt.TryGetValue(key, out float last) && now - last < RowSeconds) return;
-                LastRowAt[key] = now;
-                CrossingRoute copy = route;
-                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalCrossingGate", TelemetrySeverity.Info,
-                    ev => ev
-                        .WithSide(alliance)
-                        .WithDecision("TacticalCrossingGate", verdict.ToString(), "side=" + alliance + "|basis=" + BasisOf(in copy))
-                        .WithField("verdict", verdict.ToString())
-                        .WithField("basis", BasisOf(in copy))
-                        .WithField("fromRegion", copy.FromRegion)
-                        .WithField("toRegion", copy.ToRegion)
-                        .WithField("fromResolved", copy.FromResolved)
-                        .WithField("toResolved", copy.ToResolved)
-                        .WithField("fromX", x0)
-                        .WithField("fromZ", z0)
-                        .WithField("toX", x1)
-                        .WithField("toZ", z1)
-                        .WithField("crossings", copy.Crossings)
-                        .WithField("lookLink", copy.LookLink));
+                long key = RowThrottle.Key(alliance, route.FromRegion, route.ToRegion, basisCode, (int)verdict);
+                if (!Rows.Due(key, Environment.TickCount * 0.001f)) return;
+                WriteRow(alliance, verdict, in route, x0, z0, x1, z1);
             }
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-battle-core:crossing-gate-row", "[CrossingGate] row failed: " + ex.GetType().Name);
             }
+        }
+
+        private static void WriteRow(int alliance, CrossingVerdict verdict, in CrossingRoute route, float x0, float z0, float x1, float z1)
+        {
+            CrossingRoute copy = route;
+            TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalCrossingGate", TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(alliance)
+                    .WithDecision("TacticalCrossingGate", verdict.ToString(), "side=" + alliance + "|basis=" + BasisOf(in copy))
+                    .WithField("verdict", verdict.ToString())
+                    .WithField("basis", BasisOf(in copy))
+                    .WithField("fromRegion", copy.FromRegion)
+                    .WithField("toRegion", copy.ToRegion)
+                    .WithField("fromResolved", copy.FromResolved)
+                    .WithField("toResolved", copy.ToResolved)
+                    .WithField("fromX", x0)
+                    .WithField("fromZ", z0)
+                    .WithField("toX", x1)
+                    .WithField("toZ", z1)
+                    .WithField("crossings", copy.Crossings)
+                    .WithField("lookLink", copy.LookLink));
         }
     }
 }

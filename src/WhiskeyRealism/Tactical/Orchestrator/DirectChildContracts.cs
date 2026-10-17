@@ -249,6 +249,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             => new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector, SupportPriority01, EnemyIntent,
                 Maneuver, ZoneRectKind, Guard, new ScreenTarget(x, z, heading), ReleasedFromReserve);
 
+        /// <summary>The same intent with its release mark set to <paramref name="released"/>; every other field is carried.</summary>
+        public DirectChildIntent WithReleasedFromReserve(bool released)
+            => new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector, SupportPriority01, EnemyIntent,
+                Maneuver, ZoneRectKind, Guard, Screen, released);
+
         private static float Clamp01(float v)
         {
             if (float.IsNaN(v) || float.IsInfinity(v)) return 0f;

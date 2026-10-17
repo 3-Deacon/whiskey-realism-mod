@@ -64,7 +64,7 @@ internal static class ReserveMigrationTests
         AssertTrue(held.Found, "ledger state found");
         AssertEqual("operations-ledger-command-state:SupportingAttack:ReserveWait", held.Reason, "reason keeps role and task");
         AssertEqual(DirectChildRole.Reserve, held.Intent.Role, "ReserveWait task holds in reserve");
-        AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain)), "allocator released it");
+        AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain), defender: false), "allocator released it");
         CommandIntentResolution noLedger = TacticalReserveCommitGate.HeldResolution(ops, LeftLine, 0, Resolved(DirectChildRole.Fix));
         AssertEqual(DirectChildRole.Fix, noLedger.Intent.Role, "no ledger state: the allocator's view");
         var mainOps = new[]

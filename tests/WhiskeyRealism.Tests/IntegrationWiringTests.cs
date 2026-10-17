@@ -39,17 +39,17 @@ internal static class IntegrationWiringTests
     private static void ReserveReleasedByAllocator()
     {
         var held = Resolved(DirectChildRole.Reserve);
-        TestHarness.AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain)), "re-roled to support");
-        TestHarness.AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Fix)), "re-roled to crisis fix");
-        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain, released: false)),
+        TestHarness.AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain), defender: false), "re-roled to support");
+        TestHarness.AssertTrue(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Fix), defender: false), "re-roled to crisis fix");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain, released: false), defender: false),
             "a role from the evidence tiers is no release: vanilla's commit stays denied (smoke 2026-10-17)");
-        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Main, released: false)), "Main from the evidence");
-        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Reserve)), "allocator still holds it");
-        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Unknown)), "no allocator opinion");
-        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, NotFound), "allocator unresolved");
-        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(Resolved(DirectChildRole.Main), Resolved(DirectChildRole.SupportMain)), "not held");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Main, released: false), defender: false), "Main from the evidence");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Reserve), defender: false), "allocator still holds it");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.Unknown), defender: false), "no allocator opinion");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(held, NotFound, defender: false), "allocator unresolved");
+        TestHarness.AssertFalse(TacticalReserveCommitGate.ReleasedByAllocator(Resolved(DirectChildRole.Main), Resolved(DirectChildRole.SupportMain), defender: false), "not held");
 
-        bool released = TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain));
+        bool released = TacticalReserveCommitGate.ReleasedByAllocator(held, Resolved(DirectChildRole.SupportMain), defender: false);
         var decision = TacticalReserveCommitGate.Decide(new TacticalReserveCommitGate.Input(playerControlled: false, reserveReleased: released));
         TestHarness.AssertEqual(TacticalReserveCommitGate.Action.Allow, decision.Action, "gate lets vanilla commit");
         TestHarness.AssertEqual("reserve-released", decision.Reason, "reason");

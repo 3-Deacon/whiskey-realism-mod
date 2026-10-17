@@ -1004,6 +1004,44 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return result ?? intents;
         }
 
+        /// <summary>
+        /// The release marks of <paramref name="kept"/> (the intents the army acts on) re-derived from <paramref name="fresh"/>, this tick's allocation:
+        /// a child is marked when the fresh allocation released it from its base Reserve and the intent it keeps is a committed role. A mark is a fact about
+        /// the allocation that just ran, so it is never carried by an intent kept from an earlier tick: a pass that keeps an old intent (a role hold; the
+        /// main-role hysteresis) would otherwise keep its old mark after the release was taken back, and the reserve-release producer and #59 would
+        /// read a release that no longer exists. Returns <paramref name="kept"/> itself when no mark changes.
+        /// </summary>
+        public static IReadOnlyList<DirectChildIntent> RestampReleases(IReadOnlyList<DirectChildIntent> kept, IReadOnlyList<DirectChildIntent> fresh)
+        {
+            if (kept == null || fresh == null) return kept;
+            DirectChildIntent[] result = null;
+            for (int i = 0; i < kept.Count; i++)
+            {
+                DirectChildIntent k = kept[i];
+                bool mark = false;
+                if (k.Role != DirectChildRole.Reserve && k.Role != DirectChildRole.Unknown)
+                {
+                    int at = i < fresh.Count && string.Equals(fresh[i].ChildId, k.ChildId, StringComparison.Ordinal) ? i : IndexOfChild(fresh, k.ChildId);
+                    mark = at >= 0 && fresh[at].ReleasedFromReserve;
+                }
+                if (mark == k.ReleasedFromReserve) continue;
+                if (result == null)
+                {
+                    result = new DirectChildIntent[kept.Count];
+                    for (int j = 0; j < kept.Count; j++) result[j] = kept[j];
+                }
+                result[i] = k.WithReleasedFromReserve(mark);
+            }
+            return result ?? kept;
+        }
+
+        private static int IndexOfChild(IReadOnlyList<DirectChildIntent> intents, string childId)
+        {
+            for (int i = 0; i < intents.Count; i++)
+                if (string.Equals(intents[i].ChildId, childId, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
         private static void Accept(MainRoleHysteresisState state, string mainId)
         {
             state.IncumbentMainId = mainId ?? string.Empty;

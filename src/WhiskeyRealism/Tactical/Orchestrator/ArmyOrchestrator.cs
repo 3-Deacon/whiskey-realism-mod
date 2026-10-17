@@ -715,11 +715,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // per-child enemy intent are not part of the evidence signature.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
             IReadOnlyList<DirectChildIntent> previousIntents = _directChildIntents;
-            _directChildIntents = DirectChildAllocator.StabilizeMain(
-                DirectChildAllocator.AllocateWithZones(
-                    _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                    perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext()),
-                _mainHysteresis);
+            IReadOnlyList<DirectChildIntent> allocated = DirectChildAllocator.AllocateWithZones(
+                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
+                perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext());
+            // Every pass that keeps an intent from an earlier tick (the main hysteresis; a role hold when one is added) is followed by the restamp: the
+            // release marks are the fresh allocation's, never carried (DirectChildAllocator.RestampReleases).
+            _directChildIntents = DirectChildAllocator.RestampReleases(DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis), allocated);
             ScreenSecondaryObjectives();
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
