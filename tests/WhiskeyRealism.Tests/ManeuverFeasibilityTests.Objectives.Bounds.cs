@@ -87,6 +87,9 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(rows.Contains("\"TacticalMainEffort\"") && rows.Contains("TelemetryCategory.Decision"), "the main-effort row is a Decision row");
         AssertTrue(rows.Contains("contest.TakeChainReissues()"), "the contest count is read and cleared by the row");
         string runtime = ReadRepoFile("src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityRuntime.cs");
+        string input = ReadRepoFile("src/WhiskeyRealism/Tactical/Orchestrator/Plays/FeasibilityRuntime.cs");
+        AssertTrue(input.Contains("input.ScreenChildCount = DirectChildAllocator.ScreenChildIds(intents, st.ScreenChildren);") && input.Contains("input.ScreenChildIds = st.ScreenChildren;"),
+            "the next evaluation is handed the children that screen");
         AssertTrue(runtime.Contains("if (Plugin.ObjectiveDoctrineEnabled())") && runtime.Contains("FeasibilityTelemetry.ObjectivePressure(army.AllianceId, st.Ledger, now);") &&
             runtime.Contains("FeasibilityTelemetry.MainEffort(army.AllianceId, st.Ledger, army.CurrentObjectivePick, band, army.SecondaryScreens, now);"),
             "the heavy path emits both rows under the doctrine flag");

@@ -817,43 +817,25 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool worksLane, bool closeEngaged, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
             IIntentSink sink)
         {
-            MoveContestState contest = MoveContestState.ForAlliance(s.Alliance);
-            if (contest == null) return 0;
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
             double issuedHours = 0.0;
             bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out _, out _, out issuedHours);
             float issuedX = 0f, issuedZ = 0f;
             if (hasIssued) executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out _);
-            // BC14O: a group in close contact is moved by vanilla's reactions to it (no-delay moves the executor leaves alone), not by a chain: not contested.
-            bool chain = Plugin.ObjectiveDoctrineEnabled() && !closeEngaged;
             double nowHours = s.DoctrineHours;
-            var observation = new ContestObservation
+            var facts = new ContestTurnFacts
             {
-                Held = worksHeld,
+                Alliance = s.Alliance, GroupId = rec.InstanceId, Tick = s.TickId, Task = task, Priority = priority, Source = source,
+                Held = worksHeld, CloseEngaged = closeEngaged,
                 Recon = ReconIntentProducer.MissionScoutId(s.Alliance) == rec.InstanceId || ReconIntentProducer.HasProbeOrHold(s.Alliance, rec.InstanceId),
                 HasPath = physical.ActiveMove || physical.Paths > 0,
-                HasLastIssued = hasIssued, LastIssuedX = issuedX, LastIssuedZ = issuedZ,
+                HasLastIssued = hasIssued, IssuedX = issuedX, IssuedZ = issuedZ, IssuedHours = issuedHours,
                 X = rec.X, Z = rec.Z, WaypointX = rec.LastWaypointX, WaypointZ = rec.LastWaypointZ,
                 HasLane = worksLane && order.PrimaryTarget.HasValue, LaneX = order.PrimaryTarget.X, LaneZ = order.PrimaryTarget.Z,
                 Stance = rec.AiStance, Works = army?.Feasibility?.HeldWorks,
-                Chain = chain, HoldTask = MoveContest.IsHoldTask(task),
-                LastIssuedHours = issuedHours, PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,
+                PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,
             };
-            ContestAction action = contest.Evaluate(rec.InstanceId, s.TickId, observation, out float holdX, out float holdZ);
-            switch (action)
-            {
-                case ContestAction.HoldStop:
-                    sink.Submit(PostureIntentPlan.ContestStop(rec.InstanceId, priority, source));
-                    return 1;
-                case ContestAction.HoldMove:
-                    sink.Submit(PostureIntentPlan.ContestMove(rec.InstanceId, holdX, holdZ, priority, source));
-                    return 1;
-                case ContestAction.Reissue:
-                    sink.Submit(PostureIntentPlan.ContestReissue(rec.InstanceId, holdX, holdZ, task, priority, source));
-                    return 1;
-                default:
-                    return 0;
-            }
+            return ContestTurn.Run(in facts, sink);
         }
 
         // #61 CanBypassStaleQueuedOrder: movement tasks may pass a stalled queued order.

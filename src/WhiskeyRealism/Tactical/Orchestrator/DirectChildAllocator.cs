@@ -941,6 +941,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// Main, Fix, Support or Reserve child, one holding player-owned strength, or a FocalAssault demonstration (it pins for the assault). A play with no
         /// Screen child screens nothing.
         /// </summary>
+        /// <summary>
+        /// The ids of the children the allocation set screening a secondary objective, in order, written to <paramref name="into"/> (at most its length):
+        /// the next evaluation leaves them out of the main body its objective table is priced for. Returns how many.
+        /// </summary>
+        internal static int ScreenChildIds(IReadOnlyList<DirectChildIntent> intents, string[] into)
+        {
+            int n = 0;
+            for (int c = 0; intents != null && c < intents.Count && n < into.Length; c++)
+                if (intents[c].HasScreenTarget) into[n++] = intents[c].ChildId;
+            return n;
+        }
+
         internal static IReadOnlyList<DirectChildIntent> ScreenSecondaryObjectives(
             IReadOnlyList<DirectChildIntent> intents,
             SecondaryObjective[] secondaries,

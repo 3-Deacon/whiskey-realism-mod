@@ -240,6 +240,14 @@ internal static partial class ManeuverFeasibilityTests
             AssertTrue(intents[1].HasScreenTarget && intents[2].HasScreenTarget, "each draws a secondary objective");
             AssertFalse(intents[0].HasScreenTarget, "the Main child is not drawn");
             AssertTrue(intents[2].ScreenX > intents[1].ScreenX, "the east child screens the east objective and the west child the west");
+            // The main effort is never one of the screens: each target stands off B's and C's place (Z 700), not A's (Z 900).
+            float standoff = WorksRules.ReserveStationMeters * axis.ForwardZ;
+            AssertNear(FeasField.Z(700f) - standoff, intents[1].ScreenZ, 1f, "the west child's target is C's place, not the main effort's");
+            AssertNear(FeasField.Z(700f) - standoff, intents[2].ScreenZ, 1f, "the east child's target is B's place, not the main effort's");
+            // The next evaluation leaves exactly these children out of the main body.
+            var screened = new string[4];
+            AssertEqual(2, DirectChildAllocator.ScreenChildIds(intents, screened), "two screening children");
+            AssertTrue(screened[0] == "child-2" && screened[1] == "child-3", "child-2 and child-3 carry to the next evaluation");
             AssertEqual(2, army.SecondaryScreens, "two screens are counted");
 
             // Flag off: no screens.

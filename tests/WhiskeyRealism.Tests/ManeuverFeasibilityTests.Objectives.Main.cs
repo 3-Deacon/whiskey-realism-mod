@@ -21,6 +21,8 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14o OBJ-MAIN-EFFORT-PLAN the plan's main effort follows the objective's band and the odds-based shift is not asked", ObjMainEffortPlan),
         ("bc14o OBJ-MAIN-EFFORT-SELECT the selection's risk weight and hold bias come from the pressure", ObjMainEffortSelect),
         ("bc14o OBJ-HYSTERESIS the main effort changes only for a rival 0.1 ahead; the latch clears with a new plan, a new day and a missing objective", ObjHysteresis),
+        ("bc14o OBJ-CONTACT-ELSEWHERE the pick runs the contact-elsewhere rule: the operation follows a perceived contact (a Defender holds) while the main effort stays on the pick", ObjContactElsewhere),
+        ("bc14o OBJ-LATCH-DIRECTOR the latched objective reaches the director through the ledger store, so a near rival does not take the main effort", ObjLatchDirector),
     };
 
     // Scenario 10/11 rows: the fixture gives the penalties directly to the pure scorer, and every director term is 0.
@@ -360,5 +362,82 @@ internal static partial class ManeuverFeasibilityTests
             AssertFalse(ObjectiveLatch.ForAlliance(1).Has, "even when the army has no plan yet");
         }
         finally { ObjectiveLatch.ForAlliance(1).Clear(); }
+    }
+
+    // An empty map objective on strong ground (the best score, no enemy seen at it) and a perceived contact elsewhere.
+    static BattlefieldObjectiveEstimate EmptyObjective() => new BattlefieldObjectiveEstimate("empty", TacticalObjectiveType.VictoryPoint, 0f, 0.9f, false, 0.8f, FeasField.X(0f), FeasField.Z(900f), 0.5f, 0.1f);
+
+    static BattlefieldObjectiveEstimate ContactObjective() => new BattlefieldObjectiveEstimate("contact", TacticalObjectiveType.VictoryPoint, 4000f, 0.9f, true, 0.45f, FeasField.X(300f), FeasField.Z(500f), 0.1f, 0.1f);
+
+    static void ObjContactElsewhere()
+    {
+        BattlefieldObjectiveEstimate[] list = { EmptyObjective(), ContactObjective() };
+        var ledger = new FeasibilityLedger();
+
+        // Without the doctrine: the shipped rule. The best score is the empty objective; the side perceives contact elsewhere, so the operation works it.
+        TacticalOperationDirectorInput plain = TacticalOperationDirectorInput.ForTest(OperationRecord.Noop, 100f, 20000f, 0.3f, 0.5f, 0.5f, list).WithStance(BattleStance.Attacker);
+        TacticalOperationDirectorDecision shipped = TacticalOperationDirector.Decide(plain);
+        AssertEqual("contact", shipped.Operation.PrimaryObjectiveId, "control: the shipped director works the perceived contact, not the empty objective");
+
+        // With the doctrine: the pick is the empty objective (the better score); the rule still runs on it, so the operation follows the contact and the
+        // main effort (the pick, which the latch and the plan's band follow) stays on the empty objective.
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(plain.WithObjectiveDoctrine(ledger, null));
+        AssertTrue(decision.Pick.Has && decision.Pick.Objective.ObjectiveId == "empty", "the pick is the empty objective");
+        AssertEqual("contact", decision.Operation.PrimaryObjectiveId, "and the operation follows the perceived contact, as without the doctrine");
+
+        // A Defender forms its line on the pick and holds ("contact-elsewhere-hold"), as without the doctrine.
+        TacticalOperationDirectorInput defender = plain.WithStance(BattleStance.Defender);
+        TacticalOperationDirectorDecision held = TacticalOperationDirector.Decide(defender.WithObjectiveDoctrine(ledger, null));
+        AssertEqual("contact-elsewhere-hold", held.Reason, "a Defender holds");
+        AssertEqual(TacticalOperationDirector.Decide(defender).Reason, held.Reason, "as without the doctrine");
+        AssertEqual("empty", held.Pick.Objective.ObjectiveId, "with the main effort still on the pick");
+    }
+
+    static void ObjLatchDirector()
+    {
+        // The table: A leads B by 0.05 (inside the 0.1 margin). The director's own terms are equal (the two objectives differ only in name and place).
+        var rows = new[]
+        {
+            new ObjectiveEstimate { Id = "A", Score = 0.60f, Feasible = true, Value = 0.6f },
+            new ObjectiveEstimate { Id = "B", Score = 0.55f, Feasible = true, Value = 0.55f },
+        };
+        var table = new TableLookup { Rows = rows };
+        TacticalOperationsLedgerRuntime Ledger()
+        {
+            var ledger = new TacticalOperationsLedgerRuntime();
+            ledger.SetRuntimeClock(0f);
+            ledger.Replace(TacticalCommanderMode.Active,
+                new[]
+                {
+                    ObjectiveRecordFor("A", enemyStrength: 1000f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld),
+                    ObjectiveRecordFor("B", enemyStrength: 1000f, friendlyAssignedStrength: 100f, status: TacticalObjectiveStatus.WeaklyHeld),
+                },
+                new StrategicBattleIntentSnapshot(0.2f, 0.3f, "theater", "campaign"),
+                new ForceAvailabilitySnapshot(3000f, 0.30f),
+                new PersonalityVector(0.4f, 0f, 0f, 0f, 0f));
+            return ledger;
+        }
+        ObjectiveLatch latch = ObjectiveLatch.ForAlliance(0);
+        try
+        {
+            latch.Clear();
+            TacticalOperationsLedgerRuntime fresh = Ledger();
+            fresh.StoreDoctrineForCommandStates(new CommandNodeOperationalState[0], BattleStance.Attacker, feasibility: table, allianceId: 0);
+            AssertEqual("A", fresh.CurrentObjectivePick.Objective.ObjectiveId, "no latch: the better objective is the main effort");
+            AssertEqual("A", latch.Id, "and it is latched");
+
+            latch.Set("B", FeasField.X(0f), FeasField.Z(600f));
+            TacticalOperationsLedgerRuntime latched = Ledger();
+            latched.StoreDoctrineForCommandStates(new CommandNodeOperationalState[0], BattleStance.Attacker, feasibility: table, allianceId: 0);
+            AssertEqual("B", latched.CurrentObjectivePick.Objective.ObjectiveId, "B latched: A leads by 0.05, inside the margin, and B keeps the main effort");
+            AssertEqual("B", latch.Id, "the latch holds B");
+
+            rows[0].Score = 0.70f;
+            TacticalOperationsLedgerRuntime ahead = Ledger();
+            ahead.StoreDoctrineForCommandStates(new CommandNodeOperationalState[0], BattleStance.Attacker, feasibility: table, allianceId: 0);
+            AssertEqual("A", ahead.CurrentObjectivePick.Objective.ObjectiveId, "a rival 0.15 ahead takes it");
+            AssertEqual("A", latch.Id, "and the latch follows");
+        }
+        finally { latch.Clear(); }
     }
 }

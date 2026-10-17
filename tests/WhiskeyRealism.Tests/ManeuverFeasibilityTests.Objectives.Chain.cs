@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using WhiskeyRealism.Util;
 using WhiskeyRealism;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
@@ -20,7 +21,9 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14o HIST-PRIOR a designer chain's next objective gains the prior from its due hour and only then; the chain is read from the side's own AIBattle", HistPrior),
         ("bc14o HIST-PRIOR-ROW the prior reaches the objective's row and its score, once", HistPriorRow),
         ("bc14o OBJ-CHAIN-CONTEST vanilla's chain move against a Whiskey move under the plan is re-issued, once per distinct waypoint and per 0.05 h", ObjChainContest),
-        ("bc14o OBJ-CHAIN-CONTEST-WIRING the posture pipeline asks the contest for a not-held group and sends the move again under the group's task", ObjChainContestWiring),
+        ("bc14o OBJ-CHAIN-CONTEST-WIRING the posture pipeline runs the contest turn for a not-held group, which sends the move again under the group's task", ObjChainContestWiring),
+        ("bc14o OBJ-CHAIN-GROUPS only a due designer chain's own group, near its head objective, is contested; vanilla's march to the guns, assault and retreat are not", ObjChainGroups),
+        ("bc14o OBJ-CHAIN-FLAG the contest turn submits a re-issue only with Enable Objective Doctrine on, and the works contest does not need the flag", ObjChainFlag),
     };
 
     static AIBattle.ObjectiveChain Chain(int strategy, params (Objectives head, float due)[] entries)
@@ -108,7 +111,7 @@ internal static partial class ManeuverFeasibilityTests
 
     static ContestInput ChainInput() => new ContestInput
     {
-        Chain = true, HasPath = true, HasLastIssued = true, IssuedUnderPlan = true, LastSeenPath = true,
+        Chain = true, ChainMove = true, HasPath = true, HasLastIssued = true, IssuedUnderPlan = true, LastSeenPath = true,
         LastSeenX = 100f, LastSeenZ = 100f, LastIssuedX = 100f, LastIssuedZ = 100f, WaypointX = 400f, WaypointZ = 400f, X = 90f, Z = 90f,
     };
 
@@ -116,6 +119,8 @@ internal static partial class ManeuverFeasibilityTests
     {
         Chain = true, HasPath = true, HasLastIssued = true, LastIssuedX = 100f, LastIssuedZ = 100f, LastIssuedHours = issuedHours, PlanStartHours = planStart,
         NowHours = now, WaypointX = waypointX, WaypointZ = waypointZ, X = 90f, Z = 90f,
+        // The chain's head stands where vanilla sends the group: at the waypoint.
+        HasChainObjective = true, ChainObjectiveX = waypointX, ChainObjectiveZ = waypointZ,
     };
 
     static void ObjChainContest()
@@ -202,11 +207,167 @@ internal static partial class ManeuverFeasibilityTests
 
     static void ObjChainContestWiring()
     {
+        // The producer builds the facts and runs the turn; the turn is pure and run below (OBJ-CHAIN-FLAG, OBJ-CHAIN-GROUPS).
         string producer = ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/Producers/PostureIntentProducer.cs");
         AssertTrue(producer.Contains("Plugin.EnemyWorksDoctrineEnabled() || Plugin.ObjectiveDoctrineEnabled()"), "the contest turn runs under either flag");
         string contest = MethodBody(producer, "private static int WorksContest(");
-        AssertTrue(contest != null && contest.Contains("Chain = chain") && contest.Contains("!closeEngaged") && contest.Contains("case ContestAction.Reissue:") &&
-            contest.Contains("PostureIntentPlan.ContestReissue(rec.InstanceId, holdX, holdZ, task, priority, source)"), "the Reissue answer is sent as the group's own task, and an engaged group is not contested");
-        AssertTrue(contest.Contains("MoveContest.IsHoldTask(task)"), "a hold task is not contested");
+        AssertTrue(contest != null && contest.Contains("CloseEngaged = closeEngaged") && contest.Contains("Task = task") && contest.Contains("ContestTurn.Run(in facts, sink)"),
+            "the producer hands the turn the group's task and whether it is engaged");
+    }
+
+    // A recording sink for the contest turn.
+    sealed class TurnSink : IIntentSink
+    {
+        public readonly List<BattleOrderIntent> Intents = new List<BattleOrderIntent>();
+        public void Submit(in BattleOrderIntent intent) => Intents.Add(intent);
+    }
+
+    // A due chain's own group at 700 (group 41) with its head at (500, 500); the move Whiskey issued it, at (100, 100) 1 h ago, under a plan 2 h old.
+    static ContestTurnFacts TurnFacts(int group, long tick, double now, float waypointX, float waypointZ, bool engaged = false, CommandTaskType task = CommandTaskType.AttackObjective)
+        => new ContestTurnFacts
+        {
+            Alliance = 0, GroupId = group, Tick = tick, Task = task, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor,
+            CloseEngaged = engaged, HasPath = true, HasLastIssued = true, IssuedX = 100f, IssuedZ = 100f, IssuedHours = now - 1.0, PlanStartHours = now - 2.0, NowHours = now,
+            X = 90f, Z = 90f, WaypointX = waypointX, WaypointZ = waypointZ,
+        };
+
+    static void ObjChainFlag()
+    {
+        bool before = Plugin.ObjectiveDoctrine;
+        DueChainTable due = DueChainTable.ForAlliance(0);
+        MoveContestState.ForAlliance(0).TakeChainReissues();
+        try
+        {
+            due.Clear();
+            due.Add(41, 500f, 500f);
+            // Doctrine on: the group first seen without a path is not a new move; then vanilla's chain move to the head: one re-issue of Whiskey's move.
+            Plugin.ObjectiveDoctrine = true;
+            var quiet = new TurnSink();
+            ContestTurnFacts idle = TurnFacts(41, 1, 10.0, 100f, 100f);
+            AssertEqual(0, ContestTurn.Run(in idle, quiet), "the group walks Whiskey's own move: nothing");
+            var on = new TurnSink();
+            ContestTurnFacts moved = TurnFacts(41, 2, 10.1, 505f, 495f);
+            AssertEqual(1, ContestTurn.Run(in moved, on), "doctrine on: vanilla's chain move to the head is answered");
+            AssertEqual(OrderChannel.Move, on.Intents[0].Channel, "with a Move");
+            AssertTrue((on.Intents[0].Flags & IntentFlags.Contest) != 0 && on.Intents[0].Reason == "chain-contest", "flagged Contest, reason chain-contest");
+            AssertTrue(on.Intents[0].TargetX == 100f && on.Intents[0].TargetZ == 100f, "back to the move Whiskey issued");
+            AssertEqual(CommandTaskType.AttackObjective, on.Intents[0].Task, "under the group's own task");
+
+            // Doctrine off: the same facts, the same group, the same table: no contest Move.
+            MoveContestState.ForAlliance(0).TakeChainReissues();
+            Plugin.ObjectiveDoctrine = false;
+            var off = new TurnSink();
+            ContestTurnFacts again = TurnFacts(41, 3, 11.0, 100f, 100f);
+            ContestTurn.Run(in again, off);
+            ContestTurnFacts movedOff = TurnFacts(41, 4, 11.1, 505f, 495f);
+            AssertEqual(0, ContestTurn.Run(in movedOff, off), "doctrine off: vanilla's chain move is left alone");
+            AssertEqual(0, off.Intents.Count, "and no intent is submitted at all");
+            AssertEqual(0, MoveContestState.ForAlliance(0).TakeChainReissues(), "nor counted");
+
+            // The works contest is the works doctrine's: a held group walking into the band is stopped with the objective doctrine off.
+            var works = new TurnSink();
+            ContestTurnFacts held = TurnFacts(52, 5, 12.0, 100f, 100f);
+            held.Held = true; held.Works = Strip; held.HasPath = false; held.HasLastIssued = false; held.X = 100f; held.Z = 100f;
+            ContestTurn.Run(in held, works);
+            ContestTurnFacts walks = held;
+            walks.Tick = 6; walks.HasPath = true; walks.WaypointX = 100f; walks.WaypointZ = 450f; walks.Z = 120f;
+            AssertEqual(1, ContestTurn.Run(in walks, works), "a held group walking into the works band is contested with the objective doctrine off");
+            AssertEqual(OrderChannel.Stop, works.Intents[0].Channel, "with the hold's stop");
+        }
+        finally
+        {
+            Plugin.ObjectiveDoctrine = before;
+            due.Clear();
+            MoveContestState.ForAlliance(0).TakeChainReissues();
+            BattleScope.ResetAll();
+        }
+    }
+
+    static void ObjChainGroups()
+    {
+        // The table: a due chain's own group and where its head stands; dynamic chains, wait entries, undue heads, unknown heads and missing groups add none.
+        Objectives a = UninitialisedObjective("A", 1, 70), b = UninitialisedObjective("B", 1, 30), unknown = UninitialisedObjective("Z", 1, 5);
+        Regiment g1 = (Regiment)RuntimeHelpers.GetUninitializedObject(typeof(Regiment)), g2 = (Regiment)RuntimeHelpers.GetUninitializedObject(typeof(Regiment));
+        Func<Objectives, string> idOf = o => ReferenceEquals(o, a) ? "A" : ReferenceEquals(o, b) ? "B" : null;
+        Func<Regiment, int> groupIdOf = r => ReferenceEquals(r, g1) ? 41 : ReferenceEquals(r, g2) ? 42 : 0;
+        DueChainTable.PointLookup pointOf = (string id, out float x, out float z) =>
+        {
+            x = id == "A" ? 500f : 800f;
+            z = id == "A" ? 500f : 200f;
+            return id == "A" || id == "B";
+        };
+        var table = new DueChainTable();
+        AIBattle.ObjectiveChain due = Chain(3, (a, 10f)), later = Chain(3, (b, 99f)), dynamic = Chain(-1, (b, 10f)), stranger = Chain(3, (unknown, 10f)), noGroup = Chain(3, (b, 10f));
+        due.linegroup_centerunit = g1;
+        later.linegroup_centerunit = g2;
+        dynamic.linegroup_centerunit = g2;
+        stranger.linegroup_centerunit = g2;
+        // noGroup has no linegroup_centerunit.
+        AssertEqual(1, ObjectiveChains.FillGroups(new[] { due, later, dynamic, stranger, noGroup }, 38f, idOf, groupIdOf, pointOf, table), "one due chain with a group and a known head");
+        AssertTrue(table.TryFind(41, out float ox, out float oz) && ox == 500f && oz == 500f, "its group and where its head stands");
+        AssertFalse(table.TryFind(42, out _, out _), "the others' groups are not in it");
+        // A null head (a wait entry) adds none until vanilla drops it.
+        AIBattle.ObjectiveChain waiting = Chain(3, (null, 10f), (b, 12f));
+        waiting.linegroup_centerunit = g2;
+        AssertEqual(0, ObjectiveChains.FillGroups(new[] { waiting }, 38f, idOf, groupIdOf, pointOf, table), "a wait entry names no head");
+        AssertEqual(0, table.Count, "the table was cleared first");
+
+        // The decision: an idle group 200 m from the fight that vanilla's march to the sound of guns moved (no chain, no head near the waypoint) is not
+        // contested even though Whiskey moved it under this plan; the due chain's own group moved to its head is.
+        ContestInput guns = ChainInput();
+        guns.ChainMove = false;
+        AssertEqual(ContestAction.None, MoveContest.Decide(in guns), "a march to the sound of guns is vanilla's reaction to the fight: not contested");
+        ContestInput toHead = ChainInput();
+        AssertEqual(ContestAction.Reissue, MoveContest.Decide(in toHead), "a due chain's own move to its head is");
+
+        var state = new MoveContestState();
+        ContestObservation march = ChainObservation(10.0, 500f, 500f);       // the chain's head is not at the waypoint for these two groups
+        march.HasChainObjective = false;
+        AssertEqual(ContestAction.None, state.Evaluate(61, 1, in march, out _, out _), "a group with no chain: the memory has nothing to compare");
+        ContestObservation guns2 = ChainObservation(10.2, 560f, 100f);
+        guns2.HasChainObjective = false;
+        AssertEqual(ContestAction.None, state.Evaluate(61, 2, in guns2, out _, out _), "an idle group 200 m from the fight, sent to the guns, is left to vanilla");
+        ContestObservation chainGroup = ChainObservation(10.3, 500f, 500f);
+        chainGroup.ChainObjectiveX = 500f;
+        chainGroup.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.Reissue, state.Evaluate(62, 1, in chainGroup, out _, out _), "a due chain's own group sent to its head is re-issued");
+        // The same chain group sent to the guns, 400 m from its head, is not.
+        ContestObservation chainToGuns = ChainObservation(10.6, 900f, 100f);
+        chainToGuns.ChainObjectiveX = 500f;
+        chainToGuns.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.None, state.Evaluate(62, 2, in chainToGuns, out _, out _), "the chain's own group moved by vanilla's march to the guns, away from its head, is not contested");
+        ContestObservation shifted = ChainObservation(10.9, 560f, 560f);
+        shifted.ChainObjectiveX = 500f;
+        shifted.ChainObjectiveZ = 500f;
+        AssertEqual(ContestAction.Reissue, state.Evaluate(62, 3, in shifted, out _, out _), "a waypoint 85 m from the head is still the chain's (vanilla's spacing shift)");
+
+        // Through the turn: the table decides which groups the contest sees at all.
+        bool before = Plugin.ObjectiveDoctrine;
+        DueChainTable alliance = DueChainTable.ForAlliance(0);
+        try
+        {
+            Plugin.ObjectiveDoctrine = true;
+            alliance.Clear();
+            alliance.Add(71, 500f, 500f);
+            var sink = new TurnSink();
+            ContestTurnFacts idle71 = TurnFacts(71, 1, 20.0, 100f, 100f), idle72 = TurnFacts(72, 1, 20.0, 100f, 100f);
+            ContestTurn.Run(in idle71, sink);
+            ContestTurn.Run(in idle72, sink);
+            ContestTurnFacts chain71 = TurnFacts(71, 2, 20.1, 500f, 500f), guns72 = TurnFacts(72, 2, 20.1, 500f, 500f);
+            AssertEqual(1, ContestTurn.Run(in chain71, sink), "the table's group moved to its head: contested");
+            AssertEqual(0, ContestTurn.Run(in guns72, sink), "another group moved to the very same place by vanilla: not in the table, not contested");
+            ContestTurnFacts engaged71 = TurnFacts(71, 3, 20.3, 505f, 495f, engaged: true);
+            AssertEqual(0, ContestTurn.Run(in engaged71, sink), "a chain group in close contact is left to vanilla's reaction");
+        }
+        finally
+        {
+            Plugin.ObjectiveDoctrine = before;
+            alliance.Clear();
+            BattleScope.ResetAll();
+        }
+
+        // The runtime fills the table with the evaluation and clears it when the doctrine is off or the chains cannot be read.
+        string runtime = ReadRepoFile("src/WhiskeyRealism/Tactical/Battle/Objectives/ObjectiveRuntime.cs");
+        AssertTrue(runtime.Contains("groups?.Clear();") && runtime.Contains("ObjectiveChains.FillGroups(own.objectivechain,"), "the evaluation refreshes the chains' groups and clears them when it cannot");
     }
 }

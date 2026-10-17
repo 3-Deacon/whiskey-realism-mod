@@ -28,6 +28,49 @@ internal static partial class ManeuverFeasibilityTests
         return null;
     }
 
+    // The allow-list (user decision D39 restated as a list): the vanilla members the objective runtime, the chains' reader and the capture's live read may
+    // touch. A member of a vanilla receiver that is not listed is an enemy-state read nobody approved, whatever it is called: the deny-list above names
+    // the aggregates we know of, this names the only reads there are.
+    static readonly (string receiver, string[] members)[] VanillaReads =
+    {
+        ("bunits", new[] { "GetSideFromAlliance", "GetVictoryPointsRelation", "sideinformation" }),
+        ("own", new[] { "objectivechain" }),
+        ("GamePrefs", new[] { "continuousobjectivepoints" }),
+        ("GameVars", new[] { "currenttimefromstart" }),
+        ("group", new[] { "gameObject" }),
+        ("gameObject", new[] { "GetInstanceID" }),
+        ("obj", new[] { "owner", "points" }),
+        ("chain", new[] { "usedstrategyid", "objectives", "objectivetimetomove", "linegroup_centerunit" }),
+    };
+
+    // The members read through an indexer: the side's accrued points of the continuous mode, and a chain's own group.
+    static readonly (string indexed, string member, bool whole)[] IndexedReads = { ("sideinformation", "objectivepoints", true), ("chains", "linegroup_centerunit", false) };
+
+    static string FirstUnlistedRead(string text)
+    {
+        foreach (string line in text.Split('\n'))
+        {
+            string code = line;
+            int comment = code.IndexOf("//", StringComparison.Ordinal);
+            if (comment >= 0) code = code.Substring(0, comment);
+            foreach ((string receiver, string[] members) in VanillaReads)
+            {
+                foreach (Match m in Regex.Matches(code, @"\b" + receiver + @"\.(\w+)"))
+                    if (!members.Contains(m.Groups[1].Value)) return receiver + "." + m.Groups[1].Value + " in: " + line.Trim();
+            }
+            foreach ((string indexed, string member, bool whole) in IndexedReads)
+            {
+                // The side table is read only through its indexer: taking it whole could read any side's fields.
+                if (whole)
+                    foreach (Match m in Regex.Matches(code, @"\b" + indexed + @"\b"))
+                        if (!Regex.IsMatch(code.Substring(m.Index), @"^" + indexed + @"\[[^\]]*\]\." + member + @"\b")) return indexed + " not read as ." + member + " in: " + line.Trim();
+                foreach (Match m in Regex.Matches(code, @"\b" + indexed + @"\[[^\]]*\]\.(\w+)"))
+                    if (m.Groups[1].Value != member) return indexed + "[...]." + m.Groups[1].Value + " in: " + line.Trim();
+            }
+        }
+        return null;
+    }
+
     internal static string[] Bc14oFiles()
     {
         string[] relative =
@@ -64,6 +107,20 @@ internal static partial class ManeuverFeasibilityTests
         AssertTrue(FirstObjectiveRead("// vanilla's totalpoints are never read") == null, "a comment naming the rule is no read");
         AssertTrue(FirstObjectiveRead("float v = bunits.GetVictoryPointsRelation(side);") == null, "the displayed bar is the one accepted read");
 
+        // The allow-list scanner fires on a planted read of an enemy field nobody listed, and passes every listed read.
+        AssertTrue(FirstUnlistedRead("float f = bunits.sideinformation[1 - side].totalactiveforce;") != null, "the allow-list fires on the enemy's totalactiveforce");
+        AssertTrue(FirstUnlistedRead("var ai = bunits.aibattle;") != null, "on an AIBattle read through bunits");
+        AssertTrue(FirstUnlistedRead("int m = own.macroai;") != null, "on another member of the side's AIBattle");
+        AssertTrue(FirstUnlistedRead("var all = bunits.sideinformation;") != null, "on the side table taken whole");
+        AssertTrue(FirstUnlistedRead("var theirs = bunits.sideinformation[1 - side]; float f = theirs.totalactiveforce;") != null, "and on a side record taken into a variable");
+        AssertTrue(FirstUnlistedRead("bool c = GamePrefs.aiusefartherobjectivesforscreenstance;") != null, "on another preference");
+        AssertTrue(FirstUnlistedRead("float a = obj.alliancepoints[0];") != null, "on an objective's other fields");
+        AssertTrue(FirstUnlistedRead("var r = chains[c].reservegroups;") != null, "on another member of a chain");
+        AssertTrue(FirstUnlistedRead("float p = bunits.sideinformation[side].objectivepoints;") == null, "the accrued points of the continuous mode are listed");
+        AssertTrue(FirstUnlistedRead("float bar = bunits.GetVictoryPointsRelation(side);") == null, "and the displayed bar");
+        AssertTrue(FirstUnlistedRead("Regiment g = chains[c].linegroup_centerunit; int id = group.gameObject.GetInstanceID();") == null, "and a chain's own group and its id");
+        AssertTrue(FirstUnlistedRead("// bunits.sideinformation[0].totalactiveforce is never read") == null, "a comment is no read");
+
         string[] files = Bc14oFiles();
         foreach (string file in files)
         {
@@ -73,5 +130,18 @@ internal static partial class ManeuverFeasibilityTests
             string literal = FirstMarchLiteral(text);
             AssertTrue(literal == null, Path.GetFileName(file) + " carries a vanilla literal: " + literal);
         }
+
+        // The files that touch vanilla's state read only what the allow-list names.
+        foreach (string name in new[] { "ObjectiveRuntime.cs", "ObjectiveChains.cs" })
+        {
+            string file = files.First(f => Path.GetFileName(f) == name);
+            string unlisted = FirstUnlistedRead(File.ReadAllText(file));
+            AssertTrue(unlisted == null, name + " reads vanilla state nobody listed: " + unlisted);
+        }
+        string adapter = TestFixtures.ReadRepoFile("src/WhiskeyRealism/Tactical/Orchestrator/TacticalVisionRuntimeAdapter.cs");
+        string live = MethodBody(adapter, "internal static MapObjectiveCapture ReadObjectiveLive(");
+        AssertTrue(live != null, "the capture's live read is found");
+        string liveUnlisted = FirstUnlistedRead(live);
+        AssertTrue(liveUnlisted == null, "ReadObjectiveLive reads vanilla state nobody listed: " + liveUnlisted);
     }
 }

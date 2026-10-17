@@ -52,9 +52,16 @@ internal static partial class ManeuverFeasibilityTests
         // BC14O: no objective table.
         public WhiskeyRealism.Tactical.Battle.ObjectivePressure PressureValue;
         public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => PressureValue;
-        public int ObjectiveCount => 0;
+        /// <summary>BC14O: the objective table this lookup publishes (null: none).</summary>
+        public WhiskeyRealism.Tactical.Battle.ObjectiveEstimate[] Rows;
+        public int ObjectiveCount => Rows == null ? 0 : Rows.Length;
         public bool HoldsPlayerOwned(string childId) => false;
-        public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate) { estimate = default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate); return false; }
+        public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate)
+        {
+            bool has = Rows != null && index >= 0 && index < Rows.Length;
+            estimate = has ? Rows[index] : default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate);
+            return has;
+        }
         public int ThreatCount => 0;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public double EvaluatedHours => 0.0;

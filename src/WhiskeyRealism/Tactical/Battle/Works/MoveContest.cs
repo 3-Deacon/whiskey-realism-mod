@@ -35,8 +35,10 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// BC14O (requirement-historical-chain): the chain contest applies to this group (Enable Objective Doctrine on, the group not engaged), its
         /// task is a hold (a held group is never marched), and the move Whiskey last issued it was issued at or after the current plan began.
+        /// <see cref="ChainMove"/>: the group is a due chain's own group and its waypoint is near the chain's head objective, that is, the move is
+        /// the chain's and not one of vanilla's reactions (march to the sound of guns, an assault, the outflanked retreat).
         /// </summary>
-        public bool Chain, HoldTask, IssuedUnderPlan;
+        public bool Chain, HoldTask, IssuedUnderPlan, ChainMove;
     }
 
     /// <summary>What the pipeline knows of a group this tick: the raw reads <see cref="MoveContestState.Evaluate"/> turns into a <see cref="ContestInput"/>.</summary>
@@ -46,6 +48,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public float X, Z, WaypointX, WaypointZ, LastIssuedX, LastIssuedZ;
         /// <summary>BC14O: see <see cref="ContestInput.Chain"/>, <see cref="ContestInput.HoldTask"/>; the hour of the last issued move and of the plan's start, and now (doctrine hours).</summary>
         public bool Chain, HoldTask;
+        /// <summary>BC14O: the group is a due designer chain's own group (<c>linegroup_centerunit</c>) and the head objective stands at (<see cref="ChainObjectiveX"/>, <see cref="ChainObjectiveZ"/>).</summary>
+        public bool HasChainObjective;
+        public float ChainObjectiveX, ChainObjectiveZ;
         public double LastIssuedHours, PlanStartHours, NowHours;
         /// <summary>A former fix's lane (its fix target, outside the band): its hold point, instead of where it stands at the first hold.</summary>
         public bool HasLane;
@@ -88,12 +93,13 @@ namespace WhiskeyRealism.Tactical.Battle
             return Distance(c.X, c.Z, c.HoldX, c.HoldZ) <= OrderArbiter.DedupeMeters ? ContestAction.HoldStop : ContestAction.HoldMove;
         }
 
-        // BC14O (requirement-historical-chain): vanilla moves a chain's group at the due hour with no stance gate and no ownership test. A group that
-        // has a Whiskey move under the current plan, whose task is not a hold, and whose waypoint has moved more than the tolerance to a point that is
-        // not that move, is sent the move again.
+        // BC14O (requirement-historical-chain): vanilla moves a chain's group at the due hour with no stance gate and no ownership test. A due chain's
+        // own group that has a Whiskey move under the current plan, whose task is not a hold, and whose waypoint has moved more than the tolerance to
+        // the chain's objective (a point that is not that move), is sent the move again. A move of any other kind, or of any other group, is vanilla's
+        // reaction to the fight (march to the sound of guns, an assault move, the outflanked retreat) and is never contested.
         private static ContestAction DecideChain(in ContestInput c)
         {
-            if (!c.Chain || c.HoldTask || !c.HasPath || !c.HasLastIssued || !c.IssuedUnderPlan) return ContestAction.None;
+            if (!c.Chain || !c.ChainMove || c.HoldTask || !c.HasPath || !c.HasLastIssued || !c.IssuedUnderPlan) return ContestAction.None;
             return IsNewMove(in c) ? ContestAction.Reissue : ContestAction.None;
         }
 
@@ -272,12 +278,12 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         // BC14O: one not-held group's chain turn. The answer's target (holdX, holdZ) is the move Whiskey last issued. A group the chain does not apply to
-        // forgets its memory; a re-issue is bounded to one per ReissueMinHours, and counted.
+        // (the contest is off for it, or it is not a due chain's own group) forgets its memory; a re-issue is bounded to one per ReissueMinHours, and counted.
         private ContestAction EvaluateChain(int groupId, in ContestObservation o, out float targetX, out float targetZ)
         {
             targetX = o.LastIssuedX;
             targetZ = o.LastIssuedZ;
-            if (!o.Chain)
+            if (!o.Chain || !o.HasChainObjective)
             {
                 _chains.Remove(groupId);
                 return ContestAction.None;
@@ -286,6 +292,8 @@ namespace WhiskeyRealism.Tactical.Battle
             var input = new ContestInput
             {
                 Chain = true, HoldTask = o.HoldTask, HasPath = o.HasPath, HasLastIssued = o.HasLastIssued,
+                ChainMove = o.HasChainObjective && o.HasPath &&
+                    MoveContest.Distance(o.WaypointX, o.WaypointZ, o.ChainObjectiveX, o.ChainObjectiveZ) <= DueChainTable.NearObjectiveMeters,
                 IssuedUnderPlan = o.HasLastIssued && o.LastIssuedHours >= o.PlanStartHours,
                 LastSeenPath = m.LastSeenPath, X = o.X, Z = o.Z, WaypointX = o.WaypointX, WaypointZ = o.WaypointZ, LastSeenX = m.LastSeenX, LastSeenZ = m.LastSeenZ,
                 LastIssuedX = o.LastIssuedX, LastIssuedZ = o.LastIssuedZ,

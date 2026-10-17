@@ -400,11 +400,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 // The children that screen a secondary objective at the previous allocation are not in the main body the objectives are priced for.
                 var intents = army.CurrentDirectChildIntents;
-                int screens = 0;
-                for (int c = 0; c < intents.Count && screens < st.ScreenChildren.Length; c++)
-                    if (intents[c].HasScreenTarget) st.ScreenChildren[screens++] = intents[c].ChildId;
                 input.ScreenChildIds = st.ScreenChildren;
-                input.ScreenChildCount = screens;
+                input.ScreenChildCount = DirectChildAllocator.ScreenChildIds(intents, st.ScreenChildren);
                 ObjectiveRuntime.Fill(bunits, st.Alliance, snapshot, (float)input.DaylightHours, ref input);
             }
         }

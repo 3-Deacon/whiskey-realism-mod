@@ -27,6 +27,29 @@ namespace WhiskeyRealism.Tactical.Battle
         // One delegate for the process: a method group converted at the call would allocate one per evaluation.
         private static readonly Func<Objectives, string> IdOfObjective = TacticalStableSceneCache.IdOf;
 
+        // The chain heads' places come from the facts just read (the capture's own points), through one delegate for the process.
+        private static ObjectiveFact[] _lookFacts;
+        private static int _lookCount;
+        private static readonly DueChainTable.PointLookup PointOfFact = FactPoint;
+
+        private static bool FactPoint(string id, out float x, out float z)
+        {
+            for (int i = 0; _lookFacts != null && i < _lookCount; i++)
+            {
+                if (!string.Equals(_lookFacts[i].Id, id, StringComparison.Ordinal)) continue;
+                x = _lookFacts[i].X;
+                z = _lookFacts[i].Z;
+                return true;
+            }
+            x = z = 0f;
+            return false;
+        }
+
+        // The id the battle snapshot gives the group (BattleSnapshotBuilder: the group's GameObject instance id).
+        private static int GroupInstanceId(Regiment group) => group.gameObject.GetInstanceID();
+
+        private static readonly Func<Regiment, int> GroupInstanceIdOf = GroupInstanceId;
+
         private static void Reset()
         {
             for (int i = 0; i < Facts.Length; i++)
@@ -48,6 +71,8 @@ namespace WhiskeyRealism.Tactical.Battle
             input.HasClock = false;
             input.DueChainObjectiveIds = null;
             input.DueChainCount = 0;
+            DueChainTable groups = DueChainTable.ForAlliance(alliance);
+            groups?.Clear();
             if (!Plugin.ObjectiveDoctrineEnabled() || bunits == null || alliance < 0 || alliance >= Facts.Length) return;
             try
             {
@@ -74,6 +99,10 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     input.DueChainCount = ObjectiveChains.CollectDue(own.objectivechain, GameVars.currenttimefromstart, IdOfObjective, DueChains[alliance]);
                     input.DueChainObjectiveIds = DueChains[alliance];
+                    // The chains' own groups and where their heads stand, for the chain contest (it answers those groups only).
+                    _lookFacts = facts;
+                    _lookCount = n;
+                    ObjectiveChains.FillGroups(own.objectivechain, GameVars.currenttimefromstart, IdOfObjective, GroupInstanceIdOf, PointOfFact, groups);
                 }
             }
             catch (Exception e)
@@ -83,6 +112,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 input.HasClock = false;
                 input.DueChainObjectiveIds = null;
                 input.DueChainCount = 0;
+                groups?.Clear();
                 OnceLog.Warning("tactical-battle-core:objective-runtime", "[Objectives] the objectives or the victory bar could not be read, the shipped choice stands: "
                     + e.GetType().Name + " " + e.Message);
             }

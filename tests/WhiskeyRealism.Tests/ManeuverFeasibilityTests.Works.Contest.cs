@@ -207,10 +207,13 @@ internal static partial class ManeuverFeasibilityTests
         FlankResponseTests.AssertPinned(contested, "contestedGroup.State = state;", "its state");
         AssertTrue(contested.IndexOf("contestedGroup.Has = true;", StringComparison.Ordinal) < contested.IndexOf("return true;", StringComparison.Ordinal),
             "before the contest returns");
-        FlankResponseTests.AssertPinned(run, "MoveContestState.ForAlliance(s.Alliance)", "the side's memory");
-        FlankResponseTests.AssertPinned(run, ".Evaluate(rec.InstanceId, s.TickId,", "asked for each held group once per arbiter tick");
-        FlankResponseTests.AssertPinned(run, "PostureIntentPlan.ContestStop(", "a stop near the hold point");
-        FlankResponseTests.AssertPinned(run, "PostureIntentPlan.ContestMove(", "a move back beyond it");
+        // The turn itself (BC14O moved it into the pure ContestTurn so the harness can run it): the side's memory, once per arbiter tick, the answers.
+        string turn = FlankResponseTests.SourceText("Tactical", "Battle", "Works", "ContestTurn.cs");
+        FlankResponseTests.AssertPinned(run, "ContestTurn.Run(", "the producer runs the turn");
+        FlankResponseTests.AssertPinned(turn, "MoveContestState.ForAlliance(f.Alliance)", "the side's memory");
+        FlankResponseTests.AssertPinned(turn, ".Evaluate(f.GroupId, f.Tick,", "asked for each held group once per arbiter tick");
+        FlankResponseTests.AssertPinned(turn, "PostureIntentPlan.ContestStop(", "a stop near the hold point");
+        FlankResponseTests.AssertPinned(turn, "PostureIntentPlan.ContestMove(", "a move back beyond it");
         FlankResponseTests.AssertPinned(run, "Plugin.EnemyWorksDoctrineEnabled()", "behind Enable Enemy Works Doctrine");
         FlankResponseTests.AssertPinned(run, "ReconIntentProducer.MissionScoutId(", "a recon mission group is not contested");
         FlankResponseTests.AssertPinned(run, "executor.LastIssuedMove(", "against the move Whiskey last issued");
