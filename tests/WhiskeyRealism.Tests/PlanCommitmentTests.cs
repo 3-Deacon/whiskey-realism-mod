@@ -15,6 +15,7 @@ internal static class PlanCommitmentTests
             ("plan commitment holds a non-crisis trigger inside the commitment time", NonCrisisTriggerIsHeldInsideTheCommitment),
             ("plan commitment names the hold distinctly from the committed wings", TheHoldHasItsOwnSuppressionLiteral),
             ("plan commitment lets a non-crisis trigger through once the commitment has passed, with the score margin", NonCrisisTriggerAfterTheCommitmentKeepsThePlan),
+            ("plan commitment a review outside a crisis keeps a plan its challenger beats by less than the margin, a crisis does not", TheMarginAppliesOutsideACrisisOnly),
             ("plan commitment lets a morale collapse replan inside the commitment", CrisisReplansInsideTheCommitment),
             ("plan commitment lets any trigger through while a group is outflanked severely", FlankCrisisUnlocksAnyTrigger),
             ("plan commitment classifies the crisis triggers", CrisisClassification),
@@ -73,6 +74,40 @@ internal static class PlanCommitmentTests
         AssertTrue(after.Kept, "the plan is held unless a challenger beats it by the margin");
         AssertEqual(held, orch.CurrentPlan.PlanId, "same plan");
         AssertNear(0.9f, orch.LastReplanBaseline.ReservesCommitted, 0.001f, "a kept replan refreshes the baseline so the edge does not refire");
+    }
+
+    private static void TheMarginAppliesOutsideACrisisOnly()
+    {
+        var ev = new ArmyEvidence(1f, TerrainKind.Open, 2);
+        var unknown = new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null);
+        // The catalog's own pick, and a plan the margin keeps although the pick is another one.
+        var probe = Orch();
+        probe.Replan(ev, unknown, hysteresis: false, "probe");
+        BattlePlanId top = probe.CurrentPlan.PlanId;
+        var into = new BattlePlanId[24];
+        int n = probe.EligiblePlans(ev, into);
+        BattlePlanId marginal = BattlePlanId.Unknown;
+        for (int i = 0; i < n && marginal == BattlePlanId.Unknown; i++)
+        {
+            if (into[i] == top) continue;
+            var o = Orch();
+            o.SetPlanForTesting(new TacticalBattlePlan(into[i], BattlePhase.MainEffort, 2, null, null, 1.2f, 0f, 7));
+            if (o.Replan(ev, unknown, hysteresis: true, "probe")) marginal = into[i];
+        }
+        AssertTrue(marginal != BattlePlanId.Unknown, "the fixture has a plan within the margin of the pick");
+
+        var review = Orch();
+        review.SetPlanForTesting(new TacticalBattlePlan(marginal, BattlePhase.MainEffort, 2, null, null, 1.2f, 0f, 7));
+        ReplanOutcome after = Step(review, ArmyReplanTriggers.PlanCommitmentBattleSeconds + 1f, reserves: 0.9f);
+        AssertEqual(ReplanTrigger.ReserveExhaustion, after.Trigger, "a review, not a crisis");
+        AssertTrue(after.Kept, "kept");
+        AssertEqual(marginal, review.CurrentPlan.PlanId, "the plan within the margin stays");
+
+        var crisis = Orch();
+        crisis.SetPlanForTesting(new TacticalBattlePlan(marginal, BattlePhase.MainEffort, 2, null, null, 1.2f, 0f, 7));
+        ReplanOutcome c = Step(crisis, 600f, morale: 0.3f);
+        AssertEqual(ReplanTrigger.CasualtyThreshold, c.Trigger, "a crisis");
+        AssertEqual(top, crisis.CurrentPlan.PlanId, "re-picks without the margin");
     }
 
     private static void CrisisReplansInsideTheCommitment()
