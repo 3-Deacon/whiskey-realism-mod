@@ -703,6 +703,7 @@ internal static class CensusRows
         "SecessionRecord.OwnTroops | P/TheaterPlanner.cs | F2 TheaterPlanner.Garrisons (vanilla's alliancetroops[0]: a garrison alone blocks the secession)",
         "SecessionRecord.GarrisonStrength | P/TheaterPlanner.cs | Landing round TheaterPlanner.Garrisons (the flag alone: the hold less the town garrison's own strength)",
         "GarrisonPost.StateId | P/ForceAllocator.cs | Landing round ForceAllocator.AssignGarrisons (a member inside holds, one outside marches)",
+        "GarrisonPost.Shortfall | P/ForceAllocator.cs | Landing check [Allocation] garrison=...!short<n> (the need the mass would have had to meet)",
         "GarrisonPost.Marching | P/ForceAllocator.cs | Landing round [Allocation] garrison= (in+moving)",
         "GarrisonPost.PlayerPresence | P/ForceAllocator.cs | Landing round [Allocation] garrison=player-presence",
         "SecessionRecord.HasTown | P/TheaterPlanner.cs | D8 TheaterPlanner.Garrisons",

@@ -163,9 +163,20 @@ namespace WhiskeyRealism.Strategic.Planner
             // D8: the formations a secession garrison keeps (index into s.Own) and the posts they keep; written by Reserve, read by MassFor.
             internal bool[] GarrisonReserved;
             internal readonly List<GarrisonPost> Posts = new List<GarrisonPost>();
+            // The posts that still need formations from outside the state, chosen once the mass is known (PostFromOutside).
+            internal readonly List<PostWork> Pending = new List<PostWork>();
             // MassFor's foreign pick of its last call (index into s.Own), -1 none; the capacity list holds natives and then this one.
             internal int Foreign = -1;
             internal readonly List<int> ForeignScratch = new List<int>();
+        }
+
+        // A garrison post that wants formations from outside the state: how many (1 when nobody is present, unlimited while the need is
+        // unmet when only the flag shows presence) and whether the flag alone is the reason (a shortfall is then recorded).
+        internal sealed class PostWork
+        {
+            internal GarrisonPost Post;
+            internal int Limit;
+            internal bool FlagAlone;
         }
 
         // Per-sector facts shared by the reserves, the postures and the published HoldNeed.
@@ -203,7 +214,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 Evaluate(inputs, candidates);
             }
             plan.CapitalFloorStrength = inputs.CapitalFloor;
-            for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
 
             int main = Decide(inputs, candidates, state, battles, out string reason);
             plan.SwitchReason = reason;
@@ -248,6 +258,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     LogisticsGate.AddDepotTasks(s, plan, sectors, mainX, mainZ, m.X, m.Z, force.CommandRange, profile.SupplySlack);
                 }
             }
+            PostFromOutside(inputs, plan);   // after the mass: the garrison takes only what the mass does not
+            for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
             return plan;
@@ -685,10 +697,65 @@ namespace WhiskeyRealism.Strategic.Planner
         // at the post (a small force when nothing is believed near: the floor, or the presumption); the first of them always counts. When
         // nobody is present, the nearest ready formation not already kept for the capital or a hold is posted there; when the flag alone
         // blocks it, nobody is posted. Every member is kept out of the mass.
+        // The hold already kept against the army that threatens the town: the strength of the sector hold reserves whose reference belief (the
+        // army their sector faces) lies within the relocation range of the town. Counted once, not again as a garrison.
+        private static float HoldFacing(Inputs c, float x, float z)
+        {
+            float sum = 0f;
+            for (int i = 0; i < c.S.Own.Count; i++)
+            {
+                int sector = c.HoldReserved[i];
+                if (sector < 0 || !WlChainRules.CountsTowardCoverage(c.S.Own[i].Chain)) continue;
+                if (RiverLines.Distance(c.Facts.NearX[sector], c.Facts.NearZ[sector], x, z) <= c.S.RelocationRange) sum += ReserveRules.HoldStrength(c.S.Own[i]);
+            }
+            return sum;
+        }
+
+        // The second half of the garrison (verify, landing check): formations from outside the state are chosen once the mass is known, so
+        // the garrison can never strip it. The pool is the formations that would otherwise just hold, sit in reserve or have no task: not in
+        // the mass (marching with it or released to it, the reinforcement included), not a capital guard, a sector's hold reserve, a builder
+        // or a member of another post. Nearest the town first. A need only the mass could meet is posted as far as the pool goes and the
+        // rest recorded as the post's Shortfall.
+        private static void PostFromOutside(Inputs c, TheaterPlan plan)
+        {
+            var s = c.S;
+            for (int w = 0; w < c.Pending.Count; w++)
+            {
+                var work = c.Pending[w];
+                var post = work.Post;
+                float posted = 0f;
+                int count = 0;
+                while (count < work.Limit && posted < post.Need)
+                {
+                    int best = -1;
+                    float bestDistance = float.MaxValue;
+                    for (int i = 0; i < s.Own.Count; i++)
+                    {
+                        var f = s.Own[i];
+                        if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || c.HoldReserved[i] >= 0 || c.GarrisonReserved[i] || IsHeldBuilder(c, f.InstanceId)) continue;
+                        if (f.UnitTyp <= 13 || plan.MassInstanceIds.Contains(f.InstanceId) || !WithinHorizon(c, i, post.X, post.Z)) continue;
+                        float d = DistanceSq(f.X, f.Z, post.X, post.Z);
+                        if (d > bestDistance || (d == bestDistance && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
+                        bestDistance = d;
+                        best = i;
+                    }
+                    if (best < 0) break;
+                    c.GarrisonReserved[best] = true;
+                    post.InstanceIds.Add(s.Own[best].InstanceId);
+                    post.Marching = true;
+                    posted += Math.Max(0f, s.Own[best].Strength);
+                    count++;
+                }
+                if (work.FlagAlone && posted < post.Need) post.Shortfall = post.Need - posted;
+                if (post.Name == null && post.InstanceIds.Count > 0) post.Name = s.Own[s.IndexOfOwn(post.InstanceIds[0])].Name;
+            }
+        }
+
         private static void Garrisons(Inputs c)
         {
             var s = c.S;
             c.Posts.Clear();
+            c.Pending.Clear();
             c.GarrisonReserved = new bool[s.Own.Count];
             for (int r = 0; r < s.Secessions.Count; r++)
             {
@@ -705,8 +772,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 // believed threat's hold less the garrison's own strength, nothing when no enemy is believed near. With nobody present the
                 // full D2 need applies (the floor and the presumption), and so it does for the formations inside.
                 bool flagAlone = rec.OwnTroops && inside.Count == 0;
+                // The hold already posted against that same army (the sector hold reserves facing it) is not counted twice.
                 post.Need = flagAlone
-                    ? Math.Max(0f, HoldRatioNow(s) * threat - Math.Max(0f, rec.GarrisonStrength))
+                    ? Math.Max(0f, HoldRatioNow(s) * threat - HoldFacing(c, post.X, post.Z) - Math.Max(0f, rec.GarrisonStrength))
                     : HoldNeedAt(c, post.X, post.Z, s.RelocationRange, threat, HoldRatioNow(s), out _);
                 inside.Sort((a, b) =>
                 {
@@ -722,28 +790,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (WlChainRules.MayMove(s.Own[i].Chain)) post.InstanceIds.Add(s.Own[i].InstanceId);
                 }
                 post.PlayerPresence = inside.Count > 0 && post.InstanceIds.Count == 0;
-                // Nearest ready formations (not a capital guard, a hold reserve or a builder) march to the town until the need is met.
-                float posted = 0f;
-                while (post.Need > 0f && (flagAlone || !post.InState) && posted < post.Need)
-                {
-                    int best = -1;
-                    float bestDistance = float.MaxValue;
-                    for (int i = 0; i < s.Own.Count; i++)
-                    {
-                        var f = s.Own[i];
-                        if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || c.HoldReserved[i] >= 0 || c.GarrisonReserved[i] || IsHeldBuilder(c, f.InstanceId)) continue;
-                        if (f.UnitTyp <= 13 || !WithinHorizon(c, i, post.X, post.Z)) continue;
-                        float d = DistanceSq(f.X, f.Z, post.X, post.Z);
-                        if (d > bestDistance || (d == bestDistance && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
-                        bestDistance = d;
-                        best = i;
-                    }
-                    if (best < 0) break;
-                    c.GarrisonReserved[best] = true;
-                    post.InstanceIds.Add(s.Own[best].InstanceId);
-                    post.Marching = true;
-                    posted += Math.Max(0f, s.Own[best].Strength);
-                }
+                // Formations from outside the state are chosen after the mass (PostFromOutside): one when nobody is present, as many as the
+                // need takes when only the flag shows presence.
+                int limit = flagAlone ? int.MaxValue : !post.InState ? 1 : 0;
+                if (limit > 0 && post.Need > 0f) c.Pending.Add(new PostWork { Post = post, Limit = limit, FlagAlone = flagAlone });
                 if (post.InstanceIds.Count > 0) post.Name = s.Own[s.IndexOfOwn(post.InstanceIds[0])].Name;
                 c.Posts.Add(post);
             }

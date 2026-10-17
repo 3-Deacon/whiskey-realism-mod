@@ -39,6 +39,8 @@ internal static class SecessionGarrisonTests
             ("TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation", TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation),
             ("ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold", ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold),
             ("ThePlayerPresenceRowIsNotCalledATownGarrison", ThePlayerPresenceRowIsNotCalledATownGarrison),
+            ("ANobodyPresentStatePostsOneFormationNotSeveral", ANobodyPresentStatePostsOneFormationNotSeveral),
+            ("TheGarrisonNeverTakesTheMassAndRecordsWhatItCouldNotMeet", TheGarrisonNeverTakesTheMassAndRecordsWhatItCouldNotMeet),
         });
     }
 
@@ -452,68 +454,143 @@ internal static class SecessionGarrisonTests
         }
     }
 
-    // Landing round, ruling 7: the flag says the state is held, not that it is safe. With an enemy believed near the town the need is the
-    // believed threat's hold less the garrison's own strength; with none near, nothing is posted.
+    // A flag-alone district: the Union is present by the flag, the town garrison's own strength is `garrison`, a 30000 army is believed at
+    // the town (HoldRatio 0.6 x 30000 = 18000). West corps stand at x 240 and below (the town's sector), East corps at x 700 and above.
+    private static CampaignSnapshot FlagAlone(float garrison, float enemy, params FormationRecord[] corps)
+    {
+        var f = Side(0, 0, 0.6f);
+        var rec = f.Secessions[0];
+        rec.OwnTroops = true;
+        rec.GarrisonStrength = garrison;
+        f.Secessions[0] = rec;
+        // An own-held objective in the East gives the sector model its East sector, so East corps are not the West sector's hold reserve.
+        f.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, StateId = 5, X = 900f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 0.1f });
+        if (enemy > 0f) f.Beliefs.Add(Seen(320f, enemy));
+        foreach (var c in corps) f.Own.Add(c);
+        return f;
+    }
+
+    // Landing check, F1: with nobody present (no flag, nobody inside) one formation is posted, whatever the believed threat.
+    private static void ANobodyPresentStatePostsOneFormationNotSeveral()
+    {
+        var s = Side(0, 0, 0.6f);
+        s.Beliefs.Add(Seen(320f, 30000f));                 // an army of 30000 at the town
+        s.Own.Add(Corps(1, 240f, 9000f));
+        s.Own.Add(Corps(2, 220f, 9000f));
+        s.Own.Add(Corps(3, 700f, 9000f));
+        s.Own.Add(Corps(4, 720f, 9000f));
+        s.Own.Add(Corps(5, 740f, 9000f));
+        var plan = Plan(s);
+        AssertFalse(plan.Garrisons[0].InState, "nobody is present");
+        AssertEqual(1, plan.Garrisons[0].InstanceIds.Count, "one formation is posted, not enough of them to meet the whole need: " + string.Join(",", plan.Garrisons[0].InstanceIds));
+        AssertTrue(plan.Garrisons[0].Need > 9000f, "though the need (" + plan.Garrisons[0].Need + ") is more than one corps");
+    }
+
+    // Landing round, ruling 7, with the landing check's rulings: the flag says held, not safe. The need is the believed threat's hold less
+    // the hold already kept against that army and the garrison's own strength.
     private static void ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold()
     {
-        CampaignSnapshot Flagged(float garrisonStrength)
-        {
-            var f = Side(0, 0, 0.6f);
-            var rec = f.Secessions[0];
-            rec.OwnTroops = true;
-            rec.GarrisonStrength = garrisonStrength;
-            f.Secessions[0] = rec;
-            f.Own.Add(Corps(1, 240f, 9000f));      // the believed army's own sector holds these two back (the hold reserve)
-            f.Own.Add(Corps(2, 220f, 9000f));
-            f.Own.Add(Corps(3, 190f, 9000f));      // the nearest formations free to march
-            f.Own.Add(Corps(4, 170f, 9000f));
-            f.Own.Add(Corps(5, 150f, 9000f));
-            return f;
-        }
-
-        // An army of 30000 believed at the town: HoldRatio 0.6 x 30000 = 18000, less the garrison's 4000 = 14000: two corps march.
-        var threatened = Flagged(4000f);
-        threatened.Beliefs.Add(Seen(320f, 30000f));
+        // One West corps holds the town's sector (9000 of the 18000), the garrison is 4000: 5000 is still needed; the nearest free corps goes.
+        var threatened = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
         var plan = Plan(threatened);
-        AssertTrue(plan.Garrisons[0].InState, "the Union is present by the flag");
-        AssertNear(14000f, plan.Garrisons[0].Need, 1f, "the hold less the garrison's own strength");
-        AssertEqual(2, plan.Garrisons[0].InstanceIds.Count, "9000 + 9000 meets 14000: " + string.Join(",", plan.Garrisons[0].InstanceIds));
-        AssertEqual(3, plan.Garrisons[0].InstanceIds[0], "nearest free formation first");
-        AssertEqual(4, plan.Garrisons[0].InstanceIds[1], "then the next");
-        AssertTrue(plan.Garrisons[0].Marching, "they march to the town");
+        var post = plan.Garrisons[0];
+        AssertTrue(post.InState, "the Union is present by the flag");
+        AssertNear(5000f, post.Need, 1f, "18000 - 9000 held against the same army - 4000 garrison: " + post.Need);
+        AssertEqual(1, post.InstanceIds.Count, "one corps of 9000 meets 5000: " + string.Join(",", post.InstanceIds));
+        AssertEqual(2, post.InstanceIds[0], "the nearest free formation");
+        AssertTrue(post.Marching, "it marches to the town");
         var alloc = Allocate(threatened, plan);
-        alloc.TryGet(3, out var first);
+        alloc.TryGet(2, out var first);
         AssertEqual(FormationRole.Garrison, first.Role, "through the garrison role (MayMove, the mover)");
         AssertNear(300f, first.TargetX, 0.01f, "to Louisville");
-        alloc.TryGet(5, out var spare);
-        AssertTrue(spare.Reason != ForceAllocator.ReasonSecession, "the third corps is not needed");
-        AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=corps3@Kentucky:in+moving/14000+1 ", "the row says so");
+        AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=corps2@Kentucky:in+moving/5000 ", "the row says so");
+
+        // A hold kept against a different army is not subtracted: an East army of 30000 (18000) keeps corps 2 and 3 in the East; the town's
+        // hold is still only corps 1, so 5000 is needed and the free corps 4 goes.
+        var other = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 760f, 9000f));
+        other.Beliefs.Add(Seen(900f, 30000f));
+        var otherPlan = Plan(other);
+        AssertNear(5000f, otherPlan.Garrisons[0].Need, 1f, "the East hold faces another army and is not counted against this one: " + otherPlan.Garrisons[0].Need);
+
+        // The hold already kept covers the army: nothing is needed (the same army is not counted twice).
+        var covered = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), Corps(2, 220f, 9000f), Corps(3, 700f, 9000f), Corps(4, 720f, 9000f));
+        var coveredPlan = Plan(covered);
+        AssertNear(0f, coveredPlan.Garrisons[0].Need, 1f, "two corps hold 18000 against the army: the garrison needs nothing more");
+        AssertEqual(0, coveredPlan.Garrisons[0].InstanceIds.Count, "nobody is posted");
 
         // A garrison strong enough for the threat: nothing is posted.
-        var strong = Flagged(18000f);
-        strong.Beliefs.Add(Seen(320f, 30000f));
+        var strong = FlagAlone(18000f, 30000f, Corps(1, 700f, 9000f), Corps(2, 720f, 9000f));
         AssertEqual(0, Plan(strong).Garrisons[0].InstanceIds.Count, "a garrison that meets the hold needs nobody");
 
         // No enemy believed near: the flag is enough, nothing is posted (no floor, no presumption).
-        var quiet = Flagged(4000f);
+        var quiet = FlagAlone(4000f, 0f, Corps(1, 700f, 9000f), Corps(2, 720f, 9000f));
         var quietPlan = Plan(quiet);
         AssertNear(0f, quietPlan.Garrisons[0].Need, 0.01f, "no threat, no need");
         AssertEqual(0, quietPlan.Garrisons[0].InstanceIds.Count, "nothing posted");
 
         // An enemy far from the town (outside the relocation range) is not near: fog-honest, beliefs only.
-        var far = Flagged(4000f);
+        var far = FlagAlone(4000f, 0f, Corps(1, 700f, 9000f), Corps(2, 720f, 9000f));
         far.Beliefs.Add(Seen(900f, 30000f));
         AssertEqual(0, Plan(far).Garrisons[0].InstanceIds.Count, "a belief far away posts nothing");
 
         // A player's group is never one of the posted.
-        var player = Flagged(4000f);
-        player.Beliefs.Add(Seen(320f, 30000f));
-        var near = player.Own[2];                         // corps 3, the first that would march
-        near.Chain = WlChainClass.PlayerMapGroup;
-        player.Own[2] = near;
+        var map = Corps(2, 700f, 9000f);
+        map.Chain = WlChainClass.PlayerMapGroup;
+        var player = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), map, Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
         var playerPlan = Plan(player);
-        AssertFalse(playerPlan.Garrisons[0].InstanceIds.Contains(3), "the map-group player is not posted");
-        AssertEqual(2, playerPlan.Garrisons[0].InstanceIds.Count, "the next two free formations are");
+        AssertFalse(playerPlan.Garrisons[0].InstanceIds.Contains(2), "the map-group player is not posted");
+        AssertEqual(3, playerPlan.Garrisons[0].InstanceIds[0], "the next free formation is");
+    }
+
+    // Landing check, structural: the garrison is chosen after the mass and never takes a formation marching with or released to it; it
+    // takes the free formations nearest the town first; a need only the mass could meet is posted as far as the free formations go and the
+    // rest is recorded as the post's shortfall.
+    private static void TheGarrisonNeverTakesTheMassAndRecordsWhatItCouldNotMeet()
+    {
+        // A main effort at x 500 (an army of 3000 believed there): corps 2, standing at 480, is both the nearest to the town and the nearest
+        // to that target, so it is the mass. Corps 1 holds the town's sector. Free formations stand in the East.
+        CampaignSnapshot World(params FormationRecord[] corps)
+        {
+            var w = FlagAlone(4000f, 60000f, corps);   // 0.6 x 60000 = 36000 at the town
+            w.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, StateId = 5, X = 520f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.9f });
+            w.Beliefs.Add(Seen(520f, 3000f));
+            return w;
+        }
+
+        var s = World(Corps(1, 240f, 9000f), Corps(2, 480f, 9000f), Corps(3, 700f, 9000f), Corps(4, 720f, 9000f), Corps(5, 740f, 9000f), Corps(6, 760f, 9000f));
+        var plan = Plan(s);
+        AssertEqual(31, plan.MainObjectiveId, "a main effort exists: " + plan.MainObjectiveId);
+        AssertTrue(plan.MassInstanceIds.Count > 0, "with a mass");
+        var post = plan.Garrisons[0];
+        foreach (int id in post.InstanceIds)
+            AssertFalse(plan.MassInstanceIds.Contains(id), "formation " + id + " is posted but marches with the mass");
+        AssertTrue(post.InstanceIds.Count > 0, "free formations exist, so some are posted: need " + post.Need);
+        // Nearest the town first among the free ones.
+        for (int k = 1; k < post.InstanceIds.Count; k++)
+            AssertTrue(DistanceToTown(s, post.InstanceIds[k - 1]) <= DistanceToTown(s, post.InstanceIds[k]), "nearest first");
+
+        // Only the mass is free: nothing is taken from it; the shortfall is the whole need.
+        var tight = World(Corps(1, 240f, 9000f), Corps(2, 480f, 9000f));
+        var tightPlan = Plan(tight);
+        AssertTrue(tightPlan.MassInstanceIds.Contains(2), "corps 2 is the mass");
+        AssertEqual(0, tightPlan.Garrisons[0].InstanceIds.Count, "and the garrison does not take it");
+        AssertTrue(tightPlan.Garrisons[0].Shortfall > 0f, "the shortfall is recorded: " + tightPlan.Garrisons[0].Shortfall);
+        AssertNear(tightPlan.Garrisons[0].Need, tightPlan.Garrisons[0].Shortfall, 1f, "all of it");
+        var row = ForceAllocator.Summary(Allocate(tight, tightPlan), tightPlan, PlayerCommandClass.BelowMapLevel, 1f, 0);
+        AssertContains(row, "!short", "the allocation row logs the shortfall");
+
+        // Part of the need met by the free formations: the shortfall is what remains.
+        var partial = World(Corps(1, 240f, 9000f), Corps(2, 480f, 9000f), Corps(3, 700f, 9000f));
+        var partialPlan = Plan(partial);
+        AssertEqual(1, partialPlan.Garrisons[0].InstanceIds.Count, "the one free formation is posted");
+        AssertNear(partialPlan.Garrisons[0].Need - 9000f, partialPlan.Garrisons[0].Shortfall, 1f, "and the shortfall is the rest");
+    }
+
+    private static float DistanceToTown(CampaignSnapshot s, int instanceId)
+    {
+        var f = s.Own[s.IndexOfOwn(instanceId)];
+        float dx = f.X - 300f, dz = f.Z;
+        return (float)Math.Sqrt(dx * dx + dz * dz);
     }
 
     // Presence by a player's group alone is not a town garrison.

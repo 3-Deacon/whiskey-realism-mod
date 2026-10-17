@@ -1531,3 +1531,10 @@ On the same branch after verify round 2 (pass, minors and two rulings):
 5. **Re-key at save.** `CampaignPlannerRuntime.Export` calls `RekeyDepartmentsFromLive` -> `PlannerState.RekeyFromLive` (also the reinforcement key follows).
 6. **Flag alone with an enemy near.** `SecessionRecord.GarrisonStrength` (own garrison units per state, `CampaignSnapshotRuntime.NoteGarrison`); `TheaterPlanner.Garrisons` posts `HoldRatio' x threat - GarrisonStrength` nearest-first (existing `Garrison` role, `MayMove`), nothing when no enemy is believed near.
 
+### Landing check (2026-10-16) as built
+
+Merged main `867497fd` (one conflict, `docs/patch-catalog.md` rows 156-157: the branch's row 156, main's row 157). Then:
+1. **One post when nobody is present.** `TheaterPlanner.Garrisons` queues a `PostWork` with `Limit` 1 for a state with no flag and nobody inside, and an unlimited one only for the flag alone. Test `ANobodyPresentStatePostsOneFormationNotSeveral` (belief 30000 at the town, no flag, nobody inside: one corps).
+2. **Prune threshold pinned.** `AssertEqual(10, PlannerState.PruneAfterMissedReviews)`.
+3. **The garrison cannot strip the mass.** The formations from outside the state are chosen after the mass (`PostFromOutside`), from the formations not in the mass, not a capital guard, hold reserve or builder, nearest first; the need subtracts the hold reserves kept against the same believed army (`HoldFacing`); a need the free formations cannot meet is recorded as `GarrisonPost.Shortfall` (`!short<n>`). Tests `ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold` (hold facing the same army subtracted, a hold facing another army not, the verifier's two-hold fixture needs nothing) and `TheGarrisonNeverTakesTheMassAndRecordsWhatItCouldNotMeet` (never a mass member, nearest first, whole and partial shortfall, the row).
+

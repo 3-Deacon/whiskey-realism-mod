@@ -198,6 +198,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.PlayerPresence ? "player-presence" : g.InState ? "town-garrison" : "nobody")
                   .Append('@').Append(g.StateName)
                   .Append(g.Marching ? (g.InState ? ":in+moving/" : ":moving/") : ":in/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
+                if (g.Shortfall > 0f) sb.Append("!short").Append(g.Shortfall.ToString("0", CultureInfo.InvariantCulture));
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
             }
             return sb.ToString();

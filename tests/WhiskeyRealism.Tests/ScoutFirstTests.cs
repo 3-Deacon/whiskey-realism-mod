@@ -865,6 +865,7 @@ internal static class ScoutFirstTests
     // snapshot (inactive, invisible for a moment) keeps its home, and a failed read (an empty snapshot) counts nothing.
     private static void DepartmentsOfFormationsThatNoLongerExistArePruned()
     {
+        AssertEqual(10, PlannerState.PruneAfterMissedReviews, "ten reviews in a row: the threshold is pinned, not read back");
         int n = PlannerState.PruneAfterMissedReviews;
         var state = new PlannerState();
         state.BeginObservation();

@@ -398,6 +398,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool PlayerPresence;                // the only own formations inside the state are a player's or a CIC side's: present, but not members
         public bool InState;                       // the Union is present in the state: an own formation stands in it, or vanilla's alliancetroops[0] is set
         public float Need;                         // the D2 hold need at the post (telemetry: the [Allocation] garrison= term)
+        public float Shortfall;                    // the part of a flag-alone need only the main effort's mass could have met (never taken from it)
         public List<int> InstanceIds = new List<int>(); // the garrison: in-state formations nearest the post up to the need, else the one posted
         public string Name;                        // the first member's name (telemetry)
     }
