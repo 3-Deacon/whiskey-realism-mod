@@ -1626,7 +1626,7 @@ internal static class BattleReconTests
         AssertPinned(coordinator, "sideDefending: sideStance == BattleStance.Defender);", "#45 default scorer cap");
 
         AssertPinned(Source("Tactical", "Orchestrator", "TacticalBattleOrchestrator.cs"),
-            "CommandNodeOperationsRuntime.Build( Army.CurrentCommandNodeIntents, OperationsLedger.CurrentOperation, OperationsLedger.CurrentObjectives, Army.CurrentBattleStance);",
+            "CommandNodeOperationsRuntime.Build( Army.CurrentCommandNodeIntents, OperationsLedger.CurrentOperation, OperationsLedger.CurrentObjectives, Army.CurrentBattleStance, OperationsLedger.Ground);",
             "node planning");
         AssertPinned(Source("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"),
             "side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);", "posture fallback node");

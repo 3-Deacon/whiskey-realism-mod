@@ -37,7 +37,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     existing.TaskState,
                     existing.X,
                     existing.Z,
-                    existing.FacingDegrees);
+                    existing.FacingDegrees,
+                    hasPosition: existing.HasPosition);
             }
 
             CommandNodeOperationalState parentState;
@@ -50,7 +51,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 parentState.TaskState,
                 parentState.X,
                 parentState.Z,
-                parentState.FacingDegrees);
+                parentState.FacingDegrees,
+                hasPosition: parentState.HasPosition);
 
             return nested;
         }
