@@ -47,7 +47,9 @@ internal static partial class ManeuverFeasibilityTests
         }
         public bool TryViaRegions(string childId, out int viaFarRegion, out int attackViaFarRegion) { viaFarRegion = attackViaFarRegion = -1; return false; }
         public bool TryGet(BattlePlanId plan, out CandidateResult result) { result = default(CandidateResult); return false; }
-        public bool TryFocalPoint(out FocalPoint focal) { focal = default(FocalPoint); return false; }
+        public bool HasFocal;
+        public FocalPoint Focal;
+        public bool TryFocalPoint(out FocalPoint focal) { focal = Focal; return HasFocal; }
         public bool WorksHold(out string reason) { reason = Hold ? Reason : null; return Hold; }
         public bool AssaultsWorks(string childId) => Faces.Contains(childId);
         public bool FacesWorks(string childId) => Faces.Contains(childId);

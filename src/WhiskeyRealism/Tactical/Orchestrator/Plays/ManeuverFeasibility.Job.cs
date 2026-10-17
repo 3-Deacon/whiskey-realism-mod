@@ -22,6 +22,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool Moving;
         /// <summary>The child holds player-owned strength: it is never released to a crossing and its time to one is not offered.</summary>
         public bool HasPlayerOwned;
+        /// <summary>BC14W: some unit under the child is player-owned, at any strength (<c>PlayAnchor.ContainsPlayerOwned</c>); never given the column or the support.</summary>
+        public bool ContainsPlayerOwned;
         /// <summary>The child is bound to guard a crossing (requirement-defender-crossing-release): its regiments are left out of the crossing cover test.</summary>
         public bool BoundGuard;
         /// <summary>The hours an order from the army HQ takes to reach the child and everything below it, whether or not it is engaged.</summary>
@@ -343,6 +345,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 ChildFact fact = Children[c];
                 fact.HasPlayerOwned = _strengthPlayer[c] > 0f;
+                // BC14W: the one source the executor's table fills it from too (a player unit at zero strength counts here, not in HasPlayerOwned).
+                fact.ContainsPlayerOwned = fact.OwnIndex >= 0 && PlayAnchor.ContainsPlayerOwned(s, fact.OwnIndex);
                 float counted = _strengthAll[c] - _strengthPlayer[c];
                 fact.Strength = counted;
                 fact.Morale = counted > 0f ? _moraleSum[c] / counted : 0f;
@@ -360,7 +364,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Children[c] = fact;
                 if (!fact.Offered) continue;
                 OfferedCount++;
-                Offered.Add(new CorpsPosition(fact.Id, fact.X, fact.Z));
+                Offered.Add(new CorpsPosition(fact.Id, fact.X, fact.Z, fact.ContainsPlayerOwned));
             }
         }
 

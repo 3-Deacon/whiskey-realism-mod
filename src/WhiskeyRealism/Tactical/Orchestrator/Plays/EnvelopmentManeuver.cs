@@ -188,13 +188,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// <summary>One child's maneuver order with the lateral axis its nodes are laid out on.</summary>
     public readonly struct ChildManeuver
     {
-        public ChildManeuver(string childId, ManeuverOrder order, float lateralX, float lateralZ)
+        public ChildManeuver(string childId, ManeuverOrder order, float lateralX, float lateralZ, PlayRectKind kind = PlayRectKind.Unknown)
         {
             ChildId = childId ?? string.Empty;
             Order = order;
             LateralX = lateralX;
             LateralZ = lateralZ;
+            Kind = kind;
         }
+
+        /// <summary>The rect kind the child's maneuver runs for (the army reads the focal assault's column by it); Unknown when not given.</summary>
+        public PlayRectKind Kind { get; }
 
         public string ChildId { get; }
         public ManeuverOrder Order { get; }
@@ -225,6 +229,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// </summary>
         public static bool HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay)
             => worksHoldReason == FeasibilityLedger.ReasonHopelessAssault && (assaultsWorks || startDelay);
+
+        /// <summary>
+        /// BC14W (requirement-focal-execution): the doctrine hour a follower of the focal assault is released. The support goes
+        /// <see cref="WorksRules.EchelonDelayHours"/> after the column enters its Attack, the demonstrations as it does; both wait while the column has not
+        /// (the preparation floor, the formation wait and the works hold move them with it), and go at once when there is no column or it was abandoned.
+        /// </summary>
+        public static double FollowerReleaseHours(PlayRectKind kind, bool hasColumn, ManeuverPhase columnPhase, double columnPhaseSinceHours, double nowHours)
+        {
+            if (!hasColumn || columnPhase == ManeuverPhase.Abandoned) return nowHours;
+            if (columnPhase != ManeuverPhase.Attack) return double.PositiveInfinity;
+            return columnPhaseSinceHours + (kind == PlayRectKind.AssaultSupport ? WorksRules.EchelonDelayHours : 0.0);
+        }
 
         // BC14W: the works hold keeps the body in Hold, with no ceiling and no release or budget latched; the hour it clears is latched
         // (NoteWorksClear) and the ceiling counts from it. Only a body still before its March is held: a wing on the march is not recalled.

@@ -8,12 +8,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// </summary>
     public readonly struct CorpsPosition
     {
-        public CorpsPosition(string childId, float worldX, float worldZ)
+        public CorpsPosition(string childId, float worldX, float worldZ, bool containsPlayerOwned = false)
         {
             ChildId = childId ?? string.Empty;
             WorldX = worldX;
             WorldZ = worldZ;
+            ContainsPlayerOwned = containsPlayerOwned;
         }
+
+        /// <summary>
+        /// BC14W: the child holds a player-owned unit (<c>PlayAnchor.ContainsPlayerOwned</c>, the one source the executor and the evaluation both fill it
+        /// from). Such a child is never given the focal assault's column or support rect.
+        /// </summary>
+        public bool ContainsPlayerOwned { get; }
 
         public string ChildId { get; }
         public float WorldX { get; }
@@ -149,6 +156,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 var rect = rects[rectIdx];
 
                 int pickedCorps = -1;
+                // BC14W: a child that holds a player-owned unit is never given the focal assault's column or support (the player decides nothing in it).
+                bool skipPlayerOwned = rect.Kind == PlayRectKind.AssaultColumn || rect.Kind == PlayRectKind.AssaultSupport;
 
                 // VP override: any major VP inside this rect, and any unassigned
                 // corps near it?
@@ -161,7 +170,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         var obj = objectives[oi];
                         if (!obj.MajorVp) continue;
                         if (!rect.ContainsPoint(obj.WorldX, obj.WorldZ)) continue;
-                        int candidate = ClosestUnassignedCorps(corps, assigned, obj.WorldX, obj.WorldZ, vpRadius);
+                        int candidate = ClosestUnassignedCorps(corps, assigned, obj.WorldX, obj.WorldZ, vpRadius, skipPlayerOwned);
                         if (candidate >= 0)
                         {
                             pickedCorps = candidate;
@@ -173,7 +182,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // Fallback: closest unassigned corps to the rect anchor.
                 if (pickedCorps < 0)
                 {
-                    pickedCorps = ClosestUnassignedCorps(corps, assigned, rect.AnchorX, rect.AnchorZ, float.PositiveInfinity);
+                    pickedCorps = ClosestUnassignedCorps(corps, assigned, rect.AnchorX, rect.AnchorZ, float.PositiveInfinity, skipPlayerOwned);
                 }
 
                 if (pickedCorps < 0) continue;
@@ -208,7 +217,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             ReadOnlySpan<bool> assigned,
             float x,
             float z,
-            float maxDistance)
+            float maxDistance,
+            bool skipPlayerOwned = false)
         {
             int best = -1;
             float bestDistSq = maxDistance == float.PositiveInfinity
@@ -217,6 +227,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             for (int i = 0; i < corps.Count; i++)
             {
                 if (assigned[i]) continue;
+                if (skipPlayerOwned && corps[i].ContainsPlayerOwned) continue;
                 float dx = corps[i].WorldX - x;
                 float dz = corps[i].WorldZ - z;
                 float dSq = dx * dx + dz * dz;

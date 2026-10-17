@@ -1590,7 +1590,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance, maneuverNodes,
                 HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
-            _currentDoctrineOrders = worksHold ? GuardOrders(ledger.CurrentDoctrineOrders) : ledger.CurrentDoctrineOrders;
+            _currentDoctrineOrders = FinishOrders(ledger.CurrentDoctrineOrders, worksHold);
         }
 
         // ---- BC14W: the works hold on the stored products (requirement-works-hold) ----
@@ -1651,16 +1651,46 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     states[i] = guarded;
         }
 
-        private IReadOnlyList<CommandDoctrineOrder> GuardOrders(IReadOnlyList<CommandDoctrineOrder> orders)
+        // The ledger's built orders, finished into the army's own array when the works hold guards them or the focal assault prepares its bombardment; the
+        // ledger's own list is returned as it is when neither applies.
+        private IReadOnlyList<CommandDoctrineOrder> FinishOrders(IReadOnlyList<CommandDoctrineOrder> orders, bool worksHold)
         {
+            bool prepare = PreparationPoint(out float preparationX, out float preparationZ);
+            if (!worksHold && !prepare) return orders;
             _guardedOrders.Clear();
             for (int i = 0; i < orders.Count; i++)
             {
                 CommandDoctrineOrder order = orders[i];
-                WorksHoldGuard.Apply(in order, WorksContextOfNode(order.NodeId), out CommandDoctrineOrder guarded);
-                _guardedOrders.Add(guarded);
+                if (worksHold) WorksHoldGuard.Apply(in order, WorksContextOfNode(order.NodeId), out order);
+                if (prepare && ChildIndexOfNode(order.NodeId) >= 0) order = order.WithPreparation(preparationX, preparationZ);
+                _guardedOrders.Add(order);
             }
             return _guardedOrders;
+        }
+
+        /// <summary>
+        /// BC14W (requirement-focal-execution): the point the focal assault's batteries bombard before the column goes in. The plan's focal point from its
+        /// activation until the column strikes (its Attack, or its abandonment), and never while the works hold keeps the column: no preparation for an
+        /// assault that is not going in. Every node of the plan's children carries it, so a battery's parent group order holds it wherever the guns stand.
+        /// </summary>
+        internal bool PreparationPoint(out float x, out float z)
+        {
+            x = 0f;
+            z = 0f;
+            if (!Plugin.EnemyWorksDoctrineEnabled() || !HasPlan || _plan.PlanId != BattlePlanId.FocalAssault || _feasibility == null) return false;
+            if (!_feasibility.TryFocalPoint(out WhiskeyRealism.Tactical.Battle.FocalPoint focal)) return false;
+            if (_feasibility.WorksHold(out string reason) && string.Equals(reason, WhiskeyRealism.Tactical.Orchestrator.Plays.FeasibilityLedger.ReasonHopelessAssault, StringComparison.Ordinal))
+                return false;
+            for (int m = 0; m < _maneuvers.Count; m++)
+            {
+                if (_maneuvers[m].Kind != WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.AssaultColumn) continue;
+                WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase = _maneuvers[m].Order.Phase;
+                if (phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Attack || phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Abandoned)
+                    return false;
+            }
+            x = focal.X;
+            z = focal.Z;
+            return true;
         }
 
         /// <summary>

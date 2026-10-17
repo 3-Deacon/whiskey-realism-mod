@@ -282,6 +282,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private sealed class SideManeuvers
         {
+            public SideManeuvers(int alliance) { Alliance = alliance; }
+
+            public readonly int Alliance;
+            // BC14W: the child that runs the focal assault's AssaultColumn this plan (null with none), whose state the followers' release reads.
+            public string ColumnChildId;
             public BattlePlanId Plan = BattlePlanId.Unknown;
             public double ActivatedHours = -1.0;
             public double CenterContactHours = -1.0;
@@ -309,11 +314,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Orders.Clear();
                 MarchChecks.Clear();
                 PlanChildId = null;
+                ColumnChildId = null;
             }
         }
 
         // Plan-scoped state per side (BattleScope "play-executor" clears it with the zone-assignment cache).
-        private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(), new SideManeuvers() };
+        private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(0), new SideManeuvers(1) };
         private static readonly int[] _riverSamples = new int[4096];
         // The march-leg route: the NavMesh corners of the planned path, copied to flat arrays for the grid sampling.
         private static float[] _routeX = new float[64];
@@ -384,6 +390,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     ExploitTable exploits = ExploitTable.ForAlliance(allianceId);
                     // One route plan per side and step, served fairly (see PickRoutePlanChild).
                     side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now, planId, feasibility);
+                    side.ColumnChildId = null;
+                    for (int c = 0; c < intents.Count && side.ColumnChildId == null; c++)
+                        if (intents[c].Maneuver.HasValue && intents[c].Maneuver.Kind == PlayRectKind.AssaultColumn) side.ColumnChildId = intents[c].ChildId;
                     for (int i = 0; i < intents.Count; i++)
                     {
                         ManeuverSpec spec = intents[i].Maneuver;
@@ -402,7 +411,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                             planId, feasibility, in state);
                         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
                         side.States[intents[i].ChildId] = state;
-                        side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ));
+                        side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ, spec.Kind));
                         if (state.Phase == ManeuverPhase.Abandoned && before != ManeuverPhase.Abandoned && spec.Envelops) side.Abandoned.Add(intents[i].ChildId);
                         if (state.Phase == ManeuverPhase.March && before != ManeuverPhase.March)
                         {
@@ -441,6 +450,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             return n;
         }
+
+        /// <summary>BC14W: the doctrine hour the side's current play was activated (the preparation table's key), -1 with none.</summary>
+        internal static double ActivatedHours(int allianceId)
+            => allianceId >= 0 && allianceId < SideCount ? _maneuvers[allianceId].ActivatedHours : -1.0;
 
         /// <summary>BC14: BC11's phase for the side's direct child (None before its maneuver starts), the monitor's read of how far each wing has got.</summary>
         internal static ManeuverPhase PhaseOf(int allianceId, string childId)
@@ -519,6 +532,32 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             input.HasEnemyExtent = EnvelopmentManeuver.EnemyLineEnd(in axis, enemyX, enemyZ, right, out float endX, out float endZ);
             input.EnemyEndX = endX;
             input.EnemyEndZ = endZ;
+            input.GroupFormation = child.Formation;
+
+            // BC14W (requirement-focal-execution): the focal assault's column strikes the focal point (latched at its March, until then each evaluation's):
+            // the inward target of the corridor and river checks, the row's line end, and the Turn's heading and Attack's target in BC11.
+            if (spec.Kind == PlayRectKind.AssaultColumn)
+            {
+                FocalPoint focalPoint = default(FocalPoint);
+                bool latched = state.HasFocal;
+                if (latched) { focalPoint.X = state.FocalX; focalPoint.Z = state.FocalZ; }
+                if (latched || (feasibility != null && feasibility.TryFocalPoint(out focalPoint)))
+                {
+                    input.HasFocal = true;
+                    input.FocalX = focalPoint.X;
+                    input.FocalZ = focalPoint.Z;
+                    input.HasEnemyExtent = true;
+                    input.EnemyEndX = focalPoint.X;
+                    input.EnemyEndZ = focalPoint.Z;
+                    // The first battery's bombardment plus PreparationHours is the earliest the column goes in (no battery passed: no floor).
+                    PreparationTable preparation = PreparationTable.ForAlliance(side.Alliance);
+                    if (preparation != null && preparation.TryFloor(planId, side.ActivatedHours, focalPoint.X, focalPoint.Z, out double floor))
+                    {
+                        input.HasPreparationFloor = true;
+                        input.PreparationFloorHours = floor;
+                    }
+                }
+            }
 
             if (spec.Kind == PlayRectKind.DeepRaid)
             {
@@ -559,9 +598,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             input.ViaPassed = planned.ViaPassed;
             input.AttackViaPassed = planned.AttackViaPassed;
+            // BC14W: the focal assault's support and demonstrations follow the column, not a published hour: the support goes at its strike plus the
+            // echelon delay, the demonstrations at it, and both wait while the column does (the preparation floor, the formation wait and the works hold
+            // move them with it). A follower in contact is not held.
+            if (planId == BattlePlanId.FocalAssault && spec.HoldsForRelease && (spec.Kind == PlayRectKind.AssaultSupport || spec.Kind == PlayRectKind.Demonstration))
+            {
+                ManeuverState columnState = default(ManeuverState);
+                if (side.ColumnChildId != null) side.States.TryGetValue(side.ColumnChildId, out columnState);
+                bool beforeMarch = state.Phase == ManeuverPhase.None || state.Phase == ManeuverPhase.Hold;
+                input.HasPlannedRelease = beforeMarch && !input.ChildInContact;
+                input.PlannedReleaseHours = EnvelopmentManeuver.FollowerReleaseHours(spec.Kind, side.ColumnChildId != null, columnState.Phase,
+                    columnState.PhaseSinceHours, now);
+            }
 
             // FlankMove's checks (116929-117108) on the inward leg (anchor to the line end) and the march leg.
-            float inwardX = input.HasEnemyExtent ? endX : enemyX, inwardZ = input.HasEnemyExtent ? endZ : enemyZ;
+            float inwardX = input.HasFocal ? input.FocalX : (input.HasEnemyExtent ? endX : enemyX);
+            float inwardZ = input.HasFocal ? input.FocalZ : (input.HasEnemyExtent ? endZ : enemyZ);
             input.AnchorHeight = HeightAt(anchorX, anchorZ);
             input.CorridorEnemyCount = EnvelopmentManeuver.CorridorEnemies(snapshot, anchorX, anchorZ, inwardX, inwardZ, TerrainHeightAt, out float maxHeight);
             input.MaxCorridorEnemyHeight = maxHeight;

@@ -70,6 +70,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             frontage = PlayProjection.EstimateFrontage(ownXs, ownZs, forwardX, forwardZ);
         }
 
+        /// <summary>
+        /// BC14W (requirement-focal-execution, "Never the player's column"): whether any unit under the direct child at <paramref name="childIndex"/>
+        /// carries the PlayerOwned flag, read from the snapshot's parent map (a unit at zero strength counts). The one source the executor's
+        /// <see cref="CollectOwn"/> and the evaluation's per-child table both fill <see cref="CorpsPosition.ContainsPlayerOwned"/> from.
+        /// </summary>
+        public static bool ContainsPlayerOwned(IBattleUnitView s, int childIndex)
+        {
+            if (s == null || childIndex < 0 || childIndex >= s.OwnCount) return false;
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if ((own[i].Flags & UnitFlags.PlayerOwned) == 0) continue;
+                int cur = i;
+                for (int steps = 0; cur >= 0 && cur < s.OwnCount && steps < s.OwnCount; steps++)
+                {
+                    if (cur == childIndex) return true;
+                    cur = own[cur].ParentIndex;
+                }
+            }
+            return false;
+        }
+
         private static bool TryVisibleEnemyCentroid(IBattleUnitView s, out float x, out float z)
         {
             x = 0f;
@@ -113,7 +135,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 zs.Add(pz);
                 if (own[i].UnitTyp < commandMin) continue;
                 string childId = "child-" + own[i].InstanceId;
-                if (directChildIds.Contains(childId)) corps.Add(new CorpsPosition(childId, px, pz));
+                if (directChildIds.Contains(childId)) corps.Add(new CorpsPosition(childId, px, pz, ContainsPlayerOwned(s, i)));
             }
             return corps.Count;
         }

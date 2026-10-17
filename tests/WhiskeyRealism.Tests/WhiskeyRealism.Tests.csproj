@@ -444,6 +444,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\WorksRules.cs" Link="Battle\Works\WorksRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\WorksPicture.cs" Link="Battle\Works\WorksPicture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\MoveContest.cs" Link="Battle\Works\MoveContest.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\Works\PreparationTable.cs" Link="Battle\Works\PreparationTable.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyOrchestrator.cs" Link="Orchestrator\ArmyOrchestrator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyReplanTriggers.cs" Link="Orchestrator\ArmyReplanTriggers.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Orchestrator\ArmyTickCycle.cs" Link="Orchestrator\ArmyTickCycle.cs" />
