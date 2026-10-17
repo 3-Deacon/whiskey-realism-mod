@@ -66,7 +66,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             // 92067; RegimentSetPath on a regiment, 131254). Read only while a path is held.
             Vector3 last = unit.lastsetwaypointposition;
             float pathEnd = FlatDistance(last.x, last.z, carrier.X, carrier.Z);
-            basis = WlMoveState.BasisAfterGone(unit.regimentpaths > 0, pathEnd, distance, unit.combatstatussubordinates > 0f);
+            basis = WlMoveState.BasisAfterGone(unit.regimentpaths > 0, pathEnd, distance, unit.combatstatussubordinates > 0f, carrier.SlackMeters);
             return WlMoveState.Classify(false, false, basis != MoveBasis.None);
         }
 

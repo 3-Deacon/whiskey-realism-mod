@@ -129,8 +129,8 @@ internal static partial class WlOrderFlowTests
         AssertTrue(run.Contains("BattleScope.Register(\"tactical-player-dispatch\", () => { Dedupe.ClearForBattleBoundary(string.Empty); Memory.Clear(); });"),
             "the memory is battle-scoped");
         string exec = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs"), "internal static int Execute(");
-        AssertTrue(Regex.IsMatch(exec, @"if \(executed > 0 && winner\.Task != CommandTaskType\.None\)\s*TacticalPlayerDispatchRuntime\.NoteTask\(winner\.GroupId, winner\.Task, nowHours\);"),
-            "every executed write of a group notes the group's task");
+        AssertTrue(Regex.IsMatch(exec, @"if \(executed > 0 && winner\.Task != CommandTaskType\.None && \(winner\.Flags & IntentFlags\.WorksHold\) == 0\)\s*TacticalPlayerDispatchRuntime\.NoteTask\(winner\.GroupId, winner\.Task, nowHours\);"),
+            "every executed write of a group notes the group's task, except the works hold's stance, which names HoldObjective whatever the group does (SubmitWorksHoldStance)");
     }
 
     // Vanilla's orders that say where the chain is going (smoke 2026-10-17 orders 2, 4, 10: a support order to a zone the
@@ -203,11 +203,13 @@ internal static partial class WlOrderFlowTests
     {
         string code = Code(FlowRuntime);
         string route = BodyOf(code, "private static CaptureVerdict Route(");
-        AssertTrue(Regex.IsMatch(route, @"else if \(call\.Origin == OrderOrigin\.Vanilla && CouriersOn\(\) && TryPursuit\(unit, type, out WlMoveCarrier pursuit\)\)\s*\{\s*entry\.Pursuit = true;\s*entry\.Carrier = pursuit;\s*\}"),
+        AssertTrue(Regex.IsMatch(route, @"else if \(call\.Origin == OrderOrigin\.Vanilla && CouriersOn\(\) && TryPursuit\(unit, type, position, out WlMoveCarrier pursuit\)\)\s*\{\s*entry\.Pursuit = true;\s*entry\.Carrier = pursuit;\s*\}"),
             "Route arms only a vanilla-origin order, only while couriers are on");
         string pursuit = BodyOf(code, "private static bool TryPursuit(");
-        AssertTrue(pursuit.Contains("unit.regimentpaths <= 0") && pursuit.Contains("unit.lastsetwaypointposition") && pursuit.Contains("WlMoveCarrier.NoQueueEntry"),
-            "the called unit must hold a path now; its target is its last set waypoint, not the order's position; no queue entry is waited for");
+        AssertTrue(pursuit.Contains("unit.regimentpaths <= 0") && pursuit.Contains("X = position.x, Z = position.z") && pursuit.Contains("WlMoveCarrier.NoQueueEntry"),
+            "the called unit must hold a path now; its target is the order's position, not the waypoint read at capture; no queue entry is waited for");
+        AssertFalse(pursuit.Contains("lastsetwaypointposition"), "the waypoint read at capture can be the previous move's (BlockedMovingOrder sets it two frames later, 3382)");
+        AssertTrue(pursuit.Contains("SlackMeters = WlMoveState.VanillaWaypointSlackMeters"), "with the callers' waypoint slack");
         AssertTrue(pursuit.Contains("unit.gameObject.GetInstanceID()"), "the carrier is the called unit itself");
     }
 
@@ -231,5 +233,31 @@ internal static partial class WlOrderFlowTests
         AssertEqual("path", MoveBasisName.Of(MoveBasis.Path), "path");
         AssertEqual("contact", MoveBasisName.Of(MoveBasis.Contact), "contact");
         AssertEqual(string.Empty, MoveBasisName.Of(MoveBasis.None), "no gate looked");
+    }
+
+    // Smoke-independent hazard found in review: an objective move over 150 m goes through BlockedMovingOrder (6950-6958), which sets
+    // the waypoint two frames after the order is given. The target is the order's point, with the callers' slack.
+    private static void VanillaPursuitToleratesTheCallersWaypointOffset()
+    {
+        float slack = WlMoveState.VanillaWaypointSlackMeters;
+        AssertEqual(MoveBasis.Path, WlMoveState.BasisAfterGone(true, 200f, 900f, false, slack), "a path ending 200 m from the order's point (the 70 m terrain offset plus a 150 m similar-positions shift fits)");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(true, 200f, 900f, false), "the executor's exact reading would call that a re-laid path");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(true, ReadingJustPast(slack), 900f, false, slack), "past the slack it is another move");
+        AssertEqual(MoveBasis.Arrived, WlMoveState.BasisAfterGone(false, 0f, 270f, false, slack), "standing within 60 m plus the slack");
+        AssertEqual(MoveBasis.Contact, WlMoveState.BasisAfterGone(false, 0f, 520f, true, slack), "a contact halt within 310 m plus the slack");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(false, 0f, 531f, true, slack), "and not one metre farther");
+        AssertTrue(slack >= 70f + 150f, "the slack covers the terrain offset of UpdateMovingTargets (6941) and the similar-positions shift (8700-8705)");
+    }
+
+    private static float ReadingJustPast(float slack) => WlMoveState.ArrivalMeters + slack + 1f;
+
+    // A maintenance move voids nothing and an executor carrier stays exact.
+    private static void ExecutorCarriersCarryNoSlack()
+    {
+        var carrier = default(WlMoveCarrier);
+        carrier.Consider(5, 17.3f, 17.1f, 1, 100f, 200f);
+        AssertEqual(0f, carrier.SlackMeters, "an executor carrier is exact");
+        string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
+        AssertTrue(queue.Contains("unit.combatstatussubordinates > 0f, carrier.SlackMeters)"), "the reading uses the carrier's slack");
     }
 }

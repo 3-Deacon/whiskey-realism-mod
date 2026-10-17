@@ -284,8 +284,8 @@ internal static partial class WlOrderFlowTests
         int voidAt = body.IndexOf("WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);", StringComparison.Ordinal);
         int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
         AssertTrue(voidAt > 0 && emit > voidAt, "the group's old executor orders are voided before Emit queues the new one");
-        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\)\)\s*WlOrderFlowRuntime\.SupersedeExecutorOrders"),
-            "only an executed Move that is not a deployment placement voids");
+        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\) && \(winner\.Flags & IntentFlags\.Maintenance\) == 0\)\s*WlOrderFlowRuntime\.SupersedeExecutorOrders"),
+            "only an executed Move that is not a deployment placement and not maintenance voids: a recovery's target can be a fresh assembly point (TryRecoveryPath), and it would void a real order the brigade is still carrying out");
         string flow = Code(FlowRuntime);
         string supersede = BodyOf(flow, "internal static void SupersedeExecutorOrders(");
         AssertTrue(supersede.Contains("catch (Exception ex)") && supersede.Contains("OnceLog.Warning(\"wl-order:supersede-intent\""), "never throws, one static warning key");
@@ -591,7 +591,7 @@ internal static partial class WlOrderFlowTests
         AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.lastupdate, in carrier)"), "only an entry that carries the order counts, matched by ordertype and creation stamp");
         AssertTrue(queue.Contains("line.type == 1 && line.lineactive") && queue.Contains("line.targetunit") && queue.Contains("line.courierref == null"),
             "lost is vanilla's own test (125282-125286: an active mounted line without a courier) on the entry's primary line");
-        AssertTrue(queue.Contains("WlMoveState.BasisAfterGone(unit.regimentpaths > 0, pathEnd, distance, unit.combatstatussubordinates > 0f)") && queue.Contains("carrier.X") && queue.Contains("carrier.Z"),
+        AssertTrue(queue.Contains("WlMoveState.BasisAfterGone(unit.regimentpaths > 0, pathEnd, distance, unit.combatstatussubordinates > 0f, carrier.SlackMeters)") && queue.Contains("carrier.X") && queue.Contains("carrier.Z"),
             "an entry that is gone is told lost from carried out by the unit's path end, its distance to the target it was given and its contact");
         AssertTrue(queue.Contains("unit.lastsetwaypointposition"), "the held path's end is the unit's last set waypoint, which vanilla stamps on every group move (92067)");
         AssertTrue(queue.Contains("if (queued) return WlMoveState.Classify(true, lost, false);"), "a queued entry is judged by its courier line alone: the path says nothing while the move waits");

@@ -147,13 +147,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // The verdict for an entry that is gone: why the move counts as carried out, or None (lost).
         // pathEndMeters is the distance from the end of the unit's held path to the target; it is read only
         // while a path is held.
-        public static MoveBasis BasisAfterGone(bool pathHeld, float pathEndMeters, float distanceToTargetMeters, bool inContact)
+        public static MoveBasis BasisAfterGone(bool pathHeld, float pathEndMeters, float distanceToTargetMeters, bool inContact, float slackMeters = 0f)
         {
-            if (distanceToTargetMeters <= ArrivalMeters) return MoveBasis.Arrived;
-            if (pathHeld && pathEndMeters <= ArrivalMeters) return MoveBasis.Path;
-            if (inContact && distanceToTargetMeters <= ContactNearMeters) return MoveBasis.Contact;
+            if (distanceToTargetMeters <= ArrivalMeters + slackMeters) return MoveBasis.Arrived;
+            if (pathHeld && pathEndMeters <= ArrivalMeters + slackMeters) return MoveBasis.Path;
+            if (inContact && distanceToTargetMeters <= ContactNearMeters + slackMeters) return MoveBasis.Contact;
             return MoveBasis.None;
         }
+
+        // How far a vanilla caller's waypoint can lie from the point of the order it then gives (WlOrderFlowRuntime.TryPursuit
+        // anchors a vanilla order on the order's position): UpdateMovingTargets moves a screen-stance group to a point 70 m
+        // beyond the objective (6941) and CheckForSimilarPositions moves a waypoint another distancetoenemytocancelinterruption
+        // (150 m, unitprefs 991) off a point another group occupies (8700-8705). The executor's carriers are exact: slack 0.
+        public const float VanillaWaypointSlackMeters = 220f;
 
         // Does a queue entry of the carrier unit carry the order? A move entry of the carrier's ordertype whose
         // creation stamp is not before the carrier's: the entry the dispatch recorded (its stamp only grows,
@@ -182,6 +188,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public float Stamp;
         public int OrderType;
         public float X, Z;
+        // Added to every distance of the pursuit reading (WlMoveState.BasisAfterGone): the carrier's target is the order's
+        // position, which a vanilla caller's waypoint can be that far from. 0 for an executor carrier.
+        public float SlackMeters;
 
         // OrderType of a carrier that waits for no queue entry (a vanilla order's called unit): WlMoveState.Carries
         // matches none, so the unit's path, position and contact decide.

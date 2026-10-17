@@ -238,11 +238,14 @@ namespace WhiskeyRealism.Tactical.Battle
             }
 
             // A newer move of this group voids the group's queued executor orders to the player (they describe the
-            // move just replaced); the new move's own order is queued after.
-            if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner))
+            // move just replaced); the new move's own order is queued after. A Maintenance move (an interrupted-path
+            // recovery, whose target can be a fresh assembly point, or a formation slot) is no new order and voids none.
+            if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner) && (winner.Flags & IntentFlags.Maintenance) == 0)
                 WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);
-            // The group's task, for the task-hold test of the dispatch queued below or earlier.
-            if (executed > 0 && winner.Task != CommandTaskType.None)
+            // The group's task, for the task-hold test of the dispatch queued below or earlier. Every channel carries the group's
+            // real task (stance and formation intents take the posture decision's), except the works hold's stance, which names
+            // HoldObjective whatever the group is doing.
+            if (executed > 0 && winner.Task != CommandTaskType.None && (winner.Flags & IntentFlags.WorksHold) == 0)
                 TacticalPlayerDispatchRuntime.NoteTask(winner.GroupId, winner.Task, nowHours);
 
             // Emit never throws (it logs its own failure once).

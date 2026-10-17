@@ -400,7 +400,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 entry.AwaitsMove = true;
                 entry.Carrier = call.Carrier;
             }
-            else if (call.Origin == OrderOrigin.Vanilla && CouriersOn() && TryPursuit(unit, type, out WlMoveCarrier pursuit))
+            else if (call.Origin == OrderOrigin.Vanilla && CouriersOn() && TryPursuit(unit, type, position, out WlMoveCarrier pursuit))
             {
                 entry.Pursuit = true;
                 entry.Carrier = pursuit;
@@ -417,19 +417,24 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return verdict;
         }
 
-        // A vanilla order of a type whose caller has just set the called unit on a waypoint (WlMoveState.VanillaFollowsAWaypoint)
-        // arms the delivery check "does the chain still pursue the point" when the unit holds a path now. The point is the unit's
-        // last set waypoint, not the order's position: the callers move the unit to a point they adjust (UpdateMovingTargets
-        // 70 m off the objective, CheckForSimilarPositions) and the order names the objective or the enemy. Some callers set
-        // the waypoint only for units that are not under the player's command (6958, 8185), the call is outside that test:
-        // a unit with no path was not sent, and the order is not armed.
-        private static bool TryPursuit(Regiment unit, int type, out WlMoveCarrier pursuit)
+        // A vanilla order of a type whose caller sets the called unit on a waypoint just before the order
+        // (WlMoveState.VanillaFollowsAWaypoint) arms the delivery check "does the chain still pursue the point" when the
+        // unit holds a path now. The carrier's target is the ORDER's position with the callers' slack, not the unit's last set
+        // waypoint read here: UpdateMovingTargets sends a unit more than 150 m from its objective through BlockedMovingOrder,
+        // which sets the waypoint two frames after this call (3382), so at capture the waypoint can still be the previous
+        // move's. By delivery (a courier leg later) it has been set; the callers' waypoint differs from the order's point by
+        // at most WlMoveState.VanillaWaypointSlackMeters. Some callers set the waypoint only for units that are not under the
+        // player's command (6958, 8185) with the order outside that test: a unit with no path was not sent, and the order is
+        // not armed.
+        private static bool TryPursuit(Regiment unit, int type, Vector3 position, out WlMoveCarrier pursuit)
         {
             pursuit = default(WlMoveCarrier);
             if (!WlMoveState.VanillaFollowsAWaypoint(type) || (UnityEngine.Object)unit == null || unit.regimentpaths <= 0) return false;
-            Vector3 last = unit.lastsetwaypointposition;
-            if (last.x == 0f && last.z == 0f) return false;
-            pursuit = new WlMoveCarrier { UnitId = unit.gameObject.GetInstanceID(), OrderType = WlMoveCarrier.NoQueueEntry, X = last.x, Z = last.z };
+            pursuit = new WlMoveCarrier
+            {
+                UnitId = unit.gameObject.GetInstanceID(), OrderType = WlMoveCarrier.NoQueueEntry, X = position.x, Z = position.z,
+                SlackMeters = WlMoveState.VanillaWaypointSlackMeters,
+            };
             return true;
         }
 
