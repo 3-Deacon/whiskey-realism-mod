@@ -244,14 +244,17 @@ internal static class ManeuverFeasibilityFixtures
         /// regiments stand at the corps and face the enemy. Returns the corps' index in the tree; its child id is appended.
         /// </summary>
         public int AddCorps(float lateral, float depth, float strength, int regiments = 4, UnitFlags regimentFlags = 0, bool deployedReserve = false,
-            float fireRange = 100f, float fatigue = 0f)
+            float fireRange = 100f, float fatigue = 0f, float cover = 0f, int coverObject = 0)
         {
             float x = X(lateral), z = Z(depth);
             int corps = Tree.Add(TacticalUnitType.BattleGroupDivision, x, z, ArmyIndex);
             int brigade = Tree.Add(TacticalUnitType.BattleGroupBrigade, x, z, corps);
             for (int r = 0; r < regiments; r++)
-                Tree.Add(TacticalUnitType.Infantry, x, z, brigade, UnitFlags.IsInfantry | regimentFlags,
+            {
+                int regiment = Tree.Add(TacticalUnitType.Infantry, x, z, brigade, UnitFlags.IsInfantry | regimentFlags,
                     strength / regiments, morale: 1f, fireRange: fireRange, rotationY: 0f, fatigue: fatigue);
+                if (cover > 0f) _cover[regiment] = (cover, coverObject);
+            }
             ChildIds.Add("child-" + Tree.InstanceId(corps));
             DeployedReserve.Add(deployedReserve);
             return corps;
@@ -296,9 +299,17 @@ internal static class ManeuverFeasibilityFixtures
             AddEnemy(450f, depth, totalStrength / 3f);
         }
 
+        // BC14W: own regiments standing in works cover (tree index to the cover value and object), applied to the snapshot's records.
+        private readonly Dictionary<int, (float value, int obj)> _cover = new Dictionary<int, (float, int)>();
+
         public BattleSnapshot Snapshot()
         {
             BattleSnapshot s = Tree.Build(Now, Enemies.ToArray());
+            foreach (KeyValuePair<int, (float value, int obj)> c in _cover)
+            {
+                s.Own[c.Key].CoverValue = c.Value.value;
+                s.Own[c.Key].CoverObject = c.Value.obj;
+            }
             for (int i = 0; i < Contact.Count; i++) s.SetClosestVisibleEnemy(Contact[i], 0, 100f);
             for (int i = 0; i < HiddenEnemies.Count; i++)
             {

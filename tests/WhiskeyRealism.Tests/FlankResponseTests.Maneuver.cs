@@ -692,7 +692,7 @@ internal static partial class FlankResponseTests
         AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored, side.Army.Feasibility);", "the direct children reach CollectOwn");
         AssertPinned(coordinator, "PlayExecutorRuntime.StepManeuvers(", "the coordinator steps the maneuvers each direct-child cycle");
         AssertPinned(coordinator, "side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance", "from the side's evidence and stance");
-        AssertPinned(coordinator, "unchecked((CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash) * 31 + worksHoldHash)", "a phase change or a works hold change ticks the ledger gate");
+        AssertPinned(coordinator, "unchecked(((CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash) * 31 + worksHoldHash) * 31 + side.Army.GuardHash)", "a phase change, a works hold change or a moved guard point ticks the ledger gate");
         AssertPinned(coordinator, "side.Army.Feasibility.WorksHoldHash", "the works hold hash is read from the side's ledger");
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
         AssertPinned(runtime, "if (!Plugin.FlankResponseEnabled() || planId == BattlePlanId.Unknown", "the maneuver is behind Enable Flank Response And Envelopment");

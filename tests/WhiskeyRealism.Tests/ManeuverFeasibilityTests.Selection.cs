@@ -44,6 +44,8 @@ internal static partial class ManeuverFeasibilityTests
         public bool FacesWorks(string childId) => false;
         public int WorksHoldHash => 0;
         public IWorksQuery HeldWorks => null;
+        public bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount) { station = default(StationPoint); childCount = 0; return false; }
+        public string StationChildId(int column) => null;
         public int ThreatCount => 0;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public double EvaluatedHours => 0.0;

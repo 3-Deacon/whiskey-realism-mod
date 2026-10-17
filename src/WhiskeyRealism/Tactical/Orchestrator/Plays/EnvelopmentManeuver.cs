@@ -1004,7 +1004,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         // BC14 requirement-defender-crossing-release: a reserve released to a crossing stands at its guard point facing the crossing. Every node of
         // the child takes the guard point as its primary target (a guard has no lanes: the groups below follow their parent's formation) and the
-        // guard heading, through the same maneuver override the doctrine build already applies; the child's role gives the GuardFlank task.
+        // guard heading, through the same maneuver override the doctrine build already applies; the child's role gives the GuardFlank task. BC14W: a
+        // stationed Reserve child (a Defender's reserve behind its most threatened works focal point) is the same entry as ReserveWait, "station-works".
         private static void AddGuards(ManeuverNodeTable table, System.Collections.Generic.IReadOnlyList<DirectChildIntent> children,
             System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
         {
@@ -1014,11 +1015,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (!children[c].HasGuardPoint) continue;
                 string source = NodeIdOfChild(children[c].ChildId);
                 if (source.Length == 0) continue;
+                // BC14W: a guard point on a child that is still a Reserve is the Defender's works station (a crossing guard has taken a Refuse role).
+                bool station = children[c].Role == DirectChildRole.Reserve;
                 for (int i = 0; i < nodeIntents.Count; i++)
                 {
                     if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
-                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, CommandTaskType.GuardFlank, true,
-                        children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, "guard-crossing", isGuard: true));
+                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, station ? CommandTaskType.ReserveWait : CommandTaskType.GuardFlank, true,
+                        children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, station ? "station-works" : "guard-crossing", isGuard: true));
                 }
             }
         }

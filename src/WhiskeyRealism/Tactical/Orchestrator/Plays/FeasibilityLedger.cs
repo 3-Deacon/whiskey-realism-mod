@@ -290,6 +290,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         internal void BeginBack()
         {
             _back.Clear();
+            ClearStationBack();
             _threatBackCount = 0;
             _threatBackChildren = 0;
             _lookBackCount = 0;
@@ -362,6 +363,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _childBack = tmp;
             _childFrontCount = BuildChildTable(_front, _childFront);
             PublishFocal();
+            PublishStation();
             RefreshWorks(_worksWorld);
             CrossingThreat[] swapThreats = _threatFront;
             _threatFront = _threatBack;

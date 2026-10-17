@@ -115,6 +115,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool EnemyAcross;
     }
 
+    /// <summary>
+    /// BC14W (requirement-defender-works-reserve): where a Defender's reserve stations behind its most threatened focal point of its own works: the focal
+    /// point, the station <see cref="ManeuverFeasibility"/> picked <see cref="WorksRules.ReserveStationMeters"/> behind it along the own front axis (on own
+    /// land), the heading that faces it, and the hours the earliest enemy body needs to reach the focal point. <see cref="Has"/> false is none.
+    /// </summary>
+    public struct StationPoint
+    {
+        public bool Has;
+        public float FocalX, FocalZ, X, Z, Heading, ArrivalHours;
+    }
+
     /// <summary>What the army, the allocator and BC11's runtime read of the published ledger.</summary>
     public interface IFeasibilityLookup
     {
@@ -190,6 +201,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>BC14W: the held works of the latest built evaluation (the exploit guard, the probe nomination and the lane check ask it); null with none.</summary>
         IWorksQuery HeldWorks { get; }
+
+        /// <summary>
+        /// BC14W (requirement-defender-works-reserve): the station behind the Defender's most threatened own focal point, with each direct child's time to it
+        /// (courier plus march; NaN for a child holding player-owned strength) written to <paramref name="ownShiftByChild"/> in the column order of
+        /// <see cref="StationChildId"/>. False with none.
+        /// </summary>
+        bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount);
+
+        /// <summary>BC14W: the child id of a column of the station's time vector; null past the last.</summary>
+        string StationChildId(int column);
     }
 
     /// <summary>

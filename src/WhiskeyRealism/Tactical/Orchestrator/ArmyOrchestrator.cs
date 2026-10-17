@@ -712,6 +712,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private readonly float[] _threatRow = new float[Plays.ManeuverFeasibility.MaxChildren];
         // The threats the last allocation was handed: the release row names the one a guard answers.
         private int _lastThreatCount;
+        // BC14W: the Defender's works station and each allocation child's time to it, in the allocation's child order.
+        private float[] _stationShiftBuffer = new float[Plays.ManeuverFeasibility.MaxChildren];
+        private readonly float[] _stationRow = new float[Plays.ManeuverFeasibility.MaxChildren];
 
         // The army-level release and return damped as the leaf one is (verify r2: the crisis release is stateless and flipped with the picture).
         private readonly ReleaseHysteresis _armyReleaseHysteresis = new ReleaseHysteresis();
@@ -737,12 +740,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (feasible && _feasibility != null)
                 threats = FillThreatMatrix(_feasibility, _directChildSnapshots, _threatBuffer, _threatShiftBuffer, _threatRow, out threatChildren);
             _lastThreatCount = threats;
+            Plays.StationPoint station = default(Plays.StationPoint);
+            int stationChildren = 0;
+            if (feasible && _feasibility != null && Plugin.EnemyWorksDoctrineEnabled())
+                FillStation(_feasibility, _directChildSnapshots, _stationShiftBuffer, _stationRow, out station, out stationChildren);
             return new ReserveReleaseContext(
                 _lastGlobalOdds, flank, ReserveRelease, exploiting, HoursSource(),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Aggression),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
-                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis);
+                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis, station, _stationShiftBuffer, stationChildren);
+        }
+
+        /// <summary>
+        /// The Defender's works station and each allocation child's time to it from the ledger into the pooled buffer, by child id as the threat matrix
+        /// is: a child the ledger did not time (another child list, one that arrived since) gets NaN, which the allocator reads as never stationed.
+        /// With no station, or more children than the ledger's cap, the station is none.
+        /// </summary>
+        internal static void FillStation(Plays.IFeasibilityLookup ledger, IReadOnlyList<DirectChildSnapshot> snapshots, float[] shiftBuffer, float[] row,
+            out Plays.StationPoint station, out int allocationChildren)
+        {
+            allocationChildren = snapshots.Count;
+            if (allocationChildren > Plays.ManeuverFeasibility.MaxChildren || !ledger.TryStation(out station, row, out int children) || !station.Has)
+            {
+                station = default(Plays.StationPoint);
+                allocationChildren = 0;
+                return;
+            }
+            for (int c = 0; c < allocationChildren; c++)
+            {
+                int column = -1;
+                for (int k = 0; k < children; k++)
+                    if (string.Equals(ledger.StationChildId(k), snapshots[c].ChildId, StringComparison.Ordinal)) { column = k; break; }
+                shiftBuffer[c] = column >= 0 ? row[column] : float.NaN;
+            }
         }
 
         /// <summary>
@@ -879,17 +910,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int before = IndexOfChild(previous, current[i].ChildId);
                     if (before < 0 || !previous[before].HasGuardPoint || current[i].HasGuardPoint) continue;
                     string childId = current[i].ChildId;
+                    // BC14W: a guard point on a Reserve child was the works station, not a crossing guard.
+                    string revertedReason = previous[before].Role == DirectChildRole.Reserve ? "works-station" : "crossing-threat";
                     WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
                         WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
                         WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
                         "TacticalReserveRelease",
                         WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
                         ev => ev
-                            .WithDecision("TacticalReserveRelease", "crossing-threat", "side=" + AllianceId + "|child=" + childId + "|reverted")
+                            .WithDecision("TacticalReserveRelease", revertedReason, "side=" + AllianceId + "|child=" + childId + "|reverted")
                             .WithField("side", AllianceId)
                             .WithField("child", childId)
-                            .WithField("reason", "crossing-threat")
+                            .WithField("reason", revertedReason)
                             .WithField("reverted", true));
+                }
+                // BC14W: a Reserve child that has just been stationed behind a focal point of the Defender's works (a state change, so bounded).
+                for (int i = 0; i < current.Count; i++)
+                {
+                    if (current[i].Role != DirectChildRole.Reserve || !current[i].HasGuardPoint) continue;
+                    int before = IndexOfChild(previous, current[i].ChildId);
+                    if (before >= 0 && previous[before].Role == DirectChildRole.Reserve && previous[before].HasGuardPoint) continue;
+                    DirectChildIntent stationed = current[i];
+                    StationBinding station = ReserveRelease.Station;
+                    WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                        WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                        WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                        "TacticalReserveRelease",
+                        WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                        ev => ev
+                            .WithDecision("TacticalReserveRelease", "works-station", "side=" + AllianceId + "|child=" + stationed.ChildId)
+                            .WithField("side", AllianceId)
+                            .WithField("child", stationed.ChildId)
+                            .WithField("reason", "works-station")
+                            .WithField("focalX", station.FocalX)
+                            .WithField("focalZ", station.FocalZ)
+                            .WithField("guardX", stationed.Guard.X)
+                            .WithField("guardZ", stationed.Guard.Z)
+                            .WithField("guardHeading", stationed.Guard.Heading)
+                            .WithField("enemyArrivalHours", station.ArrivalAtChoice)
+                            .WithField("reverted", false));
                 }
             }
             catch (System.Exception ex)
@@ -1551,6 +1610,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>A hash of the maneuver orders; the ledger gate ticks when it changes (a phase change must reach the doctrine orders).</summary>
         internal int ManeuverHash => _maneuverHash;
+
+        /// <summary>A hash of the guard points of the latest allocation (crossing guards and the works station); the ledger gate ticks when it changes.</summary>
+        internal int GuardHash => DirectChildAllocator.GuardHash(_directChildIntents);
 
         internal void SetManeuvers(IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver> maneuvers)
         {

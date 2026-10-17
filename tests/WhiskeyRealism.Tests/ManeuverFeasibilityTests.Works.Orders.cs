@@ -55,6 +55,18 @@ internal static partial class ManeuverFeasibilityTests
         public bool FacesWorks(string childId) => Faces.Contains(childId);
         public int WorksHoldHash => Hash;
         public IWorksQuery HeldWorks => null;
+        public bool HasStation;
+        public StationPoint Station;
+        public float[] StationShifts = new float[0];
+        public string[] StationIds = new string[0];
+        public bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount)
+        {
+            station = Station;
+            childCount = StationShifts.Length;
+            for (int c = 0; c < childCount && c < ownShiftByChild.Length; c++) ownShiftByChild[c] = StationShifts[c];
+            return HasStation;
+        }
+        public string StationChildId(int column) => column >= 0 && column < StationIds.Length ? StationIds[column] : null;
     }
 
     // An army with two corps (child-2, child-3), each with one brigade (node-10 under node-2, node-20 under node-3).

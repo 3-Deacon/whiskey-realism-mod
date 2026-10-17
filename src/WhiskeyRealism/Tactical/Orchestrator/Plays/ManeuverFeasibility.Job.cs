@@ -223,6 +223,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             ledger.SetFocalBack(HasFocal, in Focal);
             ledger.SetLooksBack(Defender.LookLinks, Defender.LookCount);     // the picture is candidate-independent: published with every evaluation
+            ledger.SetStationBack(Defender.HasStation, in Defender.Station, Defender.StationShift, Defender.StationChildCount, Input.ChildIds);
             ledger.Publish(Input.NowHours);
             Running = false;
             return true;

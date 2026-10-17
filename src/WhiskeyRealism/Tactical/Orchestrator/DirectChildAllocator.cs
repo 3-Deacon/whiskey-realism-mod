@@ -31,8 +31,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public ReserveReleaseContext(float globalOdds, bool flankRelease, ReserveReleaseState state, bool[] exploiting,
             double nowHours, float agg01, float caution01, float casualtyTolerance01, bool? staggered = null,
             CrossingThreat[] crossingThreats = null, int threatCount = 0, float[] ownShiftByChild = null, int threatChildCount = 0,
-            ReleaseHysteresis hysteresis = null)
+            ReleaseHysteresis hysteresis = null, StationPoint station = default(StationPoint), float[] stationShiftByChild = null, int stationChildCount = 0)
         {
+            Station = station;
+            StationShiftByChild = stationShiftByChild;
+            StationChildCount = stationChildCount;
             Hysteresis = hysteresis;
             Staggered = staggered ?? state != null;
             CrossingThreats = crossingThreats;
@@ -84,6 +87,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// returned once the trigger has been gone for a margin. Null releases and returns on the raw picture each call, as before.
         /// </summary>
         public ReleaseHysteresis Hysteresis { get; }
+
+        /// <summary>
+        /// BC14W (requirement-defender-works-reserve): the station behind the Defender's most threatened own focal point and each allocation child's time to
+        /// it (<see cref="StationChildCount"/> entries, the allocation's child order; NaN for a child holding player-owned strength). <c>Station.Has</c> false is none.
+        /// </summary>
+        public StationPoint Station { get; }
+        public float[] StationShiftByChild { get; }
+        public int StationChildCount { get; }
     }
 
     /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
@@ -463,6 +474,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             if (release.FlankRelease) ReleaseReserveToThreatenedWing(evidence, roles, axisOverride);
             ReleaseReserveToCrossings(roles, axisOverride, guards, release, snapshots);
+            StationReserveBehindFocalPoint(roles, axisOverride, guards, release, snapshots);
             if (wasReserve != null) ApplyHysteresis(roles, wasReserve, axisOverride, guards, release, snapshots);
         }
 
@@ -727,6 +739,99 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     Held = HeldReserves(roles, release), Floor = FloorOf(r0x, floorShare),
                 });
             }
+        }
+
+        /// <summary>
+        /// BC14W requirement-defender-works-reserve. After the crossing release, among the children still Reserve: the eligible one (not exploiting, no
+        /// player-owned strength) with the least time to the station behind the Defender's most threatened own focal point is given a guard point there,
+        /// facing it, and stays Reserve (a station, not a release: the floor is not consulted and the role stays for every later release). One child per side.
+        /// </summary>
+        internal static void StationReserveBehindFocalPoint(
+            DirectChildRole[] roles,
+            int[] axisOverride,
+            GuardPoint[] guards,
+            ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            ReserveReleaseState state = release.State;
+            if (state == null) return;
+            StationPoint station = release.Station;
+            if (!station.Has)
+            {
+                state.EndStation();
+                return;
+            }
+
+            // The standing station keeps its child while that child is still an eligible Reserve; it moves to another focal point only when the enemy
+            // reaches that one earlier by StationSwitchHours than it reached the standing one when it was chosen.
+            StationBinding bound = state.Station;
+            int boundChild = bound.Has ? IndexOfSnapshot(snapshots, bound.ChildId) : -1;
+            if (boundChild >= 0 && StationEligible(roles, release, boundChild))
+            {
+                bool sameFocal = bound.FocalX == station.FocalX && bound.FocalZ == station.FocalZ;
+                if (sameFocal || station.ArrivalHours > bound.ArrivalAtChoice - WhiskeyRealism.Tactical.Battle.WorksRules.StationSwitchHours)
+                {
+                    guards[boundChild] = new GuardPoint(bound.X, bound.Z, bound.Heading);
+                    return;
+                }
+            }
+
+            int pick = -1;
+            float pickShift = float.PositiveInfinity;
+            for (int c = 0; c < roles.Length; c++)
+            {
+                if (!StationEligible(roles, release, c)) continue;
+                float shift = StationShiftOf(release, c);
+                if (!(shift < pickShift)) continue;
+                pick = c;
+                pickShift = shift;
+            }
+            if (pick < 0)
+            {
+                state.EndStation();
+                return;
+            }
+            guards[pick] = new GuardPoint(station.X, station.Z, station.Heading);
+            state.BindStation(new StationBinding
+            {
+                ChildId = snapshots[pick].ChildId, FocalX = station.FocalX, FocalZ = station.FocalZ, X = station.X, Z = station.Z,
+                Heading = station.Heading, ArrivalAtChoice = station.ArrivalHours,
+            });
+        }
+
+        /// <summary>
+        /// A hash of the guard points the allocation gave (child, role, the place to 50 units, the heading to 5 degrees). A station keeps its child's role,
+        /// so the command-node intents do not change when it appears, moves or ends: the operations ledger's change gate reads this as well.
+        /// </summary>
+        internal static int GuardHash(IReadOnlyList<DirectChildIntent> intents)
+        {
+            if (intents == null) return 0;
+            unchecked
+            {
+                int h = 17;
+                for (int i = 0; i < intents.Count; i++)
+                {
+                    if (!intents[i].HasGuardPoint) continue;
+                    h = h * 31 + (intents[i].ChildId?.GetHashCode() ?? 0);
+                    h = h * 31 + (int)intents[i].Role;
+                    h = h * 31 + (int)(intents[i].Guard.X / 50f);
+                    h = h * 31 + (int)(intents[i].Guard.Z / 50f);
+                    h = h * 31 + (int)(intents[i].Guard.Heading / 5f);
+                }
+                return h;
+            }
+        }
+
+        // A station goes to a child that is still a Reserve, is no exploit asset and holds no player-owned strength (its time to the station is NaN).
+        private static bool StationEligible(DirectChildRole[] roles, ReserveReleaseContext release, int child)
+        {
+            return roles[child] == DirectChildRole.Reserve && !IsExploiting(release, child) && !float.IsNaN(StationShiftOf(release, child));
+        }
+
+        private static float StationShiftOf(ReserveReleaseContext release, int child)
+        {
+            if (release.StationShiftByChild == null || child >= release.StationChildCount || child >= release.StationShiftByChild.Length) return float.NaN;
+            return release.StationShiftByChild[child];
         }
 
         private static void GuardAt(DirectChildRole[] roles, int[] axisOverride, GuardPoint[] guards, int child, in CrossingThreat threat)

@@ -11,14 +11,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     {
         /// <summary>
         /// Builds the evaluation's works picture once, at <see cref="FeasibilityJob.Begin"/>. An Attacker or Meeting side reads the enemy's works
-        /// (the enemy bodies are built for it too, for the junctions); a Defender's own works are the station's (requirement-defender-works-reserve).
+        /// (the enemy bodies are built for it too, for the junctions); a Defender builds its own works into the same picture for the station
+        /// (requirement-defender-works-reserve), which is not <see cref="FeasibilityJob.WorksActive"/>.
         /// </summary>
         internal static void BuildWorks(FeasibilityJob job)
         {
             job.WorksActive = false;
             job.HasFocal = false;
             job.Works.Clear();
-            if (!Plugin.EnemyWorksDoctrineEnabled() || !job.FrameValid || job.Input.Stance == BattleStance.Defender) return;
+            if (!Plugin.EnemyWorksDoctrineEnabled() || !job.FrameValid) return;
+            if (job.Input.Stance == BattleStance.Defender)
+            {
+                // WorksActive stays false: the enemy-works terms, the held-works guards and the recon refusals are about the enemy's works.
+                job.Works.BuildOwn(job.Input.Snapshot, in job.Input.Axis, job.Input.Works, job.Input.Picture);
+                return;
+            }
             job.WorksActive = true;
             DefenderPicture bodies = job.Defender;
             if (job.Enemy.HasSamples) BuildEnemyBodies(job, bodies);

@@ -765,7 +765,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         // BC14W: the works hold, its reason and the set of children that face works join the gate, so a hold that turns true or false
                         // forces a store of the orders on the same heavy tick.
                         int worksHoldHash = side.Army.Feasibility != null ? side.Army.Feasibility.WorksHoldHash : 0;
-                        int intentsHash = unchecked((CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash) * 31 + worksHoldHash);
+                        // A works station keeps its child's Reserve role, so its guard point joins the gate as well.
+                        int intentsHash = unchecked(((CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash) * 31 + worksHoldHash) * 31 + side.Army.GuardHash);
                         bool inputsChanged = _snapshotGeneration[s] != _lastLedgerSnapshotGeneration[s]
                             || intentsHash != _lastLedgerIntentsHash[s];
                         if (!ShouldTickOperationsLedger(inputsChanged, mode != _lastLedgerMode[s], nowBattleSeconds, _lastLedgerTickBattleSeconds[s]))

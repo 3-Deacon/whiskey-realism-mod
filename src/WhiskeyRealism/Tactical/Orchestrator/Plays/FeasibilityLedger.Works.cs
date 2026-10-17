@@ -72,6 +72,60 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <inheritdoc />
         public int WorksHoldHash => _worksHash;
 
+        // ---- the Defender's works station (requirement-defender-works-reserve), published with the candidates ----
+
+        private StationPoint _stationFront, _stationBack;
+        private float[] _stationShiftFront = new float[ManeuverFeasibility.MaxChildren], _stationShiftBack = new float[ManeuverFeasibility.MaxChildren];
+        private string[] _stationIdsFront = new string[ManeuverFeasibility.MaxChildren], _stationIdsBack = new string[ManeuverFeasibility.MaxChildren];
+        private int _stationChildrenFront, _stationChildrenBack;
+
+        internal void ClearStationBack()
+        {
+            _stationBack = default(StationPoint);
+            _stationChildrenBack = 0;
+        }
+
+        internal void SetStationBack(bool has, in StationPoint station, float[] shiftByChild, int childCount, System.Collections.Generic.IReadOnlyList<string> childIds)
+        {
+            ClearStationBack();
+            if (!has) return;
+            _stationBack = station;
+            _stationChildrenBack = Math.Min(childCount, ManeuverFeasibility.MaxChildren);
+            for (int c = 0; c < _stationShiftBack.Length; c++)
+            {
+                bool used = c < _stationChildrenBack;
+                _stationShiftBack[c] = used ? shiftByChild[c] : float.NaN;
+                _stationIdsBack[c] = used && c < childIds.Count ? childIds[c] : null;
+            }
+        }
+
+        private void PublishStation()
+        {
+            StationPoint point = _stationFront;
+            _stationFront = _stationBack;
+            _stationBack = point;
+            float[] shifts = _stationShiftFront;
+            _stationShiftFront = _stationShiftBack;
+            _stationShiftBack = shifts;
+            string[] ids = _stationIdsFront;
+            _stationIdsFront = _stationIdsBack;
+            _stationIdsBack = ids;
+            _stationChildrenFront = _stationChildrenBack;
+        }
+
+        /// <inheritdoc />
+        public bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount)
+        {
+            station = _stationFront;
+            childCount = _stationFront.Has ? _stationChildrenFront : 0;
+            if (!station.Has) return false;
+            for (int c = 0; c < childCount && c < ownShiftByChild.Length; c++) ownShiftByChild[c] = _stationShiftFront[c];
+            return true;
+        }
+
+        /// <inheritdoc />
+        public string StationChildId(int column) => _stationFront.Has && column >= 0 && column < _stationChildrenFront ? _stationIdsFront[column] : null;
+
         /// <summary>
         /// The latest built evaluation's works picture (single-buffered: it can be one evaluation ahead of the published results; works do not move,
         /// so the difference is the pieces perceived since). Null with the flag off or before the first evaluation.
