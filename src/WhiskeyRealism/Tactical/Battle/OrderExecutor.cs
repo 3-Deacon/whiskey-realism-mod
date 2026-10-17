@@ -685,11 +685,14 @@ namespace WhiskeyRealism.Tactical.Battle
             // 8. Every leg of a doctrine move (start, vias, target) that crosses a river takes a chain of crossings the side knows, or the move is not
             //    made. A via the move already has (a planned or road via) is kept, and a leg that needs a crossing gets it ahead of that via: the vias
             //    become the legs' crossings and the mover's own, in order, within the executor's bound (RoadRoutePlanner.MaxVia); a move that would need
-            //    more is refused too. A crossing the selected plan chose is not refused for an attack (a Screen or Probe never crosses a Held one).
+            //    more is refused too. The leg between a road route's two vias follows the road, which takes its own crossing: nothing is inserted there and
+            //    the crossing it passes is only checked (Clear or Watched goes; Held only for an attack; Unknown is refused with a look). A crossing the selected plan chose is not refused for an attack (a Screen or Probe never crosses a Held one).
             if (!immediate && Crossings != null && SubjectToCrossingGate(w))
             {
                 bool attack = IsCrossingAttackTask(w.Task);
                 int existing = plan.ViaCount;
+                // A BC10 road route: its two vias are the first road entry and the last road exit; the leg between them follows the road.
+                bool roadRoute = existing == RoadRoutePlanner.MaxVia && (w.Flags & IntentFlags.RoadRoute) != 0;
                 int count = 0;
                 Span<float> viaX = stackalloc float[RoadRoutePlanner.MaxVia];
                 Span<float> viaZ = stackalloc float[RoadRoutePlanner.MaxVia];
@@ -698,7 +701,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     float toX = leg < existing ? (leg == 0 ? plan.ViaX0 : plan.ViaX1) : x;
                     float toZ = leg < existing ? (leg == 0 ? plan.ViaZ0 : plan.ViaZ1) : z;
-                    CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack, out CrossingRoute route);
+                    CrossingVerdict crossing = Crossings.Check(s.Alliance, fromX, fromZ, toX, toZ, attack, roadRoute && leg == 1, out CrossingRoute route);
                     bool tooMany = false;
                     if (crossing == CrossingVerdict.ViaCrossing)
                     {

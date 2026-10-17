@@ -715,6 +715,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 Source = source,
                 Reason = reason,
                 ViaCount = roadRoute.Use ? roadRoute.ViaCount : (maneuverVia ? 1 : 0),
+                RoadRoute = roadRoute.Use,
                 ViaX0 = roadRoute.Use ? roadRoute.ViaX0 : maneuverViaX,
                 ViaZ0 = roadRoute.Use ? roadRoute.ViaZ0 : maneuverViaZ,
                 ViaX1 = roadRoute.ViaX1,
@@ -965,6 +966,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (t == null || !RoadRoutePlanner.Wanted(grid, s.Own[i].X, s.Own[i].Z, move.TargetX, move.TargetZ)) return;
             if (!TryPlan(s, t, grid, i, move.TargetX, move.TargetZ, out RoadRoute planned) || !planned.Use) return;
             move.ViaCount = planned.ViaCount;
+            move.Flags |= IntentFlags.RoadRoute;
             move.ViaX0 = planned.ViaX0;
             move.ViaZ0 = planned.ViaZ0;
             move.ViaX1 = planned.ViaX1;

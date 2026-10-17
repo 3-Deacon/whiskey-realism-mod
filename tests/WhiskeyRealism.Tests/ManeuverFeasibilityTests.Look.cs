@@ -98,8 +98,8 @@ internal static partial class ManeuverFeasibilityTests
             _picture = new LedgerCrossingPicture(f.Crossings, ledger);
             _picture.Bind(f.Regions);
         }
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, out CrossingRoute route)
-            => RiverCrossingRule.Decide(_picture, x0, z0, x1, z1, attack, out route);
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+            => RiverCrossingRule.Decide(_picture, x0, z0, x1, z1, attack, road, out route);
     }
 
     // A leg across the band from the own line (depth 0) to the far bank (depth 500) at the given lateral.

@@ -75,8 +75,8 @@ internal static class LeafReserveFieldTests
     {
         public readonly Bank Picture;
         public BankGate(Bank picture) { Picture = picture; }
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, out CrossingRoute route)
-            => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, out route);
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+            => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, road, out route);
     }
 
     // A division of six brigades across the front (facing +Z, lateral = x), x = 0 .. 500, standing on one line at LineZ; 103 and 105 held back.

@@ -34,6 +34,8 @@ internal static class RiverCrossingTests
             ("river crossing two maps with the same number of links do not share a link graph", TwoMapsDoNotShareALinkGraph),
             ("river crossing a leg after a via gets its crossing within the two-via bound, else the move is refused", ALegAfterAViaGetsItsCrossingOrTheMoveIsRefused),
             ("river crossing the link graph is battle state and goes with the battle", TheLinkGraphGoesWithTheBattle),
+            ("river crossing a road march takes its own crossing: Clear or Watched goes, Held only for an attack, Unknown is refused with a look", ARoadMarchTakesItsOwnCrossing),
+            ("river crossing the road legs around a road route are gated and get vias within the bound; the route's flag comes from the posture request", TheLegsAroundARoadRouteAreGated),
             ("river crossing the division play and the reserve release are gated like the posture executor", DivisionPlayAndReserveReleaseAreGated),
             ("river crossing a withdrawal, a fallback, a scout's look and a placement are not gated", WithdrawalsAndScoutsAreNotGated),
             ("river crossing no gate leaves the move as validated", NoGateLeavesTheMove),
@@ -61,8 +63,8 @@ internal static class RiverCrossingTests
     internal sealed class Gate : ICrossingGate
     {
         internal readonly Picture Picture = new Picture();
-        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, out CrossingRoute route)
-            => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, out route);
+        public CrossingVerdict Check(int alliance, float x0, float z0, float x1, float z1, bool attack, bool road, out CrossingRoute route)
+            => RiverCrossingRule.Decide(Picture, x0, z0, x1, z1, attack, road, out route);
     }
 
     private static CrossingVerdict Decide(Picture p, float x0, float z0, float x1, float z1) => RiverCrossingRule.Decide(p, x0, z0, x1, z1, out _);
@@ -292,6 +294,95 @@ internal static class RiverCrossingTests
         ExecutionPlan e = Executor(ford).Plan(new View(100f, 100f), WithVia(300f, 400f), 1.0);
         AssertEqual(1, e.ViaCount, "a via on a leg that crosses nothing stays the only one");
         AssertEqual(300f, e.ViaX0, "as it was");
+    }
+
+    // verify landing F9: a BC10 road march (vias at the first road entry and the last road exit) over a bridge between them.
+    private static BattleOrderIntent RoadMarch(float entryX, float exitX, float targetX, bool roadFlag, CommandTaskType task = CommandTaskType.AdvanceToAssembly)
+    {
+        BattleOrderIntent m = Move(targetX, 100f, IntentSource.PostureExecutor, task, roadFlag ? IntentFlags.RoadRoute : IntentFlags.None);
+        m.ViaCount = 2;
+        m.ViaX0 = entryX;
+        m.ViaZ0 = -200f;
+        m.ViaX1 = exitX;
+        m.ViaZ1 = -200f;
+        return m;
+    }
+
+    private static void ARoadMarchTakesItsOwnCrossing()
+    {
+        // Vias at 300 and 800 (the bridge at 500 lies between them), start and target on the banks of the vias.
+        var clear = new Gate();
+        clear.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        ExecutionPlan ok = Executor(clear).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true), 1.0);
+        AssertTrue(ok.Execute, "a road march over a Clear bridge goes: " + ok.Skip);
+        AssertEqual(2, ok.ViaCount, "with the road's two vias, no third");
+        AssertEqual(300f, ok.ViaX0, "the road entry");
+        AssertEqual(800f, ok.ViaX1, "the road exit");
+        // Without the road flag the same two vias are an ordinary move: the bridge would be a third via and the move is refused.
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(clear).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: false), 1.0).Skip,
+            "(control) two vias that are not a road route cannot take a third for the bridge");
+
+        var watched = new Gate();
+        watched.Picture.Links.Add((500f, -200f, CrossingState.Watched, 0, 1));
+        AssertTrue(Executor(watched).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true), 1.0).Execute, "a Watched bridge goes too");
+
+        var held = new Gate();
+        held.Picture.Links.Add((500f, -200f, CrossingState.Held, 0, 1));
+        ExecutionPlan screen = Executor(held).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true, CommandTaskType.Screen), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, screen.Skip, "a Screen march over a Held bridge is refused");
+        ExecutionPlan assault = Executor(held).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true, CommandTaskType.AttackObjective), 1.0);
+        AssertTrue(assault.Execute, "an attack march over it goes: " + assault.Skip);
+        AssertEqual(2, assault.ViaCount, "on the road's vias");
+        AssertEqual(0, held.Picture.Looks.Count, "a Held bridge is no look");
+
+        var unknown = new Gate();
+        unknown.Picture.Links.Add((500f, -200f, CrossingState.Unknown, 0, 1));
+        ExecutionPlan blind = Executor(unknown).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, blind.Skip, "an Unknown bridge refuses the march");
+        AssertEqual(1, unknown.Picture.Looks.Count, "and posts the look");
+        AssertEqual(0, unknown.Picture.Looks[0], "at that bridge");
+        unknown.Picture.Planned.Add(0);
+        AssertTrue(Executor(unknown).Plan(new View(100f, 100f), RoadMarch(300f, 800f, 900f, roadFlag: true), 1.0).Execute, "(a bridge the plan chose is not refused)");
+
+        // Road vias on one bank: no crossing to check.
+        AssertTrue(Executor(new Gate()).Plan(new View(100f, 100f), RoadMarch(200f, 400f, 450f, roadFlag: true), 1.0).Execute, "a road march on one bank is not touched");
+    }
+
+    private static void TheLegsAroundARoadRouteAreGated()
+    {
+        var bridge = new Gate();
+        bridge.Picture.Links.Add((500f, -200f, CrossingState.Clear, 0, 1));
+        // Before the road entry: a start across the river from the entry needs the ford, and the road's two vias leave no room for it.
+        ExecutionPlan before = Executor(bridge).Plan(new View(100f, 100f), RoadMarch(700f, 800f, 900f, roadFlag: true), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, before.Skip, "a leg before the road entry that needs a crossing cannot get it past the two-via bound");
+        // After the road exit likewise.
+        ExecutionPlan after = Executor(bridge).Plan(new View(100f, 100f), RoadMarch(200f, 300f, 700f, roadFlag: true), 1.0);
+        AssertEqual(SkipReason.NoKnownCrossing, after.Skip, "and a leg after the road exit");
+        var none = new Gate();
+        AssertEqual(SkipReason.NoKnownCrossing, Executor(none).Plan(new View(100f, 100f), RoadMarch(200f, 300f, 700f, roadFlag: true), 1.0).Skip,
+            "a leg after the exit over a river with no crossing known is refused too");
+
+        // The flag is the posture request's: a road route sets it, a maneuver via does not.
+        var sink = new FlagSink();
+        PostureIntentPlan.Submit(sink, new PostureIntentRequest
+        {
+            GroupId = 10, Action = PostureExecutionAction.SetWaypoint, Task = CommandTaskType.AdvanceToAssembly, HasTarget = true, TargetX = 900f, TargetZ = -100f,
+            ViaCount = 2, ViaX0 = 300f, ViaZ0 = -200f, ViaX1 = 800f, ViaZ1 = -200f, RoadRoute = true, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "t",
+        });
+        AssertTrue(sink.Moves.Count == 1 && (sink.Moves[0].Flags & IntentFlags.RoadRoute) != 0, "a road route's move carries the road flag");
+        var plain = new FlagSink();
+        PostureIntentPlan.Submit(plain, new PostureIntentRequest
+        {
+            GroupId = 10, Action = PostureExecutionAction.SetWaypoint, Task = CommandTaskType.AdvanceToAssembly, HasTarget = true, TargetX = 900f, TargetZ = -100f,
+            ViaCount = 1, ViaX0 = 500f, ViaZ0 = -200f, RoadRoute = false, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "t",
+        });
+        AssertTrue(plain.Moves.Count == 1 && (plain.Moves[0].Flags & IntentFlags.RoadRoute) == 0, "a maneuver via does not");
+    }
+
+    private sealed class FlagSink : IIntentSink
+    {
+        public readonly List<BattleOrderIntent> Moves = new List<BattleOrderIntent>();
+        public void Submit(in BattleOrderIntent intent) { if (intent.Channel == OrderChannel.Move) Moves.Add(intent); }
     }
 
     // The link graph is built from the first map asked and kept; it goes with the battle (BattleScope) so the old map's regions are not held.

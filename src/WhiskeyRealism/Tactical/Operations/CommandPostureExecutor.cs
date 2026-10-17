@@ -1145,6 +1145,8 @@ namespace WhiskeyRealism.Tactical.Operations
         // through them); ColumnWait holds the Move back while group formation 4 (march column,
         // TargetFormation) is ordered: the formation intent goes out alone.
         public int ViaCount;
+        /// <summary>The vias are a BC10 road route (flag <see cref="IntentFlags.RoadRoute"/> on the move).</summary>
+        public bool RoadRoute;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public bool ColumnWait;
     }
@@ -1388,6 +1390,7 @@ namespace WhiskeyRealism.Tactical.Operations
             if (r.ViaCount > 0)
             {
                 move.ViaCount = Math.Min(r.ViaCount, 2);
+                if (r.RoadRoute) move.Flags |= IntentFlags.RoadRoute;
                 move.ViaX0 = r.ViaX0;
                 move.ViaZ0 = r.ViaZ0;
                 move.ViaX1 = r.ViaX1;

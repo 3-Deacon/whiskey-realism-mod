@@ -239,6 +239,9 @@ namespace WhiskeyRealism.Tactical.Battle
         // newpath: true, ignoredeplyomentzone: false) and clears the placed tree's
         // lastsetwaypointposition and immediateunitplacement (85873-85883), #60's call.
         ImmediatePlacement = 1024,
+        // BC10, Move only: the intent's two vias are a road route (RoadRoutePlanner: the first road entry and the last road exit). The leg between
+        // them follows the road, which takes its own crossing: the crossing gate inserts no via there and only checks the crossing the leg passes.
+        RoadRoute = 2048,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
