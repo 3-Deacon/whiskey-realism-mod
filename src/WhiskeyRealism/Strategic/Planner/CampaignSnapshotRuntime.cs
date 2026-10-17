@@ -134,6 +134,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ReadAreas(s, factionIndex);
                 ReadFormations(s, alliance, faction, in chain);
                 ReadObjectives(s, alliance, faction);
+                ReadSecessions(s);
                 ReadSupply(s, alliance);
                 ReadRails(s, alliance);
                 ReadCrossings(s);
@@ -237,6 +238,23 @@ namespace WhiskeyRealism.Strategic.Planner
             AreaSource.Set(areas, areas.Count);
         }
 
+        // D8 (verify round 2): the side's own garrison units are not formations (the planner never moves them) but they are the Union's
+        // presence in a secession state and part of its hold there: their strength per state, summed while the units are read.
+        private static readonly Dictionary<int, float> GarrisonStrengthByState = new Dictionary<int, float>();
+
+        private static void NoteGarrison(Regiment reg)
+        {
+            try
+            {
+                if (!((Component)reg).gameObject.activeInHierarchy || BattleUnits.GetUnitVisibilityStateOnCampaignMap(reg) == 0) return;
+                int state = StateOf(reg.GetPosition());
+                if (state < 0) return;
+                GarrisonStrengthByState.TryGetValue(state, out float sum);
+                GarrisonStrengthByState[state] = sum + Math.Max(0f, reg.groupstrengthdirect);
+            }
+            catch (Exception) { /* a garrison that cannot be read adds nothing */ }
+        }
+
         private static void ReadFormations(CampaignSnapshot s, int alliance, object faction, in WlChainContext chain)
         {
             Fill(OffensiveSet, _offensiveField.GetValue(faction) as IList);
@@ -244,6 +262,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Fill(DepotBuilderSet, _depotBuildersField.GetValue(faction) as IList);
             Fill(CapitalSet, _capitalField.GetValue(faction) as IList);
 
+            GarrisonStrengthByState.Clear();
             OwnUnits.Clear();
             OwnIndex.Clear();
             OwnById.Clear();
@@ -253,7 +272,12 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var reg = units[i];
                 if ((UnityEngine.Object)reg == null || reg.alliance != alliance || reg.unittyp == 17) continue;
-                if ((UnityEngine.Object)reg.garrisonreference != null || !((Component)reg).gameObject.activeInHierarchy) continue;
+                if ((UnityEngine.Object)reg.garrisonreference != null)
+                {
+                    NoteGarrison(reg);
+                    continue;
+                }
+                if (!((Component)reg).gameObject.activeInHierarchy) continue;
                 if (BattleUnits.GetUnitVisibilityStateOnCampaignMap(reg) == 0) continue;
                 OwnIndex[reg] = OwnUnits.Count;
                 OwnUnits.Add(reg);
@@ -302,6 +326,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         UseRails = reg.userails,
                         UseRivers = reg.userivers,
                         GroupSpeed = reg.groupspeed,
+                        StateId = StateOf(position),
                         TimeOfNotMoving = reg.timeofnotmoving
                     });
                     OwnById[reg.GetInstanceID()] = reg;
@@ -378,6 +403,45 @@ namespace WhiskeyRealism.Strategic.Planner
                     record.ParentInstanceId = s.Own[groupIndex].InstanceId;
                     s.Own[childIndex] = record;
                 }
+            }
+        }
+
+        // The state a map point lies in (the test vanilla's alliancetroops uses, 81654-81660), -1 when the map has none there.
+        private static int StateOf(Vector3 position)
+        {
+            int state = BattlefieldSetup.GetStateOfField(position);
+            return GameVars.nation != null && state >= 0 && state < GameVars.nation.Length ? state : -1;
+        }
+
+        // D8: Kentucky and Missouri, read live from vanilla each review (never cached): the owner, the CSA's support, and vanilla's own
+        // IsDeactivated rule over them (SecessionRules.IsLive). The town is the objective's own target record.
+        private static void ReadSecessions(CampaignSnapshot s)
+        {
+            var nations = GameVars.nation;
+            if (nations == null) return;
+            for (int r = 0; r < SecessionRules.Rules.Length; r++)
+            {
+                var rule = SecessionRules.Rules[r];
+                if (rule.StateId < 0 || rule.StateId >= nations.Length) continue;
+                var nation = nations[rule.StateId];
+                float support = nation.support != null && nation.support.Length > SecessionRules.CsaAlliance ? nation.support[SecessionRules.CsaAlliance] : 0f;
+                var record = new SecessionRecord
+                {
+                    ObjectiveId = rule.ObjectiveId, StateId = rule.StateId, StateAlliance = nation.alliance,
+                    Live = SecessionRules.IsLive(nation.alliance, support),
+                    // The Union reads vanilla's own presence flag for its own side only (fog-honest: it is the side's own groups and garrisons,
+                    // 81654-81660, 82940-82943); the CSA never reads it.
+                    GarrisonStrength = s.Alliance == 0 && GarrisonStrengthByState.TryGetValue(rule.StateId, out float garrison) ? garrison : 0f,
+                    OwnTroops = s.Alliance == 0 && nation.alliancetroops != null && nation.alliancetroops.Length > 0 && nation.alliancetroops[0]
+                };
+                for (int i = 0; i < s.Objectives.Count && !record.HasTown; i++)
+                {
+                    if (s.Objectives[i].ObjectiveId != rule.ObjectiveId) continue;
+                    record.HasTown = true;
+                    record.TownX = s.Objectives[i].X;
+                    record.TownZ = s.Objectives[i].Z;
+                }
+                s.Secessions.Add(record);
             }
         }
 
@@ -459,6 +523,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var record = s.Objectives[i];
                 record.Importance01 = maxImportance > 0f ? RawImportance[i] / maxImportance : 0f;
+                record.StateId = StateOf(new Vector3(record.X, 0f, record.Z));
                 s.Objectives[i] = record;
             }
         }

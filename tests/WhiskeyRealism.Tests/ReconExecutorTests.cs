@@ -1396,7 +1396,6 @@ internal sealed class OneReviewHost : IMoverHost, IReconHost
     public void RaiseTransportModes(int instanceId) { }
     public int StateAllianceAt(float x, float z) { return x <= 150f ? 1 : 0; }
     public bool AtWar(int otherAlliance) { return otherAlliance == 1; }
-    public bool IssuePlayerOrder(int instanceId, float x, float z) { return true; }
     public void ListOffensive(int instanceId, bool listed) { }
     public WlChainClass LiveChain(int instanceId) { return WlChainClass.None; }
     public CavalrySend SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return CavalrySend.Sent; }

@@ -10,7 +10,7 @@
 The need (nearby formations attacking together, not vanilla's per-call broadening) is met by the planner's allocation instead of a package decision on top of vanilla's offensive call:
 
 - The **planned mass** is the allocation's MainEffort set (`TheaterPlan.MassInstanceIds`, `ForceAllocator`): own movable formations within the march horizon of the main target, net of the capital floor and of every other sector's hold.
-- The mover (`CampaignMoverRuntime`) is the only launcher of that mass; `MoveUnitTo` is vanilla's own call and the W&L player's chain classes are never moved (the map-group player gets a W&L dispatch order).
+- The mover (`CampaignMoverRuntime`) is the only launcher of that mass; `MoveUnitTo` is vanilla's own call and the W&L player's chain classes are never moved (the map-group player is sent neither a move nor an order).
 - Vanilla's offensive cannot spend the mass behind the planner's back: the availability Postfix (#127) answers "not available" for MainEffort members and for the Support of a decision whose launch the chapter tempo roll has not released (see [`operational-tempo-doctrine.md`](operational-tempo-doctrine.md)). Vanilla's defensive operations may still take them; the next snapshot sees the formation as busy.
 - A move vanilla refuses or that fails is judged at the next review, retried once, then given up for 14 days and the role reassigned (`MoveTracker`, `CampaignMover`). Nothing is silently replaced by random broad movement.
 

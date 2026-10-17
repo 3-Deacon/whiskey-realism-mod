@@ -5,8 +5,8 @@ using WhiskeyRealism.Util;
 namespace WhiskeyRealism.Strategic.Planner
 {
     // What the published plan hands the executors' patches besides the plan, the allocation and the sector model: whether the
-    // plan's decision has had its main-effort launch released by the chapter tempo roll, whether the executors may run at all
-    // (the pre-war gate) and the W&L map-group player's formation, whom the deferred-Support clause never withholds.
+    // plan's decision has had its main-effort launch released by the chapter tempo roll and whether the executors may run at all
+    // (the pre-war gate).
     // Published with the plan (CampaignPlanStore.PublishExecutorContext joins the day's atomic publish), so a patch between the
     // slices of a time-sliced review never sees today's release next to yesterday's plan.
     internal struct ExecutorContext
@@ -15,15 +15,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // predicate everywhere in the plan.
         public bool Released;
         public bool ExecutorsAllowed;      // PlannerChapterRules.ExecutorsAllowed at the review
-        public int MapGroupInstanceId;     // the formation of WlChainClass.PlayerMapGroup, -1 none
 
-        internal static ExecutorContext From(PlannerState state, bool executorsAllowed, int mapGroupInstanceId)
+        internal static ExecutorContext From(PlannerState state, bool executorsAllowed)
         {
             return new ExecutorContext
             {
                 Released = state.TempoReleasedDecision == state.DecisionSerial,
-                ExecutorsAllowed = executorsAllowed,
-                MapGroupInstanceId = mapGroupInstanceId
+                ExecutorsAllowed = executorsAllowed
             };
         }
     }
@@ -108,8 +106,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // allocation withholds it (Reserve, CapitalGuard, DepotBuilder, Recon, Recover, Hold at the sector's need), when it is in
         // transit, when it builds an active depot task (DepotTaskLedger.HoldsBuilder: a depot rises only while its builder stays
         // within bugle range, so the hold outlasts the allocation's role, G5c), when it is a MainEffort member of the plan's mass
-        // (decision 5: only the mover launches the mass, so vanilla's own roll cannot also send it) or a Support formation (not the
-        // map-group player's) of a decision whose launch the tempo roll has not released (no Support goes ahead of the main
+        // (decision 5: only the mover launches the mass, so vanilla's own roll cannot also send it) or a Support formation of a decision whose launch the tempo roll has not released (no Support goes ahead of the main
         // effort). The mass and the deferred Support are offense-only clauses: WithheldFromDefense never applies them.
         public static bool WithheldFromOffense(int alliance, int instanceId)
         {
@@ -119,7 +116,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!TryFind(allocation, instanceId, out var a)) return false;
             if (a.Withheld) return true;
             if (a.Role == FormationRole.MainEffort) return true;
-            return a.Role == FormationRole.Support && !ctx.Released && instanceId != ctx.MapGroupInstanceId;
+            return a.Role == FormationRole.Support && !ctx.Released;
         }
 
         // Vanilla's defence (IsUnitAvailableForDefensiveOperation 13460): withheld when the allocation withholds it, it is in

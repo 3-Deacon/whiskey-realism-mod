@@ -32,7 +32,7 @@ The catalog's six profiles reduced to `(alliance, objective ids, window, tier)` 
 ## Other places history is a weight
 
 - **Commanders:** `SuccessionScheduler` still fires the ~12 scripted events on their dates; `SuccessionScheduler.PriorFor` turns a fired, unapplied event into a bonus on the named figure's score for the role (Valley, ANV/AoP, Western), and `CommanderAppointmentPlanner` seats the best-scoring available commander on the main-effort commands, at most one a day, protected from vanilla's job 24 for 60 days. History cannot override competence by more than the prior's bonus, and a figure vanilla seated on an auto-created army group is moved off it only when an idle successor reseats it first.
-- **Home theater:** `HomeTheaterPrior` (the retired army-area registry's doctrines reduced to name -> `Theater`) is a 5 % distance discount in the allocator's Hold ordering, a tie-break only.
+- **Home theater:** replaced by the planner's own *departments* (smoke amendments 2026-10-16, D6): each formation's home `Theater` is the theater of the sector it first stands in, kept in `PlannerState` and the sidecar until a deliberate cross-department move. It draws a 25 % distance discount in the allocator's Hold ordering and decides which formations a push is made of. `HomeTheaterPrior` (a table of army names) is deleted.
 
 ## Not carried
 
