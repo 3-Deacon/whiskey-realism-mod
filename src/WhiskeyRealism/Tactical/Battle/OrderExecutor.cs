@@ -531,6 +531,12 @@ namespace WhiskeyRealism.Tactical.Battle
             _terrain = terrain;
         }
 
+        /// <summary>
+        /// The river-crossing seam (BC14's picture, RiverCrossingRule): a null gate leaves every Move as validated. The runtime sets it
+        /// each tick; Enable Crossing Move Gate off leaves it null.
+        /// </summary>
+        public ICrossingGate Crossings { get; set; }
+
         /// <summary>Terrain.activeTerrain.terrainData.size x/z (0 = unknown: no clamp).</summary>
         public void SetMapSize(float sizeX, float sizeZ)
         {
@@ -676,6 +682,19 @@ namespace WhiskeyRealism.Tactical.Battle
             plan.X = x;
             plan.Z = z;
             if (w.Channel == OrderChannel.Move && w.ViaCount > 0) ValidateVia(s, idx, w, ref plan);
+            // 8. A move whose straight leg crosses a river takes a crossing the side knows, or is not made.
+            if (!immediate && Crossings != null && SubjectToCrossingGate(w))
+            {
+                CrossingVerdict crossing = Crossings.Check(s.Alliance, rec.X, rec.Z, x, z, out float crossX, out float crossZ);
+                if (crossing == CrossingVerdict.NoKnownCrossing) { plan.Execute = false; plan.Skip = SkipReason.NoKnownCrossing; return plan; }
+                if (crossing == CrossingVerdict.ViaCrossing)
+                {
+                    // The crossing replaces any road via: the move goes start, crossing, target.
+                    plan.ViaCount = 1;
+                    plan.ViaX0 = crossX;
+                    plan.ViaZ0 = crossZ;
+                }
+            }
             plan.UseOrderDelay = UsesOrderDelay(w);
             // 9. The player's share of an ancestor's move goes out as one W&L
             //    dispatch per executed plan. Move only: the dispatch carries the
@@ -932,6 +951,17 @@ namespace WhiskeyRealism.Tactical.Battle
                 else { plan.ViaX1 = vx; plan.ViaZ1 = vz; }
                 plan.ViaCount++;
             }
+        }
+
+        // The doctrine movers whose planned moves cross land: the posture executor (Screen, Probe, the leaf slots, maneuver legs),
+        // division-play and the reserve release. A withdrawal, a fallback, a deployment placement, a scout's look and vanilla's
+        // own replayed moves are not gated: they are in contact, immediate, or exist to make a crossing known.
+        private static bool SubjectToCrossingGate(in BattleOrderIntent w)
+        {
+            if (w.Channel != OrderChannel.Move) return false;
+            if ((w.Flags & (IntentFlags.InContactWithdrawal | IntentFlags.ImmediatePlacement)) != 0) return false;
+            if (w.Task == CommandTaskType.FallBackToLine) return false;
+            return w.Source == IntentSource.PostureExecutor || w.Source == IntentSource.DivisionPlay || w.Source == IntentSource.ReserveRelease;
         }
 
         private bool IsDuplicate(IBattleUnitView s, int idx, in UnitRecord rec, in BattleOrderIntent w, float x, float z)

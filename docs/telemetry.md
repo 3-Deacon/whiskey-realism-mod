@@ -53,6 +53,7 @@ Tags are routed by `TelemetryTagPolicy`; unregistered `Tactical*` tags fall back
 | Event | Category | Source |
 |---|---|---|
 | `TacticalDirectChildIntent` | Decision | `ArmyOrchestrator.EmitDirectChildIntentTelemetry`: per-side role distribution (main/sup/fix/scrn/rL/rR/rsrv/fbck/unk counts, per-child `ChildId=Role:Sector`, plan/phase/mainEffortSector/opportunity/currentRatio). Signature-deduped, 5 s throttle. |
+| `TacticalDefenderReserve` | Decision | `ArmyOrchestrator.EmitDefenderReserveTelemetry`: the Defender's reserve split per holding command (`Name#id=held/children:reason`, reasons `reserved`, `already-held`, `thin-numbers`, `no-free-brigade`, `released-to-flank`); decision `reserved` or `thin`. Signature-deduped, 5 s throttle. |
 | `TacticalPlayExecution` | Decision | `PlayExecutorRuntime.EmitPlayExecutionTelemetry`: per-side play summary when play assignments change (side, plan, template, rect/assigned counts, army/enemy centroid X/Z, frontage, per-corps `ChildId=RectKind`). Signature-deduped, 10 s throttle. |
 | `TacticalMacroDecision` | Decision | #44 `BattleMacroStrategyPatch`: macroai write (`old`/`whiskey`/`ledger`/`fallback`/`source`) and decision lines, 30 s signature throttle. #44 is the only writer of `macroai`; there is no separate macroai write tag. |
 | `TacticalStanceWrite` | Write | `TacticalStanceWriter.EnsureStance` via OnceLog (first write/yield/refuse per key; see OnceLog). |

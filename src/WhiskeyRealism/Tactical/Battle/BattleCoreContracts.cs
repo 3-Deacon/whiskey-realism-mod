@@ -321,6 +321,8 @@ namespace WhiskeyRealism.Tactical.Battle
         Cooldown,
         Duplicate,
         LowerPriorityThanClaim,
+        /// <summary>A move across a river with no crossing the side knows (RiverCrossingRule).</summary>
+        NoKnownCrossing,
     }
 
     public struct OrderOutcome

@@ -299,6 +299,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
         }
 
+        /// <summary>How the side knows one link crossing now (RiverCrossingGateRuntime); Unknown for a side with no state.</summary>
+        internal static CrossingState LinkState(int alliance, int link)
+        {
+            SideState st = StateOf(alliance);
+            return st != null ? st.Crossings.StateOf(link) : CrossingState.Unknown;
+        }
+
         /// <summary>The crossing the maneuver's via sits on, as the side knows it now (the first-via OnceLog).</summary>
         internal static CrossingState StateAt(int alliance, float x, float z)
         {
