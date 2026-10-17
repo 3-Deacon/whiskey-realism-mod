@@ -32,6 +32,7 @@ namespace WhiskeyRealism.Strategic.Planner
     // GetAvailableObjectives 178827-178866 filters; IDAccomplished 178805). Importance is vanilla's
     // own per-target term for this faction (SnapshotRules.TargetImportance, UpdateImportanceValues
     // 14905-14995), normalized to the snapshot's largest. An enemy fort's garrison reaches the side only as a G1 belief (spec C14/C25).
+    // The side's own and allied forts' garrison dummies are summed under the target they guard (ReadForts, G8).
     // Supply sources: every IIP (owner kept; LogisticsGate accepts own, non-invisible ones) and the
     // supply depots of this alliance or an ally (UpdateIIPSupplyLink 114272-114306). Crossings: the
     // ford and bridge cells of the campaign terrain grid (BattlefieldSetup.rivercrossingpositions,
@@ -60,6 +61,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         private static void ResetCaches()
         {
+            GarrisonAt.Clear();
             for (int a = 0; a < CommanderCache.Length; a++)
             {
                 CommanderCache[a].Clear();
@@ -133,6 +135,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ReadScalars(s, alliance);
                 ReadAreas(s, factionIndex);
                 ReadFormations(s, alliance, faction, in chain);
+                ReadForts(s, alliance);
                 ReadObjectives(s, alliance, faction);
                 ReadSecessions(s);
                 ReadSupply(s, alliance);
@@ -253,6 +256,59 @@ namespace WhiskeyRealism.Strategic.Planner
                 GarrisonStrengthByState[state] = sum + Math.Max(0f, reg.groupstrengthdirect);
             }
             catch (Exception) { /* a garrison that cannot be read adds nothing */ }
+        }
+
+        // G8: the strength of the side's own and allied forts' garrison dummies per target they guard. The unit is the fort's garrisonunit
+        // (CreateGarrisonDummy 82081-82093, CBuilding.Update 96676-96686); it is not an own formation (SeparateUnits 10510-10513 keeps
+        // garrisons out of ownunits) and is read nowhere else. D8's NoteGarrison reads the garrison Regiments standing in a secession state
+        // from campaignunitlist (by state, own side only); this reads the forts' dummies by the target they guard (own and allied forts):
+        // different aggregations of the same side's units, so each keeps its own loop, and a post never takes a garrison as a formation.
+        private static readonly Dictionary<UnityEngine.Object, float> GarrisonAt = new Dictionary<UnityEngine.Object, float>();
+
+        // Fog (spec C14/C25): only own and allied forts are read; the side-of-fort test comes before any garrisonunit read, and an enemy
+        // fort's garrison reaches the side as a G1 belief (EnemyDetectionRuntime.ProbeObjectiveGarrisons). A fort still under construction
+        // is neither a post site nor a garrison.
+        private static void ReadForts(CampaignSnapshot s, int alliance)
+        {
+            GarrisonAt.Clear();
+            var forts = BattleUnits.fort;
+            var alliances = GameVars.alliance;
+            if (forts == null || alliances == null || alliance < 0 || alliance >= alliances.Length) return;
+            for (int i = 0; i < forts.Count; i++)
+            {
+                var fort = forts[i];
+                try
+                {
+                    if ((UnityEngine.Object)fort == null || fort.constructiontimer > 0f || fort.Owner >= alliances.Length) continue;
+                    if (!SnapshotRules.SideKnowsGarrison(alliance, fort.Owner, fort.Owner >= 0 && alliances[alliance].IsInAllianceWith(fort.Owner))) continue;
+                    var garrison = fort.garrisonunit;
+                    float strength = (UnityEngine.Object)garrison != null && ((Component)garrison).gameObject.activeInHierarchy ? Math.Max(0f, garrison.groupstrengthdirect) : 0f;
+                    if (fort.Owner == alliance)
+                    {
+                        Vector3 p = PositionOf(fort);
+                        s.Forts.Add(new FortRecord { X = p.x, Z = p.z, GarrisonStrength = strength });
+                    }
+                    if (strength <= 0f) continue;
+                    AddGarrison(fort.closesttown, strength);
+                    AddGarrison((UnityEngine.Object)fort.parentiip != null ? fort.parentiip : fort.closestiip, strength);
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("campaign-planner:snapshot-fort-skipped", "[CampaignPlanner] a fort could not be read and was left out: " + ex.Message);
+                }
+            }
+        }
+
+        private static void AddGarrison(UnityEngine.Object at, float strength)
+        {
+            if (at == null) return;
+            GarrisonAt.TryGetValue(at, out float sum);
+            GarrisonAt[at] = sum + strength;
+        }
+
+        private static float GarrisonOf(UnityEngine.Object at)
+        {
+            return GarrisonAt.TryGetValue(at, out float strength) ? strength : 0f;
         }
 
         private static void ReadFormations(CampaignSnapshot s, int alliance, object faction, in WlChainContext chain)
@@ -506,6 +562,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         record.X = p.x;
                         record.Z = p.z;
                         record.HolderAlliance = iip.allianceowner;
+                        record.GarrisonStrength = GarrisonOf(iip);
                         record.Roles = SnapshotRules.ObjectiveRoles(false, iip.IIPType == IIP.id_harbor, Rails.LinesOfIip(iip.GetInstanceID()), false);
                         importance = SnapshotRules.TargetImportance(false, 0f, iip.GetTransportCapacity(), AtWar(iip.allianceowner, alliance),
                             CampaignObjective.IsPartOfObjective(followed, null, iip), false,
@@ -539,6 +596,7 @@ namespace WhiskeyRealism.Strategic.Planner
             record.X = p.x;
             record.Z = p.z;
             record.HolderAlliance = town.Owner;
+            record.GarrisonStrength = GarrisonOf(town);
             record.Roles = SnapshotRules.ObjectiveRoles(town.IsCapital, false, Rails.LinesNearTown(town.GetInstanceID(), p.x, p.z, townRadius),
                 IndustryTowns.Contains(town));
             importance = SnapshotRules.TargetImportance(true, town.representingpopulation, 0f, AtWar(town.Owner, alliance),

@@ -112,7 +112,6 @@ namespace WhiskeyRealism.Strategic.Planner
         // is what the objective's accomplishment needs). Added to the target's value term (weight 0.30), so 0.25 is worth 0.075 of a score:
         // under the 0.12 switch margin and near the history prior's cap, a weight and never a must.
         public const float SecessionValueBonus = 0.25f, SecessionStateBonus = 0.10f;
-        private const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f; // 11735
         // The flags that keep a formation out of the massable set (ForceAllocator keeps them in place).
         // InDefensiveOps (G5a, chapters decision 5): vanilla's defensive operations may take a deferred
         // mass member (the offense-only withhold leaves it to vanilla's defence, 13716-13717); a formation
@@ -1285,16 +1284,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var s = c.S;
             if (!s.HasCapital) return;
             float range = s.RelocationRange;
-            float weighted = 0f;
-            for (int i = 0; i < s.Beliefs.Count; i++)
-            {
-                var b = s.Beliefs[i];
-                float live = Live(b);
-                float straight = RiverLines.Distance(b.X, b.Z, s.CapitalX, s.CapitalZ);
-                if (live <= 0f || straight >= range) continue;
-                float d = Afloat(b) ? straight : RiverLines.EffectiveDistance(b.X, b.Z, s.CapitalX, s.CapitalZ, c.Probe, s.Crossings);
-                weighted += live / (float)Math.Pow(Math.Max(VanillaThreatMinDistance, d), VanillaThreatExponent) * VanillaThreatScale;
-            }
+            float weighted = ReserveRules.VanillaThreat(s, s.CapitalX, s.CapitalZ, range, c.Probe);
             floor = CapitalFloorRatio * weighted;
             if (floor <= 0f) return;
             float own = 0f;

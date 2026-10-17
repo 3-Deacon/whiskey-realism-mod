@@ -15,6 +15,27 @@ namespace WhiskeyRealism.Strategic.Planner
             return b.Confidence01 > 0f ? System.Math.Max(0f, b.Strength) * System.Math.Min(1f, b.Confidence01) : 0f;
         }
 
+        // Vanilla's own weighting of the enemy near a place it defends (AssignUnitToDefendCapital 11733-11740): each army within range counts
+        // live strength / max(10, distance)^0.3 x 0.5. The capital floor (TheaterPlanner.CapitalThreat) and a garrison post's threat
+        // (GarrisonPlanner) both read it here, on beliefs, so there is one formula. An afloat army counts at its straight distance (it
+        // cannot be stopped by a river); a land army at the distance the probe gives (the straight one with no probe).
+        internal const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f;
+
+        internal static float VanillaThreat(CampaignSnapshot s, float x, float z, float range, ITerrainLineProbe probe)
+        {
+            float weighted = 0f;
+            for (int i = 0; i < s.Beliefs.Count; i++)
+            {
+                var b = s.Beliefs[i];
+                float live = Live(b);
+                float straight = RiverLines.Distance(b.X, b.Z, x, z);
+                if (live <= 0f || straight >= range) continue;
+                float d = Afloat(b) ? straight : RiverLines.EffectiveDistance(b.X, b.Z, x, z, probe, s.Crossings);
+                weighted += live / (float)System.Math.Pow(System.Math.Max(VanillaThreatMinDistance, d), VanillaThreatExponent) * VanillaThreatScale;
+            }
+            return weighted;
+        }
+
         // Afloat armies cannot be engaged by land (EstablishCampaignBattle 80632-80635).
         internal static bool Afloat(in EnemyBelief b)
         {

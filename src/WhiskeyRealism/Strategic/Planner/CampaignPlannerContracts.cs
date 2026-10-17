@@ -420,7 +420,7 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public GarrisonPostKind Kind = GarrisonPostKind.Secession;
         public float ExistingStrength;             // G8: the fort garrison dummy and the own formations at the post, net of its own incumbent
-        public int QuietDays;                      // G8: review days since a live land belief last lay within the relocation range of the post
+        public int QuietSinceDay = -1;             // G8: the review day from which no live land belief has lain within the relocation range of the post, -1 while one does
         public string StateName;
         public int StateId;
         public float X, Z;

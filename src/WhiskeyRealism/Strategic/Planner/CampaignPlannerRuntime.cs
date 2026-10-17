@@ -139,6 +139,8 @@ namespace WhiskeyRealism.Strategic.Planner
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
                             TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);
                     }
+                    // G8: the ordinary garrison posts join D8's secession posts in the plan, where the allocation seats both.
+                    GarrisonRuntime.PlanPosts(snapshot, plan);
                     // G1b: the recon tasks for this plan (probe verdicts on the battles it judged, then the tasks);
                     // G4's allocation below picks their formations and the sync binds the missions.
                     PlanRecon(snapshot, sectors, plan, year, month, day);
@@ -151,6 +153,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);
                     }
                     SyncRecon(snapshot, allocation);
+                    GarrisonRuntime.Sync(snapshot, plan, allocation);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
                     LogFirstReview(snapshot, sectors);
@@ -223,6 +226,8 @@ namespace WhiskeyRealism.Strategic.Planner
             saved.Beliefs.AddRange(EnemyDetectionRuntime.ModelFor(alliance).Beliefs);
             var protection = CommanderAppointmentRuntime.Book.For(alliance);
             if (protection != null) foreach (var entry in protection.ProtectedUntil) saved.Appointments.Add(entry);
+            var garrisons = GarrisonLedgers.For(alliance);
+            if (garrisons != null) saved.GarrisonPosts.AddRange(garrisons.Posts);
             var pending = PendingRebind[alliance];
             if (pending != null)
             {
@@ -281,6 +286,7 @@ namespace WhiskeyRealism.Strategic.Planner
             MoveTrackers.For(alliance)?.Restore(null);
             DepotTaskLedgers.For(alliance)?.Restore(null);
             Recon[alliance].Restore(null);
+            GarrisonLedgers.For(alliance)?.Restore(saved.GarrisonPosts);   // by unit key: the first review's PlanPosts finds the holders
             PendingRebind[alliance] = saved;
         }
 

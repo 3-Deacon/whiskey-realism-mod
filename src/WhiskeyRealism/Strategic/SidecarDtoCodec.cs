@@ -485,6 +485,8 @@ namespace WhiskeyRealism.Strategic
                     StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
                 });
             }
+            foreach (var g in p.GarrisonPosts)
+                dto.GarrisonPosts.Add(new GarrisonPostDto { Kind = g.Kind.ToString(), X = g.X, Z = g.Z, UnitKey = g.AssignedUnitKey, QuietSinceDay = g.QuietSinceDay });
             return dto;
         }
 
@@ -550,6 +552,13 @@ namespace WhiskeyRealism.Strategic
                         ObservedEnemyStrength = m.ObservedEnemyStrength, ObservedObjectiveId = m.ObservedObjectiveId,
                         StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
                     });
+                }
+            if (dto.GarrisonPosts != null)
+                foreach (var g in dto.GarrisonPosts)
+                {
+                    if (g == null) continue;
+                    Enum.TryParse<GarrisonPostKind>(g.Kind, out var kind);
+                    p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = kind, X = g.X, Z = g.Z, AssignedUnitKey = g.UnitKey, QuietSinceDay = g.QuietSinceDay });
                 }
             return p;
         }

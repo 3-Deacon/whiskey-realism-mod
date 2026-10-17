@@ -56,7 +56,6 @@ internal static class CampaignSnapshotTests
             ("ContractEnumValuesPinned", ContractEnumValuesPinned),
             ("ContractRecordsCarryCensusFields", ContractRecordsCarryCensusFields),
             ("ImportanceMirrorsVanillaTerms", ImportanceMirrorsVanillaTerms),
-            ("SnapshotReadsNoFortGarrison", SnapshotReadsNoFortGarrison),
             ("SectorAdjacencyCacheFollowsGeometry", SectorAdjacencyCacheFollowsGeometry),
             ("CoordinatorPauseGuardsOrderIssuingSteps", CoordinatorPauseGuardsOrderIssuingSteps),
             ("CoordinatorPauseGatesAreTheVanillaPredicates", CoordinatorPauseGatesAreTheVanillaPredicates),
@@ -725,14 +724,6 @@ internal static class CampaignSnapshotTests
         AssertNear(23.5f, SnapshotRules.TargetImportance(true, 1000f, 0f, false, false, true, pop, transport, nonWar, objective, capital), 0.001f, "capital bonus only at its own index, unscaled");
         AssertNear(10f, SnapshotRules.TargetImportance(false, 1000f, 50f, true, false, true, pop, transport, nonWar, objective, capital), 0.001f, "IIP: transport term, never the capital bonus");
         AssertNear(3.5f, SnapshotRules.TargetImportance(false, 0f, 50f, false, false, false, pop, transport, nonWar, objective, capital), 0.001f, "own IIP x 0.35");
-    }
-
-    private static void SnapshotReadsNoFortGarrison()
-    {
-        // Fog (spec C14/C25): a fort's garrison reaches the side only as a G1 belief; the snapshot reads no garrison at all
-        // (its own and allied forts' strength had no reader, so the scan went in G6).
-        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
-        AssertFalse(Regex.IsMatch(src, @"\bgarrisonunit\b|\bBattleUnits\.fort\b"), "the snapshot runtime reads no fort garrison");
     }
 
     private static void SectorAdjacencyCacheFollowsGeometry()

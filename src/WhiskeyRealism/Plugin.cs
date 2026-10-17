@@ -255,6 +255,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableSupplyDepotSteering;
         internal static ConfigEntry<bool> EnableFortSteering;
         internal static ConfigEntry<bool> EnableRailroadSteering;
+        internal static ConfigEntry<bool> EnableGarrisonManning;
         internal static ConfigEntry<bool> FixAiPerkPickRange;
         internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
         internal static ConfigEntry<bool> FixEngineerBranchBonus;
@@ -1349,6 +1350,16 @@ namespace WhiskeyRealism
                 "startable line begins: the one that connects own supply to the main axis or a threatened sector. Not used for the player's " +
                 "alliance, the W&L commander-in-chief's side, Europe, or while vanilla's job machine is paused (vanilla's own roll runs then). " +
                 "Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = vanilla's roll.");
+            EnableGarrisonManning = Config.Bind(
+                "Campaign Planner", "Enable Garrison Manning", true,
+                "Default ON. Vanilla defends only the capital ahead of an attack; key towns, rail hubs, ports, depots and forts away from it are " +
+                "held by whatever happens to stand there. With this on, an own objective town, rail hub, port, built depot or fort that a " +
+                "believed enemy army threatens (vanilla's own capital threat weighting, on what the side has seen) gets one formation: the " +
+                "smallest fighting formation that covers the need, from those that would otherwise just hold or sit in reserve, never the main " +
+                "effort, the capital guard, a scout or the W&L player's own command. It marches to the post and holds it, out of vanilla's " +
+                "offensive and defensive pools, until no army has been near for a fortnight; at most six posts at a time. The secession " +
+                "garrison for Kentucky and Missouri is separate and not behind this. Needs Enable Campaign Planner; the march also needs " +
+                "Enable Campaign Planner Executors; OFF = no ordinary post.");
             FixAiPerkPickRange = Config.Bind(
                 "Campaign", "Fix AI Perk Pick Range", true,
                 "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +

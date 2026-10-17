@@ -222,13 +222,17 @@ internal static class GarrisonPlannerTests
 
         var off = Side();
         off.Objectives.Add(Town(40, 500f));
-        var expired = Seen(520f, 30000f, confidence: 0f);
-        off.Beliefs.Add(expired);
-        var afloat = Seen(520f, 30000f);
-        afloat.Traits = EnemyTraits.Embarked;
-        off.Beliefs.Add(afloat);
+        off.Beliefs.Add(Seen(520f, 30000f, confidence: 0f));              // expired
         off.Beliefs.Add(Seen(651f, 30000f));                              // 151 away: outside the relocation range
-        AssertEqual(0, Posts(off).Count, "an expired, an afloat and a far belief threaten nothing");
+        AssertEqual(0, Posts(off).Count, "an expired and a far belief threaten nothing");
+
+        // An army afloat counts, as the capital formula counts it: it can land at a port or a coast town (at its straight distance).
+        var afloat = Side();
+        afloat.Objectives.Add(Town(40, 500f, roles: ObjectiveRole.Port));
+        var ship = Seen(560f, 30000f);
+        ship.Traits = EnemyTraits.Embarked;
+        afloat.Beliefs.Add(ship);
+        AssertNear(GarrisonPlanner.ThreatShare * Weighted(30000f, 60f), Posts(afloat)[0].Need, 1f, "an embarked army near a port is a threat to it");
 
         var seen = Side();
         seen.Objectives.Add(Town(40, 500f));
@@ -244,7 +248,7 @@ internal static class GarrisonPlannerTests
         s.MinStrengthForMovement = 5000f;
         s.MinMoraleForMovement = 0.3f;
         s.Objectives.Add(Town(40, 400f));
-        s.Beliefs.Add(Seen(100f, 8000f));                                  // the enemy at the main objective
+        s.Beliefs.Add(Seen(100f, 18000f));                                 // the enemy at the main objective: the mass is no more than it needs
         s.Beliefs.Add(Seen(440f, 30000f));                                 // and the threat to the town
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 395f, 9000f));                                  // a mass member standing at the town
@@ -261,7 +265,7 @@ internal static class GarrisonPlannerTests
         onlyMass.MinStrengthForMovement = 5000f;
         onlyMass.MinMoraleForMovement = 0.3f;
         onlyMass.Objectives.Add(Town(40, 400f));
-        onlyMass.Beliefs.Add(Seen(100f, 8000f));
+        onlyMass.Beliefs.Add(Seen(100f, 18000f));
         onlyMass.Beliefs.Add(Seen(440f, 30000f));
         onlyMass.Own.Add(Corps(1, 200f, 20000f));
         onlyMass.Own.Add(Corps(2, 395f, 9000f));
@@ -393,12 +397,12 @@ internal static class GarrisonPlannerTests
 
         Review(ledger, Day(1, false), out var plan1, out _);
         AssertEqual(1, plan1.Garrisons.Count, "day 1: nobody near, the post is kept");
-        AssertEqual(0, plan1.Garrisons[0].QuietDays, "quiet since today");
+        AssertEqual(Day(1, false).DaySerial, plan1.Garrisons[0].QuietSinceDay, "quiet since today");
         AssertEqual(Day(1, false).DaySerial, ledger.Posts[0].QuietSinceDay, "the ledger remembers when the quiet began");
 
         Review(ledger, Day(14, false), out var plan14, out _);
         AssertEqual(1, plan14.Garrisons.Count, "day 14: thirteen quiet days, still kept");
-        AssertEqual(GarrisonPlanner.ReleaseQuietDays - 1, plan14.Garrisons[0].QuietDays, "thirteen days");
+        AssertEqual(GarrisonPlanner.ReleaseQuietDays - 1, Day(14, false).DaySerial - plan14.Garrisons[0].QuietSinceDay, "thirteen days");
 
         // A sighting resets the quiet.
         Review(ledger, Day(15, true), out var plan15, out _);
@@ -411,7 +415,7 @@ internal static class GarrisonPlannerTests
         AssertEqual(1, released.Released, "the ledger says so");
         AssertEqual(0, ledger.Posts.Count, "and forgets it");
         allocEnd.TryGet(3, out var free);
-        AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost && !free.Withheld, "the formation is free again");
+        AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost && free.Role == FormationRole.Hold, "the formation holds as any other (no post)");
     }
 
     private static void NeverPlayerCommandOrSoleMapGroupPlayer()
@@ -458,11 +462,11 @@ internal static class GarrisonPlannerTests
         s.Objectives.Add(Town(41, 800f));
         s.Beliefs.Add(Seen(560f, 30000f));
         s.Beliefs.Add(Seen(860f, 30000f));
-        s.Own.Add(Corps(1, 503f, 6000f));                                // at the first post
+        s.Own.Add(Corps(1, 503f, 6000f));                                // at the first post, its incumbent
         s.Own.Add(Corps(2, 700f, 6000f));                                // away from the second
         var plan = HandPlan(s);
         plan.DaySerial = ExecutorFixtures.Day;
-        var alloc = Allocate(s, plan);
+        var alloc = Allocate(s, plan, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
         alloc.TryGet(1, out var holding);
         alloc.TryGet(2, out var marching);
         AssertEqual(FormationRole.Hold, holding.Role, "corps 1 holds at its post");
@@ -473,7 +477,7 @@ internal static class GarrisonPlannerTests
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, 1), "the garrison at its post is out of vanilla's offensive pool");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, 2), "so is the one marching to it");
         AssertTrue(CampaignWithholdView.WithheldFromDefense(0, 2, 0f, 0f), "the marching one is out of the defensive pool too");
-        AssertTrue(CampaignWithholdView.WithheldFromDefense(0, 1, 0f, 0f), "and the one at its post, while the enemy vanilla asks about is elsewhere");
+        AssertTrue(CampaignWithholdView.WithheldFromDefense(0, 1, 900f, 0f), "and the one at its post, while the enemy vanilla asks about stands in another sector");
         CampaignScope.ResetAll();
     }
 
@@ -621,11 +625,11 @@ internal static class GarrisonPlannerTests
         s.Objectives.Add(Town(40, 500f));
         s.Beliefs.Add(Seen(560f, 30000f));
         s.Own.Add(Corps(3, 500f, 6000f));                                // standing at the post: the incumbent
-        s.Own.Add(Corps(4, 505f, 3000f));                                // a smaller corps that would be the pick
+        s.Own.Add(Corps(4, 505f, 1500f));                                // a smaller corps that would be the pick
         var retained = new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps3:3") };
         var post = Posts(s, null, retained)[0];
-        AssertNear(3000f, post.ExistingStrength, 0.01f, "only the other corps at the post is existing strength, not the incumbent");
-        AssertNear(GarrisonPlanner.ThreatShare * Weighted(30000f, 60f) - 3000f, post.Need, 1f, "so the need is not met by the garrison itself");
+        AssertNear(1500f, post.ExistingStrength, 0.01f, "only the other corps at the post is existing strength, not the incumbent");
+        AssertNear(GarrisonPlanner.ThreatShare * Weighted(30000f, 60f) - 1500f, post.Need, 1f, "so the need is not met by the garrison itself");
         AssertEqual(3, post.InstanceIds[0], "the post names its incumbent");
         var alloc = Allocate(s, HandPlan(s), retained);
         AssertEqual(1, alloc.Seats.Count, "one seat");
@@ -644,7 +648,7 @@ internal static class GarrisonPlannerTests
         AssertTrue(plan.Garrisons[0].Need > 9000f, "the need " + plan.Garrisons[0].Need + " is above the only corps");
         AssertEqual(0, alloc.Seats.Count, "no formation covers it, so none is posted (a partial garrison is not a garrison)");
         alloc.TryGet(1, out var free);
-        AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost && !free.Withheld, "the corps stays free");
+        AssertTrue(free.Reason != ForceAllocator.ReasonGarrisonPost, "the corps is kept for no post");
         var ledger = new GarrisonLedger();
         var result = ledger.Sync(plan.Garrisons, alloc, s);
         AssertEqual(1, result.Uncovered, "the post is counted uncovered");
@@ -656,14 +660,21 @@ internal static class GarrisonPlannerTests
         var s = Side();
         s.Objectives.Add(Town(40, 500f));
         s.Beliefs.Add(Seen(560f, 30000f));
-        s.Own.Add(Corps(1, 506f, 6000f));                                // within the arrival radius
-        var near = Allocate(s, HandPlan(s));
+        s.Own.Add(Corps(1, 506f, 6000f));                                // within the arrival radius: the post's incumbent
+        var near = Allocate(s, HandPlan(s), new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") });
         near.TryGet(1, out var holding);
         AssertEqual(FormationRole.Hold, holding.Role, "at the post it holds in place");
         AssertEqual(ForceAllocator.ReasonGarrisonPost, holding.Reason, "for the post");
         AssertTrue(holding.Withheld, "withheld");
         AssertNear(506f, holding.TargetX, 0.01f, "where it stands (steering centres its theater box on a Hold formation)");
         AssertTrue(near.Seats[0].AtPost, "the seat says it is there");
+
+        // Not its incumbent, a formation standing at the post is existing strength: it covers the post and none is made.
+        var standing = Side();
+        standing.Objectives.Add(Town(40, 500f));
+        standing.Beliefs.Add(Seen(560f, 30000f));
+        standing.Own.Add(Corps(1, 506f, 6000f));
+        AssertEqual(0, Posts(standing).Count, "the formation already there is the garrison (and is vanilla's to move until a post names it)");
 
         var away = Side();
         away.Objectives.Add(Town(40, 500f));
@@ -710,7 +721,7 @@ internal static class GarrisonPlannerTests
         AssertEqual(1, alloc.Seats.Count, "one seat");
         AssertEqual(2, alloc.Seats[0].InstanceId, "the next candidate takes the post");
         alloc.TryGet(1, out var gave);
-        AssertEqual(ForceAllocator.ReasonGaveUp, gave.Reason, "the formation that gave up holds in place for it, as for any role");
+        AssertTrue(gave.Reason != ForceAllocator.ReasonGarrisonPost && gave.Role == FormationRole.Hold, "the formation that gave up on the post is not kept for it");
     }
 
     private static void TheSecessionRowIgnoresTheOrdinaryPosts()
@@ -771,8 +782,8 @@ internal static class GarrisonPlannerTests
     {
         var result = new GarrisonSyncResult { Posts = 3, Manned = 2, Released = 1, Uncovered = 1 };
         AssertEqual("[Garrison] alliance=0 posts=3 manned=2 released=1 uncovered=1", GarrisonRows.Summary(0, result), "the summary row");
-        var t = new GarrisonTransition { Name = "Port@700,0", Kind = GarrisonPostKind.Port, Unit = "corps6", State = GarrisonPostState.Holding, Need = 2196.4f };
-        AssertEqual("[GarrisonPost] alliance=1 post=Port@700,0 kind=Port unit=corps6 state=Holding need=2196", GarrisonRows.Transition(1, t), "the transition row");
+        var t = new GarrisonTransition { Name = "Port@700,0", Kind = GarrisonPostKind.Port, Unit = "corps6", State = GarrisonPostState.Holding, Need = 2196.4f, Existing = 600.2f };
+        AssertEqual("[GarrisonPost] alliance=1 post=Port@700,0 kind=Port unit=corps6 state=Holding need=2196 existing=600", GarrisonRows.Transition(1, t), "the transition row");
         var post = new GarrisonPost { Kind = GarrisonPostKind.Fort, X = 500.4f, Z = 3.6f };
         AssertEqual("Fort@500,4", GarrisonLedger.NameOf(post), "an ordinary post is named by kind and place");
         AssertEqual("Kentucky", GarrisonLedger.NameOf(new GarrisonPost { Kind = GarrisonPostKind.Secession, StateName = "Kentucky" }), "a secession post by its state");
@@ -858,14 +869,16 @@ internal static class GarrisonPlannerTests
     private static void EveryGarrisonUnitReadFollowsTheSideCheck()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignSnapshotRuntime.cs");
+        var reads = System.Text.RegularExpressions.Regex.Matches(src, @"\.garrisonunit\b");
+        AssertEqual(1, reads.Count, "the snapshot runtime reads a fort's garrison unit in exactly one place");
         string body = BodyOf(src, "private static void ReadForts(");
-        AssertTrue(body.Contains("garrisonunit"), "the fort scan reads the garrison dummy");
         int check = body.IndexOf("SnapshotRules.SideKnowsGarrison(", StringComparison.Ordinal);
-        int read = body.IndexOf("garrisonunit", StringComparison.Ordinal);
-        AssertTrue(check >= 0 && check < read, "the side-of-fort test comes before any garrisonunit read");
-        int outside = src.IndexOf("garrisonunit", StringComparison.Ordinal);
-        AssertTrue(outside >= src.IndexOf("private static void ReadForts(", StringComparison.Ordinal), "and no other part of the snapshot runtime reads a fort garrison");
-        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(src, @"\.garrisonunit\b").Count, "exactly one read of it");
+        int read = body.IndexOf(".garrisonunit", StringComparison.Ordinal);
+        AssertTrue(check >= 0 && read >= 0, "that place is the fort scan, and it asks the side test");
+        AssertTrue(check < read, "the side-of-fort test comes before the garrisonunit read");
+        string guard = body.Substring(check, read - check);
+        AssertTrue(guard.Contains("continue;"), "and a fort that fails it is skipped, not read");
+        AssertEqual(1, System.Text.RegularExpressions.Regex.Matches(src, @"BattleUnits\.fort\b").Count, "and the fort list is walked only there");
     }
 
     private static void OnlyOwnAndAlliedForts()

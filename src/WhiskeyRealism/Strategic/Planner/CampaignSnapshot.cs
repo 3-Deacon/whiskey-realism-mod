@@ -214,9 +214,12 @@ namespace WhiskeyRealism.Strategic.Planner
             return value;
         }
 
+        // Fog (spec C14/C25): a fort's garrison is the side's information only when the fort is its own or an ally's. An enemy's reaches
+        // the side as a G1 belief (EnemyDetectionRuntime.ProbeObjectiveGarrisons), never as a snapshot read. The test comes before any
+        // garrisonunit read.
         internal static bool SideKnowsGarrison(int alliance, int fortOwner, bool allied)
         {
-            return false;
+            return fortOwner >= 0 && (fortOwner == alliance || allied);
         }
 
         internal static float Clamp01(float value)

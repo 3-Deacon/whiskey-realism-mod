@@ -107,6 +107,18 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("depotTasks")] public List<DepotTaskDto> DepotTasks = new List<DepotTaskDto>();
         [JsonProperty("moves")] public List<MoveDto> Moves = new List<MoveDto>();
         [JsonProperty("reconMissions")] public List<ReconMissionDto> ReconMissions = new List<ReconMissionDto>();
+        // G8: the garrison ledger, D8's secession posts and the ordinary ones. Additive in v3: an older file has none.
+        [JsonProperty("garrisonPosts")] public List<GarrisonPostDto> GarrisonPosts = new List<GarrisonPostDto>();
+    }
+
+    internal class GarrisonPostDto
+    {
+        [JsonProperty("kind")] public string Kind;
+        [JsonProperty("x")] public float X;
+        [JsonProperty("z")] public float Z;
+        // The holder's unit key (name:commander); absent for a post no formation held.
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("quietSinceDay")] public int QuietSinceDay = -1;
     }
 
     internal class DepartmentDto

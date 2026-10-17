@@ -44,6 +44,11 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 at the first formation the main effort cannot spare; withheld. None when no
     //                 enemy is believed at the objective.
     //   Support       the remainder in a Support (or the main) sector: toward the main target.
+    //   Garrison      both sorts of garrison post, under the one role and the one withhold (plan G8 on top of D8). D8's secession members are
+    //                 seated early (AssignGarrisons: TheaterPlanner pre-picked them after the mass); G8's ordinary posts (TheaterPlan.Garrisons,
+    //                 Kind other than Secession) are seated once the reserve split is known (AssignGarrisonPosts), from the formations that would
+    //                 otherwise just hold and the Reserve surplus, never the mass. A member marches as Garrison, withheld; at its post it
+    //                 holds in place, withheld (steering centres its theater box on a Hold formation). Allocation.Seats says who holds which.
     //   Hold (rest)   the remainder anywhere else, Hold in place (EconomyOfForce garrison).
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
     //                 believed land enemy (centroid when none), with a HomeDepartmentDiscount for
@@ -188,21 +193,23 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // D8: the secession garrisons, "<unit>@<State>:<in|moving>[+n]" joined by ';', or "none" while no live secession state of ours has one.
+        // The ordinary posts (G8) have their own rows ([Garrison], [GarrisonPost]) and are not in this field.
         internal static string GarrisonText(TheaterPlan plan)
         {
-            if (plan == null || plan.Garrisons.Count == 0) return "none";
+            if (plan == null) return "none";
             var sb = new System.Text.StringBuilder();
             for (int k = 0; k < plan.Garrisons.Count; k++)
             {
                 var g = plan.Garrisons[k];
-                if (k > 0) sb.Append(';');
+                if (g.Kind != GarrisonPostKind.Secession) continue;
+                if (sb.Length > 0) sb.Append(';');
                 sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.MassPresence ? "mass-presence" : g.PlayerPresence ? "player-presence" : g.InState ? "town-garrison" : "nobody")
                   .Append('@').Append(g.StateName)
                   .Append(g.Marching ? (g.InState ? ":in+moving/" : ":moving/") : ":in/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
                 if (g.Shortfall > 0f) sb.Append("!short").Append(g.Shortfall.ToString("0", CultureInfo.InvariantCulture));
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
             }
-            return sb.ToString();
+            return sb.Length == 0 ? "none" : sb.ToString();
         }
 
         private static bool IsImmobileReason(string reason)
@@ -234,6 +241,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _tx, _tz;
             private readonly string[] _reason;
             private readonly bool[] _withheld;
+            private readonly List<GarrisonSeat> _seats = new List<GarrisonSeat>();   // who holds which garrison post (either sort)
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
 
@@ -289,6 +297,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 AssignDepotBuilders();
                 AssignRecon();
                 SplitReserve(out float mainRequired, out float mainStrength);
+                AssignGarrisonPosts();
                 AssignMainEffort();
                 AssignRemainder();
                 WithholdHoldPrefixes();
@@ -306,6 +315,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         Withheld = _withheld[i]
                     });
                 }
+                allocation.Seats.AddRange(_seats);
                 ListShortfalls(allocation, mainRequired, mainStrength);
                 ListSurpluses(allocation);
             }
@@ -435,18 +445,54 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int g = 0; g < _plan.Garrisons.Count; g++)
                 {
                     var post = _plan.Garrisons[g];
+                    if (post.Kind != GarrisonPostKind.Secession) continue;   // the ordinary posts are seated later, once the reserve split is known
                     int postSector = _sectors.SectorAt(post.X, post.Z);
                     for (int k = 0; k < post.InstanceIds.Count; k++)
                     {
                         int i = _s.IndexOfOwn(post.InstanceIds[k]);
                         if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain) || !TheaterPlanner.Movable(_s.Own[i])) continue;
                         var f = _s.Own[i];
-                        if (f.StateId == post.StateId)
+                        bool inState = f.StateId == post.StateId;
+                        if (inState)
                             Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, ReasonSecession, true);
                         else
                             Assign(i, FormationRole.Garrison, postSector, post.X, post.Z, ReasonSecession, true);
+                        if (ReferenceEquals(_reason[i], ReasonSecession)) _seats.Add(new GarrisonSeat { PostIndex = g, InstanceId = f.InstanceId, AtPost = inState });
                     }
                 }
+            }
+
+            // G8: the ordinary garrison posts (TheaterPlan.Garrisons, Kind other than Secession; D8's were seated by AssignGarrisons). Run after
+            // the reserve split, so the pool is known: a formation nothing else has claimed (it would otherwise just hold) or a Reserve surplus
+            // formation, never a member of the mass (_inMass is set by MarkMass before any garrison step) and never one already in a role of
+            // its own (capital guard, hold reserve, recover, depot builder, recon, immobile, a secession member). A formation the tracker gave
+            // up on at the post is not asked. One formation per post (GarrisonPlanner.PickFormation); Assign marks it done, so no formation
+            // holds two posts, and a post whose pick cannot be seated stays unmanned (the ledger counts it uncovered).
+            private void AssignGarrisonPosts()
+            {
+                for (int g = 0; g < _plan.Garrisons.Count; g++)
+                {
+                    var post = _plan.Garrisons[g];
+                    if (post.Kind == GarrisonPostKind.Secession) continue;
+                    var pool = new bool[_n];
+                    for (int i = 0; i < _n; i++) pool[i] = PostCandidate(i, post);
+                    int pick = GarrisonPlanner.PickFormation(_s, post, pool);
+                    if (pick < 0) continue;
+                    var f = _s.Own[pick];
+                    bool atPost = GarrisonPlanner.AtPost(f, post.X, post.Z);
+                    if (atPost)
+                        Assign(pick, FormationRole.Hold, _sector[pick], f.X, f.Z, ReasonGarrisonPost, true);
+                    else
+                        Assign(pick, FormationRole.Garrison, _sectors.SectorAt(post.X, post.Z), post.X, post.Z, ReasonGarrisonPost, true);
+                    if (ReferenceEquals(_reason[pick], ReasonGarrisonPost)) _seats.Add(new GarrisonSeat { PostIndex = g, InstanceId = f.InstanceId, AtPost = atPost });
+                }
+            }
+
+            private bool PostCandidate(int i, GarrisonPost post)
+            {
+                if (GaveUpAt(i, post.X, post.Z)) return false;
+                if (Free(i) && !_inMass[i]) return true;
+                return _done[i] && _role[i] == FormationRole.Reserve && WlChainRules.MayMove(_s.Own[i].Chain) && TheaterPlanner.Movable(_s.Own[i]);
             }
 
             // Spec C21: the supply threshold is the raw metric.
