@@ -67,6 +67,16 @@ namespace WhiskeyRealism.Tactical.Operations
         public float Z { get; }
         public float FacingDegrees { get; }
 
+        /// <summary>
+        /// BC14W (requirement-works-hold), additive: why the state's task is what it is when something other than the ledger set it. Only
+        /// <c>works-hold</c> exists (<see cref="WorksHoldGuard.Reason"/>): the works guard turned an attack into a hold. Null for every state
+        /// the ledger, the fallback builder or the shipped test constructors give.
+        /// </summary>
+        public string Reason { get; }
+
+        /// <summary>BC14W: the task the works guard replaced (AttackObjective, SupportAttack or FixEnemy); None when nothing was replaced.</summary>
+        public CommandTaskType PreGuardTask { get; }
+
         public CommandNodeOperationalState(
             string nodeId,
             CommandEchelonKind echelon,
@@ -85,8 +95,12 @@ namespace WhiskeyRealism.Tactical.Operations
             CommandTaskState taskState,
             float x,
             float z,
-            float facingDegrees)
+            float facingDegrees,
+            string reason = null,
+            CommandTaskType preGuardTask = CommandTaskType.None)
         {
+            Reason = reason;
+            PreGuardTask = preGuardTask;
             NodeId = string.IsNullOrWhiteSpace(nodeId) ? "node-unknown" : nodeId;
             Echelon = echelon;
             Role = role;
@@ -115,6 +129,18 @@ namespace WhiskeyRealism.Tactical.Operations
                 x,
                 z,
                 facingDegrees);
+        }
+
+        /// <summary>
+        /// The same state with another role and task (the posture pipeline's rewrites). The works-hold marks ride only with a hold: a state
+        /// rewritten to any other task (a probe, a recon screen) is no longer the guard's, so the stance rule and the contest, which key on
+        /// the task and the reason together, stop treating it as one.
+        /// </summary>
+        public CommandNodeOperationalState WithRoleAndTask(CommandNodeRole role, CommandTaskType task)
+        {
+            bool hold = task == CommandTaskType.HoldObjective;
+            return new CommandNodeOperationalState(NodeId, Echelon, role, task, TaskState, X, Z, FacingDegrees,
+                hold ? Reason : null, hold ? PreGuardTask : CommandTaskType.None);
         }
 
         private static float SanitizeFinite(float value)

@@ -1171,10 +1171,20 @@ namespace WhiskeyRealism.Tactical.Operations
             if (guarded == state.Task && (!hasOrder || TacticalDecisionDoctrine.TaskForStance(order.Task, stance) == order.Task))
                 return false;
             state = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, guarded, state.TaskState,
-                state.X, state.Z, state.FacingDegrees);
+                state.X, state.Z, state.FacingDegrees, state.Reason, state.PreGuardTask);
             if (hasOrder) order = order.WithTask(guarded, guarded == CommandTaskType.Screen ? ScreenReason : HoldReason);
             return true;
         }
+    }
+
+    /// <summary>
+    /// BC14W (requirement-works-hold): the works hold guard rewrites the stored orders, command states and leaf entries of the children that
+    /// face perceived enemy works, turning an attack into a hold. The reason is how every later reader tells a guarded hold from a task the
+    /// ledger gave.
+    /// </summary>
+    public static class WorksHoldGuard
+    {
+        public const string Reason = "works-hold";
     }
 
     public static class PostureIntentPlan

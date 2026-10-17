@@ -489,7 +489,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             UnitFlags descendants = t.Descendants[i];
 
             if (hasOrder && order.Task != state.Task)
-                state = WithRoleAndTask(state, order.Role, order.Task);
+                state = state.WithRoleAndTask(order.Role, order.Task);
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, descendants);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
@@ -526,7 +526,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool probe = recordTick && !exploit && ReconIntentProducer.TryProbe(s.Alliance, rec.InstanceId, out _, out _);
             if (probe)
             {
-                state = WithRoleAndTask(state, CommandNodeRole.Probe, CommandTaskType.Probe);
+                state = state.WithRoleAndTask(CommandNodeRole.Probe, CommandTaskType.Probe);
                 if (hasOrder) order = order.WithTask(CommandTaskType.Probe, ProbeReason);
             }
 
@@ -537,13 +537,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         sideDefending: defender));
             if (recon.Task != state.Task)
             {
-                state = WithRoleAndTask(state, state.Role, recon.Task);
+                state = state.WithRoleAndTask(state.Role, recon.Task);
                 if (hasOrder) order = order.WithTask(recon.Task, recon.Reason);
             }
 
             if (hasCavalry && !probe && !exploit && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
             {
-                state = WithRoleAndTask(state, state.Role, cavalryTask);
+                state = state.WithRoleAndTask(state.Role, cavalryTask);
                 if (hasOrder) order = order.WithTask(cavalryTask, cavalryReason);
             }
 
@@ -552,7 +552,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             CommandTaskType emergency = CommandFormationCorrection.TaskForLocalFlankEmergency(state.Task, closeEngaged, flankRisk);
             if (emergency != state.Task)
             {
-                state = WithRoleAndTask(state, state.Role, emergency);
+                state = state.WithRoleAndTask(state.Role, emergency);
                 // The posture pipeline's local flank emergency rewrote an exploit's task: the opportunity producer reads this on its
                 // next tick and aborts the exploit as flank-threat (one tick late by design: the table has one writer).
                 if (exploit && recordTick) ExploitFeedback.SetFlankEmergency(rec.InstanceId);
@@ -572,7 +572,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 OnceLog.Info("tactical-brigade-posture:opportunity-override",
                     "[TacticalBrigadePosture] opportunity override: " + state.Task + " -> " + overridden
                     + " (opportunity=" + opportunity + " reason=" + overrideReason + ")");
-                state = WithRoleAndTask(state, state.Role, overridden);
+                state = state.WithRoleAndTask(state.Role, overridden);
                 if (hasOrder) order = order.WithTask(overridden, overrideReason);
             }
 
@@ -847,10 +847,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return TacticalCavalryFollowMode.None;
         }
 
-        internal static CommandNodeOperationalState WithRoleAndTask(CommandNodeOperationalState state, CommandNodeRole role, CommandTaskType task)
-        {
-            return new CommandNodeOperationalState(state.NodeId, state.Echelon, role, task, state.TaskState, state.X, state.Z, state.FacingDegrees);
-        }
     }
 
     // Road march routing glue (BC10 decision 6): plans a route for a posture Move, caches it,

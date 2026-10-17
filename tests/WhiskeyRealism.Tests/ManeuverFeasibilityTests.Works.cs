@@ -11,5 +11,6 @@ internal static partial class ManeuverFeasibilityTests
     static partial void AddWorksTests(List<(string, Action)> into)
     {
         into.AddRange(WorksReaderTests());       // ManeuverFeasibilityTests.Works.Readers.cs (task 1)
+        into.AddRange(WorksCopyTests());         // ManeuverFeasibilityTests.Works.Copy.cs (tasks 2, 6, 8)
     }
 }
