@@ -15,19 +15,21 @@ namespace WhiskeyRealism.Strategic.Planner
         public int Tasks, Unfilled;
         // Of the formations the plan may mass, those in a vanilla offensive-operations or capital-defence list (no scout pick takes them).
         public int Listed;
+        // Why the hold reserve gave no scout to a staged main effort (ForceAllocator.ReasonScoutAgainstThreat), null when it was not refused.
+        public string Why;
 
         public bool Equals(ReconCounts other)
         {
             return Screens == other.Screens && Pickets == other.Pickets && AdvanceGuards == other.AdvanceGuards &&
                    Probes == other.Probes && Recalled == other.Recalled && UnwatchedApproaches == other.UnwatchedApproaches &&
-                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool && Tasks == other.Tasks && Unfilled == other.Unfilled && Listed == other.Listed;
+                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool && Tasks == other.Tasks && Unfilled == other.Unfilled && Listed == other.Listed && string.Equals(Why, other.Why, StringComparison.Ordinal);
         }
 
         public string Row(int alliance)
         {
             return "[Recon] alliance=" + alliance + " screens=" + Screens + " pickets=" + Pickets + " advanceGuards=" + AdvanceGuards +
                    " probes=" + Probes + " recalled=" + Recalled + " unwatchedApproaches=" + UnwatchedApproaches +
-                   " oldestBeliefDays=" + OldestBeliefDays + " tasks=" + Tasks + " unfilled=" + Unfilled + " listed=" + Listed + " pool=" + Pool;
+                   " oldestBeliefDays=" + OldestBeliefDays + " tasks=" + Tasks + " unfilled=" + Unfilled + " listed=" + Listed + " why=" + (Why ?? "-") + " pool=" + Pool;
         }
     }
 
@@ -113,9 +115,10 @@ namespace WhiskeyRealism.Strategic.Planner
             return own >= 0 && missions.IsRecon(s.Own[own].InstanceId);
         }
 
-        internal static ReconCounts CountsOf(CampaignSnapshot s, ReconMissionLedger missions, IReadOnlyList<ReconTask> tasks)
+        internal static ReconCounts CountsOf(CampaignSnapshot s, ReconMissionLedger missions, IReadOnlyList<ReconTask> tasks, Allocation allocation = null)
         {
             var counts = new ReconCounts();
+            if (allocation != null) counts.Why = allocation.ReconUnfilledReason;
             if (missions != null)
             {
                 var list = missions.Missions;

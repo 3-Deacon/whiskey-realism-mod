@@ -351,7 +351,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (FlagOn(Plugin.EnableCampaignReconnaissance))
                 {
                     Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);
-                    EmitRecon(snapshot);
+                    EmitRecon(snapshot, allocation);
                 }
                 else
                 {
@@ -363,10 +363,10 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // [Recon] on change of its counts (one row per alliance per change; no string otherwise).
-        private static void EmitRecon(CampaignSnapshot snapshot)
+        private static void EmitRecon(CampaignSnapshot snapshot, Allocation allocation)
         {
             int a = snapshot.Alliance;
-            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a]);
+            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation);
             if (ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])) return;
             ReconRowEmitted[a] = true;
             LastReconCounts[a] = counts;

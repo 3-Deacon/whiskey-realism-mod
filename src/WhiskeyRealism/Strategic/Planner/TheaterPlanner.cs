@@ -399,7 +399,10 @@ namespace WhiskeyRealism.Strategic.Planner
             int current = state.CurrentMainObjective;
             Retain(cands, current, state);
             int best = Best(cands);
+            // The record the main effort is on (hysteresis between records), and the best record of the current objective: the objective's
+            // own value, which a challenger objective is compared against (the kept record may trail it by up to the record window).
             int held = HeldRecord(cands, current, state);
+            int heldBest = BestOf(cands, current);
 
             if (best < 0)
             {
@@ -422,11 +425,11 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 // A standing trigger (a capital threat lasts for days) never re-draws among near
                 // equals: the current main effort stays while it is within Epsilon of the best.
-                bool currentStillBest = held >= 0 && cands[held].Score >= cands[best].Score - Epsilon;
+                bool currentStillBest = heldBest >= 0 && cands[heldBest].Score >= cands[best].Score - Epsilon;
                 chosen = currentStillBest ? held : Draw(c, cands, best, state);
                 reason = cands[chosen].ObjectiveId != current ? trigger : "hold";
             }
-            else if (cands[best].ObjectiveId != current && cands[best].Score - cands[held].Score > SwitchMargin)
+            else if (cands[best].ObjectiveId != current && cands[best].Score - cands[heldBest].Score > SwitchMargin)
             {
                 if (state.ChallengerObjective == cands[best].ObjectiveId) state.ChallengerDays++;
                 else
@@ -718,7 +721,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     TargetZ = followsMain ? mainZ : cz,
                     RequiredRatio = posture == TheaterPosture.MainEffort ? plan.MainRequiredRatio
                         : Math.Max(0f, s.OffensiveDominance * (1f + mass) + ProfileOf(c, strongest[sector]).RequiredOddsShift),
-                    HoldNeed = x.Need[sector]
+                    HoldNeed = x.Need[sector],
+                    BelievedHold = HoldRatioNow(s) * x.Threat[sector]
                 });
             }
         }

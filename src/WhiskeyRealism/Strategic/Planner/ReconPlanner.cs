@@ -104,8 +104,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // tasks watch approaches and beliefs; none of them is worth a sector's hold reserve (ForceAllocator.AssignRecon).
         internal static bool ScoutsMainObjective(in ReconTask task)
         {
-            return task.Kind == ReconKind.Probe || task.Kind == ReconKind.AdvanceGuard
-                || (task.Kind == ReconKind.Screen && string.Equals(task.Reason, ReasonMainAxis, StringComparison.Ordinal));
+            return ScoutsMainObjective(task.Kind, task.Reason);
+        }
+
+        internal static bool ScoutsMainObjective(ReconKind kind, string reason)
+        {
+            return kind == ReconKind.Probe || kind == ReconKind.AdvanceGuard
+                || (kind == ReconKind.Screen && string.Equals(reason, ReasonMainAxis, StringComparison.Ordinal));
         }
 
         public static int PickFormation(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, ReconMissionLedger missions,
