@@ -638,6 +638,8 @@ internal static class CensusRows
         "TheaterPlan.MainScouted | P/TheaterPlanner.cs | D1 [CampaignPlan] scouted=",
         "TheaterPlan.MainScoutLatched | P/TheaterPlanner.cs | F1 [CampaignPlan] scouted=latched",
         "PlannerState.ScoutedDecision | P/TheaterPlanner.cs | F1 TheaterPlanner.Plan (a scouted decision is not re-staged)",
+        "SectorPlan.BelievedHold | P/ForceAllocator.cs | smoke 2026-10-17 ForceAllocator.SectorMayGiveScout (is the sector's hold need driven by a believed army)",
+        "Allocation.ReconUnfilledReason | P/ReconStep.cs | smoke 2026-10-17 [Recon] why= (the hold reserve refused to give a scout)",
         "PlannerState.ScoutedTargetX | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.Plan (the latch speaks for the scouted record only)",
         "PlannerState.ScoutedTargetZ | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.Plan (the latch speaks for the scouted record only)",
         "PlannerState.CurrentTargetX | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.HeldRecord (the target record the main effort keeps)",

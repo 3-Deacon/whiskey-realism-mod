@@ -29,6 +29,11 @@ internal static class ReconNeverTasksTests
             ("AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn", AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn),
             ("TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks", TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks),
             ("ASecessionGarrisonIsNeverDrawnAsAScout", ASecessionGarrisonIsNeverDrawnAsAScout),
+            ("TheDrawNeverOpensAShortfallAgainstABelievedArmy", TheDrawNeverOpensAShortfallAgainstABelievedArmy),
+            ("ABelievedSectorThatStillCoversItsNeedGivesAScout", ABelievedSectorThatStillCoversItsNeedGivesAScout),
+            ("APresumptionOnlySectorGivesAScoutAndNamesItsCarrier", APresumptionOnlySectorGivesAScoutAndNamesItsCarrier),
+            ("OneStandingScoutPerMainEffortAcrossReviews", OneStandingScoutPerMainEffortAcrossReviews),
+            ("AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord", AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord),
             ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
             ("TheUnfilledCountMatchesTasksByKindPointAndReason", TheUnfilledCountMatchesTasksByKindPointAndReason),
             ("TheReconRowCountsTasksAndUnfilled", TheReconRowCountsTasksAndUnfilled),
@@ -117,6 +122,15 @@ internal static class ReconNeverTasksTests
     {
         int n = 0;
         foreach (var x in a.Assignments) if (x.Role == role) n++;
+        return n;
+    }
+
+    // The Recon assignments that see the main objective (main-axis, probe, advance guard); a posture or approach screen is another scout.
+    private static int MainScouts(Allocation a)
+    {
+        int n = 0;
+        foreach (var x in a.Assignments)
+            if (x.Role == FormationRole.Recon && (x.Reason == ReconPlanner.ReasonMainAxis || x.Reason == "probe" || x.Reason == "advance-guard")) n++;
         return n;
     }
 
@@ -273,16 +287,16 @@ internal static class ReconNeverTasksTests
         AssertEqual("probe", Of(alloc, 2).Reason, "for the probe, not for the posture or the belief that precede it");
     }
 
-    // A Union garrison inside a live secession state (Kentucky, D8) holds where it stands, withheld; the draw takes only a hold reserve.
+    // A Union garrison the plan pledged inside a live secession state (Kentucky, D8). The hold reserve claims before AssignGarrisons, so the same
+    // formation carries hold-reserve (and the plan's pledge): the draw must not take it (verify round 1, blocker).
     private static void ASecessionGarrisonIsNeverDrawnAsAScout()
     {
         var s = SmokeUnion(withReserve: false);
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 15, StateId = 14, X = 500f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 0.3f });
         s.Secessions.Add(new SecessionRecord { ObjectiveId = 15, StateId = 14, StateAlliance = 0, Live = true, HasTown = true, TownX = 500f, TownZ = 0f });
-        var garrison = Corps(20, 480f, 4000f);
+        var garrison = Corps(20, 480f, 2500f);
         garrison.StateId = 14;
         s.Own.Add(garrison);
-        s.Own.Add(Corps(21, 470f, 9500f, 3, FormationFlags.InBattle));   // holds the state's sector (9000), so no hold reserve takes the garrison first
         // The body is nearer the West objective than the garrison and big enough alone: the garrison is not in the mass.
         var body = s.Own[s.IndexOfOwn(1)];
         body.X = 345f;
@@ -291,8 +305,10 @@ internal static class ReconNeverTasksTests
         s.Own[s.IndexOfOwn(1)] = body;
         var day = Review(s);
         AssertTrue(day.Plan.MainStaged, "staged");
-        AssertEqual(ForceAllocator.ReasonSecession, Of(day.Allocation, 20).Reason, "the formation is the state's garrison");
-        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "and is not the push's scout");
+        AssertEqual(1, day.Plan.Garrisons.Count, "one post: Kentucky");
+        AssertTrue(day.Plan.Garrisons[0].InstanceIds.Contains(20), "the plan pledged the formation");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(ForceAllocator.Allocate(day.Plan, s, ExecutorFixtures.Sectors(s), null, null, null), 20).Reason, "though the hold reserve claimed it first");
+        AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "and it is not the push's scout");
         AssertTrue(ReconPlanner.ScoutPool(s) >= 1, "though the pool counts it");
     }
 
@@ -346,7 +362,7 @@ internal static class ReconNeverTasksTests
         var drawn = Review(SmokeUnion());
         var row = ReconStep.CountsOf(drawn.S, drawn.Ledger, drawn.Tasks).Row(0);
         AssertContains(row, " tasks=" + drawn.Tasks.Count + " unfilled=" + (drawn.Tasks.Count - 1) + " ", "one task has its scout: " + row);
-        AssertContains(row, " listed=1 pool=1", "the capital-defence body is named, and the one formation the pick can take is the pool: " + row);
+        AssertContains(row, " listed=1 why=- pool=1", "the capital-defence body is named, and the one formation the pick can take is the pool: " + row);
         AssertEqual(1, ReconPlanner.ListedCount(SmokeUnion(FormationFlags.InOffensiveOps)), "an offensive-operations entry is listed too");
         AssertEqual(0, ReconPlanner.ListedCount(SmokeUnion(0)), "an unlisted body is not");
         var busyListed = SmokeUnion(0);
@@ -553,6 +569,130 @@ internal static class ReconNeverTasksTests
         PlanOf(SideBySide(0f, 1f), state);
         AssertNear(10f, PlanOf(SideBySide(0f, 1f), state).MainObjectiveZ, 0.5f, "day 4: the other record after three reviews");
         AssertNear(10f, PlanOf(SideBySide(1f, 0f), state).MainObjectiveZ, 0.5f, "day 5: the first leads once, the kept one stays");
+    }
+
+    // ---- the draw and a believed threat (verify round 1, major) ----
+
+    // A believed army at x 1000 faces the East (obj 31 at 900). Its hold need is HoldRatio x the army, belief-driven once it passes the floor.
+    private static Day EastWithArmy(float armyStrength)
+    {
+        var s = SmokeUnion();
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, armyStrength));
+        return Review(s);
+    }
+
+    private static void TheDrawNeverOpensAShortfallAgainstABelievedArmy()
+    {
+        foreach (float army in new[] { 12000f, 16000f })
+        {
+            var day = EastWithArmy(army);
+            AssertTrue(day.Plan.MainStaged, army + ": the West push is staged");
+            float need = 0f, believed = 0f;
+            foreach (var sp in day.Plan.Sectors) if (sp.HoldNeed > need) { need = sp.HoldNeed; believed = sp.BelievedHold; }
+            AssertTrue(believed > ForceAllocator.MinGarrisonStrength && believed >= need - 0.01f, army + ": the East need is the army's: " + need + " / " + believed);
+            AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), army + ": nothing is drawn from the East reserve");
+            AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, army + ": it keeps holding");
+            AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, army + ": and the refusal is named");
+            AssertContains(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation).Row(0), " why=believed-threat ", army + ": in the [Recon] row");
+        }
+    }
+
+    // Belief-driven, but the sector's hold less the drawn formation still meets its target: the draw may go. East need 5400 (an army of 9000), a
+    // busy 3000 holds, the reserve is the 1000-man 5 (nearest the army) and the 3000-man 2: drawing the smallest leaves 6000 >= 5400.
+    private static void ABelievedSectorThatStillCoversItsNeedGivesAScout()
+    {
+        var s = SmokeUnion(secondEastBusy: false);
+        s.Own.Add(Corps(5, 800f, 1000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 9000f));
+        var held = ForceAllocator.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 5).Reason, "5 is hold reserve");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 2).Reason, "so is 2");
+        var day = Review(s);
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 5).Role, "the 1000-man formation scouts: the East keeps 6000 against 5400");
+        AssertEqual(FormationRole.Hold, Of(day.Allocation, 2).Role, "and 2 keeps holding");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing was refused");
+    }
+
+    // The presumption alone sets the East need (nothing believed): the scout may go, and the sector's loss is a listed shortfall whose carrier is
+    // its immobile holder, so G5b sees it although the one mobile hold was drawn away.
+    private static void APresumptionOnlySectorGivesAScoutAndNamesItsCarrier()
+    {
+        var day = Review(SmokeUnion());
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "drawn");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertTrue(day.Allocation.Shortfalls.Contains(13) || day.Allocation.Shortfalls.Contains(14), "the East is short and names a busy holder: " + string.Join(",", day.Allocation.Shortfalls));
+        AssertEqual(1, day.Allocation.Shortfalls.Count, "only the East");
+        // A sector with no immobile holder either has no one to name.
+        var s = SmokeUnion(secondEastBusy: false);
+        s.Own.RemoveAt(s.IndexOfOwn(13));
+        s.Own.Add(Corps(3, 770f, 3000f));
+        s.Own.Add(Corps(4, 780f, 3000f));
+        var bare = Review(s);
+        AssertEqual(1, Roles(bare.Allocation, FormationRole.Recon), "one drawn from a sector held by reserve alone");
+        foreach (int id in bare.Allocation.Shortfalls) AssertTrue(id != 13 && id != 14, "no immobile formation exists to carry it");
+    }
+
+    // The cap is per main effort, not per review: the scout out yesterday is today's incumbent, and no second one is opened beside it.
+    private static void OneStandingScoutPerMainEffortAcrossReviews()
+    {
+        Func<CampaignSnapshot> world = () =>
+        {
+            var w = SmokeUnion(secondEastBusy: false);
+            w.Own.Add(Corps(3, 770f, 2000f));
+            w.Own.Add(Corps(4, 780f, 2000f));
+            return w;
+        };
+        var state = new PlannerState();
+        var ledger = new ReconMissionLedger();
+        var day = Review(world(), state, ledger);
+        AssertEqual(1, MainScouts(day.Allocation), "day 1: one");
+        for (int k = 2; k <= 5; k++)
+        {
+            var s2 = world();
+            foreach (var a in day.Allocation.Assignments)
+            {
+                if (a.Role != FormationRole.Recon) continue;
+                int i = s2.IndexOfOwn(a.InstanceId);
+                var f = s2.Own[i];
+                f.X = 600f; f.Z = 0f; f.WaypointX = 600f; f.WaypointZ = 0f;      // it is on the road west, out of the East's reserve and not yet at its post
+                s2.Own[i] = f;
+            }
+            day = Review(s2, state, ledger);
+            AssertTrue(MainScouts(day.Allocation) <= 1, "day " + k + ": never a second scout for the main objective: " + MainScouts(day.Allocation));
+        }
+    }
+
+    // Three candidates, pinned: the kept record trails the objective's best record; a challenger objective is compared with the BEST record of
+    // the current objective (its value), not with the record the main effort happens to be on, so the record window does not weaken the objective.
+    private static void AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord()
+    {
+        // Objective 40: records 400 (kept) and 700; objective 41: one record at 690. Find an importance for 41 that beats 40's best record by
+        // less than the margin and the kept record by more.
+        Func<float, float, float, CampaignSnapshot> world = (a, b, other) =>
+        {
+            var s = Records(a, b);
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 41, X = 698f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = other });
+            return s;
+        };
+        float chosen = -1f, second = -1f;
+        for (float second2 = 0.3f; second2 <= 1f && chosen < 0f; second2 += 0.1f)
+            for (float imp = 0f; imp <= 1f && chosen < 0f; imp += 0.05f)
+            {
+                var s = world(Slight, second2, imp);
+                float best40 = Math.Max(ScoreOf(s, 400f), ScoreOf(s, 700f));
+                float kept40 = ScoreOf(s, 400f);
+                float c = ScoreOf(s, 698f);
+                if (c - best40 > 0.005f && c - best40 < TheaterPlanner.SwitchMargin - 0.01f && c - kept40 > TheaterPlanner.SwitchMargin + 0.01f) { chosen = imp; second = second2; }
+            }
+        AssertTrue(chosen >= 0f, "a challenger inside the margin of the best record and outside it of the kept one exists");
+        var state = new PlannerState();
+        AssertNear(400f, PlanOf(world(Lean, Slight, 0f), state).MainObjectiveX, 0.5f, "day 1: objective 40 on its 400 record");
+        AssertEqual(40, state.CurrentMainObjective, "objective 40");
+        PlanOf(world(Slight, second, chosen), state);
+        PlanOf(world(Slight, second, chosen), state);
+        AssertEqual(0, state.ChallengerDays, "objective 41 never counts as a challenger: it does not beat 40's best record by the margin");
+        AssertEqual(40, state.CurrentMainObjective, "and the main effort is still objective 40");
+        AssertNear(400f, state.CurrentTargetX, 0.5f, "on its kept record, which trails the best one");
     }
 
     // A record that leads, but by no more than the margin, is not a challenger: it breaks the run of reviews.
