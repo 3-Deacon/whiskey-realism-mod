@@ -34,6 +34,7 @@ internal static class ReconNeverTasksTests
             ("APresumptionOnlySectorGivesAScoutAndNamesItsCarrier", APresumptionOnlySectorGivesAScoutAndNamesItsCarrier),
             ("OneStandingScoutPerMainEffortAcrossReviews", OneStandingScoutPerMainEffortAcrossReviews),
             ("AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw", AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw),
+            ("AScoutOutForAnotherTaskDoesNotBlockTheDraw", AScoutOutForAnotherTaskDoesNotBlockTheDraw),
             ("AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord", AChallengerObjectiveIsComparedWithTheCurrentObjectivesBestRecord),
             ("ScoutsMainObjectiveNamesTheMainTasksOnly", ScoutsMainObjectiveNamesTheMainTasksOnly),
             ("TheUnfilledCountMatchesTasksByKindPointAndReason", TheUnfilledCountMatchesTasksByKindPointAndReason),
@@ -684,6 +685,27 @@ internal static class ReconNeverTasksTests
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "the East reserve is not drawn on");
         AssertEqual(1, MainScouts(day.Allocation), "one scout for the main objective: the one already out");
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 30).Role, "that one");
+    }
+
+    // The approach screens watch other ground; they are not the push's eyes, so one standing does not stand in for them.
+    private static void AScoutOutForAnotherTaskDoesNotBlockTheDraw()
+    {
+        var s = SmokeUnion();
+        var free = Corps(30, 365f, 3000f, 1);   // not ready: it cannot be picked for a task today, its mission still stands
+        s.Own.Add(free);
+        var ledger = new ReconMissionLedger();
+        ledger.Restore(new[]
+        {
+            new ReconMission
+            {
+                MissionId = 1, Kind = ReconKind.Screen, InstanceId = 30, UnitKey = free.UnitKey, HoldX = 350f, HoldZ = 0f, SectorId = 0,
+                State = ReconState.Moving, IssuedDay = s.DaySerial - 1, Reason = ReconPlanner.ReasonCapitalApproach, ObservedEnemyStrength = -1f, ObservedObjectiveId = -1, ClearedDay = -1
+            }
+        });
+        var day = Review(s, new PlannerState(), ledger);
+        AssertTrue(day.Plan.MainStaged, "staged");
+        AssertEqual(1, MainScouts(day.Allocation), "the push still gets its eyes from the reserve");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the reserve formation");
     }
 
     // Three candidates, pinned: the kept record trails the objective's best record; a challenger objective is compared with the BEST record of
