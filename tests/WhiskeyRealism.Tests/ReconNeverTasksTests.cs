@@ -31,6 +31,7 @@ internal static class ReconNeverTasksTests
             ("ASecessionGarrisonIsNeverDrawnAsAScout", ASecessionGarrisonIsNeverDrawnAsAScout),
             ("TheDrawNeverOpensAShortfallAgainstABelievedArmy", TheDrawNeverOpensAShortfallAgainstABelievedArmy),
             ("ABelievedSectorThatStillCoversItsNeedGivesAScout", ABelievedSectorThatStillCoversItsNeedGivesAScout),
+            ("ADrawThatLeavesExactlyTheNeedIsAllowed", ADrawThatLeavesExactlyTheNeedIsAllowed),
             ("APresumptionOnlySectorGivesAScoutAndNamesItsCarrier", APresumptionOnlySectorGivesAScoutAndNamesItsCarrier),
             ("OneStandingScoutPerMainEffortAcrossReviews", OneStandingScoutPerMainEffortAcrossReviews),
             ("AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw", AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw),
@@ -621,6 +622,22 @@ internal static class ReconNeverTasksTests
         AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing was refused");
     }
 
+    // The boundary: the hold less the drawn formation equals the need exactly (an army of 10000: need 6000; a busy 3000, the 1000 and the 3000
+    // hold 7000, and 6000 remain). Equal meets the target, so the draw goes.
+    private static void ADrawThatLeavesExactlyTheNeedIsAllowed()
+    {
+        var s = SmokeUnion(secondEastBusy: false);
+        s.Own.Add(Corps(5, 800f, 1000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 10000f));
+        var day = Review(s);
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        float need = 0f;
+        foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
+        AssertNear(6000f, need, 0.5f, "the East need");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 5).Role, "the 1000 scouts: 6000 remain against 6000");
+        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+    }
+
     // The presumption alone sets the East need (nothing believed): the scout may go, and the sector's loss is a listed shortfall whose carrier is
     // its immobile holder, so G5b sees it although the one mobile hold was drawn away.
     private static void APresumptionOnlySectorGivesAScoutAndNamesItsCarrier()
@@ -852,13 +869,13 @@ internal static class ReconNeverTasksTests
 
     // A stale belief (confidence 0.3) leaves a presumption: the East need is 20000, set by the remembered army, not by the believed term
     // (0.6 x 20000 x 0.3 = 3600). The need is presumption-backed, so the scout goes, and the shortfall names the nearest immobile holder.
-    private static CampaignSnapshot EastWithAStaleArmy(float busyAX, float busyBX)
+    private static CampaignSnapshot EastWithAStaleArmy(float busyAX, float busyBX, float confidence = 0.3f)
     {
         var s = SmokeUnion();
         var a = s.Own[s.IndexOfOwn(13)]; a.X = busyAX; a.WaypointX = busyAX; s.Own[s.IndexOfOwn(13)] = a;
         var b = s.Own[s.IndexOfOwn(14)]; b.X = busyBX; b.WaypointX = busyBX; s.Own[s.IndexOfOwn(14)] = b;
         var stale = ExecutorFixtures.Belief(1000f, 0f, 20000f);
-        stale.Confidence01 = 0.3f;
+        stale.Confidence01 = confidence;
         s.Beliefs.Add(stale);
         return s;
     }
@@ -873,6 +890,15 @@ internal static class ReconNeverTasksTests
         AssertTrue(believed > 0f && believed < need, "a believed force exists but does not drive it: " + believed);
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "so the East gives its scout though it cannot cover 20000 without it");
         AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        // A fresher belief (confidence 0.45: 0.6 x 20000 x 0.45 = 5400) puts a believed term above the floor, still under the presumption that sets the need: the
+        // sector is still presumption-backed, not belief-driven.
+        var fresher = Review(EastWithAStaleArmy(790f, 800f, 0.45f));
+        float need2 = 0f, believed2 = 0f;
+        foreach (var sp in fresher.Plan.Sectors) if (sp.SectorId == east) { need2 = sp.HoldNeed; believed2 = sp.BelievedHold; }
+        AssertNear(20000f, need2, 1f, "the remembered army still sets the need");
+        AssertTrue(believed2 > ForceAllocator.MinGarrisonStrength && believed2 < need2 - 0.01f, "a believed term above the floor but under the need: " + believed2);
+        AssertEqual(FormationRole.Recon, Of(fresher.Allocation, 2).Role, "and the East still gives its scout");
+        AssertTrue(fresher.Allocation.ReconUnfilledReason == null, "nothing refused");
     }
 
     // The carrier of a short sector is its nearest immobile holder to the army it faces: 14 (x 800) beside the belief at 1000, and 13 when
