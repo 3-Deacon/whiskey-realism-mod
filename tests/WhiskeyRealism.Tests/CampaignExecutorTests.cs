@@ -25,7 +25,7 @@ internal static class CampaignExecutorTests
             ("MoveRecordsKeyedByUnitKey", MoveRecordsKeyedByUnitKey),
             ("MoveTrackersArePerAllianceAndPerCampaign", MoveTrackersArePerAllianceAndPerCampaign),
             ("PlayerCommandChainNeverMoved", PlayerCommandChainNeverMoved),
-            ("MapGroupPlayerGetsOrderNotMove", MapGroupPlayerGetsOrderNotMove),
+            ("MapGroupPlayerIsNeverMovedOrOrdered", MapGroupPlayerIsNeverMovedOrOrdered),
             ("CarryingGroupMovedNormally", CarryingGroupMovedNormally),
             ("GaveUpMainEffortLosesTheRoleAtThatTarget", GaveUpMainEffortLosesTheRoleAtThatTarget),
             ("GaveUpDepotBuilderIsReplacedByTheNextFormation", GaveUpDepotBuilderIsReplacedByTheNextFormation),
@@ -61,7 +61,7 @@ internal static class CampaignExecutorTests
             ("TheaterWritesFollowTheRoles", TheaterWritesFollowTheRoles),
             ("ObjectiveWriteOnlyWhenChanged", ObjectiveWriteOnlyWhenChanged),
             ("ObjectiveResetOnlyWhenModWritten", ObjectiveResetOnlyWhenModWritten),
-            ("ImportanceRedirectOnlyForMainOrSupportSectors", ImportanceRedirectOnlyForMainOrSupportSectors),
+            ("ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged", ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged),
             ("ImportanceRedirectRequiresVanillaGates", ImportanceRedirectRequiresVanillaGates),
             ("ExecutorFilesHoldNoUnityTypes", ExecutorFilesHoldNoUnityTypes),
             ("MoverHostNeverTouchesTheDefensiveList", MoverHostNeverTouchesTheDefensiveList),
@@ -228,14 +228,13 @@ internal static class CampaignExecutorTests
             var host = new FakeMoverHost();
             var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
             AssertEqual(0, host.Moves.Count, chain + " is never moved");
-            AssertEqual(0, host.Orders.Count, chain + " gets no order either");
             AssertEqual(1, tally.SkippedPlayer, chain + " counted as skipped");
         }
     }
 
-    // His Support order is a W&L dispatch (the host's IssuePlayerOrder, intent Redeploy in the runtime, pinned below); he is
-    // never MainEffort, CapitalGuard or DepotBuilder (G4), and if such an assignment ever reached the mover it is skipped.
-    private static void MapGroupPlayerGetsOrderNotMove()
+    // The map-group player's group is never mass (G3), so the allocator never gives it a role the mover sends (D3: outside the mass it
+    // keeps its own front's role, Hold). Were such an assignment to reach the mover it is skipped: he is neither moved nor ordered.
+    private static void MapGroupPlayerIsNeverMovedOrOrdered()
     {
         var s = ExecutorFixtures.Wide();
         s.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
@@ -243,27 +242,17 @@ internal static class CampaignExecutorTests
         player.Chain = WlChainClass.PlayerMapGroup;
         s.Own.Add(player);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        int support = ExecutorFixtures.Sectors(s).SectorAt(550f, 0f);
-        plan.Sectors.Add(new SectorPlan { SectorId = support, Posture = TheaterPosture.Support, TargetObjectiveId = 98, TargetX = 100f, TargetZ = 0f });
+        int sector = ExecutorFixtures.Sectors(s).SectorAt(550f, 0f);
         var a = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
-        AssertEqual(FormationRole.Support, a.TryGet(2, out var x) ? x.Role : FormationRole.Hold, "the allocator gave him a Support order");
+        AssertEqual(FormationRole.Hold, a.TryGet(2, out var x) ? x.Role : FormationRole.MainEffort, "the allocator leaves him in place");
 
-        var host = new FakeMoverHost();
-        var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
-        AssertFalse(host.Moves.Exists(m => m.id == 2), "an order, never a move, for the map-group player");
-        AssertEqual(1, host.Orders.Count, "one order");
-        AssertEqual(2, host.Orders[0].id, "to him");
-        AssertNear(100f, host.Orders[0].x, 0.01f, "toward the Support target");
-        AssertEqual(1, tally.Ordered, "counted as ordered");
-        AssertTrue(host.Moves.Exists(m => m.id == 1), "the AI corps is moved");
-
-        foreach (var role in new[] { FormationRole.MainEffort, FormationRole.CapitalGuard, FormationRole.DepotBuilder, FormationRole.Recover })
+        foreach (var role in new[] { FormationRole.MainEffort, FormationRole.Support, FormationRole.CapitalGuard, FormationRole.DepotBuilder, FormationRole.Recover })
         {
             var forced = new Allocation { Alliance = 0 };
-            forced.Assignments.Add(ExecutorFixtures.Assign(2, role, support, 100f, 0f));
+            forced.Assignments.Add(ExecutorFixtures.Assign(2, role, sector, 100f, 0f));
             var other = new FakeMoverHost();
             var t2 = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, forced, ExecutorFixtures.OpenTempo()), other, new MoveTracker(), ExecutorFixtures.State());
-            AssertEqual(0, other.Moves.Count + other.Orders.Count, role + " is neither moved nor ordered for him");
+            AssertEqual(0, other.Moves.Count, role + " is not a move for him");
             AssertEqual(1, t2.SkippedPlayer, role + " skipped");
         }
     }
@@ -429,7 +418,7 @@ internal static class CampaignExecutorTests
         AssertEqual(1, review.Split(new[] { "CollectGaveUp(" }, StringSplitOptions.None).Length - 1, "collected once per review");
         AssertFalse(review.Contains("previousPlan") || review.Contains("Resolve("), "no objective is read back from an earlier plan");
         AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "G3 reads the moves with their objectives (and G5c's held builders)");
-        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, HomeTheaterPrior.ForAlliance(alliance), ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
+        AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
     }
 
     // F1 (verify g5a): the verifier's repro through the real Plan, Allocate and Review. Every mass member gives up on the main
@@ -645,7 +634,6 @@ internal static class CampaignExecutorTests
         var host = new FakeMoverHost();
         CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, a, ExecutorFixtures.OpenTempo()), host, new MoveTracker(), ExecutorFixtures.State());
         AssertEqual(1, host.Moves.Count, "the AI map group above a player below map level is moved as any AI corps");
-        AssertEqual(0, host.Orders.Count, "...by MoveUnitTo (the carried player is sent no order), not by an order");
     }
 
     private static void MoverDispatchesTheRolesInPriorityOrder()
@@ -892,7 +880,6 @@ internal static class CampaignExecutorTests
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "Hold above its need is vanilla's");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Main), "a MainEffort member of the mass: only the mover launches it (decision 5)");
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.Support), "Support while its decision is deferred");
-        AssertFalse(CampaignWithholdView.WithheldFromOffense(0, w.MapGroupSupport), "...except the map-group player's Support");
         tracker.RecordIssued(w.FreeHold, 300f, 0f, 100f, 0f, ExecutorFixtures.Day, queued: false);
         AssertTrue(CampaignWithholdView.WithheldFromOffense(0, w.FreeHold), "a formation in transit");
         AssertFalse(CampaignWithholdView.WithheldFromOffense(0, 9999), "a formation the plan does not know");
@@ -973,11 +960,11 @@ internal static class CampaignExecutorTests
             var a = new Allocation { Alliance = 0 };
             a.Assignments.Add(ExecutorFixtures.Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
             CampaignPlanStore.Publish(0, plan, a, sectors);
-            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
             CampaignPlanStore.PreparePublish();
             CampaignPlanStore.SwapPublished();
 
-            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true, MapGroupInstanceId = -1 });
+            CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = true, ExecutorsAllowed = true });
             inJob = false;
             AssertTrue(CampaignPlanStore.TryGetExecutorContext(0, out var published), "published context");
             AssertFalse(published.Released, "between slices the reader sees the last commit's release, not today's working one");
@@ -1140,7 +1127,7 @@ internal static class CampaignExecutorTests
         AssertEqual(SteeringRules.NoWrite, SteeringRules.ObjectiveWrite(5, false, 9, 5), "...and only that");
     }
 
-    private static void ImportanceRedirectOnlyForMainOrSupportSectors()
+    private static void ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged()
     {
         var s = ExecutorFixtures.Wide();
         s.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
@@ -1154,7 +1141,11 @@ internal static class CampaignExecutorTests
         AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 11, out float tx, out float tz), "an area of the main sector");
         AssertNear(100f, tx, 0.001f, "points at the sector's target x");
         AssertNear(0f, tz, 0.001f, "z");
-        AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 13, out tx, out _) && Math.Abs(tx - 100f) < 0.001f, "an area of a Support sector points at the main target too");
+        AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 13, out _, out _), "an area of a Support sector keeps vanilla's pick (F3: the main sector only)");
+        plan.MainStaged = true;
+        AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 11, out _, out _), "nothing is pointed at an unscouted target while the main effort is staged (F3)");
+        plan.MainStaged = false;
+        AssertTrue(SteeringRules.ImportanceSteers(plan, sectors, 11, out _, out _), "and the main sector steers again once the main effort is not staged");
         AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 16, out _, out _), "a Hold sector's area keeps vanilla's pick");
         plan.Sectors[2].TargetObjectiveId = 98;     // a target alone does not steer: the posture decides
         AssertFalse(SteeringRules.ImportanceSteers(plan, sectors, 16, out _, out _), "a Hold sector with a target is still vanilla's");
@@ -1207,7 +1198,6 @@ internal static class CampaignExecutorTests
     {
         // The host's move half is VanillaMoveHost (G5d shares it with the recon executor): the pins follow it.
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs") + ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs");
-        AssertTrue(HasLine(src, "Intent = WlStrategicIntent.Redeploy"), "the map-group player's Support order is a Redeploy dispatch (order type 5), never Offensive, DefendCapital or ConstructSupplyDepot");
         AssertFalse(src.Contains("WlStrategicIntent.Offensive") || src.Contains("WlStrategicIntent.DefendCapital") || src.Contains("WlStrategicIntent.ConstructSupplyDepot"), "no other intent");
         AssertTrue(HasLine(src, "return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);"), "MoveUnitTo with movearoundenemyunits: true, as every Whiskey mover");
         AssertFalse(src.Contains("EnterMoveSource"), "G5a marks no move source: nothing types the march");
@@ -1307,7 +1297,7 @@ internal static class CampaignExecutorTests
             "allocation = ForceAllocator.Allocate(plan, snapshot, sectors,",
             "SyncRecon(snapshot, allocation);",
             "CampaignPlanStore.Publish(alliance, plan, allocation, sectors);",
-            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));",
+            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "EmitPlan(plan, trace, day, month, year);",
             "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);");
 
@@ -1318,7 +1308,7 @@ internal static class CampaignExecutorTests
             "PlanFreshness.IsToday(todaysPlan.DaySerial)",
             "CampaignSteeringRuntime.Execute(alliance, Snapshots[alliance]);",
             "CampaignMoverRuntime.Execute(alliance, Snapshots[alliance], States[alliance]);",
-            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, Snapshots[alliance]));",
+            "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "ReconExecutorRuntime.Execute(alliance, Snapshots[alliance], Recon[alliance]);");
 
         // The construction executor (G5c) is the steering executor's first statement, ahead of the objective and theater writes.
@@ -1409,7 +1399,7 @@ internal static class CampaignExecutorTests
         string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs"), "internal static void ReviewPlan(");
         int stamp = body.IndexOf("PlanFreshness.NoteToday(daySerial);", StringComparison.Ordinal);
         int stand = body.IndexOf("if (mode == PlannerReviewMode.StandDown) return;", StringComparison.Ordinal);
-        int publish = body.IndexOf("CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));", StringComparison.Ordinal);
+        int publish = body.IndexOf("CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));", StringComparison.Ordinal);
         int store = body.IndexOf("CampaignPlanStore.Publish(alliance, plan, allocation, sectors);", StringComparison.Ordinal);
         AssertTrue(stamp >= 0 && stand > stamp, "the clock is noted in every mode, before the stand-down and bookkeeping returns (a paused alliance's plan ages out)");
         AssertTrue(store >= 0 && publish > store, "the context joins the plan's publish");
@@ -1453,8 +1443,7 @@ internal static class CampaignExecutorTests
         AssertTrue(HasLine(src, "else if (!listed && present) _offensive.Remove(unit);"), "removed from it");
         AssertTrue(src.Contains("VanillaFieldCache.List(_factionObject, \"unitsinoffensiveoperations\")"), "the offensive list, by cached field");
         string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
-        AssertTrue(HasLine(planner, "return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter), mapGroup);"), "the pre-war gate reaches the published context");
-        AssertTrue(HasLine(planner, "if (snapshot.Own[i].Chain == WlChainClass.PlayerMapGroup) mapGroup = snapshot.Own[i].InstanceId;"), "the map-group player's formation");
+        AssertTrue(HasLine(planner, "return ExecutorContext.From(States[alliance], PlannerChapterRules.ExecutorsAllowed(GamePrefs.leveltoload, Policy.CurrentChapter));"), "the pre-war gate reaches the published context");
     }
 
     private static void SteeringRuntimeWritesWhatTheRulesDecide()
@@ -1498,7 +1487,7 @@ internal static class CampaignExecutorTests
         int todays = body.IndexOf("PlanFreshness.IsToday(todaysPlan.DaySerial)", StringComparison.Ordinal);
         AssertTrue(todays > gate && todays < steering, "the executors act on today's plan only (a failed Plan job leaves yesterday's)");
         AssertTrue(steering < mover, "the objective and theater steering run before the mover");
-        AssertTrue(HasLine(body, "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance, snapshot));") || body.Contains("PublishExecutorContext("), "the tempo release reaches the published context");
+        AssertTrue(HasLine(body, "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));") || body.Contains("PublishExecutorContext("), "the tempo release reaches the published context");
     }
 }
 
@@ -1620,13 +1609,13 @@ internal static class ExecutorFixtures
 
     internal sealed class World
     {
-        public int Main, Support, MapGroupSupport, Reserve, CapitalGuard, FreeHold, HoldAtNeed;
+        public int Main, Support, Reserve, CapitalGuard, FreeHold, HoldAtNeed;
         public bool HoldAtNeedWithheld;
         public float HoldSectorX;
     }
 
     // A published plan, allocation, sector model and executor context (decision 4 deferred, not released) for the
-    // withhold view: corps 1 MainEffort, 2 Support, 3 map-group Support, 4 Reserve, 5 CapitalGuard, 6 Hold released
+    // withhold view: corps 1 MainEffort, 2 Support, 4 Reserve, 5 CapitalGuard, 6 Hold released
     // above its need, 7 Hold withheld at need in the sector of x 550.
     internal static World PublishedWorld(out MoveTracker tracker)
     {
@@ -1634,9 +1623,6 @@ internal static class ExecutorFixtures
         var s = Wide();
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 330f, 9000f));
-        var player = Corps(3, 340f, 6000f);
-        player.Chain = WlChainClass.PlayerMapGroup;
-        s.Own.Add(player);
         s.Own.Add(Corps(4, 210f, 9000f));
         s.Own.Add(Corps(5, 10f, 9000f));
         s.Own.Add(Corps(6, 550f, 9000f));
@@ -1650,7 +1636,6 @@ internal static class ExecutorFixtures
         var a = new Allocation { Alliance = 0 };
         a.Assignments.Add(Assign(1, FormationRole.MainEffort, plan.MainSectorId, 100f, 0f));
         a.Assignments.Add(Assign(2, FormationRole.Support, support, 100f, 0f));
-        a.Assignments.Add(Assign(3, FormationRole.Support, support, 100f, 0f));
         var reserve = Assign(4, FormationRole.Reserve, plan.MainSectorId, 210f, 0f);
         reserve.Withheld = true;
         a.Assignments.Add(reserve);
@@ -1663,9 +1648,9 @@ internal static class ExecutorFixtures
         a.Assignments.Add(atNeed);
         PlanFreshness.NoteToday(Day);
         CampaignPlanStore.Publish(0, plan, a, sectors);
-        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true, MapGroupInstanceId = 3 });
+        CampaignPlanStore.PublishExecutorContext(0, new ExecutorContext { Released = false, ExecutorsAllowed = true });
         tracker = MoveTrackers.For(0);
-        return new World { Main = 1, Support = 2, MapGroupSupport = 3, Reserve = 4, CapitalGuard = 5, FreeHold = 6, HoldAtNeed = 7, HoldAtNeedWithheld = true, HoldSectorX = 560f };
+        return new World { Main = 1, Support = 2, Reserve = 4, CapitalGuard = 5, FreeHold = 6, HoldAtNeed = 7, HoldAtNeedWithheld = true, HoldSectorX = 560f };
     }
 
     internal static void Release(int alliance)
@@ -1684,7 +1669,6 @@ internal sealed class FakeMoverHost : IMoverHost
     public Func<float, float, bool> Restricted = (x, z) => false;
     public bool MoveResult = true;
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
-    public readonly List<(int id, float x, float z)> Orders = new List<(int id, float x, float z)>();
     public readonly List<(int id, bool listed)> Listed = new List<(int id, bool listed)>();
     public readonly List<int> Raised = new List<int>();
 
@@ -1692,7 +1676,6 @@ internal sealed class FakeMoverHost : IMoverHost
     public int StateAllianceAt(float x, float z) { return State(x, z); }
     public bool AtWar(int otherAlliance) { return otherAlliance != Own && otherAlliance >= 0 && otherAlliance <= 1; }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
-    public bool IssuePlayerOrder(int instanceId, float x, float z) { Orders.Add((instanceId, x, z)); return true; }
     public void ListOffensive(int instanceId, bool listed) { Listed.Add((instanceId, listed)); }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
 }

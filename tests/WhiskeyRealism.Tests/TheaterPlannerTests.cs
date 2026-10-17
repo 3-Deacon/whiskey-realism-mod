@@ -207,6 +207,7 @@ internal static class TheaterPlannerTests
         s.Objectives.Add(Target(3, 100f, 0.1f));
         s.Objectives.Add(Target(99, 300f, 1f));
         s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(8, 150f, 20000f));   // the garrison (D2)
         var plan = PlanOnce(s);
         AssertEqual(99, plan.MainObjectiveId, "live margin above the prior's maximum beats the prior");
 
@@ -326,6 +327,7 @@ internal static class TheaterPlannerTests
         reversed.Objectives.Add(s.Objectives[1]);
         reversed.Objectives.Add(s.Objectives[0]);
         reversed.Own.Add(Corps(1, 200f, 20000f));
+        reversed.Own.Add(Corps(8, 150f, 20000f));
         var seen = new HashSet<int>();
         for (long seed = 1; seed <= 20; seed++)
         {
@@ -645,8 +647,9 @@ internal static class TheaterPlannerTests
         s.Own.Add(Corps(3, 550f, 5000f));
         s.Beliefs.Add(afloat);
         var plan = PlanOnce(s);
-        var posture = PostureOf(plan, Sectors(s).SectorAt(550f, 0f));
-        AssertTrue(posture != TheaterPosture.Hold && posture != TheaterPosture.Screen, "an afloat army is no holdable contact");
+        int farSector = Sectors(s).SectorAt(550f, 0f);
+        // The sector faces enemy-held ground (objective 97), so it holds its D2 floor: the 10000 afloat army adds nothing to the need.
+        AssertNear(ForceAllocator.MinGarrisonStrength, HoldNeedOf(plan, farSector), 0.5f, "an afloat army is no holdable contact: the hold need is the floor");
 
         var nearTarget = Line();
         nearTarget.Own.Add(Corps(1, 200f, 20000f));
@@ -1433,7 +1436,16 @@ internal static class TheaterPlannerTests
     // P20: an unthreatened sector within relocation range of the main axis supports it.
     private static void SupportFollowsTheMainAxis()
     {
-        AssertEqual(TheaterPosture.Support, PostureOfFarSector(1f), "centroid 150 from the axis");
+        // The far sector {300, 400} (centroid 350, 150 from the axis 100-200) holds an own objective (96) and faces no enemy-held
+        // ground within its reach: Support. (A sector that does face enemy ground is Hold or Screen, D2.)
+        var s = Line();
+        s.Objectives.Add(Target(98, 100f, 1f));
+        s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 96, X = 300f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 0f });
+        s.Own.Add(Corps(1, 200f, 20000f));   // the sector of the objective is released into the push (its own hold is the target's)
+        s.Own.Add(Corps(2, 400f, 5000f));
+        var plan = PlanOnce(s);
+        AssertEqual(98, plan.MainObjectiveId, "main effort at x 100");
+        AssertEqual(TheaterPosture.Support, PostureOf(plan, Sectors(s).SectorAt(400f, 0f)), "centroid 150 from the axis");
     }
 
     // P14: an army on the axis flank lowers the candidate's score.
@@ -1580,6 +1592,7 @@ internal static class TheaterPlannerTests
         s.Objectives.Add(Target(98, 100f, importance98));
         s.Objectives.Add(Target(99, 300f, importance99));
         s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(8, 150f, 20000f));   // the garrison: a sector facing enemy-held ground keeps a hold of its own (D2), the nearer corps
         return s;
     }
 

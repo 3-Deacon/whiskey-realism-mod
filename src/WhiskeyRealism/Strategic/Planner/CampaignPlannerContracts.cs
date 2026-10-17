@@ -86,6 +86,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // Regiment.timeofnotmoving (110614): the campaign date (GameVars.GetCampaignFloatingDate, years)
         // the group last moved. G5a's tempo roll takes the mass's idle time from it (vanilla 14321-14327).
         public float TimeOfNotMoving;
+        // The state the formation stands in (BattlefieldSetup.GetStateOfField(position), the test vanilla's alliancetroops uses, 81654-81660),
+        // -1 unknown. Stored plus one so an unset record reads -1.
+        private int _state;
+        public int StateId { get => _state - 1; set => _state = value + 1; }
     }
 
     // No enemy aggregate (spec C25): points, distancepoints, enemycampaignunitsstrength* and
@@ -119,6 +123,22 @@ namespace WhiskeyRealism.Strategic.Planner
         public bool Accomplished;      // IDAccomplished
         public ObjectiveRole Roles;
         public float Importance01;
+        // The state the target lies in (GetStateOfField), -1 unknown; stored plus one so an unset record reads -1.
+        private int _state;
+        public int StateId { get => _state - 1; set => _state = value + 1; }
+    }
+
+    // A state the CSA can win by secession (Kentucky, Missouri: SecessionRules). Read live from vanilla each review, never cached.
+    public struct SecessionRecord
+    {
+        public int ObjectiveId;     // 15 Kentucky, 16 Missouri
+        public int StateId;
+        public int StateAlliance;   // GameVars.nation[state].alliance
+        public bool Live;           // SecessionRules.IsLive(owner, GameVars.nation[state].support[1]): vanilla's IsDeactivated is false
+        public float GarrisonStrength; // Union only: strength of the side's own garrison units standing in the state (the flag's likely source)
+        public bool OwnTroops;      // Union only: GameVars.nation[state].alliancetroops[0], vanilla's own "a Union group stands here" flag (garrisons included)
+        public bool HasTown;
+        public float TownX, TownZ;  // the objective's town (Louisville, St.Louis), from its objective record
     }
 
     public enum SupplySourceKind
@@ -267,7 +287,10 @@ namespace WhiskeyRealism.Strategic.Planner
         CapitalGuard = 4,
         DepotBuilder = 5,
         Recover = 6,
-        Recon = 7
+        Recon = 7,
+        // D8 (smoke amendments 2026-10-16): a formation sent to stand in a secession state (a live objective 15/16 the CSA could win) until
+        // it is in it; once inside it is Hold in place, withheld, with the secession reason.
+        Garrison = 8
     }
 
     public enum ReconKind
@@ -332,6 +355,28 @@ namespace WhiskeyRealism.Strategic.Planner
         // weighted, within the relocation range of the objective itself, not of the clamped frontier point
         // in SectorPlan.TargetX/Z): G4's reserve split keeps the odds it judged.
         public float MainEnemyStrength;
+        // Scout first (smoke amendments 2026-10-16, D1): whether the main objective is scouted, i.e. a fresh land belief lies within
+        // the relocation range of it or an own formation's sight covers it. Unscouted, MainEnemyStrength is the presumed threat
+        // (TheaterPlanner.PresumedAt), not a reading, and the main effort is Staged: its mass assembles at (StartLineX, StartLineZ),
+        // the forward-most mass member's position, and does not march on the objective until the picture is scouted and the odds hold.
+        public bool MainScouted;
+        public bool MainStaged;
+        public float StartLineX, StartLineZ;
+        // Push only what it needs (D3): the force the main objective needs (MainEnemyStrength x MainRequiredRatio x (1 + margin)),
+        // and what the planner could concentrate for it (the capacity the odds were judged on). MassStrength is the selected mass.
+        public float MainNeedStrength, MainCapacityStrength;
+        public bool MainScoutLatched;   // scouted earlier in this decision, no fresh picture now (PlannerState.ScoutedDecision)
+        // D6: the one formation from another theater that joins the mass (instance id), -1 none. It is the Support formation of the push.
+        public int ReinforcementInstanceId = -1;
+        // The reinforcement's name and cross-department move (telemetry): From is the department it left on the day of the transfer
+        // (Unknown on later days), To the main objective's department.
+        public string ReinforcementName;
+        // Telemetry: the count of top formations per home department ("East:9,West:5"), empty with none.
+        public string DepartmentCounts = "";
+        public Theater ReinforcementFrom, ReinforcementTo;
+
+        // D8: the secession garrisons of this review (Union side: one post per live secession state it owns).
+        public List<GarrisonPost> Garrisons = new List<GarrisonPost>();
 
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
@@ -341,6 +386,22 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
             return null;
         }
+    }
+
+    // One secession state's garrison (D8): the post (the objective's town), the formations that hold it and whether one already stands in the state.
+    public sealed class GarrisonPost
+    {
+        public string StateName;
+        public int StateId;
+        public float X, Z;
+        public bool Marching;                      // a member outside the state is on its way to the town
+        public bool MassPresence;                  // the only own formations inside the state are the main effort's mass, which is not pinned
+        public bool PlayerPresence;                // the only own formations inside the state are a player's or a CIC side's: present, but not members
+        public bool InState;                       // the Union is present in the state: an own formation stands in it, or vanilla's alliancetroops[0] is set
+        public float Need;                         // the D2 hold need at the post (telemetry: the [Allocation] garrison= term)
+        public float Shortfall;                    // the part of a flag-alone need only the main effort's mass could have met (never taken from it)
+        public List<int> InstanceIds = new List<int>(); // the garrison: in-state formations nearest the post up to the need, else the one posted
+        public string Name;                        // the first member's name (telemetry)
     }
 
     public struct CommanderProfile

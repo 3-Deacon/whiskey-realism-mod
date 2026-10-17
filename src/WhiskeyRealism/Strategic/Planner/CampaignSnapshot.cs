@@ -42,6 +42,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<RankBand> RankBands { get; } = new List<RankBand>();             // 10..18
         public List<ArmyGroupRecord> ArmyGroups { get; } = new List<ArmyGroupRecord>(); // G2 appointment targets
         public List<CrossingRecord> Crossings { get; } = new List<CrossingRecord>(); // fords and bridges (G3)
+        public List<SecessionRecord> Secessions { get; } = new List<SecessionRecord>(); // D8: Kentucky and Missouri, read live each review
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
 
@@ -72,6 +73,7 @@ namespace WhiskeyRealism.Strategic.Planner
             RankBands.Clear();
             ArmyGroups.Clear();
             Crossings.Clear();
+            Secessions.Clear();
             Detections.Clear();
             Beliefs.Clear();
         }

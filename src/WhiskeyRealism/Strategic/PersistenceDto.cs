@@ -93,6 +93,13 @@ namespace WhiskeyRealism.Strategic
         // executors-allowed Full review (the tempo clock). Absent in a file written before the field: -1.
         [JsonProperty("tempoReleasedDecision")] public int TempoReleasedDecision = -1;
         [JsonProperty("lastFullReviewDay")] public int LastFullReviewDay = -1;
+        // D6 (smoke amendments 2026-10-16): the one reinforcement of the current decision and the home department of every top formation
+        // by unit key (a Theater name). Absent in a file written before the fields: no reinforcement, no departments (re-derived).
+        [JsonProperty("reinforcementKey")] public string ReinforcementKey;
+        [JsonProperty("reinforcementDecision")] public int ReinforcementDecision = -1;
+        // The decision whose main objective was seen scouted (a march released on a fresh picture is not re-staged); absent: -1.
+        [JsonProperty("scoutedDecision")] public int ScoutedDecision = -1;
+        [JsonProperty("departments")] public List<DepartmentDto> Departments = new List<DepartmentDto>();
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;
         [JsonProperty("beliefs")] public List<EnemyBeliefDto> Beliefs = new List<EnemyBeliefDto>();
@@ -100,6 +107,12 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("depotTasks")] public List<DepotTaskDto> DepotTasks = new List<DepotTaskDto>();
         [JsonProperty("moves")] public List<MoveDto> Moves = new List<MoveDto>();
         [JsonProperty("reconMissions")] public List<ReconMissionDto> ReconMissions = new List<ReconMissionDto>();
+    }
+
+    internal class DepartmentDto
+    {
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("department")] public string Department;
     }
 
     internal class EnemyBeliefDto

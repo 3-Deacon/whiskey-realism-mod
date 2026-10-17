@@ -1495,3 +1495,54 @@ PROVE-MODE: harness (red first; mutation plants: rank table reversed → `RearmO
 | Read census of every contract member and flag | G7 |
 | Docs in-slice (AGENTS.md locked choices, doctrine docs, W&L docs, catalog) | G7 |
 | Stage H needs (theater axes, coastal objective) | `TheaterPlan` via `CampaignPlanStore` (G0/G3); stage H adds its own axis fields with their reader |
+
+## Smoke fix (2026-10-16) as built
+
+Branch `fix/planner-scout-first` (from main `ed7f226`); the spec's "Smoke amendments 2026-10-16" carries the root causes and decisions D1-D8. Where the build differs from the stage G text above:
+
+1. **Readiness gate (D4, D5).** `TheaterPlanner.MinReadinessStep = 2`: `MassEligible` and the capital reserve skip a formation below it (vanilla `SetWaypoint` refuses its march onto enemy soil without a message, 91336-91355). The scout pool counts only ready formations.
+2. **Scout first (D1).** `Candidate` gained `Scouted`, `Presumed`, `Need`; `Evaluate` judges odds on `max(believed, presumed)`; `TheaterPlan` gained `MainScouted`, `MainStaged`, `StartLineX/Z`, `MainNeedStrength`, `MainCapacityStrength`. An unscouted main effort is staged at the forward-most mass member's position; the mover gathers there without the tempo roll and the roll runs when the target is scouted.
+3. **Hold floor (D2).** `SectorFacts` gained `Facing` and `Presumed`; a facing sector holds `max(HoldRatio' x believed, MinGarrisonStrength, presumed)` through `HoldNeedAt`.
+4. **Push what it needs (D3).** `MassFor` is the capacity; `SelectMass` picks armies nearest-first until `NeedFor(enemy, required, attackBias)` is met. `ForceAllocator.AssignRemainder` makes everything else `Hold`; `PlanOf` and the map-group player's Support order path (`IssuePlayerOrder`, `OrderPlayerSupport`, `Ordered`) are deleted.
+5. **Departments (D6).** `PlannerState` owns the home department by unit key (sidecar `PlannerStateDto.departments`, plus `reinforcementKey` / `reinforcementDecision`); `HomeTheaterPrior.cs` is deleted and the allocator's `HoldKey` reads the department with a 25 % discount.
+6. **Real scouts (D7).** `ReconPlanner.CanMove(detachment)` drops the 5000-man minimum for an advance guard or probe; `ReconMissionLedger.TaskFor` pairs by reason as well; the probe stands down once the objective is scouted; the `[Recon]` row adds `pool=`.
+7. **Secession (D8).** `SecessionRules` (new), `CampaignSnapshot.Secessions` read live by `CampaignSnapshotRuntime.ReadSecessions`, `FormationRecord.StateId` / `ObjectiveRecord.StateId`, `FormationRole.Garrison = 8`, `TheaterPlan.Garrisons` (`GarrisonPost`), `TheaterPlanner.Garrisons` and `SecessionValue`, `ForceAllocator.AssignGarrisons`, and `Garrison` in the mover's priority list and the perk role map.
+
+Telemetry added: `[CampaignPlan] scouted= staged= depts= xdept=` and per-candidate `scouted|unscouted est= pres=` in the trace; `[Allocation] need= cap= staged= garrison=`; `[Recon] pool=`. Tests: `ScoutFirstTests` (about 40) and `SecessionGarrisonTests` (14), 71 mutation plants killed with a byte-copy restore (build record `scratchpad/loop/build-planner-scout-first.md`).
+
+### Verify round 1 (2026-10-16) as built
+
+Merged main `12bc7e0` first (merge commit; the two conflicts were the `CampaignMover.cs` header comment and the `CarryingGroupMovedNormally` `host.Orders` assertion, which no longer applies). Then:
+
+1. **F1 released stays released.** `PlannerState.ScoutedDecision` (saved as `scoutedDecision`, -1 in an old file); `TheaterPlanner.Plan` latches it when the main objective is scouted and treats the decision as scouted while `ScoutedDecision == DecisionSerial` (`TheaterPlan.MainScoutLatched`, row `scouted=latched`). Test `AScoutedDecisionStaysScoutedWhenTheBeliefDecays` is the verifier's day-8 case (belief 0.45).
+2. **F2 D8 mirrors vanilla.** `SecessionRecord.OwnTroops` (= `nation[state].alliancetroops[0]`, Union side only, read by `ReadSecessions`); `TheaterPlanner.Garrisons` counts the Union present when the flag is set or an own formation stands in the state; with the flag alone nobody is posted (`garrison=town-garrison@State:in/<need>`). `SecessionRules.cs` header and spec D8 corrected (garrisons count, "visible" is the map-symbol state). Tests `AGarrisonAlreadyBlocksSecessionSoNoFieldFormationIsPosted` and `TheGarrisonNeverPostsOrHoldsAPlayerOrCicFormation`.
+3. **F3 steering.** `SteeringRules.ImportanceSteers` steers from the main sector only and never while `MainStaged` (`ImportanceRedirectOnlyForTheMainSectorAndNeverWhileStaged`).
+4. **F4 docs.** The five places that kept the deleted map-group Support order (AGENTS.md, patch-catalog.md x2, wl-player-order-doctrine.md, wl-dispatch-objective-bridge.md x2, coordinated-operation-packages.md, MEMORY.md, one test comment) now say the planner sends the map-group player neither a move nor an order.
+5. **F5 plants.** V09 (`TheMainEffortTakesNoReinforcementWhenItsOwnDepartmentSuffices`), V33 (`TheStartLineIsTheNativeEvenWhenTheReinforcementIsNearer`) and V34 (`AProbeNeedsNoOffensiveStrengthMinimumEither`) are real behaviour and are pinned. V30 (the lock's early return in `NoteReinforcement`) changes only the telemetry row of later reviews of the same decision (the move is announced once, then `name:East`): pinned in `OneCrossDepartmentMovePerDecisionAndItChangesTheDepartment`; it changes no plan output.
+6. **Minors.** The always-true assertion at ScoutFirstTests.cs:432 now asserts the new decision's own department suffices; departments are pruned (`BeginObservation` / `PruneUnobserved`) and re-keyed at appointment (`RekeyInstance`); a W&L test pins that the garrison never posts or holds a `PlayerCommand`, `PlayerMapGroup` or `CicSide` formation; `PlanPlusAllocateAllocationIsBoundedPerReview` measures Plan + Allocate through `BeginAllocationWindow`: about 13 KB for 15 formations, not allocation-free by design (the plan and allocation are new published objects each daily review), bounded at 48 KB.
+
+### Landing round (2026-10-16) as built
+
+On the same branch after verify round 2 (pass, minors and two rulings):
+1. **Cadence.** The alliance-data pass runs every 0.5 days per alliance (campaignprefs.txt:3319-3320, decompile 81492), not monthly: `SecessionRules.cs`, spec D8 and the test comment corrected; "not a garrison" removed from the spec's description of the flag.
+2. **Dead map-group exemption.** `ExecutorContext.MapGroupInstanceId`, its census row, the `ExecutorContext.From` parameter, the runtime's search for the map-group formation and the `World.MapGroupSupport` fixtures are deleted; the deferred-Support clause reads `Support && !Released`.
+3. **Row label.** `GarrisonPost.PlayerPresence` -> `garrison=player-presence@State:in/<need>`; `GarrisonPost.Marching` -> `in+moving` / `moving`; `GarrisonPost.StateId` lets the allocator hold a member inside and march one outside.
+4. **Pruning.** `PlannerState.PruneAfterMissedReviews` = 10 consecutive missed reviews; a failed read (empty snapshot) neither prunes nor counts.
+5. **Re-key at save.** `CampaignPlannerRuntime.Export` calls `RekeyDepartmentsFromLive` -> `PlannerState.RekeyFromLive` (also the reinforcement key follows).
+6. **Flag alone with an enemy near.** `SecessionRecord.GarrisonStrength` (own garrison units per state, `CampaignSnapshotRuntime.NoteGarrison`); `TheaterPlanner.Garrisons` posts `HoldRatio' x threat - GarrisonStrength` nearest-first (existing `Garrison` role, `MayMove`), nothing when no enemy is believed near.
+
+### Landing check (2026-10-16) as built
+
+Merged main `867497fd` (one conflict, `docs/patch-catalog.md` rows 156-157: the branch's row 156, main's row 157). Then:
+1. **One post when nobody is present.** `TheaterPlanner.Garrisons` queues a `PostWork` with `Limit` 1 for a state with no flag and nobody inside, and an unlimited one only for the flag alone. Test `ANobodyPresentStatePostsOneFormationNotSeveral` (belief 30000 at the town, no flag, nobody inside: one corps).
+2. **Prune threshold pinned.** `AssertEqual(10, PlannerState.PruneAfterMissedReviews)`.
+3. **The garrison cannot strip the mass.** The formations from outside the state are chosen after the mass (`PostFromOutside`), from the formations not in the mass, not a capital guard, hold reserve or builder, nearest first; the need subtracts the hold reserves kept against the same believed army (`HoldFacing`); a need the free formations cannot meet is recorded as `GarrisonPost.Shortfall` (`!short<n>`). Tests `ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold` (hold facing the same army subtracted, a hold facing another army not, the verifier's two-hold fixture needs nothing) and `TheGarrisonNeverTakesTheMassAndRecordsWhatItCouldNotMeet` (never a mass member, nearest first, whole and partial shortfall, the row).
+
+### Landing r2 (2026-10-16) as built
+
+Merged main `0c3e057e` (army-children fix; no conflicts). The in-state pledge moved from `Garrisons` (before the mass) into `PostFromOutside` (after it): a mass member or the reinforcement inside the state is presence (`GarrisonPost.MassPresence`, row `mass-presence`) and is neither pledged nor pinned; the other formations inside are pledged nearest-first; the next review, with the mass gone, the ordinary rules post one. Tests `AMassThatMarchesIntoTheStateIsNotPinnedThere` (the verifier's probe: day 1 mass [3], day 2 corps 3 inside Kentucky, the main effort and the mass stay, nothing withheld; day 3 the ordinary post), `AFreeFormationInsideIsPledgedAndTheMassMemberIsNot`, and a flag-alone need of 17000 that takes two corps in `ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold` (plant R08 form). `AGarrisonIsNeverPartOfTheMass` now pins that the best mass member inside the state is the mass, not a garrison.
+
+### Landing r3 (2026-10-17) as built
+
+Merged main `5315445d`. When the row is `mass-presence` (only a mass member or the reinforcement stands in the state, no flag), `PostFromOutside` posts one replacement through the ordinary path (cap 1, never from the mass), so the state is not unguarded between the mass leaving and the next review. Test `AMassThatMarchesIntoTheStateIsNotPinnedThere`: day 2 with the mass corps inside posts the free corps marching in; day 3 with the mass corps gone and the replacement inside it holds and nothing extra is posted; a 30000-army need of 18000 still posts one; with the flag no replacement.
+

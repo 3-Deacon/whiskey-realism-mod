@@ -88,6 +88,30 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float OddsDeadband = 0.10f;          // ratio units below RequiredRatio (F1)
         public const float CapitalThreatRelease = 0.4f;   // the latch re-arms below this (F2)
         public const int MaxTraceCandidates = 12;
+        // Vanilla refuses to march a formation of readiness step 0 or 1 onto enemy ground: SetWaypoint returns without a waypoint and
+        // without a message for the AI (91336-91355: readiness step <= 1, target on enemy soil outside regroupment range), and the
+        // AI's own offensive availability gate asks step >= 2 (IsUnitAvailableForOffensiveOperations 14091). The smoke of 2026-10-16
+        // sent such formations anyway: 4 of the Union's 6 moves "failed", were retried and given up (the mover's P8 tracker), and
+        // each give-up flipped the main effort to the other objective, whose mass still counted them.
+        public const int MinReadinessStep = 2;
+        // Scout first (smoke amendments 2026-10-16, D1/D2). A belief at or above this confidence is a fresh picture: ContactEvidenceLedger's
+        // own bar for acting on a belief (a probe never escalates on less, ReconPlanner.ProbeStaleConfidence).
+        public const float ScoutFreshConfidence = ContactEvidenceLedger.MinEscalationConfidence;
+        // The presumed enemy at an unscouted place is the smallest force vanilla's AI moves at all (aiminimumstrengthformovement 5000,
+        // campaignprefs 1396-1397; ForceAllocator.MinGarrisonStrength), scaled up by the importance of the enemy-held ground nearby: a
+        // more valuable objective is presumed better held, up to twice the floor.
+        public const float PresumedImportanceGain = 1f;
+        // D3: the mass is the force the objective needs: the estimated enemy x the required ratio x (1 + margin). The margin is
+        // MassMarginBase, shrunk by a bold commander (AttackBias, as the balance term scales by it) and grown for a cautious one.
+        public const float MassMarginBase = 0.25f, MassMarginBiasScale = 0.5f;
+        // D6: a formation from outside the main effort's theater joins only if it can be at the target within this many days
+        // (MarchTime.EstimateDays, which credits a rail leg where userails and a train allow it): a reinforcement, not a gather.
+        public const float ReinforcementMaxDays = 10f;
+        // D8 (smoke amendments 2026-10-16): the CSA's value for a live secession objective (Louisville, St.Louis: the Union takes a national
+        // morale hit, the CSA a state at secedecsasupport) and for the other targets in that state (clearing the Union presence out of it, which
+        // is what the objective's accomplishment needs). Added to the target's value term (weight 0.30), so 0.25 is worth 0.075 of a score:
+        // under the 0.12 switch margin and near the history prior's cap, a weight and never a must.
+        public const float SecessionValueBonus = 0.25f, SecessionStateBonus = 0.10f;
         private const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f; // 11735
         // The flags that keep a formation out of the massable set (ForceAllocator keeps them in place).
         // InDefensiveOps (G5a, chapters decision 5): vanilla's defensive operations may take a deferred
@@ -106,8 +130,8 @@ namespace WhiskeyRealism.Strategic.Planner
             public int SectorId;
             public int Force;          // own formation index, -1 none
             public float Value, Balance, Reach, March, Exposure, Capital, PriorTerm, Score;
-            public float Ratio, Required, Mass, Enemy;
-            public bool Eligible, InReach, Retained;
+            public float Ratio, Required, Mass, Enemy, Presumed, Need;
+            public bool Eligible, InReach, Retained, Scouted;
             public string PriorId;
         }
 
@@ -131,13 +155,39 @@ namespace WhiskeyRealism.Strategic.Planner
             // G5c: the builders the depot ledger holds (Marching and Wished tasks): MassFor counts none of them, and the capital reserve
             // skips a Wished one exactly as ForceAllocator does. Null: none.
             internal IReadOnlyList<HeldBuilder> Held;
+            // D6: the decision's reinforcement lock (the plan's PlannerState); null in a bare Evaluate (no lock).
+            internal PlannerState State;
+            // D6 detail: each own formation's home department (PlannerState.Observe), by index into s.Own; null in a bare Evaluate, where
+            // the theater of the sector a formation stands in stands in for it.
+            internal Theater[] Department;
+            // D8: the formations a secession garrison keeps (index into s.Own) and the posts they keep; chosen after the mass (PostFromOutside),
+            // so MassFor never reads them.
+            internal bool[] GarrisonReserved;
+            internal readonly List<GarrisonPost> Posts = new List<GarrisonPost>();
+            // The posts that still need formations from outside the state, chosen once the mass is known (PostFromOutside).
+            internal readonly List<PostWork> Pending = new List<PostWork>();
+            // MassFor's foreign pick of its last call (index into s.Own), -1 none; the capacity list holds natives and then this one.
+            internal int Foreign = -1;
+            internal readonly List<int> ForeignScratch = new List<int>();
+        }
+
+        // A garrison post that wants formations from outside the state: how many (1 when nobody is present, unlimited while the need is
+        // unmet when only the flag shows presence) and whether the flag alone is the reason (a shortfall is then recorded).
+        internal sealed class PostWork
+        {
+            internal GarrisonPost Post;
+            internal int Limit;
+            internal bool FlagAlone;
+            internal bool Flag;          // vanilla's alliancetroops[0] is set: a garrison already stands in the state
+            internal List<int> Inside;   // the own formations standing in the state, nearest the town first (indexes into s.Own)
         }
 
         // Per-sector facts shared by the reserves, the postures and the published HoldNeed.
         internal sealed class SectorFacts
         {
-            public float[] CX, CZ, Radius, Threat, Need, Own, Supply, Morale, NearX, NearZ;
+            public float[] CX, CZ, Radius, Threat, Need, Own, Supply, Morale, NearX, NearZ, Presumed;
             public int[] Count, Strongest;
+            public bool[] Facing;  // D2: the sector faces enemy-held ground or a believed army
             public int[] Orderable; // formations the planner can order (WlChainRules.MayMove): the base of the Supply/Morale averages
         }
 
@@ -151,7 +201,9 @@ namespace WhiskeyRealism.Strategic.Planner
             if (state == null) state = new PlannerState();
 
             var review = new ReviewTerrain(terrain, s.Areas);
-            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders };
+            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders, State = state };
+            AssignDepartments(inputs, state);
+            plan.DepartmentCounts = DepartmentCountsOf(inputs);
             var candidates = new List<Candidate>();
             Evaluate(inputs, candidates);
             int unknown = review.Unknown, probed = 0;
@@ -181,8 +233,18 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainRequiredRatio = m.Required;
                 plan.PriorId = m.PriorId;
                 plan.MainEnemyStrength = m.Enemy;
-                plan.MassStrength = MassFor(inputs, m.X, m.Z, m.SectorId, m.ObjectiveId, inputs.Scratch);
-                for (int k = 0; k < inputs.Scratch.Count; k++) plan.MassInstanceIds.Add(s.Own[inputs.Scratch[k]].InstanceId);
+                // F1 (verify round 1): once a decision's target has been scouted it stays scouted for that decision, so a march released on
+                // a fresh picture is not pulled back to a start line when the belief decays; a new decision starts unscouted.
+                plan.MainScoutLatched = !m.Scouted && state.ScoutedDecision == state.DecisionSerial;
+                if (m.Scouted) state.ScoutedDecision = state.DecisionSerial;
+                plan.MainScouted = m.Scouted || plan.MainScoutLatched;
+                plan.MainStaged = !plan.MainScouted;
+                // D3: the capacity the odds were judged on, then the part of it the objective needs.
+                plan.MainCapacityStrength = MassFor(inputs, m.X, m.Z, m.SectorId, m.ObjectiveId, inputs.Scratch);
+                plan.MainNeedStrength = m.Need;
+                plan.MassStrength = SelectMass(inputs, inputs.Scratch, m.X, m.Z, m.Need, plan);
+                if (plan.MainStaged) SetStartLine(inputs, plan, m.X, m.Z);
+                NoteReinforcement(inputs, plan, state);
                 axisFromX = force.X;
                 axisFromZ = force.Z;
                 mainX = m.X;
@@ -199,9 +261,36 @@ namespace WhiskeyRealism.Strategic.Planner
                     LogisticsGate.AddDepotTasks(s, plan, sectors, mainX, mainZ, m.X, m.Z, force.CommandRange, profile.SupplySlack);
                 }
             }
+            PostFromOutside(inputs, plan);   // after the mass: the garrison takes only what the mass does not
+            for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
             return plan;
+        }
+
+        // D1: an unscouted main effort assembles where an own formation already stands: the forward-most member of the selected mass
+        // (nearest the objective, the lower instance id on a tie; the reinforcement from another theater only if it is the whole mass).
+        // No formation is sent past a formation of its own side, and the point is inside the supply that member stands in.
+        private static void SetStartLine(Inputs c, TheaterPlan plan, float tx, float tz)
+        {
+            int best = -1;
+            float bestDistance = float.MaxValue;
+            for (int pass = 0; pass < 2 && best < 0; pass++)
+            {
+                for (int k = 0; k < plan.MassInstanceIds.Count; k++)
+                {
+                    int i = c.S.IndexOfOwn(plan.MassInstanceIds[k]);
+                    if (i < 0 || ((plan.MassInstanceIds[k] == plan.ReinforcementInstanceId) == (pass == 0))) continue;
+                    var f = c.S.Own[i];
+                    float d = DistanceSq(f.X, f.Z, tx, tz);
+                    if (d > bestDistance || (d == bestDistance && best >= 0 && f.InstanceId > c.S.Own[best].InstanceId)) continue;
+                    bestDistance = d;
+                    best = i;
+                }
+            }
+            if (best < 0) return;
+            plan.StartLineX = c.S.Own[best].X;
+            plan.StartLineZ = c.S.Own[best].Z;
         }
 
         // The capital threat, the sector facts, the reserves, then every candidate target scored
@@ -235,14 +324,22 @@ namespace WhiskeyRealism.Strategic.Planner
                 var profile = ProfileOf(c, cand.Force);
                 cand.Required = Math.Max(0f, s.OffensiveDominance * (1f + mass) + profile.RequiredOddsShift);
 
-                float enemy = LandThreatNear(c, o.X, o.Z, range);
+                // Scout first (D1): a target no fresh belief or own viewer speaks for is unscouted and its odds are judged on the
+                // believed enemy or the presumed threat, whichever is larger, never on "none seen".
+                cand.Scouted = IsScouted(c, o.X, o.Z);
+                cand.Presumed = cand.Scouted ? 0f : PresumedAt(c, o.X, o.Z, range);
+                float believed = LandThreatNear(c, o.X, o.Z, range);
+                float enemy = Math.Max(believed, cand.Presumed);
                 float own = cand.Mass;
                 cand.Enemy = enemy;
                 cand.Ratio = enemy > 0f ? own / enemy : (cand.Force >= 0 ? float.MaxValue : 0f);
-                float balance = own + enemy > 0f ? own / (own + enemy) : 0f;
+                cand.Need = NeedFor(enemy, cand.Required, profile.AttackBias);
+                // The balance term ranks targets by what is known (the believed enemy); the presumption gates the odds above and
+                // sizes the push (Need), and being the same floor everywhere it would only blur the ranking.
+                float balance = own + believed > 0f ? own / (own + believed) : 0f;
                 cand.Balance = SnapshotRules.Clamp01(balance * (1f + AttackBiasBalanceScale * profile.AttackBias));
                 float area01 = area >= 0 && maxAreaImportance > 0f ? SnapshotRules.Clamp01(s.Areas[area].Importance / maxAreaImportance) : 0f;
-                cand.Value = SnapshotRules.Clamp01(0.5f * o.Importance01 + 0.25f * area01 + 0.25f * Role01(o.Roles));
+                cand.Value = SnapshotRules.Clamp01(0.5f * o.Importance01 + 0.25f * area01 + 0.25f * Role01(o.Roles) + SecessionValue(s, o));
                 cand.Capital = CapitalTerm(c, o);
 
                 if (cand.Force >= 0)
@@ -528,6 +625,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     posture = TheaterPosture.Recover;
                 else if (threat > 0f) posture = hasOwn && own[sector] >= x.Need[sector] ? TheaterPosture.Hold : TheaterPosture.Screen;
                 else if (!hasOwn) continue;
+                else if (x.Facing[sector]) posture = own[sector] >= x.Need[sector] ? TheaterPosture.Hold : TheaterPosture.Screen; // D2: faces enemy ground, nothing believed
                 else if (plan.MainObjectiveId >= 0 && SegmentDistance(cx, cz, axisFromX, axisFromZ, mainX, mainZ) <= range)
                     posture = TheaterPosture.Support;
                 else posture = TheaterPosture.EconomyOfForce;
@@ -560,29 +658,375 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static bool MassEligible(in FormationRecord f, float minMorale)
         {
             return Movable(f) && WlChainRules.MayMove(f.Chain)
+                && f.ReadinessStep >= MinReadinessStep
                 && f.Supply01 >= RecoverSupplyBelow && f.Morale >= minMorale;
         }
 
-        // The massable set for a target in targetSector (indexes into s.Own, written to `into`) and
-        // its strength. A formation the move tracker gave up on for this objective (P8, GaveUpMove.ObjectiveId) is left out like a busy
-        // one, so a mass whose members all gave up is empty: the existing no-force rule drops the main effort and the odds are
-        // judged on the force that can still march.
+        // D8, the CSA side: a live secession objective (vanilla's IsDeactivated is false: the state is not the CSA's and the CSA's support there is at
+        // least 0.45) is worth more as a candidate, and so is every other target in its state (clearing the Union presence out of it, which the
+        // objective's accomplishment needs). Read from this review's snapshot, never cached: the next review reads vanilla again.
+        internal static float SecessionValue(CampaignSnapshot s, in ObjectiveRecord o)
+        {
+            if (s.Alliance != SecessionRules.CsaAlliance) return 0f;
+            float bonus = 0f;
+            for (int i = 0; i < s.Secessions.Count; i++)
+            {
+                var rec = s.Secessions[i];
+                if (!rec.Live) continue;
+                if (o.ObjectiveId == rec.ObjectiveId) return SecessionValueBonus;
+                if (o.StateId == rec.StateId) bonus = SecessionStateBonus;
+            }
+            return bonus;
+        }
+
+        // D2's hold need at a point (x, z) whose reach is `reach`: max(HoldRatio' x the believed land threat, MinGarrisonStrength, and while nothing
+        // fresh is believed within that reach the presumed threat). The sector facts and the D8 garrison post size their hold with this one function.
+        private static float HoldNeedAt(Inputs c, float x, float z, float reach, float threat, float holdRatio, out float presumed)
+        {
+            presumed = FreshLandBeliefWithin(c.S, x, z, reach) ? 0f : PresumedAt(c, x, z, reach);
+            return Math.Max(Math.Max(holdRatio * threat, ForceAllocator.MinGarrisonStrength), presumed);
+        }
+
+        private static float HoldRatioNow(CampaignSnapshot s)
+        {
+            return HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
+        }
+
+        // D8, the Union side (the state's owner): while a secession objective is live a Union campaign group standing in the state denies it
+        // (nation.alliancetroops[0], 81654-81660, 179266 / 179281). Vanilla's flag counts every visible Union group of unittyp > 13, the
+        // state's garrisons included (82940-82943: a garrison unit with its reference is visible), so the Union is present when the flag is
+        // set (SecessionRecord.OwnTroops, read for the Union side only) or an own formation stands in the state. The formations already
+        // standing in it, nearest the post (the objective's town) first, are the pledged garrison until their strength meets the D2 hold need
+        // at the post (a small force when nothing is believed near: the floor, or the presumption); the first of them always counts. When
+        // nobody is present, the nearest ready formation not already kept for the capital or a hold is posted there; when the flag alone
+        // blocks it, nobody is posted. Every member is kept out of the mass.
+        // The hold already kept against the army that threatens the town: the strength of the sector hold reserves whose reference belief (the
+        // army their sector faces) lies within the relocation range of the town. Counted once, not again as a garrison.
+        private static float HoldFacing(Inputs c, float x, float z)
+        {
+            float sum = 0f;
+            for (int i = 0; i < c.S.Own.Count; i++)
+            {
+                int sector = c.HoldReserved[i];
+                if (sector < 0 || !WlChainRules.CountsTowardCoverage(c.S.Own[i].Chain)) continue;
+                if (RiverLines.Distance(c.Facts.NearX[sector], c.Facts.NearZ[sector], x, z) <= c.S.RelocationRange) sum += ReserveRules.HoldStrength(c.S.Own[i]);
+            }
+            return sum;
+        }
+
+        // The second half of the garrison (verify, landing check and r2): formations are pledged and posted once the mass is known, so the
+        // garrison can never strip or stop it. A mass member (or the reinforcement) standing inside the state counts as the Union's presence
+        // but is neither pledged nor pinned; the other formations inside are pledged, nearest the town first, until the need is met (the first
+        // always). When the mass is the only presence, one replacement is posted from outside at once, so there is no unguarded gap between
+        // the mass leaving and the next review; that review, with the mass gone, finds it inside and pledges it.
+        // For the formations from outside the state:  The pool is the formations that would otherwise just hold, sit in reserve or have no task: not in
+        // the mass (marching with it or released to it, the reinforcement included), not a capital guard, a sector's hold reserve, a builder
+        // or a member of another post. Nearest the town first. A need only the mass could meet is posted as far as the pool goes and the
+        // rest recorded as the post's Shortfall.
+        private static void PostFromOutside(Inputs c, TheaterPlan plan)
+        {
+            var s = c.S;
+            for (int w = 0; w < c.Pending.Count; w++)
+            {
+                var work = c.Pending[w];
+                var post = work.Post;
+                bool massInside = false;
+                float held = 0f;
+                int pledged = 0;
+                for (int k = 0; k < work.Inside.Count; k++)
+                {
+                    int i = work.Inside[k];
+                    if (plan.MassInstanceIds.Contains(s.Own[i].InstanceId))
+                    {
+                        massInside = true;
+                        continue;
+                    }
+                    if (pledged > 0 && held >= post.Need) break;
+                    pledged++;
+                    c.GarrisonReserved[i] = true;
+                    if (WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) held += ReserveRules.HoldStrength(s.Own[i]);
+                    if (WlChainRules.MayMove(s.Own[i].Chain)) post.InstanceIds.Add(s.Own[i].InstanceId);
+                }
+                if (post.InstanceIds.Count == 0 && work.Inside.Count > 0)
+                {
+                    post.MassPresence = massInside;
+                    post.PlayerPresence = !massInside;
+                }
+                // The mass is the only presence (no flag, nobody else inside): it will march on, so one replacement is posted now, through the
+                // ordinary path (never from the mass), and there is no unguarded gap between its leaving and the next review.
+                int limit = post.MassPresence && !work.Flag ? Math.Max(work.Limit, 1) : work.Limit;
+                float posted = 0f;
+                int count = 0;
+                while (count < limit && posted < post.Need)
+                {
+                    int best = -1;
+                    float bestDistance = float.MaxValue;
+                    for (int i = 0; i < s.Own.Count; i++)
+                    {
+                        var f = s.Own[i];
+                        if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || c.HoldReserved[i] >= 0 || c.GarrisonReserved[i] || IsHeldBuilder(c, f.InstanceId)) continue;
+                        if (f.UnitTyp <= 13 || plan.MassInstanceIds.Contains(f.InstanceId) || !WithinHorizon(c, i, post.X, post.Z)) continue;
+                        float d = DistanceSq(f.X, f.Z, post.X, post.Z);
+                        if (d > bestDistance || (d == bestDistance && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
+                        bestDistance = d;
+                        best = i;
+                    }
+                    if (best < 0) break;
+                    c.GarrisonReserved[best] = true;
+                    post.InstanceIds.Add(s.Own[best].InstanceId);
+                    post.Marching = true;
+                    posted += Math.Max(0f, s.Own[best].Strength);
+                    count++;
+                }
+                if (work.FlagAlone && posted < post.Need) post.Shortfall = post.Need - posted;
+                if (post.Name == null && post.InstanceIds.Count > 0) post.Name = s.Own[s.IndexOfOwn(post.InstanceIds[0])].Name;
+            }
+        }
+
+        private static void Garrisons(Inputs c)
+        {
+            var s = c.S;
+            c.Posts.Clear();
+            c.Pending.Clear();
+            c.GarrisonReserved = new bool[s.Own.Count];
+            for (int r = 0; r < s.Secessions.Count; r++)
+            {
+                var rec = s.Secessions[r];
+                if (!rec.Live || !rec.HasTown || rec.StateAlliance != s.Alliance) continue;
+                var post = new GarrisonPost { StateName = SecessionRules.NameOf(rec.StateId), StateId = rec.StateId, X = rec.TownX, Z = rec.TownZ };
+                float threat = LandThreatNear(c, post.X, post.Z, s.RelocationRange);
+
+                var inside = new List<int>();
+                for (int i = 0; i < s.Own.Count; i++)
+                    if (s.Own[i].StateId == rec.StateId && s.Own[i].UnitTyp > 13) inside.Add(i);
+                post.InState = inside.Count > 0 || rec.OwnTroops;   // vanilla's flag counts garrisons too: a garrison alone already blocks
+                // The flag alone (a town garrison, no own formation inside) says the state is held, not that it is safe: what is posted is the
+                // believed threat's hold less the garrison's own strength, nothing when no enemy is believed near. With nobody present the
+                // full D2 need applies (the floor and the presumption), and so it does for the formations inside.
+                bool flagAlone = rec.OwnTroops && inside.Count == 0;
+                // The hold already posted against that same army (the sector hold reserves facing it) is not counted twice.
+                post.Need = flagAlone
+                    ? Math.Max(0f, HoldRatioNow(s) * threat - HoldFacing(c, post.X, post.Z) - Math.Max(0f, rec.GarrisonStrength))
+                    : HoldNeedAt(c, post.X, post.Z, s.RelocationRange, threat, HoldRatioNow(s), out _);
+                inside.Sort((a, b) =>
+                {
+                    int d = DistanceSq(s.Own[a].X, s.Own[a].Z, post.X, post.Z).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, post.X, post.Z));
+                    return d != 0 ? d : s.Own[a].InstanceId.CompareTo(s.Own[b].InstanceId);
+                });
+                // The formations inside are pledged, and the formations from outside the state posted, once the mass is known
+                // (PostFromOutside): the main effort's mass is never stopped by a garrison. Outside: one when nobody is present, as many as
+                // the need takes when only the flag shows presence.
+                int limit = flagAlone ? int.MaxValue : !post.InState ? 1 : 0;
+                c.Pending.Add(new PostWork { Post = post, Limit = post.Need > 0f ? limit : 0, FlagAlone = flagAlone, Flag = rec.OwnTroops, Inside = inside });
+                c.Posts.Add(post);
+            }
+        }
+
+        // D6 detail: every own formation has a home department from its first review on (PlannerState.Observe: the theater of the sector it
+        // stands in then, kept until a deliberate transfer).
+        private static void AssignDepartments(Inputs c, PlannerState state)
+        {
+            var s = c.S;
+            c.Department = new Theater[s.Own.Count];
+            state?.BeginObservation();
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                var f = s.Own[i];
+                Theater standing = c.Sectors.TheaterOf(ReserveRules.HoldSectorOf(c.Sectors, f));
+                c.Department[i] = state != null ? state.Observe(f.InstanceId, f.UnitKey, standing) : standing;
+            }
+            if (state != null && s.Own.Count > 0) state.PruneUnobserved();   // an empty snapshot (a degraded read) prunes nothing
+        }
+
+        private static string DepartmentCountsOf(Inputs c)
+        {
+            var counts = new int[6];
+            for (int i = 0; i < c.Department.Length; i++)
+            {
+                int d = (int)c.Department[i];
+                if (d >= 0 && d < counts.Length) counts[d]++;
+            }
+            var sb = new StringBuilder();
+            for (int d = 0; d < counts.Length; d++)
+            {
+                if (counts[d] == 0) continue;
+                if (sb.Length > 0) sb.Append(',');
+                sb.Append((Theater)d).Append(':').Append(counts[d]);
+            }
+            return sb.ToString();
+        }
+
+        internal static Theater DepartmentOf(Inputs c, int i)
+        {
+            if (c.Department != null && i >= 0 && i < c.Department.Length) return c.Department[i];
+            return c.Sectors.TheaterOf(ReserveRules.HoldSectorOf(c.Sectors, c.S.Own[i]));
+        }
+
+        // The unit key of the decision's reinforcement, null when this decision has none yet.
+        private static string LockedReinforcement(Inputs c)
+        {
+            return c.State != null && c.State.ReinforcementDecision == c.State.DecisionSerial ? c.State.ReinforcementKey : null;
+        }
+
+        // D6 detail (d): the losing department's D2 hold is still met without the formation: the hold needs of the sectors of that
+        // theater (SectorFacts.Need, the one hold function) against what the department's other formations hold there.
+        private static bool DepartmentHoldMet(Inputs c, Theater department, int excluded)
+        {
+            float need = 0f;
+            for (int k = 0; k < c.Sectors.Count; k++)
+                if (c.Sectors.TheaterOf(k) == department) need += c.Facts.Need[k];
+            float have = 0f;
+            for (int j = 0; j < c.S.Own.Count; j++)
+            {
+                if (j == excluded || DepartmentOf(c, j) != department) continue;
+                var f = c.S.Own[j];
+                if (WlChainRules.CountsTowardCoverage(f.Chain)) have += ReserveRules.HoldStrength(f);
+            }
+            return have >= need;
+        }
+
+        // The capacity for a target in targetSector (indexes into s.Own, written to `into`) and its strength: what the planner could
+        // concentrate there. A formation the move tracker gave up on for this objective (P8, GaveUpMove.ObjectiveId) is left out like a
+        // busy one, so a capacity whose members all gave up is empty: the existing no-force rule drops the main effort and the odds are
+        // judged on the force that can still march. D6 (armies are territorial): the capacity is the target theater's own formations
+        // (the theater of the sector each stands in) plus at most one reinforcement from elsewhere (ReinforcementPick); the part of it
+        // the objective needs is SelectMass.
         internal static float MassFor(Inputs c, float tx, float tz, int targetSector, int objectiveId, List<int> into)
         {
             var s = c.S;
             into.Clear();
+            c.ForeignScratch.Clear();
+            c.Foreign = -1;
             float total = 0f;
+            Theater targetTheater = targetSector >= 0 ? c.Sectors.TheaterOf(targetSector) : Theater.Unknown;
+            string locked = LockedReinforcement(c);
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
                 if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
                 int holds = c.HoldReserved[i];
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
+                // The main effort draws from its own department: the target's theater. A formation of another department is a
+                // candidate for the one reinforcement; so is the decision's reinforcement once its transfer has changed its department.
+                bool pick = locked != null && string.Equals(f.UnitKey, locked, StringComparison.Ordinal);
+                if (targetTheater != Theater.Unknown && (pick || DepartmentOf(c, i) != targetTheater))
+                {
+                    c.ForeignScratch.Add(i);
+                    continue;
+                }
                 if (!WithinHorizon(c, i, tx, tz)) continue;
                 into.Add(i);
                 total += Math.Max(0f, f.Strength);
             }
+            int foreign = ReinforcementPick(c, tx, tz);
+            if (foreign >= 0)
+            {
+                c.Foreign = foreign;
+                into.Add(foreign);
+                total += Math.Max(0f, s.Own[foreign].Strength);
+            }
             return total;
+        }
+
+        // D6: the one reinforcement. A decision that already has one keeps only that formation (by unit key, so it survives a load); a
+        // new decision picks the formation that can be at the target soonest (MarchTime.EstimateDays, rail leg included), within
+        // ReinforcementMaxDays, the lower instance id on a tie. Its own front's D2 hold is met without it by construction: a formation the
+        // hold reserve keeps is not in the foreign list.
+        private static int ReinforcementPick(Inputs c, float tx, float tz)
+        {
+            var s = c.S;
+            string locked = LockedReinforcement(c);
+            int best = -1;
+            float bestDays = float.MaxValue;
+            for (int k = 0; k < c.ForeignScratch.Count; k++)
+            {
+                int i = c.ForeignScratch[k];
+                var f = s.Own[i];
+                if (locked != null && !string.Equals(f.UnitKey, locked, StringComparison.Ordinal)) continue;
+                // A new transfer leaves its department's hold met (a locked one already moved).
+                if (locked == null && !DepartmentHoldMet(c, DepartmentOf(c, i), i)) continue;
+                float distance = RiverLines.Distance(f.X, f.Z, tx, tz);
+                float days = MarchTime.EstimateDays(c.Speed, f, tx, tz, distance, s, null, c.OwnIips);
+                if (days > ReinforcementMaxDays) continue;
+                if (days > bestDays || (days == bestDays && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
+                bestDays = days;
+                best = i;
+            }
+            return best;
+        }
+
+        // D3: the force an objective needs against `enemy` at `required` odds: enemy x required x (1 + margin), the margin
+        // MassMarginBase x (1 - MassMarginBiasScale x AttackBias) (bold: leaner, cautious: heavier), never below the smallest force
+        // the AI moves at all (MinGarrisonStrength).
+        internal static float NeedFor(float enemy, float required, float attackBias)
+        {
+            float margin = MassMarginBase * (1f - MassMarginBiasScale * Math.Max(-1f, Math.Min(1f, attackBias)));
+            return Math.Max(ForceAllocator.MinGarrisonStrength, enemy * required * (1f + margin));
+        }
+
+        // D3: the part of the capacity the objective needs, nearest the target first (the lower instance id on a tie), the
+        // reinforcement last and only if the natives fall short. An army's corps go together (D6 detail (e)): the natives are taken by army,
+        // an army being the formations that share a ParentInstanceId (a formation with no parent is its own), the army nearest the target
+        // first and all its capacity members once it is entered, so an army is never split between the push and the front it came from
+        // (a corps its department's hold needs is not in the capacity at all). Written to the plan (MassInstanceIds,
+        // ReinforcementInstanceId); returns its strength. Formations left out keep their own front's role (ForceAllocator).
+        private static float SelectMass(Inputs c, List<int> capacity, float tx, float tz, float need, TheaterPlan plan)
+        {
+            var s = c.S;
+            var natives = new List<int>(capacity.Count);
+            for (int k = 0; k < capacity.Count; k++)
+                if (capacity[k] != c.Foreign) natives.Add(capacity[k]);
+            Comparison<int> byDistance = (a, b) =>
+            {
+                int d = DistanceSq(s.Own[a].X, s.Own[a].Z, tx, tz).CompareTo(DistanceSq(s.Own[b].X, s.Own[b].Z, tx, tz));
+                return d != 0 ? d : s.Own[a].InstanceId.CompareTo(s.Own[b].InstanceId);
+            };
+            natives.Sort(byDistance);
+            var armies = new List<List<int>>();
+            for (int k = 0; k < natives.Count; k++)
+            {
+                int parent = s.Own[natives[k]].ParentInstanceId;
+                List<int> army = null;
+                if (parent >= 0)
+                    for (int a = 0; a < armies.Count && army == null; a++)
+                        if (s.Own[armies[a][0]].ParentInstanceId == parent) army = armies[a];
+                if (army == null)
+                {
+                    army = new List<int>();
+                    armies.Add(army);
+                }
+                army.Add(natives[k]);   // natives are sorted, so an army's members and the armies themselves are nearest first
+            }
+            float total = 0f;
+            for (int a = 0; a < armies.Count && total < need; a++)
+                for (int k = 0; k < armies[a].Count; k++)
+                {
+                    plan.MassInstanceIds.Add(s.Own[armies[a][k]].InstanceId);
+                    total += Math.Max(0f, s.Own[armies[a][k]].Strength);
+                }
+            if (c.Foreign >= 0 && total < need)
+            {
+                plan.MassInstanceIds.Add(s.Own[c.Foreign].InstanceId);
+                plan.ReinforcementInstanceId = s.Own[c.Foreign].InstanceId;
+                total += Math.Max(0f, s.Own[c.Foreign].Strength);
+            }
+            return total;
+        }
+
+        // D6: a reinforcement the mass took binds to this decision (once; a decision never takes a second one), and the transfer changes
+        // its home department to the main objective's (PlannerState.Transfer): it is that department's formation from now on.
+        private static void NoteReinforcement(Inputs c, TheaterPlan plan, PlannerState state)
+        {
+            if (plan.ReinforcementInstanceId < 0 || state == null) return;
+            int i = c.S.IndexOfOwn(plan.ReinforcementInstanceId);
+            if (i < 0) return;
+            plan.ReinforcementName = c.S.Own[i].Name;
+            plan.ReinforcementTo = c.Sectors.TheaterOf(plan.MainSectorId);
+            if (state.ReinforcementDecision == state.DecisionSerial && state.ReinforcementKey != null) return;
+            plan.ReinforcementFrom = DepartmentOf(c, i);
+            state.ReinforcementKey = c.S.Own[i].UnitKey;
+            state.ReinforcementDecision = state.DecisionSerial;
+            state.Transfer(c.S.Own[i].UnitKey, plan.ReinforcementTo);
         }
 
         // A formation the depot ledger holds as a builder is the depot's, not the mass's (G5c): the published held set, one source.
@@ -654,7 +1098,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 CX = new float[n], CZ = new float[n], Radius = new float[n], Threat = new float[n], Need = new float[n],
                 Own = new float[n], Supply = new float[n], Morale = new float[n], NearX = new float[n], NearZ = new float[n],
-                Count = new int[n], Strongest = new int[n], Orderable = new int[n]
+                Count = new int[n], Strongest = new int[n], Orderable = new int[n], Presumed = new float[n], Facing = new bool[n]
             };
             float holdRatio = HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
             for (int k = 0; k < n; k++)
@@ -691,8 +1135,15 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int k = 0; k < n; k++)
             {
                 c.Terrain?.Mark(ReviewTerrain.GroupSector, k, x.CX[k], x.CZ[k]);
+                float reach = x.Radius[k] + s.RelocationRange;
                 x.Threat[k] = SectorThreat(c, x.CX[k], x.CZ[k], x.Radius[k]);
-                x.Need[k] = holdRatio * x.Threat[k];
+                // D2: a sector facing enemy-held ground (an enemy-held objective within its radius plus the relocation range) or a
+                // believed army keeps a hold of max(HoldRatio x believed, MinGarrison, presumed), the presumption only while nothing
+                // there is scouted (no fresh land belief within that reach).
+                x.Facing[k] = x.Threat[k] > 0f || EnemyGroundWithin(s, x.CX[k], x.CZ[k], reach);
+                x.Need[k] = x.Facing[k]
+                    ? HoldNeedAt(c, x.CX[k], x.CZ[k], reach, x.Threat[k], holdRatio, out x.Presumed[k])
+                    : holdRatio * x.Threat[k];
                 int near = NearestLandBelief(s, x.CX[k], x.CZ[k]);
                 x.NearX[k] = near >= 0 ? s.Beliefs[near].X : x.CX[k];
                 x.NearZ[k] = near >= 0 ? s.Beliefs[near].Z : x.CZ[k];
@@ -719,12 +1170,74 @@ namespace WhiskeyRealism.Strategic.Planner
             c.HoldReserved = new int[n];
             ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));
             ReserveRules.Hold(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalReserved, c.HoldReserved);
+            Garrisons(c);
         }
 
         private static CommanderProfile ProfileOf(Inputs c, int formation)
         {
             if (formation < 0 || c.Profile == null) return default(CommanderProfile);
             return c.Profile(c.S.Own[formation].CommanderId);
+        }
+
+        private static bool EnemyGroundWithin(CampaignSnapshot s, float x, float z, float radius)
+        {
+            for (int i = 0; i < s.Objectives.Count; i++)
+            {
+                var o = s.Objectives[i];
+                if (o.Accomplished || o.HolderAlliance < 0 || o.HolderAlliance == s.Alliance) continue;
+                if (RiverLines.Distance(o.X, o.Z, x, z) <= radius) return true;
+            }
+            return false;
+        }
+
+        private static bool FreshLandBeliefWithin(CampaignSnapshot s, float x, float z, float radius)
+        {
+            for (int i = 0; i < s.Beliefs.Count; i++)
+            {
+                var b = s.Beliefs[i];
+                if (b.Confidence01 >= ScoutFreshConfidence && !Afloat(b) && RiverLines.Distance(b.X, b.Z, x, z) <= radius) return true;
+            }
+            return false;
+        }
+
+        // D1: the place is scouted when a fresh land belief lies within the relocation range of it (the radius its odds are read on)
+        // or an own formation's sight radius covers it (what the viewer sees, it sees: an empty target in view is a scouted one).
+        // Fog-honest: beliefs and own viewers only.
+        internal static bool IsScouted(Inputs c, float x, float z)
+        {
+            var s = c.S;
+            if (FreshLandBeliefWithin(s, x, z, s.RelocationRange)) return true;
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                var f = s.Own[i];
+                if (f.SightRadius > 0f && RiverLines.Distance(f.X, f.Z, x, z) <= f.SightRadius) return true;
+            }
+            return false;
+        }
+
+        // D2: the presumed enemy within `radius` of (x, z) when nothing there is scouted, from fog-honest inputs only:
+        //   max( MinGarrisonStrength x (1 + PresumedImportanceGain x I),  S )
+        // where I is the largest importance of an enemy-held objective within the radius (public ownership and importance) and S the
+        // strongest army the side's own beliefs remember there at a confidence below ScoutFreshConfidence (an aged-out sighting: at its
+        // last-seen strength, not the confidence-weighted figure that makes an aging army look smaller by the day).
+        internal static float PresumedAt(Inputs c, float x, float z, float radius)
+        {
+            var s = c.S;
+            float importance = 0f;
+            for (int i = 0; i < s.Objectives.Count; i++)
+            {
+                var o = s.Objectives[i];
+                if (o.Accomplished || o.HolderAlliance < 0 || o.HolderAlliance == s.Alliance) continue;
+                if (RiverLines.Distance(o.X, o.Z, x, z) <= radius) importance = Math.Max(importance, o.Importance01);
+            }
+            float remembered = 0f;
+            for (int i = 0; i < s.Beliefs.Count; i++)
+            {
+                var b = s.Beliefs[i];
+                if (b.Confidence01 <= 0f || b.Confidence01 >= ScoutFreshConfidence || Afloat(b)) continue;
+                if (RiverLines.Distance(b.X, b.Z, x, z) <= radius) remembered = Math.Max(remembered, Math.Max(0f, b.Strength));
+            }
+            return Math.Max(ForceAllocator.MinGarrisonStrength * (1f + PresumedImportanceGain * importance), remembered);
         }
 
         // Believed land enemy within radius (straight), each weighted min(1, radius / river distance).
@@ -866,7 +1379,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " sectors=main:" + main + ",support:" + support + ",hold:" + hold + ",eof:" + eof + ",screen:" + screen + ",recover:" + recover
                 + " switch=" + (plan.SwitchReason ?? "none")
                 + " prior=" + (plan.PriorId ?? "none")
-                + " depots=" + plan.DepotTasks.Count;
+                + " depots=" + plan.DepotTasks.Count
+                + " scouted=" + (plan.MainObjectiveId < 0 ? "none" : plan.MainScoutLatched ? "latched" : plan.MainScouted ? "yes" : "no")
+                + " staged=" + (plan.MainStaged ? "yes" : "no")
+                + " depts=" + (plan.DepartmentCounts.Length == 0 ? "none" : plan.DepartmentCounts)
+                + " xdept=" + (plan.ReinforcementInstanceId < 0 ? "none" : plan.ReinforcementName + (plan.ReinforcementFrom != Theater.Unknown ? ":" + plan.ReinforcementFrom + ">" + plan.ReinforcementTo : ":" + plan.ReinforcementTo));
         }
 
         private static string Trace(Inputs c, List<Candidate> cands, TheaterPlan plan)
@@ -893,6 +1410,9 @@ namespace WhiskeyRealism.Strategic.Planner
                   .Append(" p=").Append(x.PriorTerm.ToString("0.00", CultureInfo.InvariantCulture))
                   .Append(" odds=").Append(x.Ratio >= float.MaxValue ? "inf" : x.Ratio.ToString("0.00", CultureInfo.InvariantCulture))
                   .Append('/').Append(x.Required.ToString("0.00", CultureInfo.InvariantCulture))
+                  .Append(x.Scouted ? " scouted" : " unscouted")
+                  .Append(" est=").Append(x.Enemy.ToString("0", CultureInfo.InvariantCulture))
+                  .Append(" pres=").Append(x.Presumed.ToString("0", CultureInfo.InvariantCulture))
                   .Append(" mass=").Append(x.Mass.ToString("0", CultureInfo.InvariantCulture))
                   .Append(x.Retained ? " retained" : x.Eligible ? "" : " ineligible");
             }
