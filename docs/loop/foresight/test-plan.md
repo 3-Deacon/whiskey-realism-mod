@@ -17,7 +17,7 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 - TC-PIC-CONSERVE (SMOKE-30): every `[EnemyPicture]` row with `total` known has `believed + faded + unaccounted` within 1 of `total`, or `unaccounted=0` with the last-seen sum above `total`. Count: `grep -c '"event":"EnemyPicture"'` against the rows passing that test (a `python3 -I` one-liner over the `fields`).
 
 ### S2 Hold need, release, eligibility (F3)
-- TC-HOLD-RATIO `HoldNeedHoldsUnseenMenAtTheHoldRatio`; TC-HOLD-165 `ASightingAt165DoesNotSwitchOffWashington` (FX-002A); TC-HOLD-FLOOR `FloorUsesOnlyUndisplacedImportance`.
+- TC-HOLD-RATIO `HoldNeedHoldsUnseenMenAtTheHoldRatio`; TC-HOLD-165 `ASightingAt165DoesNotSwitchOffWashington` (FX-002A); TC-HOLD-FLOOR `FloorUsesOnlyUndisplacedImportance`; TC-HOLD-FACE `AnAnchorAloneMakesASectorFace`; TC-HOLD-DEPT `DepartmentNeedCountsEachElementOnce`; TC-HOLD-D9 `ASectorHoldingAgainstABelievedArmyStillRefusesAScout`.
 - TC-REL-EVERY `AHoldIsReleasedOnlyWhenEveryElementItFacesIsAtTheTarget` (FX-002A: Romney does not release Manassas); TC-REL-NOTHING `ASectorFacingNothingReleasesNothing`.
 - TC-ELIG-MIN `ACapacityBelowTheLiveMinimumIsIneligible`; TC-ELIG-ODDS `OddsRuleUnchangedAboveTheMinimum`.
 
@@ -70,27 +70,27 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 |---|---|---|---|---|
 | requirement-enemy-total | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:270 | TC-PIC-UNKNOWN, TC-PIC-CONSERVE |  |  |
 | requirement-picture-partition | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:271 | TC-PIC-ONCE, TC-PIC-FADE, TC-PIC-EXPIRE, TC-PIC-ANCHORS, TC-PIC-DISPLACE, TC-PIC-SUM, TC-PIC-CONSERVE |  |  |
-| requirement-hold-need | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:281 | TC-HOLD-RATIO, TC-HOLD-165, TC-HOLD-FLOOR |  |  |
-| requirement-hold-release | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:282 | TC-REL-EVERY, TC-REL-NOTHING |  |  |
-| requirement-candidate-floor-capacity | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:283 | TC-ELIG-MIN, TC-ELIG-ODDS |  |  |
-| requirement-marks-player-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:287 | TC-MARK-NEWEST, TC-MARK-BAND, TC-MARK-SMOKE |  |  |
-| requirement-marks-ai-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:288 | TC-MARK-CHANCE, TC-MARK-50, TC-MARK-OFFSET, TC-MARK-SEED, TC-MARK-SMOKE |  |  |
-| requirement-mark-beliefs | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:289 | TC-MARK-KEY, TC-MARK-NORETIRE, TC-MARK-SAMEDAY, TC-MARK-NOSCOUT, TC-MARK-SIDECAR |  |  |
-| requirement-capital-window | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:293 | TC-CAP-REACH, TC-CAP-WASH, TC-CAP-RAILS, TC-CAP-SMOKE |  |  |
-| requirement-capital-floor | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:294 | TC-CAP-BASE, TC-CAP-THREAT, TC-CAP-VSFOUR, TC-CAP-SMOKE |  |  |
-| requirement-covering-post | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:299 | TC-COV-CORRIDOR, TC-COV-FWD, TC-COV-REAR, TC-COV-NONE, TC-COV-CENSUS |  |  |
-| requirement-covering-size | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:300 | TC-COV-NEED, TC-COV-MIN |  |  |
-| requirement-covering-members | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:301 | TC-COV-INCUMBENT, TC-COV-NEAREST, TC-COV-WL, TC-COV-BUSY, TC-COV-SECTOR |  |  |
-| requirement-covering-post-choice | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:302 | TC-COV-VERDICT |  |  |
-| requirement-covering-hold | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:303 | TC-COV-MASSFOR, TC-COV-POOLS, TC-COV-ROLE, TC-COV-DEFENCE, TC-COV-SMOKE |  |  |
-| requirement-covering-lifecycle | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:304 | TC-COV-UNBIND, TC-COV-SIDECAR |  |  |
-| requirement-redeploy-role | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:308 | TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD |  |  |
-| requirement-department-reinforcement | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:312 | TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-LIFE, TC-DEP-SMOKE |  |  |
-| requirement-commitment | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:316 | TC-COM-DIP, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE |  |  |
-| requirement-commitment-mover | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:317 | TC-COM-NOMARCH, TC-COM-WAIT |  |  |
-| requirement-return-home | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:318 | TC-RET-SEND, TC-RET-LIFE, TC-RET-CAP, TC-RET-SMOKE |  |  |
-| requirement-depot-builder | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:322 | TC-DEPOT-READY, TC-DEPOT-SURPLUS, TC-DEPOT-AOV, TC-DEPOT-SMOKE |  |  |
-| requirement-live-min-strength | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:326 | TC-MIN-PUBLISH, TC-MIN-ONESITE, TC-MIN-SMOKE |  |  |
-| requirement-interception | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:330 | TC-INT-MODE, TC-INT-NOREMOVE, TC-INT-SMOKE |  |  |
-| requirement-telemetry | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:334 | TC-TEL-ISSUE, TC-TEL-TRACE, TC-TEL-RESERVES, TC-TEL-REASONS, TC-TEL-TAGS |  |  |
+| requirement-hold-need | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:282 | TC-HOLD-RATIO, TC-HOLD-165, TC-HOLD-FLOOR, TC-HOLD-FACE, TC-HOLD-DEPT, TC-HOLD-D9 |  |  |
+| requirement-hold-release | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:283 | TC-REL-EVERY, TC-REL-NOTHING |  |  |
+| requirement-candidate-floor-capacity | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:284 | TC-ELIG-MIN, TC-ELIG-ODDS |  |  |
+| requirement-marks-player-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:288 | TC-MARK-NEWEST, TC-MARK-BAND, TC-MARK-SMOKE |  |  |
+| requirement-marks-ai-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:289 | TC-MARK-CHANCE, TC-MARK-50, TC-MARK-OFFSET, TC-MARK-SEED, TC-MARK-SMOKE |  |  |
+| requirement-mark-beliefs | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:290 | TC-MARK-KEY, TC-MARK-NORETIRE, TC-MARK-SAMEDAY, TC-MARK-NOSCOUT, TC-MARK-SIDECAR |  |  |
+| requirement-capital-window | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:294 | TC-CAP-REACH, TC-CAP-WASH, TC-CAP-RAILS, TC-CAP-SMOKE |  |  |
+| requirement-capital-floor | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:295 | TC-CAP-BASE, TC-CAP-THREAT, TC-CAP-VSFOUR, TC-CAP-SMOKE |  |  |
+| requirement-covering-post | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:300 | TC-COV-CORRIDOR, TC-COV-FWD, TC-COV-REAR, TC-COV-NONE, TC-COV-CENSUS |  |  |
+| requirement-covering-size | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:301 | TC-COV-NEED, TC-COV-MIN |  |  |
+| requirement-covering-members | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:302 | TC-COV-INCUMBENT, TC-COV-NEAREST, TC-COV-WL, TC-COV-BUSY, TC-COV-SECTOR |  |  |
+| requirement-covering-post-choice | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:303 | TC-COV-VERDICT |  |  |
+| requirement-covering-hold | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:304 | TC-COV-MASSFOR, TC-COV-POOLS, TC-COV-ROLE, TC-COV-DEFENCE, TC-COV-SMOKE |  |  |
+| requirement-covering-lifecycle | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:305 | TC-COV-UNBIND, TC-COV-SIDECAR |  |  |
+| requirement-redeploy-role | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:309 | TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD |  |  |
+| requirement-department-reinforcement | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:313 | TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-LIFE, TC-DEP-SMOKE |  |  |
+| requirement-commitment | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:317 | TC-COM-DIP, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE |  |  |
+| requirement-commitment-mover | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:318 | TC-COM-NOMARCH, TC-COM-WAIT |  |  |
+| requirement-return-home | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:319 | TC-RET-SEND, TC-RET-LIFE, TC-RET-CAP, TC-RET-SMOKE |  |  |
+| requirement-depot-builder | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:323 | TC-DEPOT-READY, TC-DEPOT-SURPLUS, TC-DEPOT-AOV, TC-DEPOT-SMOKE |  |  |
+| requirement-live-min-strength | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:327 | TC-MIN-PUBLISH, TC-MIN-ONESITE, TC-MIN-SMOKE |  |  |
+| requirement-interception | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:331 | TC-INT-MODE, TC-INT-NOREMOVE, TC-INT-SMOKE |  |  |
+| requirement-telemetry | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:335 | TC-TEL-ISSUE, TC-TEL-TRACE, TC-TEL-RESERVES, TC-TEL-REASONS, TC-TEL-TAGS |  |  |
 <!-- matrix:end -->
