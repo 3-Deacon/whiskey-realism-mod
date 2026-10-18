@@ -27,6 +27,7 @@ internal static class TaskChurnTests
             ("task churn: the enemy line is remembered through a count without a glimpse of it", TheEnemyLineIsRemembered),
             ("task churn: the remembered enemy line ends with its horizon, a re-sighting or a clock that ran backwards", TheMemoryEnds),
             ("task churn: an operation on a remembered line keeps its objective and its orders through the gap", OrdersStayThroughTheGap),
+            ("task churn: the memory of the enemy line ends with the ledger", TheMemoryEndsWithTheLedger),
             ("task churn: the change row names the director's reason and the forces it weighed", TheChangeRowNamesTheReason),
             ("task churn: a group that saw the enemy within the horizon is still in contact", AGroupKeepsItsContact),
             ("task churn: the reconnaissance rule reads the group's remembered contact, not the tick's sight", ReconReadsRememberedContact),
@@ -295,6 +296,8 @@ internal static class TaskChurnTests
             "the pipeline asks the group's contact memory, with this tick's sight as the sighting");
         FlankResponseTests.AssertPinned(run, "new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged,",
             "and the reconnaissance rule is given that");
+        FlankResponseTests.AssertPinned(text, "static PosturePipeline() { BattleScope.Register(\"posture-contact\", _contact.Clear); }",
+            "the memory is a battle's: it is cleared with the battle, from the owner's static constructor");
     }
 
     // ---- telemetry ----
@@ -311,5 +314,19 @@ internal static class TaskChurnTests
         FlankResponseTests.AssertPinned(ledger, ".WithField(\"collapseSeconds\", input.OddsCollapseSeconds)", "and how long the collapse had lasted");
         string tags = FlankResponseTests.SourceText("Telemetry", "TelemetryTagPolicy.cs");
         FlankResponseTests.AssertPinned(tags, "AddTactical(\"TacticalOperationChange\", TelemetryCategory.Decision);", "the event is routed to the tactical sidecar");
+    }
+
+    private static void TheMemoryEndsWithTheLedger()
+    {
+        var runtime = new TacticalOperationsLedgerRuntime();
+        Tick(runtime, 100f, 0f, Map("Island_Ford"), EnemyLine(1500f));
+        var force = new ForceAvailabilitySnapshot(3000f, 0.3f);
+        var personality = new PersonalityVector(0.4f, 0f, 0f, 0f, 0f);
+        runtime.SetRuntimeClock(136f);
+        runtime.Replace(TacticalCommanderMode.Off, new[] { Map("Island_Ford") }, Intent, force, personality);
+        AssertEqual(0, runtime.CurrentObjectives.Count, "a ledger that does not run has no picture");
+        runtime.SetRuntimeClock(172f);
+        runtime.Replace(TacticalCommanderMode.Active, new[] { Map("Island_Ford") }, Intent, force, personality);
+        AssertEqual(1, runtime.CurrentObjectives.Count, "and the line it knew before it stopped does not come back with it");
     }
 }
