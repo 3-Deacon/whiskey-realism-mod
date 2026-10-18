@@ -5,8 +5,8 @@ spec = 'docs/superpowers/specs/2026-10-14-campaign-planner-design.md'
 tp = root + '/docs/loop/foresight/test-plan.md'
 cases = {
  'requirement-enemy-total': 'TC-PIC-UNKNOWN, TC-PIC-CONSERVE',
- 'requirement-picture-partition': 'TC-PIC-ONCE, TC-PIC-BUILD, TC-PIC-SHARES, TC-PIC-FADE, TC-PIC-EXPIRE, TC-PIC-ANCHORS, TC-PIC-DISPLACE, TC-PIC-SUM, TC-PIC-CONSERVE',
- 'requirement-hold-need': 'TC-HOLD-RATIO, TC-HOLD-ASSIGN, TC-HOLD-EASTDONOR, TC-HOLD-165, TC-HOLD-FLOOR, TC-HOLD-FACE, TC-HOLD-DEPT, TC-HOLD-D9',
+ 'requirement-picture-partition': 'TC-PIC-ONCE, TC-PIC-BUILD, TC-PIC-SHARES, TC-PIC-ELEMENTS, TC-PIC-FADE, TC-PIC-EXPIRE, TC-PIC-ANCHORS, TC-PIC-DISPLACE, TC-PIC-SUM, TC-PIC-CONSERVE',
+ 'requirement-hold-need': 'TC-HOLD-RATIO, TC-HOLD-ASSIGN, TC-HOLD-EASTDONOR, TC-HOLD-SECESSION, TC-HOLD-165, TC-HOLD-FLOOR, TC-HOLD-FACE, TC-HOLD-DEPT, TC-HOLD-D9',
  'requirement-hold-release': 'TC-REL-EVERY, TC-REL-NOTHING',
  'requirement-candidate-floor-capacity': 'TC-ELIG-MIN, TC-ELIG-ODDS',
  'requirement-marks-player-side': 'TC-MARK-NEWEST, TC-MARK-BAND, TC-MARK-READERS, TC-MARK-SMOKE',
@@ -20,7 +20,7 @@ cases = {
  'requirement-covering-post-choice': 'TC-COV-VERDICT',
  'requirement-covering-hold': 'TC-COV-MASSFOR, TC-COV-POOLS, TC-COV-ROLE, TC-COV-DEFENCE, TC-COV-SMOKE',
  'requirement-covering-lifecycle': 'TC-COV-UNBIND, TC-COV-SIDECAR',
- 'requirement-redeploy-role': 'TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD, TC-RED-DELIST, TC-RED-GIVEUP',
+ 'requirement-redeploy-role': 'TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD, TC-RED-DELIST, TC-RED-GIVEUP, TC-RED-READERS',
  'requirement-claims': 'TC-CLAIM-ROWS, TC-CLAIM-COUNTED, TC-CLAIM-ONE, TC-CLAIM-SHIPPED, TC-COM-CLAIMS, TC-DEP-CLAIMS, TC-CLAIM-SMOKE',
  'requirement-department-reinforcement': 'TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-HAVE, TC-DEP-LIFE, TC-DEP-END, TC-DEP-QUEUE, TC-DEP-SMOKE',
  'requirement-commitment': 'TC-COM-DIP, TC-COM-KEY, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE',
