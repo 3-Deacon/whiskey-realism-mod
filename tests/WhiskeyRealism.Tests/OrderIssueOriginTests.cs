@@ -60,7 +60,7 @@ internal static class OrderIssueOriginTests
         string runtime = FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
         FlankResponseTests.AssertPinned(runtime, "using var origin = OrderIssueOrigin.Scope(winner.Source);", "Execute names the winner's source until it returns");
         string observer = FlankResponseTests.SourceText("Patches", "TacticalObserverPatch.cs");
-        FlankResponseTests.AssertPinned(observer, "string origin = WhiskeyRealism.Tactical.Battle.OrderIssueOrigin.Current ?? \"other\";", "the observer reads it");
+        FlankResponseTests.AssertPinned(observer, "string origin = WhiskeyRealism.Tactical.Battle.OrderIssueOrigin.Current ?? (WhiskeyRealism.Tactical.Battle.RepathRoutineMarker.PlayerOrderActive ? \"player-ui\" : \"other\");", "the observer reads it, then a click through SetWaypoint (BUG-WL-024), else other");
         FlankResponseTests.AssertPinned(observer, "\"[TacticalPlayerOrder] event=queued relation=\" + relation + \" origin=\" + origin", "the player-order row prints origin=");
         FlankResponseTests.AssertPinned(observer, "\"[TacticalCommand] event=queued relation=\" + relation + \" origin=\" + origin", "the command row prints origin=");
     }

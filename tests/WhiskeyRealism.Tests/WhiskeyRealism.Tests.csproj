@@ -312,6 +312,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\ApproachLine.cs" Link="Battle\ApproachLine.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\LayoutMirror.cs" Link="Battle\LayoutMirror.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\FormationFlipDetector.cs" Link="Battle\FormationFlipDetector.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\PlayerUnitRepath.cs" Link="Battle\PlayerUnitRepath.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Tactical\OrderRelation.cs" Link="OrderRelation.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattleProducerRegistry.cs" Link="Battle\BattleProducerRegistry.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\BattlePerception.cs" Link="Battle\BattlePerception.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Tactical\Battle\TroopQuality.cs" Link="Battle\TroopQuality.cs" />

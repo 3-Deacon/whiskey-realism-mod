@@ -1301,11 +1301,11 @@ namespace WhiskeyRealism.Patches
 
                 bool sourceUnderCommander = issuer != null && issuer.dlcw_isundercommander;
                 bool targetUnderCommander = target != null && target.dlcw_isundercommander;
-                string relation = OrderRelation(sourceUnderCommander, targetUnderCommander);
+                string relation = WhiskeyRealism.Tactical.OrderRelation.Classify(sourceUnderCommander, targetUnderCommander);
                 float delay = queued.processingtime - GameVars.currenttimefromstart;
                 int queueCount = issuer != null && issuer.orderqueue != null ? issuer.orderqueue.Count : -1;
-                // The executor's source for an order Whiskey queued (OrderIssueOrigin), else "other": a vanilla routine or the player's own order.
-                string origin = WhiskeyRealism.Tactical.Battle.OrderIssueOrigin.Current ?? "other";
+                // The executor's source for an order Whiskey queued (OrderIssueOrigin), "player-ui" for a click through BattleUnits.SetWaypoint with showmovementoptions (166134, 166165), else "other": a vanilla routine or a player order that does not pass SetWaypoint (stop, stance, formation). The source field is the queue holder (the scene parent, 91490), not the issuer.
+                string origin = WhiskeyRealism.Tactical.Battle.OrderIssueOrigin.Current ?? (WhiskeyRealism.Tactical.Battle.RepathRoutineMarker.PlayerOrderActive ? "player-ui" : "other");
                 string signature = "queued|" + SafeInstanceId(issuer) + "|" + SafeInstanceId(target) + "|" +
                     orderType + "|" + queueCount + "|" + BucketSeconds(delay) + "|" + relation + "|" + origin;
 
@@ -1372,7 +1372,7 @@ namespace WhiskeyRealism.Patches
                 var lineTarget = line != null ? SafeRegiment(line.targetunit) : targetunit;
                 bool sourceUnderCommander = lineSource != null && lineSource.dlcw_isundercommander;
                 bool targetUnderCommander = lineTarget != null && lineTarget.dlcw_isundercommander;
-                string relation = OrderRelation(sourceUnderCommander, targetUnderCommander);
+                string relation = WhiskeyRealism.Tactical.OrderRelation.Classify(sourceUnderCommander, targetUnderCommander);
                 string delivery = line == null ? "unknown" : (line.type == 0 ? "bugle" : "courier");
                 TacticalOrderDelivery deliveryKind = DeliveryKind(delivery);
                 float processTime = line != null ? line.processtime : 0f;
@@ -2591,14 +2591,6 @@ namespace WhiskeyRealism.Patches
             {
                 return null;
             }
-        }
-
-        private static string OrderRelation(bool sourceUnderCommander, bool targetUnderCommander)
-        {
-            if (!sourceUnderCommander && targetUnderCommander) return "ai-to-player-subordinate";
-            if (sourceUnderCommander && targetUnderCommander) return "player-chain";
-            if (sourceUnderCommander && !targetUnderCommander) return "player-to-ai";
-            return "ai-chain";
         }
 
         private static string OrderTypeName(int orderType)
