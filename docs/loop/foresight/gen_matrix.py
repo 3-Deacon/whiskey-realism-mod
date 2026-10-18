@@ -4,7 +4,7 @@ root = sys.argv[1]
 spec = 'docs/superpowers/specs/2026-10-14-campaign-planner-design.md'
 tp = root + '/docs/loop/foresight/test-plan.md'
 cases = {
- 'requirement-enemy-total': 'TC-PIC-UNKNOWN, TC-PIC-CONSERVE',
+ 'requirement-enemy-total': 'TC-PIC-UNKNOWN, TC-PIC-CONSERVE, TC-NOTFROZEN',
  'requirement-picture-partition': 'TC-PIC-ONCE, TC-PIC-BUILD, TC-PIC-SHARES, TC-PIC-ELEMENTS, TC-PIC-FADE, TC-PIC-EXPIRE, TC-PIC-ANCHORS, TC-PIC-DISPLACE, TC-PIC-SUM, TC-PIC-CONSERVE',
  'requirement-hold-need': 'TC-HOLD-RATIO, TC-HOLD-ASSIGN, TC-HOLD-EASTDONOR, TC-HOLD-SECESSION, TC-HOLD-165, TC-HOLD-FLOOR, TC-HOLD-FACE, TC-HOLD-DEPT, TC-HOLD-D9',
  'requirement-hold-release': 'TC-REL-EVERY, TC-REL-NOTHING',
