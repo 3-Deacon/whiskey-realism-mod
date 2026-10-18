@@ -25,6 +25,9 @@ internal static class TaskChurnTests
             ("task churn: the enemy line is remembered through a count without a glimpse of it", TheEnemyLineIsRemembered),
             ("task churn: the remembered enemy line ends with its horizon, a re-sighting or a clock that ran backwards", TheMemoryEnds),
             ("task churn: an operation on a remembered line keeps its objective and its orders through the gap", OrdersStayThroughTheGap),
+            ("task churn: the change row names the director's reason and the forces it weighed", TheChangeRowNamesTheReason),
+            ("task churn: a group that saw the enemy within the horizon is still in contact", AGroupKeepsItsContact),
+            ("task churn: the reconnaissance rule reads the group's remembered contact, not the tick's sight", ReconReadsRememberedContact),
         });
     }
 
@@ -210,5 +213,47 @@ internal static class TaskChurnTests
         AssertEqual(before.ObjectiveId, during.ObjectiveId, "nor its objective");
         AssertNear(before.PrimaryTarget.X, during.PrimaryTarget.X, 0.01f, "nor the point it goes to (x)");
         AssertNear(before.PrimaryTarget.Z, during.PrimaryTarget.Z, 0.01f, "nor (z)");
+    }
+
+    // ---- the posture pipeline ----
+
+    private static void AGroupKeepsItsContact()
+    {
+        var memory = new GroupContactMemory();
+        AssertFalse(memory.InContact(7, visibleNow: false, nowHours: 12.0), "a group that never saw the enemy is not in contact");
+        AssertTrue(memory.InContact(7, visibleNow: true, nowHours: 12.0), "in sight is in contact");
+        AssertTrue(memory.InContact(7, visibleNow: false, nowHours: 12.2), "a quarter hour behind a rise: still in contact");
+        AssertFalse(memory.InContact(8, visibleNow: false, nowHours: 12.2), "the memory is the group's own");
+        AssertTrue(memory.InContact(7, visibleNow: false, nowHours: 12.0 + GroupContactMemory.HorizonHours), "to the horizon");
+        AssertFalse(memory.InContact(7, visibleNow: false, nowHours: 12.0 + GroupContactMemory.HorizonHours + 0.01), "past it the enemy is lost");
+        AssertFalse(memory.InContact(7, visibleNow: false, nowHours: 12.3), "and a lost enemy is not found again by the clock");
+        memory.InContact(9, visibleNow: true, nowHours: 20.0);
+        AssertFalse(memory.InContact(9, visibleNow: false, nowHours: 19.0), "a clock that ran backwards does not keep a contact");
+    }
+
+    private static void ReconReadsRememberedContact()
+    {
+        string text = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        string run = FlankResponseTests.Between(text, "internal static bool Run(", "private static bool CanBypassStaleQueuedOrder(");
+        FlankResponseTests.AssertPinned(run, "bool visibleEnemy = _contact.InContact(rec.InstanceId, s.ClosestVisibleEnemy(i, out _) >= 0, s.DoctrineHours);",
+            "the pipeline asks the group's contact memory, with this tick's sight as the sighting");
+        FlankResponseTests.AssertPinned(run, "new TacticalGrandTacticianReconInput(state.Role, state.Task, visibleEnemy, underRecentFire: closeEngaged,",
+            "and the reconnaissance rule is given that");
+    }
+
+    // ---- telemetry ----
+
+    private static void TheChangeRowNamesTheReason()
+    {
+        string ledger = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
+        FlankResponseTests.AssertPinned(ledger, "EmitOperationChange(allianceId, _lastDecidedOperation, decision, input); _lastDecidedOperation = decision.Operation;",
+            "the row compares with what the director decided last, then that becomes the reference");
+        FlankResponseTests.AssertPinned(ledger, ".WithDecision(\"TacticalOperationChange\", after.Phase.ToString(), decision.Reason)", "the director's reason");
+        FlankResponseTests.AssertPinned(ledger, ".WithField(\"ownStrength\", input.OwnStrength)", "the army it weighed");
+        FlankResponseTests.AssertPinned(ledger, ".WithField(\"assignedStrength\", input.OperationAssignedStrength)", "the part of it tasked to attack");
+        FlankResponseTests.AssertPinned(ledger, ".WithField(\"enemyStrength\", enemy)", "the enemy at the objective");
+        FlankResponseTests.AssertPinned(ledger, ".WithField(\"collapseSeconds\", input.OddsCollapseSeconds)", "and how long the collapse had lasted");
+        string tags = FlankResponseTests.SourceText("Telemetry", "TelemetryTagPolicy.cs");
+        FlankResponseTests.AssertPinned(tags, "AddTactical(\"TacticalOperationChange\", TelemetryCategory.Decision);", "the event is routed to the tactical sidecar");
     }
 }
