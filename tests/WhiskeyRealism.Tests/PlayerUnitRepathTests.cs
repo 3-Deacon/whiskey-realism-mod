@@ -163,6 +163,10 @@ internal static class PlayerUnitRepathTests
         AssertTrue(clock.TryTake(1, RepathRoutine.Fallback, RepathKind.Path, 500f, out _, out _), "a row at 500 s");
         AssertTrue(clock.TryTake(1, RepathRoutine.Fallback, RepathKind.Path, 5f, out _, out _), "a clock that restarted (a new session) does not hide the key for ever");
 
+        var full = new RepathRowBudget();
+        for (int unit = 1; unit <= RepathRowBudget.WindowRows; unit++) full.TryTake(unit, RepathRoutine.Fallback, RepathKind.Path, 500f, out _, out _);
+        AssertTrue(full.TryTake(900, RepathRoutine.Fallback, RepathKind.Path, 5f, out _, out _), "a full window at 500 s does not refuse rows for ever once the clock restarts at 5 s");
+
         clock.Reset();
         AssertEqual(0, clock.KeyCount, "reset empties the keys");
         AssertEqual(0, clock.Dropped, "and the count");
