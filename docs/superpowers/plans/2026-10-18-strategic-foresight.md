@@ -64,15 +64,17 @@ The live minimum strength (F5) and the depot builder rule (F9) are corrections o
 // CampaignMover.MoverTally
 public readonly List<string> IssueRows = new List<string>();   // one per issued move, at most MoveTracker.MaxMovesPerDay a review
 // "[CampaignMoverIssue] alliance=<a> unit=<key> role=<Role> reason=<reason> target=<x>,<z> objective=<id> from=<x>,<z> readiness=<step>"
-internal static class ReservesRow { internal static string Build(CampaignSnapshot s, TheaterPlan plan, Allocation a); }
+internal static class ReservesRow { internal static string Build(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, Allocation a, PlannerState state, Allocation previous, TheaterPlan previousPlan); }
 // F1 shape: "[Reserves] alliance=<a> capital=<held>/<floor> hold=<sector:held/need,...>" (at most 6 sectors, largest need first);
-// F3, F6, F7, F8 append covering=, committed=, returning=, deptShort=, vanillaDefWithheld= (D11 requirement-telemetry is the final shape).
-internal static class DefenseFilterTally { internal static string Reasons(IReadOnlyDictionary<int, string> reasonByUnitId); } // "reason:n,..." sorted by reason
+// Owners of the later fields (D11 requirement-telemetry is the final shape): F6 covering=, holdReserve=, vanillaDefWithheld=,
+// vanillaDefHoldOrCovering=; F7 committed=, returning=, returningUnits=, massInVanillaDef=; F8 deptShort= (with donor|nodonor).
+internal static class DefenseFilterTally { internal static string Reasons(IReadOnlyDictionary<int, string> reasonByUnitId, IEnumerable<int> ids); } // "reason:n,..." over ids, sorted by reason
+internal static class RowText { internal static string Name(string s); }   // spaces -> '_', null -> "-" (every place, post and unit in a D11 row)
 ```
 
 **Steps:**
-- [ ] Tests first (`ForesightTelemetryTests`): `IssueRowNamesUnitRoleTargetObjectiveAndOrigin`, `IssueRowsNeverExceedTheDailyCap`, `TraceCarriesEachCandidatesCoordinates`, `ReservesRowNamesCapitalAndHoldShares`, `ReservesRowSignatureUnchangedWhenNothingChanges`, `DefenseFilterReasonsAreTalliedAndSorted`, `NewRowsAreRegisteredInTheTagPolicy`.
-- [ ] Implement; the mover adds an issue row exactly where it records `MoveOutcome.Issued` or `Retried` (not `Queued`, not refused).
+- [ ] Tests first (`ForesightTelemetryTests`): `IssueRowNamesUnitRoleTargetObjectiveAndOrigin`, `IssueRowsNeverExceedTheDailyCap`, `TraceCarriesEachCandidatesCoordinates`, `ReservesRowNamesCapitalAndHoldShares`, `ReservesRowSignatureUnchangedWhenNothingChanges`, `DefenseFilterReasonsAreTalliedAndSorted`, `NewRowsAreRegisteredInTheTagPolicy` (tag and category), `RowNamesHaveNoSpaces`, `ARefusedRetryWritesNoIssueRow`, `ReservesRowEveryReview`, `ReservesDefenceCountsReadYesterdaysAllocation`.
+- [ ] Implement; the mover adds an issue row in `Dispatch` only when the move was made (`moved`: outcome Issued or Retried; `MoveIssue` reports a refused retry as `Retried` with `moved == false`, which writes none). Every new row carries `date=`; register `CampaignMoverIssue` (Write) and `Reserves` (State); `[Reserves]` is emitted every review per alliance; the trace token is ` at=<x>,<z>`, never glued to `objective@sector`.
 - [ ] Gates; commit `feat(foresight): mover issue rows, trace coordinates, reserve and #25 reason rows [F1]`.
 
 **Verification:** the gates above. **Smoke rows:** `[CampaignMoverIssue] alliance=1 unit=Army_of_Virginia:<id> role=DepotBuilder reason=depot-task target=1101,-554 objective=-1 from=1247,-803 readiness=<n>` (the shape; the baseline save's own case); `[Reserves] alliance=1 capital=<n>/<n> hold=<k>:<n>/<n>`; `DefenseIntent` filter signature `alliance=1|removed=8|forbidden=8|reasons=asset-proximity-local-only:<n>,...`. **Rollback:** none needed (rows only); `Logging Profile` governs them. **PROVE-MODE plants:** drop the target from `IssueRow` -> `IssueRowNamesUnitRoleTargetObjectiveAndOrigin` red; emit a row per queued move -> `IssueRowsNeverExceedTheDailyCap` red.
@@ -191,7 +193,8 @@ internal sealed class MarkLedger
 **Owned files:** `Strategic/Planner/CampaignPlannerContracts.cs` (`TheaterPlan.MinGarrisonStrength`), `Strategic/Planner/TheaterPlanner.cs` (set it; `NeedFor`, `HoldNeedAt`, the presumption floor read it; `MinStrengthFallback`), `Strategic/Planner/ForceAllocator.cs` (delete the const; `Target`, `SectorMayGiveScout` read the plan), `Strategic/Planner/ReinforcementRouting.cs` (reads the plan), test `LiveMinimumStrengthTests.cs`, the rewritten pins, census.
 
 **Steps:**
-- [ ] Tests first: `PlanPublishesTheScenariosMinimum`, `FallbackOnlyWhenTheReadIsNotPositive` (one warning), `EveryFloorDerivesFromThePlan` (a source pin: no `5000f` and no `MinGarrisonStrength` const left under `Strategic/Planner/`), `ReinforcementRoutingReadsThePlansMinimum`, `HoldTargetIsTheLiveMinimumInAQuietSector`.
+- [ ] Find the fixtures whose floor changes: `grep -ln "MinStrengthForMovement\|MinGarrisonStrength" tests/WhiskeyRealism.Tests/*.cs`; re-read every hit (a fixture that sets `MinStrengthForMovement = 1000f` now floors at 1000) and name the changed ones in the commit.
+- [ ] Tests first: `PlanPublishesTheScenariosMinimum`, `FallbackOnlyWhenTheReadIsNotPositive`, `AHandBuiltPlanKeepsTheFallback`, `EveryFloorDerivesFromThePlan` (a source pin: the only `5000f` under `Strategic/Planner/` is `MinStrengthFallback`'s declaration; no `MinGarrisonStrength` const), `ReinforcementRoutingReadsThePlansMinimum`, `HoldTargetIsTheLiveMinimumInAQuietSector`.
 - [ ] Implement; the first-review row (`CampaignPlannerRuntime.LogFirstReview`, `[CampaignPlanner] first review`) gains `minStrength=<n>`.
 - [ ] Gates; commit `fix(foresight): the scenario's live minimum strength, one definition site [F5]`.
 
@@ -201,19 +204,21 @@ internal sealed class MarkLedger
 
 **Why:** nothing held the approach between the capitals (investigation (c), (h)); the capital floor guards the capital itself (`CapitalGuard` marches to it, `ForceAllocator` `AssignCapitalGuards`).
 
-**Owned files:** `Strategic/Planner/CampaignSnapshot.cs` (`Places`, `PlaceRecord`), `Strategic/Planner/CampaignSnapshotRuntime.cs` (`ReadPlaces`: `BattleUnits.towns` with `Owner`, `BattleUnits.smalltowns` with `allianceowner`; rail counts through the snapshot's `LinesNearTown` / `LinesOfIip`), create `Strategic/Planner/CoveringForce.cs` (pure: corridor, posts, need, verdict), `Strategic/Planner/ReserveRules.cs` (`Covering`; `Hold` takes the covering, committed and excluded masks), `Strategic/Planner/TheaterPlanner.cs` (`Reserve` calls it; `MassFor` excludes members except for the enemy-capital candidate; publish `TheaterPlan.Covering`), `Strategic/Planner/PlannerState.cs` (`CoveringKeys`, `CoveringForward`, `CoveringVerdictDays`, `CoveringVerdictKnown`, `CoveringPostKey`, written once in `Plan` after `Decide`), `Strategic/Planner/CampaignPlannerContracts.cs` (`FormationRole.Redeploy = 9`, `CoveringPlan`, `TheaterPlan.Covering`), `Strategic/Planner/ForceAllocator.cs` (`AssignCovering`; `Summary` `covering=` `redeploy=`; D9's, the depot's and the posts' pools exclude `covering-force`), `Strategic/Planner/CampaignMover.cs` (the (role, reason) priority of requirement-redeploy-role; `MovesRole`), `Strategic/Planner/CampaignWithholdView.cs` (`Read` also yields the plan; the covering defence clause; `Redeploy` withheld from offense), `Strategic/Planner/CampaignPlannerRuntime.cs` (`[CoveringCorridor]`, `[CoveringForce]`, `[Reserves] covering= vanillaDefWithheld=`), `PersistenceDto.cs` / `SidecarDtoCodec.cs` (the three covering fields), `Plugin.cs` (`Enable Covering Force`), `Telemetry/TelemetryTagPolicy.cs` (`CoveringCorridor`, `CoveringForce`), test `CoveringForceTests.cs`, csproj lines, census.
+**Owned files:** `Strategic/Planner/CampaignSnapshot.cs` (`Places`), `Strategic/Planner/CampaignPlannerContracts.cs` (`PlaceRecord`), `Strategic/Planner/CampaignSnapshotRuntime.cs` (`ReadPlaces`: `BattleUnits.towns` with `Owner`, `BattleUnits.smalltowns` with `allianceowner`; rail counts through the snapshot's `LinesNearTown` / `LinesOfIip`), create `Strategic/Planner/CoveringForce.cs` (pure: corridor, posts, need, verdict), `Strategic/Planner/ReserveRules.cs` (`Covering`; `Hold` takes the covering, committed and excluded masks), `Strategic/Planner/TheaterPlanner.cs` (`Reserve` calls it; `MassFor` excludes members except for the enemy-capital candidate; publish `TheaterPlan.Covering`), `Strategic/Planner/PlannerState.cs` (`CoveringKeys`, `CoveringForward`, `CoveringVerdictDays`, `CoveringVerdictKnown`, `CoveringPostKey`, written once in `Plan` after `Decide`), `Strategic/Planner/CampaignPlannerContracts.cs` (`FormationRole.Redeploy = 9`, `CoveringPlan`, `TheaterPlan.Covering`), `Strategic/Planner/ForceAllocator.cs` (`AssignCovering`; `Summary` `covering=` `redeploy=`; D9's, the depot's and the posts' pools exclude `covering-force`), `Strategic/Planner/CampaignMover.cs` (the (role, reason) priority of requirement-redeploy-role; `MovesRole`), `Strategic/Planner/CampaignWithholdView.cs` (`Read` also yields the plan; the covering defence clause; `Redeploy` withheld from offense), `Strategic/Planner/CampaignPlannerRuntime.cs` (`[CoveringCorridor]`, `[CoveringForce]`, `[Reserves] covering= vanillaDefWithheld=`), `PersistenceDto.cs` / `SidecarDtoCodec.cs` (the three covering fields), `Plugin.cs` (`Enable Covering Force`), `Telemetry/TelemetryTagPolicy.cs` (`CoveringCorridor`, `CoveringForce`), test `CoveringForceTests.cs`, csproj lines, census.
 
 **Vanilla to read:** 78940, 82518-82535, 103719, 143173-143220 (`Town.Owner`, `IsCapital`, `CityName`), 62230, 11668-11869, 13460-13504 and 13610 (what vanilla's defence takes), 14080-14158; the snapshot's rail index (`CampaignSnapshot.cs` `LinesNearTown`, `LinesOfIip`).
 
 **Interfaces:**
 ```csharp
-public struct PlaceRecord { public string Name; public float X, Z; public int Owner; public int RailLines; public bool IsTown; }
-public sealed class CoveringPlan
+public struct PlaceRecord { public string Name; public float X, Z; public int Owner; public int RailLines; public bool IsTown; }   // in CampaignPlannerContracts.cs (censused)
+public enum CoveringKind { None = 0, Forward = 1, Rear = 2 }
+public sealed class CoveringPlan   // never null after Plan
 {
-    public string PostName; public float X, Z; public bool Forward; public float Need, Held, Radius;  // Radius = RelocationRange (the defence clause)
-    public List<int> InstanceIds = new List<int>();
-    public string Reason;   // null when posted; "no-capital", "no-corridor-place", "flag-off", "cic-side" otherwise
+    public string PostName; public float PostX, PostZ; public CoveringKind Kind; public float Need, Held, Radius;  // Radius = RelocationRange (the defence clause)
+    public List<int> InstanceIds = new List<int>();   // also G4's Hold mask when Kind is None for the enemy-capital push
+    public string Reason;   // null when posted; "no-capital", "no-corridor-place", "flag-off", "cic-side", "main-effort-enemy-capital"
 }
+// CoveringPostKey = Name(forward)@x,z|Name(rear)@x,z, integer coordinates, "none" for a missing post.
 internal static class CoveringForce
 {
     internal static void Corridor(CampaignSnapshot s, List<int> intoPlaceIndexes);   // band 0.5 x range, strictly between, rail >= 1
@@ -230,7 +235,7 @@ internal static class CoveringForce
 - [ ] Implement the rest; the mover's priority becomes a (role, reason) list.
 - [ ] Gates; census; commit `feat(foresight): covering force between the capitals, Redeploy role [F6]`.
 
-**Smoke rows (002/A):** `[CoveringCorridor] alliance=1 candidates=Manassas Junction:0.82:331:116:<n>;...;Fredericksburg:0.51:209:199:<n>;... forward=Manassas Junction rear=Fredericksburg`; `[CoveringForce] alliance=1 post=Manassas_Junction kind=forward|rear reason=- need=<n> held=<n> members=<unit+unit> short=<n> verdictDays=<n>`; `[CampaignMoverIssue] alliance=1 role=Redeploy reason=covering-force target=1245,-681`; `[Allocation] covering=<n> redeploy=<n>`; `[Reserves] covering=<held>/<need> vanillaDefWithheld=0`; a Union `[CoveringForce] alliance=0` row as well. **Rollback:** `Enable Covering Force = false`. **PROVE-MODE plants:** let `MassFor` take members for any target -> `MassForExcludesMembersExceptAgainstTheEnemyCapital` red; drop the AI-holder rule -> `MapGroupPlayerNeverTheOnlyHolder` red; serve `Redeploy return-home` before `MainEffort` -> `RedeployMovePriorityOrder` red.
+**Smoke rows (002/A):** `[CoveringCorridor] alliance=1 date=<d> candidates=Manassas_Junction:<kind>:0.82:331:116:<n>;...;Fredericksburg:<kind>:0.51:209:199:<n>;... forward=Manassas_Junction rear=Fredericksburg`; `[CoveringForce] alliance=1 post=Manassas_Junction kind=forward|rear reason=- need=<n> held=<n> members=<unit+unit> short=<n> verdictDays=<n>`; `[CampaignMoverIssue] alliance=1 role=Redeploy reason=covering-force target=1245,-681`; `[Allocation] covering=<n> redeploy=<n>`; `[Reserves] covering=<held>/<need> vanillaDefWithheld=0`; a Union `[CoveringForce] alliance=0` row as well. **Rollback:** `Enable Covering Force = false`. **PROVE-MODE plants:** let `MassFor` take members for any target -> `MassForExcludesMembersExceptAgainstTheEnemyCapital` red; drop the AI-holder rule -> `MapGroupPlayerNeverTheOnlyHolder` red; serve `Redeploy return-home` before `MainEffort` -> `RedeployMovePriorityOrder` red.
 
 ## F7 — Main effort commitment, sorties and return home (requirements commitment, commitment-mover, return-home)
 
@@ -266,18 +271,18 @@ internal static class CoveringForce
 **Owned files:** `Strategic/Planner/ForceAllocator.cs` (`SmallestIn`: `MassEligible`, the surplus test on the first pass, the last-body rule on the second), test `DepotBuilderRuleTests.cs`.
 
 **Steps:**
-- [ ] Tests first: `AnUnreadyFormationNeverBuilds`, `ABuilderLeavesItsSectorsHoldMet`, `TheMassGivesABuilderOnlyWhenNoSurplusExists`, `TheMassKeepsItsLastBody`, `NeitherHoldReserveNorCoveringBuilds`, `TheInvestigationsArmyOfVirginiaIsNotPicked` (fixture: the 06-23 sector with the Army of Virginia at readiness step 1).
+- [ ] Tests first: `AQuietSectorsSurplusMayBuild` (the standing-hold measure, not the hold tally, which is 0 there), `AnUnreadyFormationNeverBuilds`, `ABuilderLeavesItsSectorsHoldMet`, `TheMassGivesABuilderOnlyWhenNoSurplusExists`, `TheMassKeepsItsLastBody`, `NeitherHoldReserveNorCoveringBuilds`, `TheInvestigationsArmyOfVirginiaIsNotPicked` (fixture: the 06-23 sector with the Army of Virginia at readiness step 1).
 - [ ] Implement; gates; commit `fix(foresight): depot builders only from ready surpluses [F9]`.
 
 **Smoke rows:** `[CampaignMoverIssue] role=DepotBuilder readiness=<2 or 3>`. **Rollback:** `Enable Campaign Planner`. **PROVE-MODE plant:** drop `MassEligible` -> `AnUnreadyFormationNeverBuilds` red.
 
 ## F10 — Integration, docs, smoke
 
-- [ ] Merge F1-F9 in order into `feat/strategic-foresight`; full gates; `PlannerPatchesReadOnlyPublishedState`, `PlannerReadCensusTests`, `PipelineOrderPinned` (add the picture build and the department step to the named Plan job calls) green.
+- [ ] Merge F1-F9 in order into `feat/strategic-foresight`; full gates; `PlannerReadCensusTests` (every new member with its reader), `PlannerPatchesReadOnlyPublishedState` (its `PublishedTypes` adds `CoveringPlan`, `ReturnMove`, `DepartmentMove`), `PipelineOrderPinned` (in `ReviewPlan`: the `[Reserves]` and covering rows after the allocation row; a second ordered pin over `TheaterPlanner.Plan`'s body: `Evaluate` -> `Decide` -> `SelectMass` -> `PostFromOutside` -> `DepartmentReinforcement` -> the return moves -> `AssignPostures`) green. D11 adds no Harmony patch and no `PatchFirstFire.Mark`, so `tools/smoke-check.py`'s first-fire lists and `tools/smoke-situational.txt` need no entry.
 - [ ] Docs: spec D11 "as built" notes (deviations only); `docs/patch-catalog.md` #25 row and the planner runtime rows (picture, marks, covering, department); `docs/handoff.md`; `docs/telemetry.md` (every new row and field); `docs/bug-fixes/README.md` (`BUG-INTEL-001`); `AGENTS.md` campaign write owners (the `Redeploy` role, the covering force's defence clause) and patch hygiene (#25's observe mode).
 - [ ] Build, deploy and verify the deployed DLL (`stat` and `sha256sum` of `dist/WhiskeyRealism.dll` and the plugin copy must match) before any smoke.
 
-## Smoke checklist (in order; a fresh 002/A W&L career from 1861-06-02, the player below map level, 30 game days, `Logging Profile = TacticalTuning`)
+## Smoke checklist (in order; a fresh 002/A W&L career from 1861-06-02, the player below map level, 30 game days, `Logging Profile = FullTuning`, as the baseline: `TacticalTuning` keeps Tactical-layer rows only)
 
 1. After F1+F2: every alliance-0/1 #25 row is `filter-observed`; `[CampaignMoverIssue]` rows name unit, role and target.
 2. After F3: `[EnemyPicture] alliance=1` shows the Union's `total`; the conservation holds (test-plan count TC-PIC-CONSERVE); `[CapitalThreat] alliance=1 weighted>0 floor>=2000`. **Gate (the user's):** the integrator reports the measured `total`, the Washington anchor's share and the would-be covering need (`CoveringForce.Need` from the row's numbers) and asks `question-capital-share` before F6 merges.
