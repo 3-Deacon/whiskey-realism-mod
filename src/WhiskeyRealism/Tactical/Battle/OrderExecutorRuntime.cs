@@ -124,8 +124,14 @@ namespace WhiskeyRealism.Tactical.Battle
             executor.Crossings = Plugin.CrossingMoveGateEnabled() ? RiverCrossingGateRuntime.Instance : null;
             WaypointValidatorRuntime.TryMapSize(out float sizeX, out float sizeZ);
             executor.SetMapSize(sizeX, sizeZ);
+            executor.TaskHoldHours = TaskHoldHours();
+        }
+
+        /// <summary>The same-task hold (Plugin.BrigadeTaskHoldSeconds, real seconds at 1x) in battle hours: the executor's re-issue hold and the W&amp;L dispatch's task-hold.</summary>
+        internal static float TaskHoldHours()
+        {
             float holdSeconds = Plugin.BrigadeTaskHoldSeconds != null ? Plugin.BrigadeTaskHoldSeconds.Value : 12f;
-            executor.TaskHoldHours = TacticalBattleClock.RealSecondsAtOneXToHours(holdSeconds);
+            return TacticalBattleClock.RealSecondsAtOneXToHours(holdSeconds);
         }
 
         /// <summary>
@@ -234,13 +240,34 @@ namespace WhiskeyRealism.Tactical.Battle
                     "[OrderArbiter] first vanilla order issued channel=" + winner.Channel + " source=" + winner.Source);
             }
 
+            // A written group Move makes queued orders to the player stale: the group's own (unless this is a Maintenance move, which is no
+            // new order and whose recovery target can be a fresh assembly point), every child it moved, and every non-detached descendant
+            // group re-pathed to a new place (vanilla restamps only the ordered group's last waypoint, 92067, so a sub-group's old order
+            // would still read as pursuit). The new move's own order is queued after (StaleDispatchVoid).
+            if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner) && WlOrderFlowRuntime.HasQueuedOrders)
+            {
+                WaypointValidatorRuntime.TryMapSize(out float voidSizeX, out float voidSizeZ);
+                WlOrderFlowRuntime.VoidStaleOrders(own, view.OwnCount, groupIndex, (winner.Flags & IntentFlags.Maintenance) != 0, plan.X, plan.Z,
+                    _issued, issued, voidSizeX, voidSizeZ);
+            }
+            // The group's task, for the task-hold test of the dispatch queued below or earlier. Every channel carries the group's
+            // real task (stance and formation intents take the posture decision's), except the works hold's stance, which names
+            // HoldObjective whatever the group is doing.
+            if (executed > 0 && winner.Task != CommandTaskType.None && (winner.Flags & IntentFlags.WorksHold) == 0)
+                TacticalPlayerDispatchRuntime.NoteTask(winner.GroupId, winner.Task, nowHours);
+
             // Emit never throws (it logs its own failure once).
             if (OrderExecutor.ShouldDispatch(plan, executed))
             {
                 Regiment ancestor = BattleSnapshotBuilder.UnitAt(view, groupIndex, enemy: false);
                 if ((UnityEngine.Object)ancestor != null)
                     TacticalPlayerDispatchRuntime.Emit(ancestor, plan.DispatchType, plan.X, plan.Z, winner.Heading,
-                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task), in carrier);
+                        WlOrderTextRuntime.DestinationFor(plan.X, plan.Z, null), OrderOrigin.Executor, TacticalDispatchTypeMapper.IntentKind(winner.Task), in carrier, winner.Task);
+            }
+            else if (executed > 0 && winner.Channel == OrderChannel.Move && (winner.Flags & IntentFlags.Maintenance) != 0 && plan.Targets.PlayerShareNeedsDispatch)
+            {
+                // A recovery or a formation slot of an ancestor of the player's command: not an order for him (one bounded row).
+                WlOrderFlowRuntime.NoteDispatchSkipped(winner.GroupId, 0, TacticalPlayerDispatchRuntime.MaintenanceMove);
             }
 
             return executed;

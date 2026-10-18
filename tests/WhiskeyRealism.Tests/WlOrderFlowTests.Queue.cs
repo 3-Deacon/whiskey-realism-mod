@@ -168,6 +168,48 @@ internal static partial class WlOrderFlowTests
         AssertEqual(1, a.IssuerKey, "the original enqueue order survives the requeue");
     }
 
+    // Smoke 2026-10-17 order 6: the executor queued a type 12 for the brigade at 19:01:32, then moved the same brigade somewhere else
+    // 18-36 s later; nothing took the first order off the queue, and it reached the panel at 19:04:43. A newer executor move of a
+    // group voids that group's queued executor orders (superseded-intent), one row each.
+    private static void NewerExecutorMoveVoidsTheGroupsQueuedExecutorOrders()
+    {
+        var sink = new RecordingSink();
+        var q = new WlCourierQueue(sink);
+        Enq(q, QEntry(issuer: 1, type: 12, origin: OrderOrigin.Executor, x: 0, issuedAt: 1.0, dueAt: 9.0), out _);
+        Enq(q, QEntry(issuer: 1, type: 1, origin: OrderOrigin.Executor, x: 1000, issuedAt: 1.1, dueAt: 9.0), out _);
+        Enq(q, QEntry(issuer: 2, type: 12, origin: OrderOrigin.Executor, x: 2000, issuedAt: 1.0, dueAt: 9.0), out _);   // another group
+        Enq(q, QEntry(issuer: 1, type: 2, origin: OrderOrigin.Vanilla, x: 3000, issuedAt: 1.0, dueAt: 9.0), out _);     // vanilla's, not the executor's
+        Enq(q, QEntry(issuer: 1, type: 3, origin: OrderOrigin.P62, x: 4000, issuedAt: 1.0, dueAt: 9.0), out _);         // #62's
+        int voided = q.DiscardSupersededIntents(unitId: 101, newX: 5000f, newZ: 0f, WlCourierQueue.SupersededIntent);
+        AssertEqual(2, voided, "both executor orders of the group went");
+        AssertEqual(2, sink.Count("superseded-intent"), "one row each, with the reason");
+        AssertEqual(3, q.Count, "the other group's, vanilla's and #62's orders stay");
+        AssertFalse(q.HasPendingOrigin(OrderOrigin.Executor) && q.HasPending(1), "the group's type 1 executor order is gone");
+    }
+
+    private static void SameOrderAgainIsNotVoided()
+    {
+        // The new move's target is within 110 m of the queued order's: the same order again. Voiding it would restart its courier;
+        // the en-route test keeps the queued one and drops the repeat.
+        var sink = new RecordingSink();
+        var q = new WlCourierQueue(sink);
+        Enq(q, QEntry(issuer: 1, type: 12, origin: OrderOrigin.Executor, x: 0, issuedAt: 1.0, dueAt: 9.0), out _);
+        AssertEqual(0, q.DiscardSupersededIntents(101, 110f, 0f, WlCourierQueue.SupersededIntent), "110 m is the same place (inclusive)");
+        AssertEqual(1, q.DiscardSupersededIntents(101, 111f, 0f, WlCourierQueue.SupersededIntent), "111 m is another");
+        AssertEqual(0, q.Count, "gone");
+    }
+
+    private static void SupersedeAllocatesNothingAndKeepsTheQueueUsable()
+    {
+        var q = new WlCourierQueue(null);
+        for (int i = 0; i < 6; i++) Enq(q, QEntry(issuer: 1, type: i, origin: OrderOrigin.Executor, x: i * 1000f, issuedAt: 1.0 + i, dueAt: 50.0, z: 0f), out _);
+        long mark = TestFixtures.BeginAllocationWindow();
+        q.DiscardSupersededIntents(101, 99999f, 0f, WlCourierQueue.SupersededIntent);
+        AssertEqual(0L, TestFixtures.AllocatedSince(mark), "the discard allocates nothing");
+        AssertEqual(0, q.Count, "all voided");
+        AssertTrue(Enq(q, QEntry(issuer: 1, type: 1, origin: OrderOrigin.Executor, x: 0, issuedAt: 9.0, dueAt: 9.0), out _), "the queue takes a new order afterwards");
+    }
+
     private static void OverflowDiscardsOldestAndReports()
     {
         var sink = new RecordingSink();

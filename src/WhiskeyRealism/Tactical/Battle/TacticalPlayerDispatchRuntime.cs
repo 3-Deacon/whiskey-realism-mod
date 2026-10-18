@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.PlayerOrders;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
@@ -19,14 +20,32 @@ namespace WhiskeyRealism.Tactical.Battle
     // #62's accept/attempt bookkeeping follows the delivery (OnP62Outcome), not the enqueue.
     internal static class TacticalPlayerDispatchRuntime
     {
+        // Reasons of a dispatch that is not sent (a `drop` row of the order flow).
+        internal const string RepeatTarget = "repeat-target";
+        internal const string MaintenanceMove = "maintenance";
+
         internal static readonly PlayerOrderDedupeState Dedupe = new PlayerOrderDedupeState();
         // #62's view of the game (the active order, its provenance, the candidate it composes); the
         // delivery callback below uses the same adapter to read what vanilla stored.
         internal static readonly PlayerOrderRuntimeAdapter Adapter = new PlayerOrderRuntimeAdapter(Dedupe);
+        // The last target dispatched per group and the task each group has held since (PlayerDispatchMemory).
+        internal static readonly PlayerDispatchMemory Memory = new PlayerDispatchMemory();
 
         static TacticalPlayerDispatchRuntime()
         {
-            BattleScope.Register("tactical-player-dispatch", () => Dedupe.ClearForBattleBoundary(string.Empty));
+            BattleScope.Register("tactical-player-dispatch", () => { Dedupe.ClearForBattleBoundary(string.Empty); Memory.Clear(); });
+        }
+
+        // An executed write of the group: its task, for the task-hold test of a queued dispatch.
+        internal static void NoteTask(int groupId, CommandTaskType task, double nowHours)
+        {
+            Memory.NoteTask(groupId, (int)task, nowHours);
+        }
+
+        // WlOrderFlow.TaskStillHolds: the ordered group is still under the task the order was made for.
+        internal static bool TaskHolds(int groupId, int task, out double heldAtHours)
+        {
+            return Memory.TaskHolds(groupId, task, OrderExecutorRuntime.TaskHoldHours(), out heldAtHours);
         }
 
         // #62's order for the player: `unit` is the player's parent unit (never his own command, which
@@ -80,7 +99,7 @@ namespace WhiskeyRealism.Tactical.Battle
         // accompanies (the executor's Move through SetWaypoint's order queue); with one, the order is shown
         // one leg after that move is carried out.
         internal static bool Emit(Regiment ancestorOrPlayerCommand, int vanillaType, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind,
-            in WlMoveCarrier carrier)
+            in WlMoveCarrier carrier, CommandTaskType task)
         {
             using (TelemetryPerf.Scope("tactical.dispatch.emit", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
@@ -88,7 +107,17 @@ namespace WhiskeyRealism.Tactical.Battle
                 {
                     if ((UnityEngine.Object)ancestorOrPlayerCommand == null || vanillaType < 0
                         || !TacticalWriteGuard.ModeAllowsWrites()) return false;
-                    return WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin, kind, in carrier);
+                    int groupId = ancestorOrPlayerCommand.gameObject.GetInstanceID();
+                    // The same order again (a target within 110 m of the group's last dispatch, whatever its type): the player
+                    // was told. A dispatch that never reached the panel is forgotten (WlOrderFlowRuntime.BattleHost.Row).
+                    if (Memory.IsRepeat(groupId, x, z))
+                    {
+                        WlOrderFlowRuntime.NoteDispatchSkipped(groupId, vanillaType, RepeatTarget);
+                        return false;
+                    }
+                    bool queued = WlOrderFlowRuntime.EnqueueWhiskey(ancestorOrPlayerCommand, vanillaType, x, z, rotation, destinationName, origin, kind, in carrier, (int)task);
+                    if (queued) Memory.RecordDispatch(groupId, x, z);
+                    return queued;
                 }
                 catch (Exception ex)
                 {

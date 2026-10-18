@@ -59,6 +59,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("careerKey")] public string CareerKey;
         [JsonProperty("reliability")] public float Reliability;
         [JsonProperty("samples")] public int Samples;
+        // The measure the estimate was taken with (PlayerComplianceLedger.MeasureVersion); absent (0) in a sidecar written
+        // before the 2026-10-17 fix, whose estimate is not adopted.
+        [JsonProperty("measure")] public int Measure;
     }
 
     internal class FactionDto

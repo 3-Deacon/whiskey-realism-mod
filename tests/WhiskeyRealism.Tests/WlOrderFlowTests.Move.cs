@@ -276,6 +276,21 @@ internal static partial class WlOrderFlowTests
         AssertTrue(move >= 0 && dispatch > move, "Emit comes after IssueMove in Execute");
     }
 
+    // A written group Move voids the queued orders it makes stale BEFORE the new order is queued: voiding after Emit would discard the
+    // order the new move just queued.
+    private static void ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne()
+    {
+        string body = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs"), "internal static int Execute(");
+        int voidAt = body.IndexOf("WlOrderFlowRuntime.VoidStaleOrders(own, view.OwnCount, groupIndex, (winner.Flags & IntentFlags.Maintenance) != 0, plan.X, plan.Z,", StringComparison.Ordinal);
+        int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
+        AssertTrue(voidAt > 0 && emit > voidAt, "the stale orders are voided before Emit queues the new one");
+        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\) && WlOrderFlowRuntime\.HasQueuedOrders\)"),
+            "every executed Move that is not a deployment placement voids, Maintenance included (the flag only spares the ordered group's own order: StaleDispatchVoid)");
+        string flow = Code(FlowRuntime);
+        string voidBody = BodyOf(flow, "internal static void VoidStaleOrders(");
+        AssertTrue(voidBody.Contains("catch (Exception ex)") && voidBody.Contains("OnceLog.Warning(\"wl-order:supersede-intent\""), "never throws, one static warning key");
+    }
+
     // A fan-out (the player's command is not detached from the brigade): the planner orders the brigade's
     // children, the brigade itself has no queue entry, and the dispatch still goes out for the brigade. The
     // children's moves ride the brigade's own queue; the gate asks about the carrier child, not the brigade.
@@ -360,26 +375,60 @@ internal static partial class WlOrderFlowTests
     // not be "lost": a lost move was never made, an arrived or fighting unit made it.
     private static void ArrivalInsideTheGapIsCarriedOutNotLost()
     {
-        AssertTrue(WlMoveState.CarriedOutAfterGone(pathHeld: false, distanceToTargetMeters: 20f, inContact: false), "arrived within 20 m of its target");
-        AssertTrue(WlMoveState.CarriedOutAfterGone(false, WlMoveState.ArrivalMeters, false), "exactly at the arrival distance");
-        AssertEqual(MoveState.Executed, WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(false, 35f, false)), "the player is told");
-        AssertFalse(WlMoveState.CarriedOutAfterGone(false, WlMoveState.ArrivalMeters + 1f, false), "just outside it is not an arrival");
+        AssertEqual(MoveBasis.Arrived, WlMoveState.BasisAfterGone(pathHeld: false, pathEndMeters: 0f, distanceToTargetMeters: 20f, inContact: false), "arrived within 20 m of its target");
+        AssertEqual(MoveBasis.Arrived, WlMoveState.BasisAfterGone(false, 0f, WlMoveState.ArrivalMeters, false), "exactly at the arrival distance");
+        AssertEqual(MoveState.Executed, WlMoveState.Classify(false, false, WlMoveState.BasisAfterGone(false, 0f, 35f, false) != MoveBasis.None), "the player is told");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(false, 0f, WlMoveState.ArrivalMeters + 1f, false), "just outside it is not an arrival");
         AssertNear(WhiskeyRealism.Tactical.Battle.OrderArbiter.DedupeMeters, WlMoveState.ArrivalMeters, 1e-4f, "the arrival distance is the executor's own: a unit within it counts as at its target");
     }
 
-    private static void ContactStopIsCarriedOutNotLost()
+    // Smoke 2026-10-17 (session 20261017-180916), order #6: the fall-back (type 12) the executor dispatched at 19:01:32 for a
+    // brigade target about 2 km to the rear. The brigade moved about 45 m, stopped at (1232,-799) in contact and stayed.
+    // The old test (any path, or contact, or arrival) released the order on a path that was a re-lay and on a contact that
+    // was 2 km short of the target.
+    private static void ContactFarFromTheTargetIsLostSmokeOrder6()
     {
-        // A unit that met the enemy halted (CheckEnemyContact StopRegiment, 117380) far from its target: it
-        // executed the move up to the fight.
-        AssertTrue(WlMoveState.CarriedOutAfterGone(pathHeld: false, distanceToTargetMeters: 600f, inContact: true), "stopped in contact, 600 m short");
-        AssertEqual(MoveState.Executed, WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(false, 600f, true)), "the player is told");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(pathHeld: false, pathEndMeters: 0f, distanceToTargetMeters: 2000f, inContact: true),
+            "stopped in contact 2 km short of the target: the move was not carried out");
+        AssertEqual(MoveState.Lost, WlMoveState.Classify(false, false, WlMoveState.BasisAfterGone(false, 0f, 2000f, true) != MoveBasis.None), "the order is discarded as move-lost");
     }
 
-    private static void RealLossIsStillLost()
+    private static void ContactNearTheTargetIsCarriedOut()
     {
-        AssertFalse(WlMoveState.CarriedOutAfterGone(pathHeld: false, distanceToTargetMeters: 600f, inContact: false), "no path, far from the target, no contact");
-        AssertEqual(MoveState.Lost, WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(false, 600f, false)), "the order is discarded");
-        AssertTrue(WlMoveState.CarriedOutAfterGone(pathHeld: true, distanceToTargetMeters: 600f, inContact: false), "a unit still marching on its path made the move");
+        // A unit that met the enemy near the objective halted (CheckEnemyContact StopRegiment, 117380): it executed the move up to the fight.
+        AssertEqual(MoveBasis.Contact, WlMoveState.BasisAfterGone(false, 0f, WlMoveState.ContactNearMeters, true), "in contact exactly at the named distance");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(false, 0f, WlMoveState.ContactNearMeters + 1f, true), "one metre farther is not near");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(false, 0f, 250f, false), "near the target but not in contact and no path: a loss, as before");
+        AssertTrue(WlMoveState.ContactNearMeters > WlMoveState.ArrivalMeters, "the contact distance is wider than arrival, or it would add nothing");
+    }
+
+    private static void PathCountsOnlyWhenItEndsAtTheTarget()
+    {
+        AssertEqual(MoveBasis.Path, WlMoveState.BasisAfterGone(pathHeld: true, pathEndMeters: 25f, distanceToTargetMeters: 900f, inContact: false), "marching on a path that ends at the target");
+        AssertEqual(MoveBasis.Path, WlMoveState.BasisAfterGone(true, WlMoveState.ArrivalMeters, 900f, false), "a path ending exactly at the arrival distance");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(true, WlMoveState.ArrivalMeters + 1f, 900f, false),
+            "a path that ends 61 m from the target is another move (a formation re-lay or a later retarget)");
+        AssertEqual(MoveBasis.None, WlMoveState.BasisAfterGone(pathHeld: false, pathEndMeters: 5f, distanceToTargetMeters: 900f, inContact: false),
+            "a path end with no path held says nothing");
+    }
+
+    private static void BasisPrecedenceIsArrivedThenPathThenContact()
+    {
+        AssertEqual(MoveBasis.Arrived, WlMoveState.BasisAfterGone(true, 10f, 20f, true), "standing at the target outranks the rest");
+        AssertEqual(MoveBasis.Path, WlMoveState.BasisAfterGone(true, 10f, 200f, true), "a path to the target outranks contact");
+        AssertEqual(MoveBasis.Contact, WlMoveState.BasisAfterGone(true, 900f, 200f, true), "contact near the target counts when the path went elsewhere");
+    }
+
+    private static void GateVerdictIsOnTheDeliveryRow()
+    {
+        var host = new FakeHost { Now = 10.5, Slot = null, Move = MoveState.Executed, Basis = MoveBasis.Contact };
+        var flow = NewFlow(host);
+        PutMoveOrder(flow, issued: 10.0);
+        flow.RunPass();
+        host.Now = 10.5 + Leg;
+        flow.RunPass();
+        AssertEqual("1:deliver:accepted", host.Rows[host.Rows.Count - 1], "delivered after the leg");
+        AssertEqual(MoveBasis.Contact, host.GateOnLastRow, "the gate's verdict rides on the entry the row is written for");
     }
 
     // The player always ends up with the latest order the chain gave (the held order is superseded, not lost).
@@ -530,20 +579,21 @@ internal static partial class WlOrderFlowTests
         AssertTrue(loop >= 0 && issue > loop && note > issue && emit > note, "each moved target's queue entry is noted after its IssueMove, inside the target loop, before Emit");
         AssertTrue(Regex.IsMatch(body, @"if \(unit\.regimentpaths > 0 && WlMoveQueue\.TryPending\(unit,\s*out float queuedAt,\s*out float stamp,\s*out int orderType\)\)\s*carrier\.Consider\(own\[targetIndex\]\.InstanceId,\s*queuedAt,\s*stamp,\s*orderType,\s*x,\s*z\);"),
             "the carrier candidate is the issued target (a child in a fan-out) that holds a path, with its pending entry's processing time, stamp and ordertype and the target it was given");
-        AssertTrue(Regex.IsMatch(body, @"IntentKind\(winner\.Task\),\s*in carrier\)"), "and Emit receives it");
+        AssertTrue(Regex.IsMatch(body, @"IntentKind\(winner\.Task\),\s*in carrier,\s*winner\.Task\)"), "and Emit receives it, with the group's task");
         string code = Code(FlowRuntime);
         AssertTrue(Regex.IsMatch(BodyOf(code, "private static CaptureVerdict Route("), @"if\s*\(call\.Carrier\.Has && CouriersOn\(\)\)\s*\{\s*entry\.AwaitsMove = true;\s*entry\.Carrier = call\.Carrier;\s*\}"),
             "Route arms an entry from the call's carrier and only while couriers are on");
-        AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "no other origin is armed: vanilla's own orders are timed as before");
+        AssertFalse(BodyOf(code, "private static bool TryMakeEntry(").Contains("AwaitsMove"), "TryMakeEntry arms nothing: the executor carrier and the vanilla pursuit are armed in Route");
         string moveOf = BodyOf(code, "public MoveState MoveOf(");
-        AssertTrue(moveOf.Contains("Regiment carrier = ResolveUnit(e.Carrier.UnitId);") && moveOf.Contains("WlMoveQueue.StateOf(carrier, in e.Carrier)"),
+        AssertTrue(moveOf.Contains("Regiment carrier = ResolveUnit(e.Carrier.UnitId);") && moveOf.Contains("WlMoveQueue.StateOf(carrier, in e.Carrier, out basis)"),
             "the host asks about the carrier unit (not the ordered unit) and its entry");
         string queue = Code("src/WhiskeyRealism/Tactical/PlayerOrders/WlMoveQueue.cs");
         AssertTrue(queue.Contains("WlMoveState.Carries(entry.ordertype, entry.lastupdate, in carrier)"), "only an entry that carries the order counts, matched by ordertype and creation stamp");
         AssertTrue(queue.Contains("line.type == 1 && line.lineactive") && queue.Contains("line.targetunit") && queue.Contains("line.courierref == null"),
             "lost is vanilla's own test (125282-125286: an active mounted line without a courier) on the entry's primary line");
-        AssertTrue(queue.Contains("WlMoveState.CarriedOutAfterGone(unit.regimentpaths > 0, distance, unit.combatstatussubordinates > 0f)") && queue.Contains("carrier.X") && queue.Contains("carrier.Z"),
-            "an entry that is gone is told lost from carried out by the unit's path, its distance to the target it was given and its contact");
+        AssertTrue(queue.Contains("WlMoveState.BasisAfterGone(IsMoving(unit), pathEnd, distance, unit.combatstatussubordinates > 0f, carrier.SlackMeters)") && queue.Contains("carrier.X") && queue.Contains("carrier.Z"),
+            "an entry that is gone is told lost from carried out by the unit's path end, its distance to the target it was given and its contact");
+        AssertTrue(queue.Contains("unit.lastsetwaypointposition"), "the held path's end is the unit's last set waypoint, which vanilla stamps on every group move (92067)");
         AssertTrue(queue.Contains("if (queued) return WlMoveState.Classify(true, lost, false);"), "a queued entry is judged by its courier line alone: the path says nothing while the move waits");
         AssertTrue(queue.Contains("if (latest == null || entry.processingtime > latest.processingtime) latest = entry;"), "the carrier entry of a unit is its latest pending move");
         AssertTrue(queue.Contains("processingTime = entry.processingtime;") && queue.Contains("stamp = entry.lastupdate;") && queue.Contains("orderType = entry.ordertype;"), "the carrier records the entry's processing time and its creation stamp");

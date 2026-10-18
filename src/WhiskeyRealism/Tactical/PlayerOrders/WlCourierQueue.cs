@@ -34,6 +34,22 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public bool AwaitsMove;
         public bool MoveHeld;
         public WlMoveCarrier Carrier;
+        // Why the move gate released the order (written on the flow row); None until the gate looked.
+        public MoveBasis Gate;
+        // An executor dispatch: the group's CommandTaskType (as an int; 0 = none) the order was made for. Delivered
+        // only while the group is still under it (WlOrderFlow.TaskStillHolds).
+        public int DispatchTask;
+        // A vanilla order that describes a move its caller has just set the called unit on (types 0, 2, 3 and 4,
+        // WlMoveState.VanillaFollowsAWaypoint): Carrier is that unit, its OrderType -1 (no queue entry is waited
+        // for: those SetWaypoint calls pass useorderdelay false, or are queued behind the order's own delay) and
+        // X/Z the waypoint it was sent to. At delivery the order is discarded (chain-abandoned) when the unit no
+        // longer pursues that point.
+        public bool Pursuit;
+        // For the flow row: the re-admit policy's reason at capture (a static literal), and whether the player's command
+        // was detached from its parent group when the entry was made (vanilla detaches it from the AI engine at
+        // deployment, 85321-85323: the brigade then leaves without him and the order tells him to follow).
+        public string AdmitReason;
+        public bool PlayerDetached;
         public double LegHours;
         // Campaign entries (CampaignCall): the issuing unit by GameObject name and its commander id (an
         // instance id does not survive a save), and the commander shown as issuer.
@@ -63,8 +79,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public const string EnRoute = "en-route";
         public const string Overflow = "courier-overflow";
         public const string Superseded = "superseded";
+        // The executor gave the same group a newer move: its queued executor orders describe a move that was replaced.
+        public const string SupersededIntent = "superseded-intent";
         // Vanilla's own order dedupe radius (8643); the en-route and campaign target radius.
         public const float SamePointMeters = 110f;
+        // The distance from an armed vanilla order's point inside which the pursuit check (WlMoveState.BasisAfterGone with the callers' slack)
+        // still calls a unit bound there: arrival 60 m plus VanillaWaypointSlackMeters 220 m. A newer target farther than this makes the order stale.
+        public const float ArmedVanillaMeters = WlMoveState.ArrivalMeters + WlMoveState.VanillaWaypointSlackMeters;
         private const int Retreat = 15;
         private const int HistoryCapacity = 16;
 
@@ -129,6 +150,36 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public void Discard(in CourierEntry e, string reason)
         {
             _sink?.Discarded(in e, reason);
+        }
+
+        // A newer executor move of the group `unitId` voids that group's queued executor orders (WlOrderFlow:
+        // the order still waits for a courier or for a move that has since been replaced), unless the order is
+        // the same place again (within SamePointMeters of the new target, inclusive): that one keeps its place,
+        // and the en-route test drops the repeat. Each is reported through the sink. Returns how many went.
+        // `includeArmedVanilla`: a vanilla order armed with its called unit (Pursuit) goes too; used for descendants of a re-pathed group,
+        // whose last waypoint vanilla does not restamp (StaleDispatchVoid), so its pursuit reading cannot be trusted. An executor order is the
+        // same place within 110 m; an armed vanilla order within the distance its own pursuit check accepts (ArmedVanillaMeters), so the two
+        // tests agree: the check calls a unit within that distance of the order's point still bound there.
+        public int DiscardSupersededIntents(int unitId, float newX, float newZ, string reason, bool includeArmedVanilla = false)
+        {
+            int voided = 0;
+            int i = 0;
+            while (i < _count)
+            {
+                bool armedVanilla = includeArmedVanilla && _pending[i].Pursuit && _pending[i].Origin != OrderOrigin.Executor;
+                bool kind = _pending[i].Origin == OrderOrigin.Executor || armedVanilla;
+                if (!kind || _pending[i].UnitId != unitId
+                    || Within(_pending[i].X, _pending[i].Z, newX, newZ, armedVanilla ? ArmedVanillaMeters : SamePointMeters))
+                {
+                    i++;
+                    continue;
+                }
+                CourierEntry gone = _pending[i];
+                RemoveAt(i);
+                _sink?.Discarded(in gone, reason);
+                voided++;
+            }
+            return voided;
         }
 
         // True when an entry from this origin is waiting.
@@ -271,9 +322,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Flat XZ, 110 inclusive (D8 (b), D11).
         private static bool Near(float ax, float az, float bx, float bz)
         {
+            return Within(ax, az, bx, bz, SamePointMeters);
+        }
+
+        private static bool Within(float ax, float az, float bx, float bz, float meters)
+        {
             float dx = ax - bx;
             float dz = az - bz;
-            return dx * dx + dz * dz <= SamePointMeters * SamePointMeters;
+            return dx * dx + dz * dz <= meters * meters;
         }
 
         // The queue is full: drops the entry with the earliest issue time (ties by enqueue order),
