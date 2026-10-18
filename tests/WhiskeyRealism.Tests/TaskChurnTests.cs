@@ -36,6 +36,8 @@ internal static class TaskChurnTests
             ("task churn: the stay contest answers once per macro cycle and is off with the objective doctrine", TheStayContestIsBounded),
             ("task churn: a move is foreign when it is not the executor's last move for a group that is not in a fight", ForeignMoveTruthTable),
             ("task churn: the posture pipeline stops reading a foreign move as already correct", ThePipelineReadsForeignMoves),
+            ("task churn: a child on its parent's slot follows the parent's march, a waypoint of its own is contested", AChildOnItsParentsSlotFollowsIt),
+            ("task churn: smoke 2026-10-18 replay, the 4th Brigade is contested at the first stay row, then every macro cycle while it walks vanilla's march", TheSmokeReplay),
             ("task churn: a group that saw the enemy within the horizon is still in contact", AGroupKeepsItsContact),
             ("task churn: the reconnaissance rule reads the group's remembered contact, not the tick's sight", ReconReadsRememberedContact),
         });
@@ -345,7 +347,8 @@ internal static class TaskChurnTests
         public void Submit(in BattleOrderIntent intent) => Intents.Add(intent);
     }
 
-    // A due chain's own group (61) at (90,90) whose head objective stands at (500,500), walking vanilla's move to (505,495); Whiskey issued it nothing.
+    // A group (61) at (90,90) on `task`, walking a move that is not Whiskey's own (the caller's verdict, MoveContest.IsForeignStayMove and not a parent's
+    // march) to (505,495). It is a due chain's own group (WithChain), but nothing below needs it to be.
     private static ContestTurnFacts StayFacts(CommandTaskType task, long tick, double now, bool stayPoint = false)
     {
         return new ContestTurnFacts
@@ -353,7 +356,7 @@ internal static class TaskChurnTests
             Alliance = 0, GroupId = 61, Tick = tick, Task = task, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor,
             HasPath = true, HasLastIssued = false, NowHours = now, PlanStartHours = now - 2.0,
             X = 90f, Z = 90f, WaypointX = 505f, WaypointZ = 495f,
-            StayTask = MoveContest.IsStayTask(task), HasStayPoint = stayPoint, StayX = 300f, StayZ = 300f,
+            ForeignStayMove = true, HasStayPoint = stayPoint, StayX = 300f, StayZ = 300f,
         };
     }
 
@@ -416,31 +419,31 @@ internal static class TaskChurnTests
                 return ContestTurn.Run(in f, sink);
             }
             ContestTurnFacts own = StayFacts(CommandTaskType.Screen, 0, 0.0, stayPoint: true);
-            own.HasLastIssued = true; own.IssuedX = 505f; own.IssuedZ = 495f; own.IssuedHours = 9.0;
-            AssertEqual(0, Answered(own), "the move Whiskey last issued is Whiskey's own, even when it ends at the head");
+            own.ForeignStayMove = false;
+            AssertEqual(0, Answered(own), "a move that is Whiskey's own, a fight, vanilla's assault or a parent's march is the caller's verdict: no foreign stay move, no contest");
 
             ContestTurnFacts fight = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
             fight.CloseEngaged = true;
-            AssertEqual(0, Answered(fight), "a group in a fight is left to vanilla's reactions");
-
-            ContestTurnFacts elsewhere = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
-            elsewhere.WaypointX = 900f; elsewhere.WaypointZ = 900f;
-            AssertEqual(0, Answered(elsewhere), "a move that does not end at the chain's head is not the chain's");
+            AssertEqual(0, Answered(fight), "a group in close contact is left to vanilla's reactions whatever the verdict");
 
             ContestTurnFacts recon = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
             recon.Recon = true;
             AssertEqual(0, Answered(recon), "a recon group is not contested");
-
-            ContestTurnFacts stranger = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
-            stranger.GroupId = 77;
-            AssertEqual(0, Answered(stranger), "a group that is not a due chain's own is not contested");
 
             ContestTurnFacts idle = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
             idle.HasPath = false;
             AssertEqual(0, Answered(idle), "a group that does not walk has nothing to contest");
 
             ContestTurnFacts attack = StayFacts(CommandTaskType.AttackObjective, 0, 0.0);
-            AssertEqual(0, Answered(attack), "an attack with no Whiskey move recorded is not a stay (the BC14O re-issue needs the move it re-issues)");
+            attack.ForeignStayMove = false;
+            AssertEqual(0, Answered(attack), "an attack is no stay task: the caller gives no foreign stay move, and the BC14O re-issue needs the move it re-issues");
+
+            // The widening (coordinator, after smoke16): the contest is not the due chain's. A group that is not on the table, and a move that does not end
+            // at the chain's head, are contested as well.
+            ContestTurnFacts stranger = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
+            stranger.GroupId = 77;
+            stranger.WaypointX = 900f; stranger.WaypointZ = 900f;
+            AssertEqual(1, Answered(stranger), "a lone brigade off the chain table, walking a move that ends anywhere, is contested");
         });
     }
 
@@ -485,17 +488,76 @@ internal static class TaskChurnTests
     {
         string text = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         string run = FlankResponseTests.Between(text, "internal static bool Run(", "// #61 CanBypassStaleQueuedOrder");
-        FlankResponseTests.AssertPinned(run, "if (recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentWalks(s, t, i) && IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical))",
-            "a foreign move of a stay task, behind the BC14O flag, not a parent's march");
+        FlankResponseTests.AssertPinned(run, "bool foreignStay = recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentMarches(s, i) && IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical);",
+            "a foreign move of a stay task, behind the BC14O flag, not a recon or exploit group, not a parent's march");
         FlankResponseTests.AssertPinned(run, "physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);",
             "is no active move for the posture decision");
+        FlankResponseTests.AssertPinned(run, "closeEngaged, foreignStay, state.Task, army, observed, priority, source, sink);",
+            "and the contest turn is given the verdict and the move as observed");
         AssertTrue(run.IndexOf("IsForeignStayMove(s, rec", StringComparison.Ordinal) < run.IndexOf("TacticalIdleClassification idle", StringComparison.Ordinal),
             "before the idle classification and the eligibility read the move");
         FlankResponseTests.AssertPinned(text, "bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out issuedHours);",
             "the executor's last outcome for the group is what the move is compared with");
-        FlankResponseTests.AssertPinned(text, "if (PostureSense.ActiveMove(s.Own[a], t.Moving[a])) return true;", "a group that walks because its parent does is the parent's");
-        FlankResponseTests.AssertPinned(text, "StayTask = MoveContest.IsStayTask(task),", "the contest turn is told the task keeps the group where it is");
+        FlankResponseTests.AssertPinned(text, "if (MoveContest.FollowsParentMarch(hasPath, own, rec.LastWaypointX, rec.LastWaypointZ, parent.LastWaypointX, parent.LastWaypointZ)) return true;",
+            "a group on the slot of a parent's own march is the parent's");
+        FlankResponseTests.AssertPinned(text, "bool hasPath = parent.RegimentPaths > 0 || parent.MovementMode > 0;", "the parent walks by a path of its own, not by the moving children it is counted from");
+        FlankResponseTests.AssertPinned(text, "ForeignStayMove = foreignStay,", "the contest turn is told the verdict");
         FlankResponseTests.AssertPinned(text, "HasStayPoint = hasOrder && order.PrimaryTarget.HasValue && (task == CommandTaskType.FormUp || task == CommandTaskType.Screen),",
             "a form-up and a screen carry their ledger point, a hold none");
+    }
+
+    private static void AChildOnItsParentsSlotFollowsIt()
+    {
+        AssertTrue(MoveContest.FollowsParentMarch(true, true, 1000f, -1000f, 1100f, -1000f), "a child 100 m from the parent's waypoint, the parent on a move of Whiskey's own, follows it");
+        AssertFalse(MoveContest.FollowsParentMarch(true, true, 1000f, -1000f, 1300f, -1000f), "300 m off is an order of its own");
+        AssertFalse(MoveContest.FollowsParentMarch(true, false, 1000f, -1000f, 1100f, -1000f), "a parent that walks a foreign move is not followed: the child is contested for its own waypoint");
+        AssertFalse(MoveContest.FollowsParentMarch(false, true, 1000f, -1000f, 1100f, -1000f), "a parent with no path leads nobody");
+    }
+
+    // Smoke 2026-10-18, the 4th Brigade (#-927726): its rows from the tactical sidecar, the doctrine hour interpolated from the TacticalCrossingWatch rows
+    // (the sidecar has wall-clock times only). The brigade walked vanilla's move to (677.5,-1417.5), 1,100 m, from 05:06:18.9 with no enemy in sight (the
+    // matrix 'enemy' 0, stance 3); its posture rows carry the tasks below. Whiskey's last move for it is not in the sidecar: it is taken as the FixEnemy
+    // point of 05:06:18.276, (1018,-1240.5); the 1st Division's last move is taken as its own waypoint, as its rows show it set by Whiskey's posture.
+    // The group is NOT on the due chain table here: the replay shows the coverage does not depend on it.
+    private static void TheSmokeReplay()
+    {
+        //          label,       hours,    task,                             x,       z,       wpx,    wpz,     walks, enemy, parentWalks, parentWpX, parentWpZ
+        var rows = new (string, double, CommandTaskType, float, float, float, float, bool, float, bool, float, float)[]
+        {
+            ("05:06:18.906", 14.65896, CommandTaskType.FixEnemy,        1147.5f, -337.5f, 677.5f, -1417.5f, true,  0f, false, 758f,  -1234.5f),
+            ("05:06:19.379", 14.66467, CommandTaskType.Screen,          1147.5f, -337.5f, 677.5f, -1417.5f, true,  0f, false, 758f,  -1234.5f),
+            ("05:06:21.688", 14.73201, CommandTaskType.Screen,          1145f,   -352f,   677.5f, -1417.5f, true,  0f, false, 758f,  -1234.5f),
+            ("05:06:25.571", 14.85997, CommandTaskType.Probe,           1145f,   -352f,   1125.5f, -377.5f, false, 0f, true,  758f,  -1234.5f),
+            ("05:06:38.671", 15.07855, CommandTaskType.FallBackToLine,  1145f,   -352f,   677.5f, -1417.5f, true,  0f, true,  758f,  -1234.5f),
+            ("05:06:42.318", 15.11069, CommandTaskType.FormUp,          1097.5f, -416f,   677.5f, -1417.5f, true,  0f, true,  1132f, -327f),
+            ("05:07:13.906", 15.30516, CommandTaskType.FormUp,          1040.5f, -573.5f, 677.5f, -1417.5f, true,  0f, true,  1132f, -327f),
+            ("05:07:38.609", 15.56489, CommandTaskType.Probe,           1052.5f, -573f,   677.5f, -1417.5f, false, 0f, true,  759.5f, -1235f),
+        };
+        // The stay contest answers the first Screen row, the next macro cycle's Screen row, and the two FormUp rows; the FixEnemy, Probe and FallBackToLine
+        // rows are no stay tasks (those tasks go somewhere). The group is not on the due chain table: the shipped session's 45 TacticalMainEffort rows of side 0 all
+        // read vanillaChainContest 0 while the brigade walked 11 minutes, so the existing chain contest never answered it. (On the table the BC14O re-issue would
+        // also answer the FixEnemy and FallBackToLine rows, a Whiskey move existing for them, and the rate limit would shift the stay answers.)
+        var expected = new[] { false, true, true, false, false, true, true, false };
+        WithChain(() =>
+        {
+            DueChainTable due = DueChainTable.ForAlliance(0);
+            due.Clear();
+            for (int k = 0; k < rows.Length; k++)
+            {
+                var r = rows[k];
+                bool foreign = MoveContest.IsForeignStayMove(r.Item8, r.Item9 > 0f, 3, r.Item3, true, r.Item6, r.Item7, 1018f, -1240.5f)
+                    && !MoveContest.FollowsParentMarch(r.Item10, true, r.Item6, r.Item7, r.Item11, r.Item12);
+                var sink = new Sink();
+                var facts = new ContestTurnFacts
+                {
+                    Alliance = 0, GroupId = 927726, Tick = k + 1, Task = r.Item3, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor,
+                    HasPath = r.Item8, HasLastIssued = true, IssuedX = 1018f, IssuedZ = -1240.5f, IssuedHours = 14.6514, PlanStartHours = 12.0, NowHours = r.Item2,
+                    X = r.Item4, Z = r.Item5, WaypointX = r.Item6, WaypointZ = r.Item7, ForeignStayMove = foreign,
+                };
+                int n = ContestTurn.Run(in facts, sink);
+                AssertEqual(expected[k] ? 1 : 0, n, "row " + r.Item1 + " (" + r.Item3 + ", the group is off the chain table)");
+                if (n > 0) AssertTrue((sink.Intents[0].Flags & IntentFlags.Contest) != 0, "contest-flagged at " + r.Item1);
+            }
+        });
     }
 }

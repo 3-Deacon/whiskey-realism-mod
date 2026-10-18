@@ -685,8 +685,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // A move that is not Whiskey's own is no proof the group does its task (smoke 2026-10-18: a brigade on FormUp, Screen and Probe tasks walked
             // 580 m to the vanilla objective, every row "already-correct"). The executor's last move is the group's own; a group that walks because its
             // parent does, a group in a fight and a group in vanilla's assault are left to what moves them.
-            if (recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentWalks(s, t, i) &&
-                IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical))
+            CommandPhysicalState observed = physical;
+            bool foreignStay = recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentMarches(s, i) &&
+                IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical);
+            if (foreignStay)
             {
                 physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);
             }
@@ -753,7 +755,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC14O: the same turn answers vanilla's chain move against a move Whiskey gave a group under the current plan (a re-issue, never in a hold).
             if (recordTick && (Plugin.EnemyWorksDoctrineEnabled() || Plugin.ObjectiveDoctrineEnabled()))
             {
-                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, closeEngaged, state.Task, army, physical, priority, source, sink);
+                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, closeEngaged, foreignStay, state.Task, army, observed, priority, source, sink);
                 if (contested > 0)
                 {
                     // Like every early exit, the group's posture is recorded for the producers that read it this tick (recon's ledger-task test, the
@@ -955,19 +957,30 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, hasIssued, rec.LastWaypointX, rec.LastWaypointZ, issuedX, issuedZ);
         }
 
-        // An ancestor group is itself walking: the group walks because its parent's order re-lays it, and its own task is not what moves it.
-        private static bool ParentWalks(BattleSnapshot s, PostureTick.State t, int i)
+        // The group walks its parent's march (MoveContest.FollowsParentMarch): an ancestor has a path of its own that is a move Whiskey issued it and the
+        // group's waypoint lies on the slot of it. The parent's own order is not what the group is contested for; a waypoint of the group's own is.
+        private static bool ParentMarches(BattleSnapshot s, int i)
         {
-            int a = s.Own[i].ParentIndex;
+            OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
+            ref UnitRecord rec = ref s.Own[i];
+            int a = rec.ParentIndex;
             for (int hops = 0; a >= 0 && a < s.OwnCount && hops < 4; hops++, a = s.Own[a].ParentIndex)
-                if (PostureSense.ActiveMove(s.Own[a], t.Moving[a])) return true;
+            {
+                ref UnitRecord parent = ref s.Own[a];
+                bool hasPath = parent.RegimentPaths > 0 || parent.MovementMode > 0;
+                float issuedX = 0f, issuedZ = 0f;
+                double issuedHours = 0.0;
+                bool hasIssued = executor != null && executor.LastIssuedMove(parent.InstanceId, out issuedX, out issuedZ, out issuedHours);
+                bool own = MoveContest.IsOwnMove(hasIssued, parent.LastWaypointX, parent.LastWaypointZ, issuedX, issuedZ);
+                if (MoveContest.FollowsParentMarch(hasPath, own, rec.LastWaypointX, rec.LastWaypointZ, parent.LastWaypointX, parent.LastWaypointZ)) return true;
+            }
             return false;
         }
 
         // BC14W: one group's turn of the works contest (MoveContest): the memory is asked every tick for a held group, a recon mission group is neither
         // contested nor counted, and the answer is turned into the executor's Stop or Move. Returns the intents submitted.
         private static int WorksContest(BattleSnapshot s, int i, in UnitRecord rec, in CommandDoctrineOrder order, bool hasOrder, bool worksHeld,
-            bool worksLane, bool closeEngaged, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
+            bool worksLane, bool closeEngaged, bool foreignStay, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
             IIntentSink sink)
         {
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
@@ -987,7 +1000,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 HasLane = worksLane && order.PrimaryTarget.HasValue, LaneX = order.PrimaryTarget.X, LaneZ = order.PrimaryTarget.Z,
                 Stance = rec.AiStance, Works = army?.Feasibility?.HeldWorks,
                 // A stay task is contested against vanilla's chain move: a form-up and a screen go back to their ledger point, a hold is stopped.
-                StayTask = MoveContest.IsStayTask(task),
+                ForeignStayMove = foreignStay,
                 HasStayPoint = hasOrder && order.PrimaryTarget.HasValue && (task == CommandTaskType.FormUp || task == CommandTaskType.Screen),
                 StayX = order.PrimaryTarget.X, StayZ = order.PrimaryTarget.Z,
                 PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,

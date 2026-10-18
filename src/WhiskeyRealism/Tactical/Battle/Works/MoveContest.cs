@@ -40,11 +40,12 @@ namespace WhiskeyRealism.Tactical.Battle
         /// </summary>
         public bool Chain, HoldTask, IssuedUnderPlan, ChainMove;
         /// <summary>
-        /// Smoke 2026-10-18: the group's task is one that keeps it where Whiskey put it (<see cref="MoveContest.IsStayTask"/>: a hold, a form-up, a screen), and
-        /// the move it walks is vanilla's chain move, not a move Whiskey gave it (<see cref="MoveContest.IsOwnMove"/> false). <see cref="HasStayPoint"/>: the
-        /// ledger point a form-up or a screen goes to (<see cref="StayX"/>, <see cref="StayZ"/>); a hold has none and is stopped where it stands.
+        /// Smoke 2026-10-18: the group's task is one that keeps it where Whiskey put it (<see cref="MoveContest.IsStayTask"/>: a hold, a form-up, a screen) and
+        /// the move it walks is not one Whiskey gave it (<see cref="MoveContest.IsForeignStayMove"/>, the caller's verdict: not a fight, not vanilla's assault,
+        /// not a parent's march). <see cref="HasStayPoint"/>: the ledger point a form-up or a screen goes to (<see cref="StayX"/>, <see cref="StayZ"/>); a
+        /// hold has none and is stopped where it stands.
         /// </summary>
-        public bool StayTask, ForeignMove, HasStayPoint;
+        public bool StayContest, HasStayPoint;
         public float StayX, StayZ;
     }
 
@@ -55,8 +56,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public float X, Z, WaypointX, WaypointZ, LastIssuedX, LastIssuedZ;
         /// <summary>BC14O: see <see cref="ContestInput.Chain"/>, <see cref="ContestInput.HoldTask"/>; the hour of the last issued move and of the plan's start, and now (doctrine hours).</summary>
         public bool Chain, HoldTask;
-        /// <summary>See <see cref="ContestInput.StayTask"/> and <see cref="ContestInput.HasStayPoint"/>.</summary>
-        public bool StayTask, HasStayPoint;
+        /// <summary>See <see cref="ContestInput.StayContest"/> and <see cref="ContestInput.HasStayPoint"/>.</summary>
+        public bool ForeignStayMove, HasStayPoint;
         public float StayX, StayZ;
         /// <summary>BC14O: the group is a due designer chain's own group (<c>linegroup_centerunit</c>) and the head objective stands at (<see cref="ChainObjectiveX"/>, <see cref="ChainObjectiveZ"/>).</summary>
         public bool HasChainObjective;
@@ -113,6 +114,21 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>groupstancename (65061): 4 = assault.</summary>
         public const int AssaultStanceOf = 4;
 
+        /// <summary>
+        /// A child's waypoint this close to its parent's is the parent's march: vanilla's group order re-lays every child on a slot around the parent's
+        /// waypoint, so a child on a stay task that walks to such a point follows an order that is the parent's (and is contested there when the parent
+        /// is itself on a stay task). A child's waypoint farther off is an order of its own.
+        /// </summary>
+        public const float ParentSlotMeters = 150f;
+
+        /// <summary>
+        /// The child walks its parent's march: the parent has a path of its own that is the move Whiskey last issued it (<paramref name="parentOwnMove"/>),
+        /// and the child's waypoint lies within <see cref="ParentSlotMeters"/> of the parent's. A parent that walks a foreign move is not followed here: its
+        /// own stay task contests it, and the child's contest stands on its own.
+        /// </summary>
+        public static bool FollowsParentMarch(bool parentHasPath, bool parentOwnMove, float childWaypointX, float childWaypointZ, float parentWaypointX, float parentWaypointZ)
+            => parentHasPath && parentOwnMove && Distance(childWaypointX, childWaypointZ, parentWaypointX, parentWaypointZ) <= ParentSlotMeters;
+
         public static ContestAction Decide(in ContestInput c)
         {
             if (c.Recon) return ContestAction.None;
@@ -135,7 +151,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             // A stay task has no Whiskey move to re-issue: vanilla's chain move is answered with a Stop where the group stands, or, for a form-up or a
             // screen, a move back to its ledger point. Every time it is walked, not only at the first sight of it: a Stop the executor refused must be tried again.
-            if (c.Chain && c.ChainMove && c.StayTask && c.ForeignMove && c.HasPath)
+            if (c.Chain && c.StayContest && c.HasPath)
             {
                 float tx = c.HasStayPoint ? c.StayX : c.X, tz = c.HasStayPoint ? c.StayZ : c.Z;
                 return Distance(c.X, c.Z, tx, tz) <= OrderArbiter.DedupeMeters ? ContestAction.HoldStop : ContestAction.HoldMove;
@@ -324,13 +340,16 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             targetX = o.LastIssuedX;
             targetZ = o.LastIssuedZ;
-            bool stay = o.StayTask && IsChainMove(in o) && !MoveContest.IsOwnMove(o.HasLastIssued, o.WaypointX, o.WaypointZ, o.LastIssuedX, o.LastIssuedZ);
+            // A stay task walking a move that is not Whiskey's own is contested whoever sent it: the chain's centre unit, a member of a chain, a lone
+            // brigade walking a parent's or a chain's vanilla order (the caller's verdict, MoveContest.IsForeignStayMove). It needs the contest on and the
+            // group out of a fight (o.Chain), not a due chain's head.
+            bool stay = o.Chain && o.ForeignStayMove && o.HasPath;
             if (stay)
             {
                 targetX = o.HasStayPoint ? o.StayX : o.X;
                 targetZ = o.HasStayPoint ? o.StayZ : o.Z;
             }
-            if (!o.Chain || !o.HasChainObjective)
+            if (!stay && (!o.Chain || !o.HasChainObjective))
             {
                 _chains.Remove(groupId);
                 return ContestAction.None;
@@ -341,7 +360,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 Chain = true, HoldTask = o.HoldTask, HasPath = o.HasPath, HasLastIssued = o.HasLastIssued,
                 ChainMove = IsChainMove(in o),
                 IssuedUnderPlan = o.HasLastIssued && o.LastIssuedHours >= o.PlanStartHours,
-                StayTask = o.StayTask, ForeignMove = stay, HasStayPoint = o.HasStayPoint, StayX = o.StayX, StayZ = o.StayZ,
+                StayContest = stay, HasStayPoint = o.HasStayPoint, StayX = o.StayX, StayZ = o.StayZ,
                 LastSeenPath = m.LastSeenPath, X = o.X, Z = o.Z, WaypointX = o.WaypointX, WaypointZ = o.WaypointZ, LastSeenX = m.LastSeenX, LastSeenZ = m.LastSeenZ,
                 LastIssuedX = o.LastIssuedX, LastIssuedZ = o.LastIssuedZ,
             };
