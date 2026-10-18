@@ -40,6 +40,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // unreliable days (telemetry: the row reports it; the allocator never counts the player, C4).
         // Per campaign; the sidecar carries the run (Export/Restore).
         private static readonly string[] LastAllocationRow = new string[2];
+        // Foresight F3: the [EnemyPicture] and [CapitalThreat] rows' last signatures (rows on change). Per campaign.
+        private static readonly string[] LastPictureRow = new string[2];
+        private static readonly string[] LastCapitalThreatRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
         // G1b: each alliance's recon missions and this review's tasks (pooled), the last [Recon] row's counts
@@ -73,6 +76,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 States[a] = new PlannerState();
                 LastPlanRow[a] = null;
                 LastAllocationRow[a] = null;
+                LastPictureRow[a] = null;
+                LastCapitalThreatRow[a] = null;
                 NonCompliance[a].Reset();
                 Recon[a] = new ReconMissionLedger();
                 ReconTasks[a].Clear();
@@ -105,11 +110,18 @@ namespace WhiskeyRealism.Strategic.Planner
                         player, in chain, tempo, Snapshots[alliance]);
                     RebindSaved(alliance, snapshot);
 
+                    // The campaign seed is fixed on a campaign's first review, before Detect: the AI side's spotting-mark stream is seeded from it
+                    // (foresight F4), in every mode.
+                    var state = States[alliance];
+                    if (state.CampaignSeed == 0L)
+                        state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
                     // G1: fog-honest detection and the belief update. Bookkeeping: it runs in every
                     // mode, for a W&L CIC player's stand-down alliance and during the pause (no writes).
-                    EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn());
+                    EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn(), States[alliance].CampaignSeed);
                     var beliefs = EnemyDetectionRuntime.ModelFor(alliance);
                     beliefs.Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance), EnemyDetectionRuntime.MarchFor());
+                    snapshot.DetectionsSeen = DetectionRules.SeenCount(snapshot.Detections);
+                    snapshot.DetectionsMarked = beliefs.AppliedMarkKeys.Count;
                     snapshot.Beliefs.AddRange(beliefs.Beliefs);
                     EnemyDetectionRuntime.Report(snapshot, beliefs);
                     if (mode == PlannerReviewMode.StandDown) return;
@@ -120,9 +132,6 @@ namespace WhiskeyRealism.Strategic.Planner
 
                     var sectors = SectorModel.Build(snapshot);
                     // G3 plan step (P3-P5): profiles -> plan with logistics and depot tasks.
-                    var state = States[alliance];
-                    if (state.CampaignSeed == 0L)
-                        state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
                     Battles.Take(alliance, snapshot.DaySerial, PendingBattles);
                     // P8: the moves the tracker gave up on (not yet lapsed). G3 leaves a formation out of the mass of the objective
                     // each move was issued for, G4 takes the role from a formation that gave up on the target it would send it to.
@@ -132,12 +141,18 @@ namespace WhiskeyRealism.Strategic.Planner
                     // a Wished one: one published set, read once.
                     var heldBuilders = new List<HeldBuilder>();
                     DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);
+                    // The planner's minimum strength is the scenario's aiminimumstrengthformovement; a read that is not positive or not finite
+                    // falls back to 5000 (TheaterPlanner.PlanMinimum), and the pure planner has no logger, so the review says so, once, whatever the
+                    // picture flag is.
+                    if (!TheaterPlanner.ReadIsUsable(snapshot.MinStrengthForMovement))
+                        OnceLog.Warning("campaign-planner:min-strength-fallback", "[CampaignPlanner] aiminimumstrengthformovement reads " + snapshot.MinStrengthForMovement.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", not a minimum; the planner uses " + TheaterPlanner.MinStrengthFallback.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
                     TheaterPlan plan;
                     string trace;
+                    EnemyPicture picture;
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
-                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);
                     }
                     // G8: the ordinary garrison posts join D8's secession posts in the plan, where the allocation seats both.
                     GarrisonRuntime.PlanPosts(snapshot, plan);
@@ -152,13 +167,19 @@ namespace WhiskeyRealism.Strategic.Planner
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
                         allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);
                     }
-                    SyncRecon(snapshot, allocation);
+                    SyncRecon(snapshot, plan, allocation);
                     GarrisonRuntime.Sync(snapshot, plan, allocation);
+                    // Yesterday's allocation and plan are still the working copy; Publish overwrites them, and the defence counts of [Reserves]
+                    // judge today's snapshot against them (as AgeRecon reads the allocation).
+                    CampaignPlanStore.TryGetAllocation(alliance, out var yesterdaysAllocation);
+                    CampaignPlanStore.TryGetPlan(alliance, out var yesterdaysPlan);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
-                    LogFirstReview(snapshot, sectors);
+                    LogFirstReview(snapshot, sectors, plan);
                     EmitPlan(plan, trace, day, month, year);
+                    EmitPicture(snapshot, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
+                    EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
                 catch (Exception ex)
                 {
@@ -344,14 +365,14 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // G1b: binds the allocation's Recon assignments to missions before the allocation is published, then the
         // [Recon] row.
-        private static void SyncRecon(CampaignSnapshot snapshot, Allocation allocation)
+        private static void SyncRecon(CampaignSnapshot snapshot, TheaterPlan plan, Allocation allocation)
         {
             using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 if (FlagOn(Plugin.EnableCampaignReconnaissance))
                 {
                     Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);
-                    EmitRecon(snapshot, allocation);
+                    EmitRecon(snapshot, plan, allocation);
                 }
                 else
                 {
@@ -363,10 +384,10 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // [Recon] on change of its counts (one row per alliance per change; no string otherwise).
-        private static void EmitRecon(CampaignSnapshot snapshot, Allocation allocation)
+        private static void EmitRecon(CampaignSnapshot snapshot, TheaterPlan plan, Allocation allocation)
         {
             int a = snapshot.Alliance;
-            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation);
+            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation, plan);
             if (ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])) return;
             ReconRowEmitted[a] = true;
             LastReconCounts[a] = counts;
@@ -400,13 +421,31 @@ namespace WhiskeyRealism.Strategic.Planner
             int a = plan.Alliance;
             if (a < 0 || a >= LastPlanRow.Length || string.Equals(LastPlanRow[a], row, StringComparison.Ordinal)) return;
             LastPlanRow[a] = row;
-            TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
             if (!PlannerSettings.PlanTrace) return;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "CampaignPlan:trace", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(a)
                 .WithDecision("trace", plan.SwitchReason ?? "none", row)
                 .WithField("date", year.ToString("D4") + "-" + month.ToString("D2") + "-" + day.ToString("D2"))
                 .WithField("candidates", trace ?? ""));
+        }
+
+        // [EnemyPicture] and [CapitalThreat] on change of their text (one row per alliance per change), dated after the compare. The picture
+        // is built and its row written with the picture flag off too, as telemetry.
+        private static void EmitPicture(CampaignSnapshot snapshot, TheaterPlan plan, EnemyPicture picture)
+        {
+            int a = plan.Alliance;
+            if (picture == null || a < 0 || a >= LastPictureRow.Length) return;
+            string row = EnemyPicture.Row(picture, snapshot);
+            if (!string.Equals(LastPictureRow[a], row, StringComparison.Ordinal))
+            {
+                LastPictureRow[a] = row;
+                TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+            }
+            string capital = EnemyPicture.CapitalRow(plan, picture, snapshot);
+            if (string.Equals(LastCapitalThreatRow[a], capital, StringComparison.Ordinal)) return;
+            LastCapitalThreatRow[a] = capital;
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(capital, plan.DaySerial), TelemetryLayer.Campaign);
         }
 
         // A map-group player (stage F's PlayerMapGroup) stands in this alliance's formations only on the
@@ -426,7 +465,14 @@ namespace WhiskeyRealism.Strategic.Planner
             string row = ForceAllocator.Summary(allocation, plan, player, reliability, unreliableDays);
             if (string.Equals(LastAllocationRow[a], row, StringComparison.Ordinal)) return;
             LastAllocationRow[a] = row;
-            TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
+        // [Reserves] every Full review, with no signature compare: the review is the clock the foresight criteria count on (ReservesRow).
+        private static void EmitReserves(CampaignSnapshot snapshot, SectorModel sectors, TheaterPlan plan, Allocation allocation, PlannerState state,
+                                         Allocation yesterdaysAllocation, TheaterPlan yesterdaysPlan)
+        {
+            TelemetryRouter.LegacyInfo(ReservesRow.Build(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan), TelemetryLayer.Campaign);
         }
 
         // DLC_WL reads as WlChainContext.Capture does: dlc_scenarioactive, IsCommanderInChief
@@ -451,7 +497,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The transport-mode counts are the smoke proof of G0's W&L-side finding: vanilla gives
         // rails and rivers to non-player alliances only (112862-112867).
-        private static void LogFirstReview(CampaignSnapshot s, SectorModel sectors)
+        private static void LogFirstReview(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan)
         {
             int rails = 0, rivers = 0;
             for (int i = 0; i < s.Own.Count; i++)
@@ -471,6 +517,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 " commanders=" + s.Commanders.Count +
                 " crossings=" + s.Crossings.Count +
                 " useRails=" + rails + " useRivers=" + rivers +
+                " minStrength=" + plan.MinGarrisonStrength.ToString("0", System.Globalization.CultureInfo.InvariantCulture) +
                 " player=" + s.Player);
         }
 

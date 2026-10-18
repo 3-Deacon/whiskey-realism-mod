@@ -1,0 +1,145 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
+
+namespace WhiskeyRealism.Strategic.Planner
+{
+    // The [Reserves] row (D11 requirement-telemetry, foresight F1): once per review, what the planner holds against what it needs, and what
+    // vanilla's own defence did with the formations the planner withheld. Every later foresight criterion counts review days on this row
+    // ("a review day is a Full-mode review, a [Reserves] row of the alliance"), and the smoke reads the covering force's and the
+    // departments' shortfalls from it. Pure over the review's snapshot, plan and allocation; the runtime writes it (CampaignPlannerRuntime).
+    //
+    //   capital=<held>/<floor>   the CapitalGuard formations' strength against the plan's capital floor
+    //   hold=<sector:held/need>  at most MaxHoldSectors sectors, largest need first (the lower id on a tie): the hold each has by the roles
+    //                            assigned against max(HoldNeed, the garrison minimum), the allocator's own sums
+    //   dept=<theater:have,...>  each department's HoldStrength over its formations that count toward coverage; "none" when none do
+    //   enemyOnOwnSoil           live land beliefs (EnemyTraits.OnOwnSoil, not afloat) the side holds today
+    //   vanillaDefActive         own formations in a vanilla defensive operation today
+    //   vanillaDefWithheld       formations now in a vanilla defensive operation that yesterday's allocation withheld as Reserve, CapitalGuard,
+    //                            DepotBuilder, Recon or Recover (a violation of the hold the planner keeps)
+    //   vanillaDefHoldOrCovering the same for a withheld Hold (vanilla's defence may take it: the same-sector exception) and, from foresight
+    //                            F6b, a covering-force member
+    //   massInVanillaDef         members of yesterday's mass now in a vanilla defensive operation
+    // The last three read YESTERDAY's allocation and plan, which the runtime captures before today's Publish overwrites the working copy
+    // (as AgeRecon reads it); on the first review they read 0. enemyOnOwnSoil= and vanillaDefActive= (foresight F2) are today's picture:
+    // criterion-interception-restored counts the review days on which both are above 0.
+    internal static class ReservesRow
+    {
+        internal const int MaxHoldSectors = 6;
+
+        internal static string Build(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, Allocation a, PlannerState state, Allocation previous, TheaterPlan previousPlan)
+        {
+            var inv = CultureInfo.InvariantCulture;
+            var sb = new StringBuilder();
+            sb.Append("[Reserves] alliance=").Append(s.Alliance).Append(" date=").Append(ReviewCadenceCatchUp.FormatDate(s.DaySerial))
+              .Append(" capital=").Append(ForceAllocator.RoleStrength(s, a, FormationRole.CapitalGuard).ToString("0", inv))
+              .Append('/').Append(plan.CapitalFloorStrength.ToString("0", inv))
+              .Append(" hold=").Append(HoldShares(s, sectors, plan, a, inv))
+              .Append(" dept=").Append(DepartmentStrengths(s, sectors, state, inv))
+              .Append(" enemyOnOwnSoil=").Append(EnemiesOnOwnSoil(s))
+              .Append(" vanillaDefActive=").Append(InVanillaDefence(s));
+            CountVanillaDefence(s, previous, previousPlan, out int withheld, out int holdOrCovering, out int mass);
+            sb.Append(" vanillaDefWithheld=").Append(withheld)
+              .Append(" vanillaDefHoldOrCovering=").Append(holdOrCovering)
+              .Append(" massInVanillaDef=").Append(mass);
+            return sb.ToString();
+        }
+
+        // "sector:held/need,..." over the sectors with the largest need, the lower id first among equals. The need is the allocator's
+        // Target: max(the plan's HoldNeed, the garrison minimum), so every sector has one.
+        private static string HoldShares(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, Allocation a, CultureInfo inv)
+        {
+            var need = new float[sectors.Count];
+            for (int k = 0; k < need.Length; k++) need[k] = plan.MinGarrisonStrength;
+            for (int k = 0; k < plan.Sectors.Count; k++)
+            {
+                var sp = plan.Sectors[k];
+                if (sp != null && sp.SectorId >= 0 && sp.SectorId < need.Length) need[sp.SectorId] = Math.Max(need[sp.SectorId], sp.HoldNeed);
+            }
+            var order = new List<int>(need.Length);
+            for (int k = 0; k < need.Length; k++) order.Add(k);
+            order.Sort((x, y) => need[y] != need[x] ? need[y].CompareTo(need[x]) : x.CompareTo(y));
+            var sb = new StringBuilder();
+            for (int k = 0; k < order.Count && k < MaxHoldSectors; k++)
+            {
+                int sector = order[k];
+                if (sb.Length > 0) sb.Append(',');
+                sb.Append(sector).Append(':').Append(ForceAllocator.CountedHold(s, sectors, a, sector).ToString("0", inv)).Append('/').Append(need[sector].ToString("0", inv));
+            }
+            return sb.Length == 0 ? "none" : sb.ToString();
+        }
+
+        // Each department's HoldStrength over its formations that count toward coverage (the player's own command and a CIC side count
+        // nothing): the shipped D6 "have" (TheaterPlanner.DepartmentHoldMet), by home department, read for question-capital-share's
+        // comparison against the covering need. A formation of no known department is where it stands.
+        private static string DepartmentStrengths(CampaignSnapshot s, SectorModel sectors, PlannerState state, CultureInfo inv)
+        {
+            var have = new float[6];
+            var any = new bool[6];
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                var f = s.Own[i];
+                if (!WlChainRules.CountsTowardCoverage(f.Chain)) continue;
+                var department = state != null ? state.DepartmentOf(f.UnitKey) : Theater.Unknown;
+                if (department == Theater.Unknown) department = sectors.TheaterOf(ReserveRules.HoldSectorOf(sectors, f));
+                int d = (int)department;
+                if (department == Theater.Unknown || d < 0 || d >= have.Length) continue;
+                have[d] += ReserveRules.HoldStrength(f);
+                any[d] = true;
+            }
+            var sb = new StringBuilder();
+            for (int d = 0; d < have.Length; d++)
+            {
+                if (!any[d]) continue;
+                if (sb.Length > 0) sb.Append(',');
+                sb.Append((Theater)d).Append(':').Append(have[d].ToString("0", inv));
+            }
+            return sb.Length == 0 ? "none" : sb.ToString();
+        }
+
+        // Live land beliefs standing on the side's own soil (the test 13601-13603 uses for an enemy vanilla's defence may answer).
+        private static int EnemiesOnOwnSoil(CampaignSnapshot s)
+        {
+            int count = 0;
+            for (int i = 0; i < s.Beliefs.Count; i++)
+            {
+                var b = s.Beliefs[i];
+                if (ReserveRules.Live(b) > 0f && !ReserveRules.Afloat(b) && (b.Traits & EnemyTraits.OnOwnSoil) != 0) count++;
+            }
+            return count;
+        }
+
+        private static int InVanillaDefence(CampaignSnapshot s)
+        {
+            int count = 0;
+            for (int i = 0; i < s.Own.Count; i++)
+                if ((s.Own[i].Flags & FormationFlags.InDefensiveOps) != 0) count++;
+            return count;
+        }
+
+        // Today's formations in a vanilla defensive operation, judged by what yesterday's allocation made of them.
+        private static void CountVanillaDefence(CampaignSnapshot s, Allocation previous, TheaterPlan previousPlan, out int withheld, out int holdOrCovering, out int mass)
+        {
+            withheld = holdOrCovering = mass = 0;
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                var f = s.Own[i];
+                if ((f.Flags & FormationFlags.InDefensiveOps) == 0) continue;
+                if (previous != null && previous.TryGet(f.InstanceId, out var was))
+                {
+                    if (WithheldAsReserve(was.Role)) withheld++;
+                    else if (was.Role == FormationRole.Hold && was.Withheld) holdOrCovering++;
+                }
+                if (previousPlan != null && previousPlan.MassInstanceIds.Contains(f.InstanceId)) mass++;
+            }
+        }
+
+        // The roles whose withhold is the planner's claim that vanilla's defence must not spend the formation.
+        private static bool WithheldAsReserve(FormationRole role)
+        {
+            return role == FormationRole.Reserve || role == FormationRole.CapitalGuard || role == FormationRole.DepotBuilder
+                || role == FormationRole.Recon || role == FormationRole.Recover;
+        }
+    }
+}

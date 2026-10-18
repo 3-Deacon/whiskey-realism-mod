@@ -96,18 +96,18 @@ internal static class ForceAllocatorTests
     // ---- the main effort and the mass ----
 
     // D3 (smoke amendments 2026-10-16): the mass is the force the objective needs, not everything movable. Three corps and a main target
-    // nobody has scouted: the presumed enemy is 5000 x (1 + 1.0, the objective's importance) = 10000, the need 10000 x 1.1 x 1.25 = 13750, and
-    // corps 1 (20000, nearest the target) is all of it. The other two keep their own front's role: they are not "the remainder to the main
+    // nobody has scouted: the presumed enemy is the live minimum (the fixture's aiminimumstrengthformovement, 1000) x (1 + 1.0, the objective's
+    // importance) = 2000, the need 2000 x 1.1 x 1.25 = 2750, and corps 1 (20000, nearest the target) is all of it. The other two keep their own front's role: they are not "the remainder to the main
     // effort". The staged main effort gathers at its start line, the position of its forward-most member.
     private static void OnlyTheNeededMassGoesToTheMainEffort()
     {
-        var s = Wide();
+        var s = Guarded(Wide());
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 350f, 15000f));
         s.Own.Add(Corps(3, 550f, 10000f));
         var plan = PlanOf(s);
         AssertEqual(98, plan.MainObjectiveId, "main effort at x 100");
-        AssertNear(13750f, plan.MainNeedStrength, 1f, "the need: presumed 10000 x required 1.1 x (1 + 0.25)");
+        AssertNear(2750f, plan.MainNeedStrength, 1f, "the need: floor 1000 x 2 = 2000 x required 1.1 x (1 + 0.25)");
         AssertEqual("1", string.Join(",", plan.MassInstanceIds), "the mass is the nearest corps, which is enough");
         var a = Alloc(plan, s);
         var sectors = Sectors(s);
@@ -131,7 +131,7 @@ internal static class ForceAllocatorTests
     // G3 verify r1 F4/F9: the odds were judged on TheaterPlan.MassInstanceIds, so MainEffort is exactly that set.
     private static void MainEffortIsExactlyThePlannedMass()
     {
-        var s = Wide();
+        var s = Guarded(Wide(), 12000f);
         s.Beliefs.Add(Belief(150f, 0f, 30000f)); // scouted (50 from the objective, 150 from the capital: outside its range), need 30000 x 1.1 x 1.25 > both corps
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 350f, 15000f));
@@ -182,7 +182,7 @@ internal static class ForceAllocatorTests
             FormationFlags.Embarked, FormationFlags.FortBuilder, FormationFlags.VanillaDepotBuilder, FormationFlags.InTransfer };
         foreach (var flag in flags)
         {
-            var s = Wide();
+            var s = Guarded(Wide());
             s.Own.Add(Corps(1, 200f, 20000f));
             s.Own.Add(WithFlags(Corps(2, 350f, 15000f), flag));
             var plan = PlanOf(s);
@@ -228,7 +228,7 @@ internal static class ForceAllocatorTests
 
     // ---- capital ----
 
-    // A believed army at x 20 against a capital at x 0: floor = 40000 / 20^0.3 x 0.5 = 8142. The nearest
+    // A believed army at x 20 against a capital at x 0: floor = the plan's minimum (the fixture's 1000) + 40000 / 20^0.3 x 0.5 = 1000 + 8142 (D11). The nearest
     // massable formations fill it: corps 3 (3000) then corps 2 (15000); corps 1 stays the main effort.
     private static void CapitalGuardFilledFirstUpToFloor()
     {
@@ -239,7 +239,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(3, 50f, 3000f));
         s.Beliefs.Add(Belief(20f, 0f, 40000f));
         var plan = PlanOf(s);
-        AssertNear(8142f, plan.CapitalFloorStrength, 5f, "capital floor on beliefs");
+        AssertNear(plan.MinGarrisonStrength + 8142f, plan.CapitalFloorStrength, 5f, "capital floor on beliefs: the plan's minimum plus the weight");
         var a = Alloc(plan, s);
         foreach (int id in new[] { 3, 2 })
         {
@@ -273,7 +273,7 @@ internal static class ForceAllocatorTests
     // withheld; the free corps masses.
     private static void HoldSectorKeepsHoldRatio()
     {
-        var s = Wide();
+        var s = Guarded(Wide());
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(4, 550f, 8000f));
         s.Beliefs.Add(Belief(600f, 0f, 10000f));
@@ -319,7 +319,7 @@ internal static class ForceAllocatorTests
     // it): the main target is in the threatened sector, so the corps that G3's hold reserve picked there masses.
     private static void HoldReleasedIntoTheMassMasses()
     {
-        var s = Wide();
+        var s = Guarded(Wide());
         s.Objectives.Clear();
         s.Objectives.Add(Target(98, 100f, 0f));
         s.Objectives.Add(Target(99, 300f, 0f));
@@ -345,7 +345,9 @@ internal static class ForceAllocatorTests
             s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, tempo);
             s.RelocationRange = 150f;
             s.OffensiveDominance = 1.1f;
-            s.MinStrengthForMovement = 1000f;
+            // The test is about the hold modifier, so the scenario's minimum is the 5000 the corps below were sized for (it was 1000 for the
+            // movement tests only, with the floors a constant 5000 independent of it; foresight F5 makes them one number).
+            s.MinStrengthForMovement = 5000f;
             s.MinMoraleForMovement = 0.3f;
             s.HasCapital = true;
             for (int i = 0; i < 7; i++)
@@ -370,13 +372,13 @@ internal static class ForceAllocatorTests
 
     private static void NullTempoIsNeutral()
     {
-        var s = Wide();
+        var s = Guarded(Wide());
         AssertTrue(s.Tempo == null, "fixture has no director posture (first review)");
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 350f, 15000f));
         var plan = PlanOf(s);
         var a = Alloc(plan, s);
-        AssertEqual(2, a.Assignments.Count, "allocates without a director posture");
+        AssertEqual(3, a.Assignments.Count, "allocates without a director posture");
         AssertEqual(FormationRole.MainEffort, Of(a, 1).Role, "neutral tempo masses as usual");
     }
 
@@ -466,8 +468,10 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(5, 100f, 9000f));  // main body
         s.Own.Add(Corps(6, 250f, 4000f));  // recon
         s.Own.Add(Corps(8, 120f, 9000f));  // main body
+        s.Own.Add(Corps(7, 390f, 9000f));  // sector 1's other formation: F9, a builder leaves its sector's hold met, so corps 2 builds only with this one staying
         s.Beliefs.Add(Belief(110f, 0f, 10000f));
         var plan = ManualPlan(s);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         plan.CapitalFloorStrength = 1000f;
         int mainSector = Sectors(s).SectorAt(100f, 0f);
         plan.MainSectorId = mainSector;
@@ -526,6 +530,7 @@ internal static class ForceAllocatorTests
         var s = Wide();
         s.Own.Add(Corps(301, 380f, 4000f));
         s.Own.Add(Corps(302, 350f, 6000f));
+        s.Own.Add(Corps(304, 390f, 9000f));   // F9: the sector holds 15000 outside the mass, so the smaller of its two leaves 9000 behind, over the minimum of 5000
         var plan = ManualPlan(s);
         int sector = Sectors(s).SectorAt(350f, 0f);
         int main = Sectors(s).SectorAt(100f, 0f);
@@ -539,7 +544,8 @@ internal static class ForceAllocatorTests
 
         plan.MassInstanceIds.Add(302);
         var b = Alloc(plan, s);
-        AssertEqual(FormationRole.DepotBuilder, Of(b, 301).Role, "with the whole sector in the mass, the smallest builds");
+        AssertEqual(FormationRole.Hold, Of(b, 304).Role, "304 alone outside the mass is no surplus (9000 held, none left)");
+        AssertEqual(FormationRole.DepotBuilder, Of(b, 301).Role, "with the sector's surplus gone, the smallest member of the mass builds");
         AssertEqual(FormationRole.MainEffort, Of(b, 302).Role, "the main effort loses only that formation");
     }
 
@@ -748,7 +754,7 @@ internal static class ForceAllocatorTests
     {
         foreach (bool withPlayer in new[] { false, true })
         {
-            var s = Wide();
+            var s = Guarded(Wide());
             s.Own.Add(Corps(1, 200f, 20000f));
             s.Own.Add(Corps(4, 560f, 8000f));
             if (withPlayer)
@@ -1165,7 +1171,7 @@ internal static class ForceAllocatorTests
     // formation on its physical sector first (the credit follows the waypoint, whatever the position).
     private static void SectorFactsCreditTheHoldSectorBeforeAnyPhysicalCheck()
     {
-        string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs"), "private static SectorFacts BuildSectorFacts(");
+        string body = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs"), "internal static SectorFacts BuildSectorFacts(");
         int hold = body.IndexOf("int sector = ReserveRules.HoldSectorOf(c.Sectors, f);", StringComparison.Ordinal);
         int own = body.IndexOf("x.Own[sector] += ReserveRules.HoldStrength(f);", StringComparison.Ordinal);
         int count = body.IndexOf("x.Count[sector]++;", StringComparison.Ordinal);
@@ -1206,7 +1212,7 @@ internal static class ForceAllocatorTests
             player.Chain = WlChainClass.PlayerMapGroup;
             return player;
         }
-        var s = Wide();
+        var s = Guarded(Wide());
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Group(20000f));
         s.Beliefs.Add(Belief(600f, 0f, 10000f));
@@ -1220,7 +1226,7 @@ internal static class ForceAllocatorTests
         AssertFalse(a.Surpluses.Contains(5), "never a surplus");
         AssertEqual(FormationRole.MainEffort, Of(a, 1).Role, "the free corps masses");
 
-        var weak = Wide();
+        var weak = Guarded(Wide());
         weak.Own.Add(Corps(1, 200f, 20000f));
         weak.Own.Add(Group(2000f));
         weak.Beliefs.Add(Belief(600f, 0f, 10000f));
@@ -1473,6 +1479,7 @@ internal static class ForceAllocatorTests
         horse.CavalryShare = 0.9f;
         s.Own.Add(horse);
         var plan = MainPlan(s, new[] { 1, 2 }, 100f);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         var task = ScreenTask(250f, 0f, 150f, 0f, plan.MainSectorId);
         var a = Alloc(plan, s, recon: new List<ReconTask> { task });
         var x = Of(a, 2);
@@ -1490,6 +1497,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(horse);
         s.Own.Add(Corps(3, 240f, 3000f)); // smaller infantry, outside the mass
         var plan = MainPlan(s, new[] { 2 }, 100f);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         var a = Alloc(plan, s, recon: new List<ReconTask> { ScreenTask(250f, 0f, 150f, 0f, plan.MainSectorId) });
         AssertEqual(FormationRole.Recon, Of(a, 2).Role, "cavalry first, even from the mass and with infantry outside it");
         AssertTrue(Of(a, 3).Role != FormationRole.Recon, "the infantry is not used");
@@ -1518,6 +1526,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(horse);
         s.Own.Add(Corps(3, 400f, 6000f));
         var plan = MainPlan(s, new[] { 1, 2 }, 100f);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         int other = Sectors(s).SectorAt(350f, 0f);
         var tasks = new List<ReconTask>
         {
@@ -1542,6 +1551,7 @@ internal static class ForceAllocatorTests
             t.Own.Add(h);
         }
         var plan2 = MainPlan(t, new[] { 1, 2, 4 }, 100f);
+        plan2.MinGarrisonStrength = t.MinStrengthForMovement;
         var b = Alloc(plan2, t, recon: new List<ReconTask>
         {
             ScreenTask(210f, 0f, 140f, 0f, plan2.MainSectorId),
@@ -1573,6 +1583,7 @@ internal static class ForceAllocatorTests
         horse.CavalryShare = 0.9f;
         s.Own.Add(horse);
         var plan = ManualPlan(s);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         var task = ScreenTask(250f, 0f, 153.37f, 12.5f, 1);
         var tasks = new List<ReconTask> { task };
         var ledger = new ReconMissionLedger();
@@ -1800,7 +1811,7 @@ internal static class ForceAllocatorTests
         AssertContains(reset, "NonCompliance[a].Reset();", "the unreliable-day run is per campaign");
         AssertContains(BodyOf(src, "private static bool HasMapGroupFormation("), "if (s.Own[i].Chain == WlChainClass.PlayerMapGroup) return true;", "the run belongs to the side that carries a map-group player");
         string emitBody = BodyOf(src, "private static void EmitAllocation(");
-        AssertContains(emitBody, "TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);", "the [Allocation] row, on change");
+        AssertContains(emitBody, "TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);", "the [Allocation] row, on change, with the review date (foresight F1: appended after the compare)");
     }
 
     // The allocation travels with its plan through the atomic daily publish: a reader between slices gets
@@ -1920,6 +1931,15 @@ internal static class ForceAllocatorTests
     }
 
     private static SectorModel Sectors(CampaignSnapshot s) => SectorModel.Build(s);
+
+    // D11: the capital floor is never under the minimum strength, so a fixture whose plan wants a free body keeps a guard at the capital.
+    private const int GuardId = 900;
+
+    private static CampaignSnapshot Guarded(CampaignSnapshot s, float strength = 9000f)
+    {
+        s.Own.Add(Corps(GuardId, 0f, strength));
+        return s;
+    }
 
     // The real G3 plan: its mass, capital floor and published hold needs are what the allocator reads.
     private static TheaterPlan PlanOf(CampaignSnapshot s)

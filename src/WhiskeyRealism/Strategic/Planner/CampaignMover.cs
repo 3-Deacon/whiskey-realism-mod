@@ -52,6 +52,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // One row per move judged a miss this review (failed or given up): the unit, its role, where it was sent from and to and where its
         // waypoint stands. The tally row counts them; these say which (smoke 2026-10-18: gaveUp=2 with no name). At most MaxMovesPerDay a review.
         public readonly List<string> MissRows = new List<string>();
+        // One row per move the mover made this review (outcome Issued, or Retried with the host taking it; a move queued behind a running
+        // order and a refusal write none): the unit, its role and reason, where it was sent from and to, and for which objective. Foresight F1:
+        // the investigation had to reconstruct who was sent where from geometry. At most MoveTracker.MaxMovesPerDay a review, since each row
+        // is a move that spent the day's budget.
+        public readonly List<string> IssueRows = new List<string>();
+        // The review day the rows are dated with (ReviewCadenceCatchUp.FormatDate).
+        public int DaySerial;
         // The tempo roll of this review, when one was evaluated (a new decision's launch).
         public LaunchVerdict Tempo;
         public bool TempoFirstRow, TempoReleaseRow;
@@ -66,9 +73,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public string Row(int alliance)
         {
             if (!Any) return "";
-            return "[CampaignMover] alliance=" + alliance + " issued=" + Issued + " confirmed=" + Confirmed + " failed=" + Failed + " retried=" + Retried
-                + " gaveUp=" + GaveUp + " queued=" + Queued + " skippedPlayer=" + SkippedPlayer
-                + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred + " deferredStaged=" + DeferredStaged;
+            return ReviewCadenceCatchUp.Dated("[CampaignMover] alliance=" + alliance + " issued=" + Issued + " confirmed=" + Confirmed + " failed=" + Failed
+                + " retried=" + Retried + " gaveUp=" + GaveUp + " queued=" + Queued + " skippedPlayer=" + SkippedPlayer
+                + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred + " deferredStaged=" + DeferredStaged, DaySerial);
         }
 
         // [CampaignTempo] undispatchable=true, once per decision per entry into the state.
@@ -130,6 +137,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var plan = inputs.Plan;
             var allocation = inputs.Allocation;
             if (s == null || plan == null || allocation == null) return tally;
+            tally.DaySerial = s.DaySerial;
 
             JudgeLastReview(s, allocation, tracker, tally);
             ReleaseRecoverFromOffense(s, allocation, host);
@@ -183,11 +191,11 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             var inv = CultureInfo.InvariantCulture;
             tracker.TryGetMove(f.InstanceId, out float fromX, out float fromZ, out float tx, out float tz, out int issued, out int retries, out int objective, out string role);
-            return "[CampaignMoverMiss] alliance=" + s.Alliance + " unit=" + TelemetryLegacyParser.Quote(f.UnitKey ?? f.InstanceId.ToString(inv)) + " role=" + (role ?? "-") + " outcome=" + outcome
+            return ReviewCadenceCatchUp.Dated("[CampaignMoverMiss] alliance=" + s.Alliance + " unit=" + TelemetryLegacyParser.Quote(f.UnitKey ?? f.InstanceId.ToString(inv)) + " role=" + (role ?? "-") + " outcome=" + outcome
                 + " target=" + tx.ToString("0", inv) + "," + tz.ToString("0", inv) + " objective=" + objective + " retries=" + retries
                 + " from=" + fromX.ToString("0", inv) + "," + fromZ.ToString("0", inv) + " at=" + f.X.ToString("0", inv) + "," + f.Z.ToString("0", inv)
                 + " waypoint=" + f.WaypointX.ToString("0", inv) + "," + f.WaypointZ.ToString("0", inv) + " days=" + (s.DaySerial - issued)
-                + " strength=" + f.Strength.ToString("0", inv) + " readiness=" + f.ReadinessStep;
+                + " strength=" + f.Strength.ToString("0", inv) + " readiness=" + f.ReadinessStep, s.DaySerial);
         }
 
         private static bool RoleStillSends(Allocation allocation, int instanceId)
@@ -345,9 +353,22 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;
 
-            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, ObjectiveOf(inputs.Plan, a), s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, a.Role.ToString(), out var outcome);
+            int objective = ObjectiveOf(inputs.Plan, a);
+            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, objective, s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, a.Role.ToString(), out var outcome);
             Count(tally, outcome);
+            if (moved) tally.IssueRows.Add(IssueRow(s, in f, a, tx, tz, objective));
             if (moved && (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support)) host.ListOffensive(f.InstanceId, true);
+        }
+
+        // [CampaignMoverIssue]: the field names and number formats of [CampaignMoverMiss] (the unit key quoted, coordinates whole numbers).
+        private static string IssueRow(CampaignSnapshot s, in FormationRecord f, Assignment a, float tx, float tz, int objective)
+        {
+            var inv = CultureInfo.InvariantCulture;
+            float fromX = f.X, fromZ = f.Z;   // coordinates: the quote sweep exempts from=<fromX>, which is a place, not a name
+            return ReviewCadenceCatchUp.Dated("[CampaignMoverIssue] alliance=" + s.Alliance, s.DaySerial)
+                + " unit=" + TelemetryLegacyParser.Quote(f.UnitKey ?? f.InstanceId.ToString(inv)) + " role=" + a.Role + " reason=" + (a.Reason ?? "-")
+                + " target=" + tx.ToString("0", inv) + "," + tz.ToString("0", inv) + " objective=" + objective
+                + " from=" + fromX.ToString("0", inv) + "," + fromZ.ToString("0", inv) + " readiness=" + f.ReadinessStep + " pick=" + ForceAllocator.PickOf(a);
         }
 
         // The objective a move is toward: a MainEffort or Support assignment goes to its sector's target, the objective of that

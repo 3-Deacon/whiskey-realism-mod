@@ -501,6 +501,7 @@ internal static class CampaignTempoGateTests
         var day1 = ExecutorFixtures.Wide();
         day1.Own.Add(ExecutorFixtures.Corps(1, 200f, 10000f));
         day1.Own.Add(ExecutorFixtures.Corps(2, 350f, 15000f));
+        day1.Own.Add(ExecutorFixtures.Corps(3, 0f, 9000f));          // the capital guard: D11's floor (the minimum plus the weighted threat) is met by it alone
         day1.Beliefs.Add(ExecutorFixtures.Belief(150f, 0f, 20000f)); // scouted: the need is 20000 x 1.1 x 1.25 = 27500, more than corps 1 alone
         var plan1 = ExecutorFixtures.RealPlan(day1, state);
         AssertEqual(98, plan1.MainObjectiveId, "day 1: a main effort");
@@ -509,7 +510,7 @@ internal static class CampaignTempoGateTests
 
         var day2 = ExecutorFixtures.Wide(1);
         day2.Beliefs.Add(ExecutorFixtures.Belief(150f, 0f, 20000f));
-        foreach (var f in new[] { ExecutorFixtures.Corps(1, 200f, 10000f), ExecutorFixtures.Corps(2, 350f, 15000f) })
+        foreach (var f in new[] { ExecutorFixtures.Corps(1, 200f, 10000f), ExecutorFixtures.Corps(2, 350f, 15000f), ExecutorFixtures.Corps(3, 0f, 9000f) })
         {
             var busy = f;
             busy.Flags |= FormationFlags.InDefensiveOps;     // vanilla's defence took both
@@ -523,7 +524,7 @@ internal static class CampaignTempoGateTests
             AssertTrue(sp.Posture != TheaterPosture.MainEffort && sp.Posture != TheaterPosture.Support && sp.TargetObjectiveId < 0, "no sector follows a main target: nothing is held back for it");
         var alloc2 = ForceAllocator.Allocate(plan2, day2, ExecutorFixtures.Sectors(day2), null, null, null);
         foreach (var a in alloc2.Assignments)
-            AssertTrue(a.Role == FormationRole.Hold && a.Reason == ForceAllocator.ReasonBusy, "both formations hold, busy");
+            AssertTrue(a.Role == FormationRole.Hold && a.Reason == ForceAllocator.ReasonBusy, "every formation holds, busy");
         AssertEqual(decision, state.DecisionSerial, "(the decision serial moves on only at the next decision)");
         CampaignScope.ResetAll();
         PlanFreshness.NoteToday(day2.DaySerial);
@@ -541,6 +542,7 @@ internal static class CampaignTempoGateTests
         s.Own.Add(ExecutorFixtures.Corps(1, 200f, 10000f));
         s.Own.Add(ExecutorFixtures.Corps(2, 250f, 15000f));
         s.Own.Add(ExecutorFixtures.Corps(3, 300f, 12000f));
+        s.Own.Add(ExecutorFixtures.Corps(4, 0f, 9000f));   // the capital guard (D11's floor is never under the minimum strength)
         var first = ExecutorFixtures.RealPlan(s, state);
         AssertEqual(3, first.MassInstanceIds.Count, "all three massed on the first review");
 
@@ -553,6 +555,7 @@ internal static class CampaignTempoGateTests
         attacking.Flags |= FormationFlags.InOffensiveOps;        // the mover's own dispatch
         next.Own.Add(attacking);
         next.Own.Add(ExecutorFixtures.Corps(3, 300f, 12000f));
+        next.Own.Add(ExecutorFixtures.Corps(4, 0f, 9000f));
         var plan = ExecutorFixtures.RealPlan(next, state);
         AssertFalse(plan.MassInstanceIds.Contains(1), "a defending member leaves the mass");
         AssertTrue(plan.MassInstanceIds.Contains(2) && plan.MassInstanceIds.Contains(3), "a member in the mover's own offensive list stays in it");

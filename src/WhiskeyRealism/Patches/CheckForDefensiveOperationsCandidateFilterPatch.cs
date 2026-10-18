@@ -5,6 +5,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Strategic.Planner;
 using WhiskeyRealism.Telemetry;
 using WhiskeyRealism.Util;
 
@@ -36,6 +37,17 @@ namespace WhiskeyRealism.Patches
     // is reverted like any AI unit (WlChainRules.MayMove): a cancelled queued march
     // drops #69's pending dispatch at its flush, and a move back goes through
     // MoveUnitTo, so #69 dispatches it (the pass's last move of the corps).
+    //
+    // Foresight F2 (D11 requirement-interception, decision 1, 2026-10-18): while the campaign planner runs for the alliance (a fresh published
+    // allocation with executors allowed, alliances 0 and 1) and Enable Vanilla Defensive Interception is on, the Prefix removes nothing and the
+    // Postfix reverts nothing: vanilla's only interception of an advance onto own soil (13505-13780) chooses from the side's whole list again,
+    // and the Prefix reports what it would have removed (DefenseIntent filter-observed, wouldRemove=, reasons=). The planner's withheld
+    // formations stay out of vanilla's defence through PlannerDefensiveAvailabilityPatch (#127), which is then the only Whiskey gate on it and
+    // also withholds every formation Whiskey may not move (WlChainRules.MayMove false: the W&L player's own command, a unit in his operation,
+    // his map group, a CIC side), the clause the ledger's player-controlled suppression carried here (integrator decision 2026-10-18).
+    // In every other case (planner off, stale or no plan, a CIC side, Europe, flag off) the call is filtered and reverted as above, and its
+    // row names why (mode=filter:<why>, DefenseInterceptionGate.ModeFor). Smoke 2026-10-18: every alliance-1 row read removed=forbidden
+    // (the CSA's whole list), so the interception never ran for either side.
     //
     // Vanilla field names confirmed from Assembly-CSharp.decompiled.cs:
     //   AIFaction.ownunits               — List<Regiment> (line 10324)
@@ -119,6 +131,15 @@ namespace WhiskeyRealism.Patches
                 var defOps = defOpsField?.GetValue(faction) as IList;
                 if (ownUnits == null || defOps == null) return;
 
+                // While the planner runs for the alliance vanilla's defence is left whole: report, set nothing aside, change nothing. Ending
+                // here leaves the Postfix no snapshot to revert against and the Finalizer nothing to restore.
+                var mode = InterceptionMode(allianceId, out string why);
+                if (mode == DefenseFilterMode.Observe)
+                {
+                    ObserveCandidates(allianceId, ownUnits, forbidden, reasonByUnitId);
+                    return;
+                }
+
                 // Snapshot ownunits in original order so Postfix can restore exactly.
                 var snapshot = new List<object>(ownUnits.Count);
                 for (int i = 0; i < ownUnits.Count; i++) snapshot.Add(ownUnits[i]);
@@ -162,21 +183,25 @@ namespace WhiskeyRealism.Patches
                 // Filter the live ownunits in place — remove forbidden references
                 // for the duration of vanilla's call. Walk in reverse to keep
                 // index stable while removing.
+                bool verbose = Plugin.Instance.DefenseIntentVerboseLogging.Value;
+                var removedIds = verbose ? new List<int>() : null;   // only the verbose row names its reasons
                 int removed = 0;
                 for (int i = ownUnits.Count - 1; i >= 0; i--)
                 {
                     var unityObj = ownUnits[i] as UnityEngine.Object;
                     if (unityObj == null) continue;
-                    if (forbidden.Contains(unityObj.GetInstanceID()))
+                    int id = unityObj.GetInstanceID();
+                    if (forbidden.Contains(id))
                     {
                         ownUnits.RemoveAt(i);
                         removed++;
+                        removedIds?.Add(id);
                     }
                 }
 
-                if (removed > 0 && Plugin.Instance.DefenseIntentVerboseLogging.Value)
+                if (removed > 0 && verbose)
                 {
-                    EmitDefenseIntentFilter(allianceId, removed, forbidden.Count);
+                    EmitDefenseIntentFilter(allianceId, removed, forbidden.Count, DefenseFilterTally.Reasons(reasonByUnitId, removedIds), DefenseInterceptionGate.FilterModeText(why));
                 }
             }
             catch (Exception ex)
@@ -392,14 +417,66 @@ namespace WhiskeyRealism.Patches
                 .WithField("patch", 25));
         }
 
-        private static void EmitDefenseIntentFilter(int allianceId, int removed, int forbidden)
+        // reasons: DefenseFilterTally.Reasons over the removed ids, "reason:n,..." (foresight F1: the smoke could only read removed=forbidden);
+        // mode: "filter:<why>", why the gate filtered instead of observing (F2).
+        private static void EmitDefenseIntentFilter(int allianceId, int removed, int forbidden, string reasons, string mode)
         {
-            string signature = "alliance=" + allianceId + "|removed=" + removed + "|forbidden=" + forbidden;
+            string signature = "alliance=" + allianceId + "|removed=" + removed + "|forbidden=" + forbidden + "|reasons=" + reasons + "|mode=" + mode;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(allianceId)
                 .WithDecision("filter-candidates", "forbidden-defense-package", signature)
                 .WithField("removed", removed)
-                .WithField("forbidden", forbidden));
+                .WithField("forbidden", forbidden)
+                .WithField("reasons", reasons)
+                .WithField("mode", mode));
+        }
+
+        // The mode of this call: the published plan's freshness and allocation for the alliance, and the flags (DefenseInterceptionGate.ModeFor).
+        private static DefenseFilterMode InterceptionMode(int allianceId, out string why)
+        {
+            bool inRange = allianceId >= 0 && allianceId <= 1;
+            bool published = inRange && CampaignPlanStore.TryGetPlan(allianceId, out _);
+            Allocation allocation = null;
+            bool fresh = inRange && CampaignWithholdView.TryFreshAllocation(allianceId, out allocation);
+            int assignments = fresh && allocation != null ? allocation.Assignments.Count : 0;
+            return DefenseInterceptionGate.ModeFor(allianceId, FlagOn(Plugin.EnableVanillaDefensiveInterception), FlagOn(Plugin.EnableCampaignPlanner),
+                FlagOn(Plugin.EnableCampaignPlannerExecutors), published, fresh, assignments, out why);
+        }
+
+        // Reused by every observed call (the patch is not re-entrant): the instance ids of vanilla's candidate list, and the forbidden ones among them.
+        private static readonly List<int> PresentIds = new List<int>();
+        private static readonly List<int> WouldIds = new List<int>();
+
+        // Observe mode: what the filter would have removed, as a row. Written whenever the ledger forbade anything, a zero count included, and
+        // not behind the verbose flag; bounded by the per-alliance signature (ObservedLog). Changes nothing.
+        private static void ObserveCandidates(int allianceId, IList ownUnits, HashSet<int> forbidden, Dictionary<int, string> reasonByUnitId)
+        {
+            PresentIds.Clear();
+            WouldIds.Clear();
+            for (int i = 0; i < ownUnits.Count; i++)
+            {
+                var unityObj = ownUnits[i] as UnityEngine.Object;
+                if (unityObj == null) continue;
+                PresentIds.Add(unityObj.GetInstanceID());
+            }
+            int wouldRemove = DefenseInterceptionGate.WouldRemove(PresentIds, forbidden, WouldIds);
+            // The dedupe compares the count and a fingerprint of the reasons, so a call that finds what the last row said allocates nothing;
+            // the reasons text and the signature are built only for a row that is written.
+            if (!ObservedLog.ShouldEmit(allianceId, wouldRemove, DefenseFilterTally.Fingerprint(reasonByUnitId, WouldIds))) return;
+            string reasons = DefenseFilterTally.Reasons(reasonByUnitId, WouldIds);
+            string signature = DefenseInterceptionGate.ObservedSignature(allianceId, wouldRemove, reasons);
+            TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
+                .WithAlliance(allianceId)
+                .WithDecision("filter-observed", "interception-left-to-vanilla", signature)
+                .WithField("wouldRemove", wouldRemove)
+                .WithField("forbidden", forbidden.Count)
+                .WithField("reasons", reasons));
+        }
+
+        private static bool FlagOn(BepInEx.Configuration.ConfigEntry<bool> entry)
+        {
+            try { return entry != null && entry.Value; }
+            catch { return false; }
         }
 
         private static void EmitDefenseIntentSkipRevert(int allianceId, int unitId, string candidateName, string threatSignature, string reason)

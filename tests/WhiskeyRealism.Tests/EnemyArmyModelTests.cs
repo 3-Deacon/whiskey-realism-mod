@@ -1036,7 +1036,7 @@ internal static class EnemyArmyModelTests
     {
         string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
         string review = MethodBody(planner, "internal static void ReviewPlan(");
-        int detect = review.IndexOf("EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn())", StringComparison.Ordinal);
+        int detect = review.IndexOf("EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn(), States[alliance].CampaignSeed)", StringComparison.Ordinal);
         int update = review.IndexOf(".Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance), EnemyDetectionRuntime.MarchFor())", StringComparison.Ordinal);
         int copy = review.IndexOf("snapshot.Beliefs.AddRange(", StringComparison.Ordinal);
         int report = review.IndexOf("EnemyDetectionRuntime.Report(snapshot, beliefs);", StringComparison.Ordinal);
@@ -1060,8 +1060,14 @@ internal static class EnemyArmyModelTests
         AssertContains(MethodBody(runtime, "private static bool GridVisible("), "_gridBroken = true;", "a probe exception ends grid probing for the review");
         int hiddenCalls = 0;
         for (int at = runtime.IndexOf("UnitIsHidden(", StringComparison.Ordinal); at >= 0; at = runtime.IndexOf("UnitIsHidden(", at + 1, StringComparison.Ordinal)) hiddenCalls++;
-        AssertEqual(1, hiddenCalls, "one UnitIsHidden call");
+        AssertEqual(2, hiddenCalls, "two UnitIsHidden calls: the sighting probe and, from foresight F4, the spotting-mark probe (IsHiddenAt)");
         AssertContains(MethodBody(runtime, "private static bool IsHiddenFromGrid("), "UnitIsHidden(", "inside the probe DetectionRules.GridVisible calls");
+        AssertContains(MethodBody(runtime, "private static bool IsHiddenAt("), "UnitIsHidden(", "the mark probe's one grid call");
+        AssertContains(runtime, "private static readonly Func<float, float, bool> GridHiddenAt = IsHiddenAt;", "the mark probe is only a delegate too");
+        int markProbeRefs = 0;
+        for (int at = runtime.IndexOf("IsHiddenAt", StringComparison.Ordinal); at >= 0; at = runtime.IndexOf("IsHiddenAt", at + 1, StringComparison.Ordinal)) markProbeRefs++;
+        AssertEqual(2, markProbeRefs, "never called directly (delegate + definition only)");
+        AssertContains(MethodBody(runtime, "private static void ProbeAllEnemies("), "ProbeMarks(s, side);", "the marks are probed inside the incident-masked loop, after the sightings");
         AssertContains(runtime, "private static readonly Func<Regiment, bool> HiddenProbe = IsHiddenFromGrid;", "the probe is only a delegate");
         int probeRefs = 0;
         for (int at = runtime.IndexOf("IsHiddenFromGrid", StringComparison.Ordinal); at >= 0; at = runtime.IndexOf("IsHiddenFromGrid", at + 1, StringComparison.Ordinal)) probeRefs++;

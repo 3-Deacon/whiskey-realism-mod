@@ -71,6 +71,7 @@ internal static class CampaignExecutorTests
             ("ImportancePatchPinned", ImportancePatchPinned),
             ("ReviewExecuteWiringPinned", ReviewExecuteWiringPinned),
             ("PipelineOrderPinned", PipelineOrderPinned),
+            ("ThePlanBuildsThePictureBeforeItsFirstEvaluate", ThePlanBuildsThePictureBeforeItsFirstEvaluate),
             ("PlannerPatchesReadOnlyPublishedState", PlannerPatchesReadOnlyPublishedState),
             ("PlannerPatchWriteProbeIsCaught", PlannerPatchWriteProbeIsCaught),
             ("ReviewPlanStampsTheClockAndPublishesTheContext", ReviewPlanStampsTheClockAndPublishesTheContext),
@@ -417,7 +418,7 @@ internal static class CampaignExecutorTests
         AssertTrue(collect > 0 && plan > collect && allocate > plan, "collect, plan, then allocate");
         AssertEqual(1, review.Split(new[] { "CollectGaveUp(" }, StringSplitOptions.None).Length - 1, "collected once per review");
         AssertFalse(review.Contains("previousPlan") || review.Contains("Resolve("), "no objective is read back from an earlier plan");
-        AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "G3 reads the moves with their objectives (and G5c's held builders)");
+        AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);"), "G3 reads the moves with their objectives (and G5c's held builders)");
         AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
     }
 
@@ -504,6 +505,7 @@ internal static class CampaignExecutorTests
         s.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));
         s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
         s.Own.Add(ExecutorFixtures.Corps(3, 400f, 18000f));
+        s.Own.Add(ExecutorFixtures.Corps(4, 0f, 9000f));   // the capital guard: D11's floor is the minimum plus the weighted threat (7261 here), met by the guard alone
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 18000f));
         return s;
     }
@@ -1274,14 +1276,30 @@ internal static class CampaignExecutorTests
         return coordinator.Substring(start, next - start);
     }
 
+    // Foresight F3: the enemy picture is built once, ahead of the first Evaluate, so the terrain-filling review's two passes plan on one picture.
+    private static void ThePlanBuildsThePictureBeforeItsFirstEvaluate()
+    {
+        string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs");
+        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)\n        {");
+        AssertInOrder(plan, "TheaterPlanner.Plan", "picture = inputs.Picture = EnemyPicture.Build(s, (x, z) => IsScouted(inputs, x, z));",
+            "var candidates = new List<Candidate>();", "int unknown = review.Unknown, probed = 0;");
+        // The two Evaluate passes of a terrain-filling review: both after the picture.
+        const string evaluate = "Evaluate(inputs, candidates);";
+        int build = plan.IndexOf("EnemyPicture.Build(", StringComparison.Ordinal);
+        AssertTrue(plan.IndexOf(evaluate, StringComparison.Ordinal) > build, "the first Evaluate comes after the picture is built");
+        AssertEqual(2, plan.Split(new[] { evaluate }, StringSplitOptions.None).Length - 1, "two passes, one picture");
+    }
+
     private static void PipelineOrderPinned()
     {
         string runtime = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignPlannerRuntime.cs");
         AssertInOrder(BodyOf(runtime, "internal static void ReviewPlan("), "ReviewPlan",
             "var snapshot = CampaignSnapshotRuntime.Build(alliance, faction, daySerial,",
             "RebindSaved(alliance, snapshot);",
-            "EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn());",
+            "state.CampaignSeed = PlannerState.ComputeCampaignSeed(",
+            "EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn(), States[alliance].CampaignSeed);",
             "beliefs.Update(snapshot.Detections, snapshot.DaySerial,",
+            "snapshot.DetectionsMarked = beliefs.AppliedMarkKeys.Count;",
             "snapshot.Beliefs.AddRange(beliefs.Beliefs);",
             "EnemyDetectionRuntime.Report(snapshot, beliefs);",
             "if (mode == PlannerReviewMode.StandDown) return;",
@@ -1296,12 +1314,15 @@ internal static class CampaignExecutorTests
             "GarrisonRuntime.PlanPosts(snapshot, plan);",
             "PlanRecon(snapshot, sectors, plan, year, month, day);",
             "allocation = ForceAllocator.Allocate(plan, snapshot, sectors,",
-            "SyncRecon(snapshot, allocation);",
+            "SyncRecon(snapshot, plan, allocation);",
             "GarrisonRuntime.Sync(snapshot, plan, allocation);",
+            "CampaignPlanStore.TryGetAllocation(alliance, out var yesterdaysAllocation);",
+            "CampaignPlanStore.TryGetPlan(alliance, out var yesterdaysPlan);",
             "CampaignPlanStore.Publish(alliance, plan, allocation, sectors);",
             "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "EmitPlan(plan, trace, day, month, year);",
-            "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);");
+            "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);",
+            "EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);");
 
         AssertInOrder(BodyOf(runtime, "internal static void ReviewExecute("), "ReviewExecute",
             "if (!ExecutorsEnabled()) return;",

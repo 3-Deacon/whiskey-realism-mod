@@ -291,6 +291,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var b = s.Beliefs[i];
                 if (b.Confidence01 <= 0f || b.LastSeenDay != s.DaySerial) continue;
+                if (b.LastSource == DetectionSource.Mark) continue;   // a mark is no contact (foresight F4): its position is the truth within a mark radius
                 if (Distance(b.X, b.Z, f.X, f.Z) <= radius) return true;
             }
             return false;

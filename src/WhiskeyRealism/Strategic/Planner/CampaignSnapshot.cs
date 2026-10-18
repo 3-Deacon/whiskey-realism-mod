@@ -23,6 +23,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public float CapitalX, CapitalZ;
         public bool HasCapital;
+        // The opposing major alliance's public facts (foresight F3, D11 requirement-enemy-total): its capital (position and name, as the strategy
+        // screen and the map show them) and its total men in the field, GameVars.alliance[e].troopsfielded for e = 1 - Alliance (alliances 0
+        // and 1 only). NaN is unknown: an unreadable alliance, or Europe's snapshot. Read by EnemyPicture.Build.
+        public float EnemyCapitalX, EnemyCapitalZ;
+        public bool HasEnemyCapital;
+        public string EnemyCapitalName;
+        public float EnemyTroopsFielded = float.NaN;
         public float RelocationRange;       // GamePrefs.aimaximumdistancetosearchforunitrelocations
         // GamePrefs.theatersize is a Vector2 (49166): IsWithinOperationsTheater tests x against
         // theatersize.x and z against theatersize.y (17105).
@@ -46,6 +53,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<FortRecord> Forts { get; } = new List<FortRecord>();               // G8: the side's own forts (post sites and their garrison dummies)
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
+        // Foresight F4: how many of the review's detections were sightings (everything but a mark) and how many marks the belief model applied;
+        // the review fills them after the model update, the [EnemyPicture] row prints them.
+        public int DetectionsSeen, DetectionsMarked;
 
         internal void Reset(int alliance, int factionIndex, int daySerial, PlayerCommandClass player,
                             int playerCommandInstanceId, DirectorPosture tempo)
@@ -59,6 +69,10 @@ namespace WhiskeyRealism.Strategic.Planner
 
             CapitalX = CapitalZ = 0f;
             HasCapital = false;
+            EnemyCapitalX = EnemyCapitalZ = 0f;
+            HasEnemyCapital = false;
+            EnemyCapitalName = null;
+            EnemyTroopsFielded = float.NaN;
             RelocationRange = 0f;
             TheaterHalfExtentX = TheaterHalfExtentZ = 0f;
             OffensiveDominance = 0f;
@@ -78,6 +92,8 @@ namespace WhiskeyRealism.Strategic.Planner
             Forts.Clear();
             Detections.Clear();
             Beliefs.Clear();
+            DetectionsSeen = 0;
+            DetectionsMarked = 0;
         }
 
         public int IndexOfOwn(int instanceId)

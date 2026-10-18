@@ -179,6 +179,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     s.CapitalZ = own.z;
                     s.HasCapital = true;
                 }
+                ReadEnemyPublicFacts(s, alliance, alliances);
             }
             s.RelocationRange = GamePrefs.aimaximumdistancetosearchforunitrelocations;
             s.TheaterHalfExtentX = GamePrefs.theatersize.x;
@@ -186,6 +187,25 @@ namespace WhiskeyRealism.Strategic.Planner
             s.OffensiveDominance = GamePrefs.aidominanceforoffensiveoperations;
             s.MinStrengthForMovement = GamePrefs.aiminimumstrengthformovement;
             s.MinMoraleForMovement = GamePrefs.aiminimummoraleformovement;
+        }
+
+        // The opposing major alliance's public total and capital (D11 requirement-enemy-total): troopsfielded is summed in UpdateAllianceData
+        // (81488-81567) and shown for both alliances on the strategy screen (CampaignStrategy.UpdateStats 180120-180126); the capital is
+        // Alliance.capital (62230), its name Town.CityName (143192). Alliances 0 and 1 only: Europe is no enemy total and has no counterpart.
+        private static void ReadEnemyPublicFacts(CampaignSnapshot s, int alliance, GameVars.Alliance[] alliances)
+        {
+            if (alliance != 0 && alliance != 1) return;
+            int enemy = 1 - alliance;
+            if (enemy >= alliances.Length) return;
+            float fielded = alliances[enemy].troopsfielded;
+            s.EnemyTroopsFielded = !float.IsNaN(fielded) && !float.IsInfinity(fielded) && fielded >= 0f ? fielded : float.NaN;
+            var capital = alliances[enemy].capital;
+            if ((UnityEngine.Object)capital == null) return;
+            Vector3 position = PositionOf(capital);
+            s.EnemyCapitalX = position.x;
+            s.EnemyCapitalZ = position.z;
+            s.EnemyCapitalName = capital.CityName;
+            s.HasEnemyCapital = true;
         }
 
         // Daily: the faction-indexed importancevalues and ownpoints and the supplycapacity. The shape

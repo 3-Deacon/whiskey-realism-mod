@@ -193,21 +193,25 @@ namespace WhiskeyRealism.Strategic.Planner
     // sighting (the three provenances that used to be told apart were only ever assigned, never branched on;
     // sidecars written with the old values 1 and 3 load as Seen, see DetectionSources.FromSaved), Contact is
     // vanilla's campaign contact (counted in [EnemyBeliefs]), ObjectiveGarrison a fort or town garrison
-    // sighting (keeps its radius). The numbers are persisted: 2 and 4 stay as they were.
+    // sighting (keeps its radius), Mark a vanilla spotting mark (foresight F4, decision 2: where a hidden group was last shown, within a
+    // MarkRadius of the truth; it counts in every strength sum and never scouts, lands a group, raises a raid or counts as contact).
+    // The numbers are persisted: 2 and 4 stay as they were, Mark is 5.
     public enum DetectionSource
     {
         Seen = 0,
         Contact = 2,
-        ObjectiveGarrison = 4
+        ObjectiveGarrison = 4,
+        Mark = 5
     }
 
     public static class DetectionSources
     {
-        // A saved DetectionSource: 2 and 4 as before; 0, 1 and 3 (FogGrid, OwnSideWithinFog, NoFog) and anything unknown are Seen.
+        // A saved DetectionSource: 2, 4 and 5 as written; 0, 1 and 3 (FogGrid, OwnSideWithinFog, NoFog) and anything unknown are Seen.
         public static DetectionSource FromSaved(int saved)
         {
             if (saved == (int)DetectionSource.Contact) return DetectionSource.Contact;
             if (saved == (int)DetectionSource.ObjectiveGarrison) return DetectionSource.ObjectiveGarrison;
+            if (saved == (int)DetectionSource.Mark) return DetectionSource.Mark;
             return DetectionSource.Seen;
         }
     }
@@ -233,6 +237,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // G9: the strength-weighted WSF of the seen group's armed units, per weapon lane (infantry and cavalry rifles, guns), 0 when
         // none was seen in the lane. What a sighting shows of the enemy's arms, never read from an alliance's averageweaponstrength*.
         public float RifleQuality, GunQuality;
+        // Foresight F4: a Mark detection's calendar day (MarkRules.MarkDay, at most today) and its radius (MarkRules.MarkRadius); 0 otherwise.
+        public int MarkDay;
+        public float MarkRadius;
     }
 
     public struct EnemyBelief
@@ -251,6 +258,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // G9: the lane qualities of the last sighting that showed the lane (EnemyDetection.RifleQuality/GunQuality); carried unchanged
         // while the group is unseen, 0 until a sighting shows it.
         public float RifleQuality, GunQuality;
+        // Foresight F4: the radius a mark belief starts from (MarkRadius), 0 for a sighting or a contact; the uncertainty radius is this plus
+        // the drift of the days since the mark. Persisted (baseRadius).
+        public float BaseRadius;
     }
 
     public struct CommanderRecord
@@ -366,6 +376,15 @@ namespace WhiskeyRealism.Strategic.Planner
         public float MainRequiredRatio;
         public List<SectorPlan> Sectors = new List<SectorPlan>();
         public float CapitalFloorStrength;
+        // Foresight F5 (D11 requirement-live-min-strength): the smallest strength the AI moves a formation at, the scenario's
+        // aiminimumstrengthformovement (002/A 2000, Config 5000) read by TheaterPlanner.Plan, the 5000 fallback when that read is not positive
+        // or not finite and, with Enable Strategic Foresight Picture off, always. Every floor and hold target derives from it; a plan a test
+        // builds by hand keeps the fallback.
+        public float MinGarrisonStrength = TheaterPlanner.MinStrengthFallback;
+        // Foresight F3 (D11 requirement-capital-window and -floor): the numbers behind the capital floor, for the [CapitalThreat] row and
+        // the [CapitalFloor] row. CapitalReach is the race, max(RelocationRange, CapitalReliefDays x CapitalCorpsPerDay); CapitalWeighted
+        // vanilla's weight (11727) over the picture's elements inside it; CapitalThreat01 the 0.6 trigger's input (baseline excluded).
+        public float CapitalReach, CapitalWeighted, CapitalThreat01, CapitalReliefDays, CapitalCorpsPerDay;
         public List<DepotTask> DepotTasks = new List<DepotTask>();
         public string SwitchReason;
         public string PriorId;

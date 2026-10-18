@@ -99,10 +99,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // Scout first (smoke amendments 2026-10-16, D1/D2). A belief at or above this confidence is a fresh picture: ContactEvidenceLedger's
         // own bar for acting on a belief (a probe never escalates on less, ReconPlanner.ProbeStaleConfidence).
         public const float ScoutFreshConfidence = ContactEvidenceLedger.MinEscalationConfidence;
-        // The presumed enemy at an unscouted place is the smallest force vanilla's AI moves at all (aiminimumstrengthformovement 5000,
-        // campaignprefs 1396-1397; ForceAllocator.MinGarrisonStrength), scaled up by the importance of the enemy-held ground nearby: a
+        // The presumed enemy at an unscouted place is the smallest force vanilla's AI moves at all (aiminimumstrengthformovement,
+        // campaignprefs 1396-1397; TheaterPlan.MinGarrisonStrength), scaled up by the importance of the enemy-held ground nearby: a
         // more valuable objective is presumed better held, up to twice the floor.
         public const float PresumedImportanceGain = 1f;
+        // The minimum strength when the scenario's read is not positive or not finite (Config/campaignprefs.txt 1397): the one place the
+        // number 5000 stands for it. TheaterPlan.MinGarrisonStrength is the definition site everything else derives from.
+        internal const float MinStrengthFallback = 5000f;
         // D3: the mass is the force the objective needs: the estimated enemy x the required ratio x (1 + margin). The margin is
         // MassMarginBase, shrunk by a bold commander (AttackBias, as the balance term scales by it) and grown for a cautious one.
         public const float MassMarginBase = 0.25f, MassMarginBiasScale = 0.5f;
@@ -132,6 +135,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int Force;          // own formation index, -1 none
             public float Value, Balance, Reach, March, Exposure, Capital, PriorTerm, Score;
             public float Ratio, Required, Mass, Enemy, Presumed, Need;
+            public int Anchors;        // foresight F3: the undisplaced anchors holding men within the relocation range of the target
             public bool Eligible, InReach, Retained, Scouted;
             public string PriorId;
         }
@@ -144,6 +148,12 @@ namespace WhiskeyRealism.Strategic.Planner
             public ITerrainLineProbe Probe;
             public MarchSpeedInputs Speed;
             public float CapitalFloor, CapitalThreat01;
+            // Foresight F3: the enemy picture, built once a review before the first Evaluate (Evaluate builds it when null); the numbers the
+            // capital threat leaves for the plan's [CapitalThreat] row; and the minimum strength every floor derives from (the scenario's live
+            // minimum, set by Plan from PlanMinimum; the fallback for a hand-built input; MinStrength(Inputs) is the one reader).
+            internal EnemyPicture Picture;
+            internal float MinStrength = MinStrengthFallback;
+            internal float CapitalWeighted, CapitalReach, CapitalReliefDays, CapitalCorpsPerDay;
             internal ReviewTerrain Terrain;   // marks the questions' order; null once scoring runs without rivers
             internal SectorFacts Facts;
             internal bool[] CapitalReserved;
@@ -187,6 +197,7 @@ namespace WhiskeyRealism.Strategic.Planner
         internal sealed class SectorFacts
         {
             public float[] CX, CZ, Radius, Threat, Need, Own, Supply, Morale, NearX, NearZ, Presumed;
+            public float[] Assigned; // foresight F3: the Faded and Anchor mass EnemyPicture.AssignSectors gave each sector (weighted)
             public int[] Count, Strongest;
             public bool[] Facing;  // D2: the sector faces enemy-held ground or a believed army
             public int[] Orderable; // formations the planner can order (WlChainRules.MayMove): the base of the Supply/Morale averages
@@ -196,14 +207,27 @@ namespace WhiskeyRealism.Strategic.Planner
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
                                          IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)
         {
+            return Plan(s, sectors, sectorProfile, state, battles, terrain, in speed, out trace, out _, gaveUp, heldBuilders);
+        }
+
+        // The same, and the enemy picture the review was planned on (null when the plan was not built), for the [EnemyPicture] row.
+        internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
+                                         IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
+                                         out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)
+        {
             var plan = new TheaterPlan { Alliance = s != null ? s.Alliance : -1, DaySerial = s != null ? s.DaySerial : 0 };
             trace = "";
+            picture = null;
             if (s == null || sectors == null || s.Alliance < 0 || s.Alliance > 1) return plan;
             if (state == null) state = new PlannerState();
 
             var review = new ReviewTerrain(terrain, s.Areas);
             var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders, State = state };
+            plan.MinGarrisonStrength = inputs.MinStrength = PlanMinimum(s);
             AssignDepartments(inputs, state);
+            // The picture is built once, before the first Evaluate: displacement is judged on straight distances and needs no terrain probe, so
+            // both passes of a terrain-filling review plan on one picture.
+            picture = inputs.Picture = EnemyPicture.Build(s, (x, z) => IsScouted(inputs, x, z));
             plan.DepartmentCounts = DepartmentCountsOf(inputs);
             var candidates = new List<Candidate>();
             Evaluate(inputs, candidates);
@@ -218,6 +242,12 @@ namespace WhiskeyRealism.Strategic.Planner
                 Evaluate(inputs, candidates);
             }
             plan.CapitalFloorStrength = inputs.CapitalFloor;
+            plan.CapitalReach = inputs.CapitalReach;
+            plan.CapitalWeighted = inputs.CapitalWeighted;
+            plan.CapitalThreat01 = inputs.CapitalThreat01;
+            plan.CapitalReliefDays = inputs.CapitalReliefDays;
+            plan.CapitalCorpsPerDay = inputs.CapitalCorpsPerDay;
+            NoteEnemyCapitalEstimates(inputs);
 
             int main = Decide(inputs, candidates, state, battles, out string reason);
             plan.SwitchReason = reason;
@@ -317,10 +347,11 @@ namespace WhiskeyRealism.Strategic.Planner
             var s = c.S;
             float range = s.RelocationRange;
             float mass = s.Tempo != null ? s.Tempo.MassRatioModifier : 0f;
+            EnsurePicture(c);
+            c.OwnIips = MarchTime.OwnIips(s);   // before CapitalThreat: its relief race estimates marches over the own IIPs
             c.Terrain?.Mark(ReviewTerrain.GroupCapital, 0, s.CapitalX, s.CapitalZ);
             CapitalThreat(c, out c.CapitalFloor, out c.CapitalThreat01);
             c.Facts = BuildSectorFacts(c);
-            c.OwnIips = MarchTime.OwnIips(s);
             c.RoadPerDay = new float[s.Own.Count];
             for (int i = 0; i < s.Own.Count; i++)
                 c.RoadPerDay[i] = MarchTime.SpeedPerDay(c.Speed, s.Own[i].UnitTyp, s.Own[i].GroupSpeed, c.Speed.RoadCost);
@@ -343,13 +374,26 @@ namespace WhiskeyRealism.Strategic.Planner
                 // Scout first (D1): a target no fresh belief or own viewer speaks for is unscouted and its odds are judged on the
                 // believed enemy or the presumed threat, whichever is larger, never on "none seen".
                 cand.Scouted = IsScouted(c, o.X, o.Z);
-                cand.Presumed = cand.Scouted ? 0f : PresumedAt(c, o.X, o.Z, range);
                 float believed = LandThreatNear(c, o.X, o.Z, range);
-                float enemy = Math.Max(believed, cand.Presumed);
+                float enemy;
+                if (PlannerSettings.ForesightPicture)
+                {
+                    // D11: the layers are disjoint, so they add (the believed army and the men presumed at anchors and fading beliefs near the
+                    // target), floored at the plain minimum raised by the importance of an undisplaced anchor there, scouted or not; the
+                    // scouted flag still drives D1's staging.
+                    cand.Presumed = c.Picture.Presumed(s, o.X, o.Z, range, c.Probe);
+                    cand.Anchors = c.Picture.AnchorsNear(o.X, o.Z, range);
+                    enemy = Math.Max(believed + cand.Presumed, Floor(c, o.X, o.Z, range));
+                }
+                else
+                {
+                    cand.Presumed = cand.Scouted ? 0f : PresumedAt(c, o.X, o.Z, range);
+                    enemy = Math.Max(believed, cand.Presumed);
+                }
                 float own = cand.Mass;
                 cand.Enemy = enemy;
                 cand.Ratio = enemy > 0f ? own / enemy : (cand.Force >= 0 ? float.MaxValue : 0f);
-                cand.Need = NeedFor(enemy, cand.Required, profile.AttackBias);
+                cand.Need = NeedFor(enemy, cand.Required, profile.AttackBias, MinStrength(c));
                 // The balance term ranks targets by what is known (the believed enemy); the presumption gates the odds above and
                 // sizes the push (Need), and being the same floor everywhere it would only blur the ranking.
                 float balance = own + believed > 0f ? own / (own + believed) : 0f;
@@ -376,7 +420,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 cand.PriorTerm = Math.Min(PriorMaxContribution, PriorLambda * prior);
                 cand.Score = ValueWeight * cand.Value + BalanceWeight * cand.Balance + ReachWeight * cand.Reach + DistanceWeight * cand.March
                     + ExposureWeight * (1f - cand.Exposure) + CapitalThreatWeight * cand.Capital + cand.PriorTerm;
-                cand.Eligible = cand.Force >= 0 && cand.Ratio >= cand.Required;
+                // D11: besides D3's odds rule, a capacity of at least the minimum strength vanilla moves at all (14099).
+                cand.Eligible = cand.Force >= 0 && cand.Ratio >= cand.Required && cand.Mass >= MinStrength(c);
                 into.Add(cand);
             }
             // A fixed candidate order (objective id, then position), so neither the tie-break nor the
@@ -398,7 +443,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             bool capitalOnset = CapitalOnset(state, c.CapitalThreat01);
             int current = state.CurrentMainObjective;
-            Retain(cands, current, state);
+            Retain(cands, current, state, MinStrength(c));
             int best = Best(cands);
             // The record the main effort is on (hysteresis between records), and the best record of the current objective: the objective's
             // own value, which a challenger objective is compared against (the kept record may trail it by up to the record window).
@@ -471,7 +516,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The odds deadband (F1): the current main effort keeps its eligibility while its odds are
         // within OddsDeadband below its RequiredRatio, for fewer than SwitchDays consecutive reviews.
-        private static void Retain(List<Candidate> cands, int current, PlannerState state)
+        internal static void Retain(List<Candidate> cands, int current, PlannerState state, float minStrength)
         {
             // The record the main effort is on has the deadband, not whichever record of the objective scores best today.
             int index = KeptRecord(cands, current, state, anyEligibility: true);
@@ -485,6 +530,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 state.BelowOddsDays = 0;
                 return;
             }
+            // A capacity below the minimum strength is no push: it returns before the odds counter, so Decide drops the objective at once.
+            if (cand.Mass < minStrength) return;
             if (cand.Ratio < cand.Required - OddsDeadband) return;
             state.BelowOddsDays++;
             if (state.BelowOddsDays >= SwitchDays) return;
@@ -761,12 +808,81 @@ namespace WhiskeyRealism.Strategic.Planner
             return bonus;
         }
 
-        // D2's hold need at a point (x, z) whose reach is `reach`: max(HoldRatio' x the believed land threat, MinGarrisonStrength, and while nothing
-        // fresh is believed within that reach the presumed threat). The sector facts and the D8 garrison post size their hold with this one function.
-        private static float HoldNeedAt(Inputs c, float x, float z, float reach, float threat, float holdRatio, out float presumed)
+        // The D8 garrison post's hold need at a point (x, z) whose reach is `reach` (the relocation range). Foresight: max(HoldRatio' x (the
+        // believed land threat + the presumed men no facing sector was assigned), Floor); the post competes for no element a sector holds
+        // against (requirement-hold-need). Picture off: D2's rule (LegacyHoldNeedAt). The sector facts size their hold with the same
+        // formula, except that a sector takes the elements assigned to it.
+        internal static float HoldNeedAt(Inputs c, float x, float z, float reach, float threat, float holdRatio, out float presumed)
+        {
+            if (!PlannerSettings.ForesightPicture) return LegacyHoldNeedAt(c, x, z, reach, threat, holdRatio, out presumed);
+            presumed = UnassignedPresumed(c, x, z, reach);
+            return Math.Max(holdRatio * (threat + presumed), Floor(c, x, z, reach));
+        }
+
+        // D2's hold need: max(HoldRatio' x the believed land threat, MinGarrisonStrength, and while nothing fresh is believed within that reach
+        // the presumed threat). Kept behind Enable Strategic Foresight Picture (the rollback).
+        private static float LegacyHoldNeedAt(Inputs c, float x, float z, float reach, float threat, float holdRatio, out float presumed)
         {
             presumed = FreshLandBeliefWithin(c.S, x, z, reach) ? 0f : PresumedAt(c, x, z, reach);
-            return Math.Max(Math.Max(holdRatio * threat, ForceAllocator.MinGarrisonStrength), presumed);
+            return Math.Max(Math.Max(holdRatio * threat, MinStrength(c)), presumed);
+        }
+
+        // The Faded and Anchor elements within `reach` of a point that no facing sector was assigned, weighted as the picture weights them.
+        private static float UnassignedPresumed(Inputs c, float x, float z, float reach)
+        {
+            float total = 0f;
+            var elements = c.Picture.Elements;
+            for (int i = 0; i < elements.Count; i++)
+            {
+                var e = elements[i];
+                if (e.AssignedSector >= 0 || (e.Kind != PictureElementKind.Faded && e.Kind != PictureElementKind.Anchor)) continue;
+                total += e.Mass * c.Picture.WeightWithin(e.X, e.Z, x, z, reach, c.Probe);
+            }
+            return total;
+        }
+
+        internal static float MinStrength(Inputs c)
+        {
+            return c.MinStrength;
+        }
+
+        // The plan's minimum strength (D11 requirement-live-min-strength): the scenario's read when it is positive and finite, else the 5000
+        // fallback; with the picture flag off always the fallback, so rolling the picture back alone never leaves the live floor under D2's
+        // old presumption.
+        internal static float PlanMinimum(CampaignSnapshot s)
+        {
+            if (!PlannerSettings.ForesightPicture) return MinStrengthFallback;
+            return ReadIsUsable(s.MinStrengthForMovement) ? s.MinStrengthForMovement : MinStrengthFallback;
+        }
+
+        // Whether the scenario's raw read can be a minimum; the review warns when it cannot, whatever the flag says.
+        internal static bool ReadIsUsable(float raw)
+        {
+            return raw > 0f && !float.IsNaN(raw) && !float.IsInfinity(raw);
+        }
+
+        private static void EnsurePicture(Inputs c)
+        {
+            if (c.Picture == null) c.Picture = EnemyPicture.Build(c.S, (x, z) => IsScouted(c, x, z));
+        }
+
+        // D11 Floor(x, z, r) = MinStrength x (1 + PresumedImportanceGain x I), I the largest importance of an undisplaced anchor within r (0 with
+        // none: a place whose anchors are all scouted floors at the plain minimum).
+        internal static float Floor(Inputs c, float x, float z, float r)
+        {
+            EnsurePicture(c);
+            return MinStrength(c) * (1f + PresumedImportanceGain * c.Picture.UndisplacedImportance(x, z, r));
+        }
+
+        // The enemy capital's estimate: the believed army near it plus the men presumed there (the number the covering force's expected
+        // short is read against).
+        private static void NoteEnemyCapitalEstimates(Inputs c)
+        {
+            var p = c.Picture;
+            if (p == null || !p.HasEnemyCapital) return;
+            float range = c.S.RelocationRange;
+            float believed = LandThreatNear(c, p.EnemyCapitalX, p.EnemyCapitalZ, range);
+            p.EnemyCapitalEstProp = believed + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe);
         }
 
         private static float HoldRatioNow(CampaignSnapshot s)
@@ -906,7 +1022,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // D6 detail: every own formation has a home department from its first review on (PlannerState.Observe: the theater of the sector it
         // stands in then, kept until a deliberate transfer).
-        private static void AssignDepartments(Inputs c, PlannerState state)
+        internal static void AssignDepartments(Inputs c, PlannerState state)
         {
             var s = c.S;
             c.Department = new Theater[s.Own.Count];
@@ -952,11 +1068,9 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // D6 detail (d): the losing department's D2 hold is still met without the formation: the hold needs of the sectors of that
         // theater (SectorFacts.Need, the one hold function) against what the department's other formations hold there.
-        private static bool DepartmentHoldMet(Inputs c, Theater department, int excluded)
+        internal static bool DepartmentHoldMet(Inputs c, Theater department, int excluded)
         {
-            float need = 0f;
-            for (int k = 0; k < c.Sectors.Count; k++)
-                if (c.Sectors.TheaterOf(k) == department) need += c.Facts.Need[k];
+            float need = DepartmentNeed(c, department);
             float have = 0f;
             for (int j = 0; j < c.S.Own.Count; j++)
             {
@@ -965,6 +1079,34 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (WlChainRules.CountsTowardCoverage(f.Chain)) have += ReserveRules.HoldStrength(f);
             }
             return have >= need;
+        }
+
+        // The hold a department needs. Foresight (D11 requirement-hold-need, amending D6 (d)): max(the sum of Floor over the department's facing
+        // sectors, HoldRatio' x the land elements (Live, Faded, Anchor) assigned, each to its one nearest facing sector, to the department's
+        // sectors), so an element counts in one department once and the sector needs of a department never hold one army twice over. Picture off:
+        // the sum of the sectors' needs (SectorFacts.Need), as before.
+        internal static float DepartmentNeed(Inputs c, Theater department)
+        {
+            if (!PlannerSettings.ForesightPicture)
+            {
+                float sum = 0f;
+                for (int k = 0; k < c.Sectors.Count; k++)
+                    if (c.Sectors.TheaterOf(k) == department) sum += c.Facts.Need[k];
+                return sum;
+            }
+            float floors = 0f;
+            for (int k = 0; k < c.Sectors.Count; k++)
+                if (c.Sectors.TheaterOf(k) == department && c.Facts.Facing[k])
+                    floors += Floor(c, c.Facts.CX[k], c.Facts.CZ[k], c.Facts.Radius[k] + c.S.RelocationRange);
+            float assigned = 0f;
+            var elements = c.Picture.Elements;
+            for (int i = 0; i < elements.Count; i++)
+            {
+                var e = elements[i];
+                if (e.AssignedSector < 0 || c.Sectors.TheaterOf(e.AssignedSector) != department) continue;
+                assigned += e.Mass * e.Weight;
+            }
+            return Math.Max(floors, HoldRatioNow(c.S) * assigned);
         }
 
         // The capacity for a target in targetSector (indexes into s.Own, written to `into`) and its strength: what the planner could
@@ -1039,11 +1181,11 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // D3: the force an objective needs against `enemy` at `required` odds: enemy x required x (1 + margin), the margin
         // MassMarginBase x (1 - MassMarginBiasScale x AttackBias) (bold: leaner, cautious: heavier), never below the smallest force
-        // the AI moves at all (MinGarrisonStrength).
-        internal static float NeedFor(float enemy, float required, float attackBias)
+        // the AI moves at all (the plan's minimum strength).
+        internal static float NeedFor(float enemy, float required, float attackBias, float minimum)
         {
             float margin = MassMarginBase * (1f - MassMarginBiasScale * Math.Max(-1f, Math.Min(1f, attackBias)));
-            return Math.Max(ForceAllocator.MinGarrisonStrength, enemy * required * (1f + margin));
+            return Math.Max(minimum, enemy * required * (1f + margin));
         }
 
         // D3: the part of the capacity the objective needs, nearest the target first (the lower instance id on a tie), the
@@ -1130,11 +1272,35 @@ namespace WhiskeyRealism.Strategic.Planner
             return false;
         }
 
-        // A sector's hold is released for a target that is the very army the hold faces (its nearest
-        // believed army within relocation range of the target): attacking it is holding against it.
-        private static bool HoldThreatAtTarget(Inputs c, int sector, float tx, float tz)
+        // A sector's hold is released for a target that is the very army the hold faces: attacking it is holding against it. Foresight (D11
+        // requirement-hold-release): only when every threat element the sector faces lies within the relocation range of the target, each
+        // live land belief and each anchor holding men inside the sector's reach; a sector facing none releases nothing. Picture off: the
+        // nearest believed army within range of the target (one sighting 156 from Romney released the whole Manassas hold).
+        internal static bool HoldThreatAtTarget(Inputs c, int sector, float tx, float tz)
         {
-            return RiverLines.Distance(c.Facts.NearX[sector], c.Facts.NearZ[sector], tx, tz) <= c.S.RelocationRange;
+            if (!PlannerSettings.ForesightPicture)
+                return RiverLines.Distance(c.Facts.NearX[sector], c.Facts.NearZ[sector], tx, tz) <= c.S.RelocationRange;
+            float range = c.S.RelocationRange;
+            float cx = c.Facts.CX[sector], cz = c.Facts.CZ[sector];
+            float reach = c.Facts.Radius[sector] + range;
+            bool faced = false;
+            var beliefs = c.S.Beliefs;
+            for (int i = 0; i < beliefs.Count; i++)
+            {
+                var b = beliefs[i];
+                if (Live(b) <= 0f || Afloat(b) || RiverLines.Distance(b.X, b.Z, cx, cz) > reach) continue;
+                faced = true;
+                if (RiverLines.Distance(b.X, b.Z, tx, tz) > range) return false;
+            }
+            var anchors = c.Picture.Anchors;
+            for (int i = 0; i < anchors.Count; i++)
+            {
+                var a = anchors[i];
+                if (a.Share <= 0f || RiverLines.Distance(a.X, a.Z, cx, cz) > reach) continue;
+                faced = true;
+                if (RiverLines.Distance(a.X, a.Z, tx, tz) > range) return false;
+            }
+            return faced;
         }
 
         // March time within MarchHorizonDays: the road rate first, the rail leg only when the road
@@ -1172,15 +1338,16 @@ namespace WhiskeyRealism.Strategic.Planner
         // Per sector: centroid, radius, own strength / supply / morale, river-weighted believed land
         // threat (the one threat function: G4's hold need reads SectorPlan.HoldNeed, F9), hold need,
         // and the believed army nearest the centroid (the hold reserve's ordering point).
-        private static SectorFacts BuildSectorFacts(Inputs c)
+        internal static SectorFacts BuildSectorFacts(Inputs c)
         {
+            EnsurePicture(c);
             var s = c.S;
             int n = c.Sectors.Count;
             var x = new SectorFacts
             {
                 CX = new float[n], CZ = new float[n], Radius = new float[n], Threat = new float[n], Need = new float[n],
                 Own = new float[n], Supply = new float[n], Morale = new float[n], NearX = new float[n], NearZ = new float[n],
-                Count = new int[n], Strongest = new int[n], Orderable = new int[n], Presumed = new float[n], Facing = new bool[n]
+                Count = new int[n], Strongest = new int[n], Orderable = new int[n], Presumed = new float[n], Facing = new bool[n], Assigned = new float[n]
             };
             float holdRatio = HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
             for (int k = 0; k < n; k++)
@@ -1214,21 +1381,41 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (sector < 0 || sector >= n) continue;
                 x.Radius[sector] = Math.Max(x.Radius[sector], RiverLines.Distance(x.CX[sector], x.CZ[sector], s.Areas[i].X, s.Areas[i].Z));
             }
+            bool foresight = PlannerSettings.ForesightPicture;
             for (int k = 0; k < n; k++)
             {
                 c.Terrain?.Mark(ReviewTerrain.GroupSector, k, x.CX[k], x.CZ[k]);
                 float reach = x.Radius[k] + s.RelocationRange;
                 x.Threat[k] = SectorThreat(c, x.CX[k], x.CZ[k], x.Radius[k]);
-                // D2: a sector facing enemy-held ground (an enemy-held objective within its radius plus the relocation range) or a
-                // believed army keeps a hold of max(HoldRatio x believed, MinGarrison, presumed), the presumption only while nothing
-                // there is scouted (no fresh land belief within that reach).
-                x.Facing[k] = x.Threat[k] > 0f || EnemyGroundWithin(s, x.CX[k], x.CZ[k], reach);
-                x.Need[k] = x.Facing[k]
-                    ? HoldNeedAt(c, x.CX[k], x.CZ[k], reach, x.Threat[k], holdRatio, out x.Presumed[k])
-                    : holdRatio * x.Threat[k];
+                // A sector faces enemy ground when it faces a believed army, an enemy-held objective within its radius plus the relocation
+                // range, or (foresight) an anchor holding men there.
+                x.Facing[k] = x.Threat[k] > 0f || EnemyGroundWithin(s, x.CX[k], x.CZ[k], reach)
+                    || (foresight && c.Picture.AnchorElementWithin(x.CX[k], x.CZ[k], reach));
                 int near = NearestLandBelief(s, x.CX[k], x.CZ[k]);
                 x.NearX[k] = near >= 0 ? s.Beliefs[near].X : x.CX[k];
                 x.NearZ[k] = near >= 0 ? s.Beliefs[near].Z : x.CZ[k];
+            }
+            // Foresight: each presumed element counts in one facing sector only (its nearest), the assignment re-run every pass.
+            if (foresight) c.Picture.AssignSectors(x, c.Sectors, s.RelocationRange, c.Probe);
+            for (int k = 0; k < n; k++)
+            {
+                float reach = x.Radius[k] + s.RelocationRange;
+                if (foresight)
+                {
+                    // D11 requirement-hold-need: unseen men are held against at the same ratio as seen ones, never below the floor.
+                    x.Presumed[k] = x.Assigned[k];
+                    x.Need[k] = x.Facing[k]
+                        ? Math.Max(holdRatio * (x.Threat[k] + x.Assigned[k]), Floor(c, x.CX[k], x.CZ[k], reach))
+                        : holdRatio * x.Threat[k];
+                }
+                else
+                {
+                    // D2: a sector facing enemy-held ground or a believed army keeps a hold of max(HoldRatio x believed, MinGarrison, presumed), the
+                    // presumption only while nothing there is scouted (no fresh land belief within that reach).
+                    x.Need[k] = x.Facing[k]
+                        ? LegacyHoldNeedAt(c, x.CX[k], x.CZ[k], reach, x.Threat[k], holdRatio, out x.Presumed[k])
+                        : holdRatio * x.Threat[k];
+                }
             }
             return x;
         }
@@ -1277,6 +1464,8 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Beliefs.Count; i++)
             {
                 var b = s.Beliefs[i];
+                // A mark belief never scouts (foresight F4): it is where a hidden group was last shown, within a mark radius of the truth.
+                if (b.LastSource == DetectionSource.Mark) continue;
                 if (b.Confidence01 >= ScoutFreshConfidence && !Afloat(b) && RiverLines.Distance(b.X, b.Z, x, z) <= radius) return true;
             }
             return false;
@@ -1319,7 +1508,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (b.Confidence01 <= 0f || b.Confidence01 >= ScoutFreshConfidence || Afloat(b)) continue;
                 if (RiverLines.Distance(b.X, b.Z, x, z) <= radius) remembered = Math.Max(remembered, Math.Max(0f, b.Strength));
             }
-            return Math.Max(ForceAllocator.MinGarrisonStrength * (1f + PresumedImportanceGain * importance), remembered);
+            return Math.Max(MinStrength(c) * (1f + PresumedImportanceGain * importance), remembered);
         }
 
         // Believed land enemy within radius (straight), each weighted min(1, radius / river distance).
@@ -1359,17 +1548,38 @@ namespace WhiskeyRealism.Strategic.Planner
             return total;
         }
 
-        // P7 floor and the capital threat from one computation (see the header).
-        private static void CapitalThreat(Inputs c, out float floor, out float threat01)
+        // The capital floor and threat from one computation. P7: floor = CapitalFloorRatio x vanilla's weight (see the header). Foresight
+        // (D11 requirement-capital-window and -floor): the weight is taken over the picture's elements inside the capital reach, a race
+        // against the capital's own department (CapitalRace), and the floor is the minimum strength plus that weight, never below #4's
+        // VanillaNeed on this snapshot; the threat that trips the 0.6 capital trigger excludes the baseline, so it never fires on an empty map.
+        // Picture off: P7's numbers over the relocation range.
+        internal static void CapitalThreat(Inputs c, out float floor, out float threat01)
         {
             floor = 0f;
             threat01 = 0f;
             var s = c.S;
+            c.CapitalWeighted = 0f;
+            c.CapitalReach = s.RelocationRange;
+            c.CapitalReliefDays = 0f;
+            c.CapitalCorpsPerDay = 0f;
             if (!s.HasCapital) return;
+            EnsurePicture(c);
             float range = s.RelocationRange;
-            float weighted = ReserveRules.VanillaThreat(s, s.CapitalX, s.CapitalZ, range, c.Probe);
-            floor = CapitalFloorRatio * weighted;
-            if (floor <= 0f) return;
+            float weighted;
+            if (PlannerSettings.ForesightPicture)
+            {
+                CapitalRace(c, out c.CapitalReliefDays, out c.CapitalCorpsPerDay, out c.CapitalReach);
+                weighted = ReserveRules.PictureThreat(s, c.Picture, s.CapitalX, s.CapitalZ, c.CapitalReach, c.Probe);
+                float vanillaNeed = CapitalFloorPolicy.VanillaNeed(MinStrength(c), s.Beliefs, 1f, s.CapitalX, s.CapitalZ, range, s.Own);
+                floor = Math.Max(MinStrength(c) + CapitalFloorRatio * weighted, vanillaNeed);
+            }
+            else
+            {
+                weighted = ReserveRules.VanillaThreat(s, s.CapitalX, s.CapitalZ, range, c.Probe);
+                floor = CapitalFloorRatio * weighted;
+            }
+            c.CapitalWeighted = weighted;
+            if (CapitalFloorRatio * weighted <= 0f) return;
             float own = 0f;
             for (int i = 0; i < s.Own.Count; i++)
             {
@@ -1379,8 +1589,40 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (RiverLines.Distance(hx, hz, s.CapitalX, s.CapitalZ) >= range) continue;
                 own += Math.Max(0f, Math.Min(f.Strength, f.Strength * f.Morale));
             }
-            threat01 = SnapshotRules.Clamp01(floor / Math.Max(1f, own));
+            threat01 = SnapshotRules.Clamp01(CapitalFloorRatio * weighted / Math.Max(1f, own));
         }
+
+        // The capital reach is a race, not a constant: max(RelocationRange, ReliefDays x CorpsRoadPerDay). ReliefDays is the largest march
+        // time to the own capital among the own MassEligible formations whose home department is the capital sector's theater (the slowest
+        // formation of the department sets the race, so one far corps stretches it); CorpsRoadPerDay a corps' road rate at vanilla's group
+        // speed ceiling (the unit-type-15 base speed as the group speed). Rails are credited to neither side: the estimate is called with no
+        // snapshot, so the rail leg is skipped (one fast own train must not shrink the reach and drop Washington again), and a formation
+        // with no speed (an estimate of float.MaxValue) is skipped. With no such formation, or no speed table, the reach is the relocation range.
+        private static void CapitalRace(Inputs c, out float reliefDays, out float corpsPerDay, out float reach)
+        {
+            var s = c.S;
+            reliefDays = 0f;
+            corpsPerDay = 0f;
+            var baseSpeed = c.Speed.MountedBaseSpeed;
+            if (baseSpeed != null && baseSpeed.Length > CorpsUnitTyp)
+                corpsPerDay = MarchTime.SpeedPerDay(c.Speed, CorpsUnitTyp, baseSpeed[CorpsUnitTyp], c.Speed.RoadCost);
+            int sector = c.Sectors.SectorAt(s.CapitalX, s.CapitalZ);
+            Theater department = sector >= 0 ? c.Sectors.TheaterOf(sector) : Theater.Unknown;
+            if (department != Theater.Unknown)
+            {
+                for (int i = 0; i < s.Own.Count; i++)
+                {
+                    var f = s.Own[i];
+                    if (!MassEligible(f, s.MinMoraleForMovement) || DepartmentOf(c, i) != department) continue;
+                    float days = MarchTime.EstimateDays(c.Speed, f, s.CapitalX, s.CapitalZ, RiverLines.Distance(f.X, f.Z, s.CapitalX, s.CapitalZ), null, null, c.OwnIips);
+                    if (days >= float.MaxValue) continue;
+                    reliefDays = Math.Max(reliefDays, days);
+                }
+            }
+            reach = Math.Max(s.RelocationRange, reliefDays * corpsPerDay);
+        }
+
+        private const int CorpsUnitTyp = 15;
 
         private static float CapitalTerm(Inputs c, in ObjectiveRecord o)
         {
@@ -1473,6 +1715,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var x = cands[order[k]];
                 sb.Append(" | ").Append(x.ObjectiveId).Append('@').Append(x.SectorId)
+                  .Append(" at=").Append(x.X.ToString("0", CultureInfo.InvariantCulture)).Append(',').Append(x.Z.ToString("0", CultureInfo.InvariantCulture))
                   .Append(" s=").Append(x.Score.ToString("0.000", CultureInfo.InvariantCulture))
                   .Append(" v=").Append(x.Value.ToString("0.00", CultureInfo.InvariantCulture))
                   .Append(" b=").Append(x.Balance.ToString("0.00", CultureInfo.InvariantCulture))
@@ -1486,6 +1729,7 @@ namespace WhiskeyRealism.Strategic.Planner
                   .Append(x.Scouted ? " scouted" : " unscouted")
                   .Append(" est=").Append(x.Enemy.ToString("0", CultureInfo.InvariantCulture))
                   .Append(" pres=").Append(x.Presumed.ToString("0", CultureInfo.InvariantCulture))
+                  .Append(" anchors=").Append(x.Anchors)
                   .Append(" mass=").Append(x.Mass.ToString("0", CultureInfo.InvariantCulture))
                   .Append(x.Retained ? " retained" : x.Eligible ? "" : " ineligible");
             }

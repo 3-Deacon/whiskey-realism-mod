@@ -1189,7 +1189,7 @@ internal static class ConstructionSteeringTests
         string planner = Src("Strategic/Planner/CampaignPlannerRuntime.cs");
         AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);"), "the review reads the ledger's held set once");
         AssertEqual(1, CountOccurrences(planner, "CollectHeldBuilders("), "from one source");
-        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "and hands it to G3's plan");
+        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);"), "and hands it to G3's plan");
         AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "and hands them to the allocator");
         string allocator = Src("Strategic/Planner/ForceAllocator.cs");
         string run = BodyOf(allocator, "internal void Run(Allocation allocation)");
@@ -1204,7 +1204,7 @@ internal static class ConstructionSteeringTests
         string theater = Src("Strategic/Planner/TheaterPlanner.cs");
         AssertTrue(HasLine(BodyOf(theater, "internal static float MassFor("), "if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;"), "G3 counts a held builder in no mass");
         AssertTrue(HasLine(BodyOf(theater, "private static void Reserve("), "ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));"), "and raises no capital guard from a Wished one, as the allocator");
-        AssertTrue(HasLine(pin, "Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);"), "as DepotBuilder at the pinned position, withheld");
+        AssertTrue(HasLine(pin, "Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonPinnedBuilder, true);"), "as DepotBuilder at the pinned position, withheld, with the pinned reason (foresight F1: the issue row's pick=pinned)");
         string mover = Src("Strategic/Planner/CampaignMover.cs");
         AssertFalse(mover.Contains("DepotTask") || mover.Contains("HeldBuilder"), "the mover reads no depot state: the allocator's assignment is the one rule");
     }
@@ -1308,9 +1308,13 @@ internal static class ConstructionSteeringTests
         CampaignSnapshot W(int dayOffset, bool threat, out SectorModel sectors, out TheaterPlan plan, out Allocation allocation)
         {
             var w = ExecutorFixtures.Wide(dayOffset);
-            w.Own.Add(ExecutorFixtures.Corps(1, 10f, 20000f));    // the builder: nearest the capital, alone in its sector
+            w.Own.Add(ExecutorFixtures.Corps(1, 10f, 20000f));    // the builder: nearest the capital, the sector's only free formation outside the mass
+            var body = ExecutorFixtures.Corps(5, 60f, 20000f);    // F9: the main effort's body, nearer the target; a lone mass member is never a builder, so the builder must be outside it
+            if (threat) body.ReadinessStep = 1;                   // and when the threat comes it is unready, so it is neither mass nor a builder (the mass would give 1 of 2 bodies)
+            w.Own.Add(body);
             w.Own.Add(ExecutorFixtures.Corps(2, 300f, 25000f));
             w.Own.Add(ExecutorFixtures.Corps(3, 320f, 25000f));
+            w.Own.Add(ExecutorFixtures.Corps(4, 0f, 6000f));      // the baseline guard: D11's floor is never under the minimum strength
             if (threat) w.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 40000f));
             sectors = ExecutorFixtures.Sectors(w);
             plan = TheaterPlanner.Plan(w, sectors, null, ExecutorFixtures.State(), null, null, ExecutorFixtures.Speed(), out _);
@@ -1320,7 +1324,7 @@ internal static class ConstructionSteeringTests
         }
         var ledger = new DepotTaskLedger();
         var w1 = W(0, false, out _, out var p1, out var a1);
-        AssertEqual(0f, p1.CapitalFloorStrength, "fixture: no capital reserve on the first review");
+        AssertEqual(p1.MinGarrisonStrength, p1.CapitalFloorStrength, "fixture: the first review's capital reserve is the plan's baseline minimum (the fixture world's own, 1000), met by its own guard");
         AssertTrue(a1.TryGet(1, out var first) && first.Role == FormationRole.DepotBuilder, "fixture: the formation alone in its sector is the depot builder");
         ledger.Sync(p1, a1, w1, null);
         AssertTrue(ledger.Tasks.Count == 1 && ledger.Tasks[0].State == DepotTaskState.Marching && ledger.HoldsBuilder(1), "the task starts Marching and holds it");
@@ -1354,6 +1358,7 @@ internal static class ConstructionSteeringTests
         s.Own.Add(small);
         s.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
         s.Own.Add(ExecutorFixtures.Corps(4, 520f, 3000f));
+        s.Own.Add(ExecutorFixtures.Corps(5, 540f, 9000f));   // F9: a builder leaves its sector's hold met, so the far sector holds more than the plan's minimum without it
         var sectors = ExecutorFixtures.Sectors(s);
         int near = sectors.SectorAt(230f, 70f), far = sectors.SectorAt(520f, 0f);
         AssertTrue(near >= 0 && far >= 0 && near != far, "fixture: two sectors");

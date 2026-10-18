@@ -258,6 +258,7 @@ internal static class ObjectiveGroundTests
             s.Areas.Add(new AreaRecord { Index = 10 + i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f }, Importance = 1f, SupplyCapacity = 100f });
         for (float x = 100f; x <= 700f; x += 200f) s.Supply.Add(Iip(500 + (int)x, x, alliance));
         s.Own.Add(Corps(1, 200f, 20000f));
+        s.Own.Add(Corps(900, 0f, 9000f));   // the capital guard: D11's capital floor is never under the minimum strength
         float at = 300f;
         foreach (int id in objectiveIds)
         {

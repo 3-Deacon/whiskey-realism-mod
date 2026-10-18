@@ -30,7 +30,10 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Recover       a movable formation below RecoverSupplyBelow raw supply or the movement morale
     //                 minimum (spec C21: ReserveRules.Recovers), walked toward the nearest supply
     //                 source; withheld. It counts 0 toward its sector's hold (it is leaving).
-    //   DepotBuilder  the smallest fighting formation in a depot task's sector; withheld.
+    //   DepotBuilder  a depot task's builder, withheld: the incumbent of a Marching task (kept whatever its readiness), else the smallest formation of the
+    //                 task's sector that the mass could use (readiness step 2 and above) and the sector can spare (its standing hold meets its
+    //                 target without it), else the smallest member of the mass that stands there, never the mass's last free body. Never a hold
+    //                 reserve (claimed before the depot step) and never an unready new pick (D11 requirement-depot-builder).
     //   Recon         ReconPlanner.PickFormation per recon task, highest priority first; the Recon
     //                 assignment copies the task's SectorId and hold point so ReconMissionLedger.Sync
     //                 can pair them back (G1b contract); withheld. A staged main effort with no free scout draws one from a sector's hold
@@ -57,7 +60,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
     //                 believed land enemy (centroid when none), with a HomeDepartmentDiscount for
     //                 a formation whose home department (PlannerState, D6 detail) is the sector's theater; the shortest prefix whose
-    //                 strength reaches max(HoldNeed, MinGarrisonStrength) is withheld from vanilla's
+    //                 strength reaches max(HoldNeed, TheaterPlan.MinGarrisonStrength) is withheld from vanilla's
     //                 offensive gather (CheckOffensiveMovements 14257-14275), the rest is not.
     //   Gave up       a formation the move tracker gave up on at the target its role would send it to (P8: two misses,
     //                 MoveTracker.GaveUp) loses that role: the depot and recon picks take the next candidate, any other
@@ -83,7 +86,6 @@ namespace WhiskeyRealism.Strategic.Planner
     // garrison, largest first. G5b routes recruits and brigade transfers from one to the other.
     public static class ForceAllocator
     {
-        public const float MinGarrisonStrength = 5000f;
         public const float UnreliableBelow = 0.5f; // telemetry: the [Allocation] row's run of unreliable days
         // D6 detail (c): a formation whose home department is the sector's theater is treated as this much closer to the sector's army
         // (0.05 when the home was only a historical hint; the department is now the planner's own stable assignment).
@@ -118,6 +120,10 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonHoldReserve = "hold-reserve";
         internal const string ReasonRecover = "recover";
         internal const string ReasonDepotTask = "depot-task";
+        // A builder the depot ledger already holds, kept: a Wished task's (AssignPinnedBuilders) or a Marching task's incumbent
+        // (ClaimIncumbent), apart from the builder AssignDepotBuilders newly picks: the [CampaignMoverIssue] row's pick= tells the two apart,
+        // which a smoke must do to count builders the planner chose (criterion-builders-fit).
+        internal const string ReasonPinnedBuilder = "depot-task-pinned";
         internal const string ReasonMass = "mass";
         internal const string ReasonReserve = "reserve-surplus";
         internal const string ReasonReinforcement = "reinforcement";
@@ -235,6 +241,56 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
             }
             return sb.Length == 0 ? "none" : sb.ToString();
+        }
+
+        // The [CampaignMoverIssue] row's pick=: how a depot builder came to be one. A builder the ledger already held (pinned by
+        // AssignPinnedBuilders, or a Marching task's incumbent kept by ClaimIncumbent) is "pinned", one AssignDepotBuilders newly picked is
+        // "new", every other role "-". Kept here so the mover reads no depot state.
+        internal static string PickOf(in Assignment a)
+        {
+            if (a.Role != FormationRole.DepotBuilder) return "-";
+            return string.Equals(a.Reason, ReasonPinnedBuilder, StringComparison.Ordinal) ? "pinned" : "new";
+        }
+
+        // The strength of the formations that have `role` in a finished allocation (floored at 0, whoever the formation is). The one
+        // definition of "the capital guards' strength": the pass's shortfall test and the [Reserves] row's capital= both read it.
+        internal static float RoleStrength(CampaignSnapshot s, Allocation a, FormationRole role)
+        {
+            float sum = 0f;
+            for (int k = 0; k < a.Assignments.Count; k++)
+            {
+                if (a.Assignments[k].Role != role) continue;
+                int i = OwnIndexOf(s, a, k);
+                if (i >= 0) sum += Math.Max(0f, s.Own[i].Strength);
+            }
+            return sum;
+        }
+
+        // The hold a sector has by the roles assigned, in a finished allocation: its Hold formations, and the capital guards that stand in
+        // the capital's own sector (a guard elsewhere is on the march and holds nothing where it stands), the way ReserveRules.Hold counts
+        // them. A formation counts when the sector is both where it stands (ReserveRules.HoldSectorOf, the map-group player's last waypoint)
+        // and its role's sector, at WlChainRules.CountsTowardCoverage, ReserveRules.HoldStrength. The pass's shortfall test and the
+        // [Reserves] row's hold= both read it.
+        internal static float CountedHold(CampaignSnapshot s, SectorModel sectors, Allocation a, int sector)
+        {
+            float sum = 0f;
+            for (int k = 0; k < a.Assignments.Count; k++)
+            {
+                var x = a.Assignments[k];
+                if ((x.Role != FormationRole.Hold && x.Role != FormationRole.CapitalGuard) || x.SectorId != sector) continue;
+                int i = OwnIndexOf(s, a, k);
+                if (i < 0 || ReserveRules.HoldSectorOf(sectors, s.Own[i]) != sector || !WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) continue;
+                sum += ReserveRules.HoldStrength(s.Own[i]);
+            }
+            return sum;
+        }
+
+        // The snapshot index of assignment k's formation. The pass writes one assignment per own formation in snapshot order, so the
+        // index is k itself; any other allocation (a test's, a stale one) is looked up by instance id.
+        private static int OwnIndexOf(CampaignSnapshot s, Allocation a, int k)
+        {
+            int id = a.Assignments[k].InstanceId;
+            return k < s.Own.Count && s.Own[k].InstanceId == id ? k : s.IndexOfOwn(id);
         }
 
         private static bool IsImmobileReason(string reason)
@@ -443,7 +499,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     int i = _s.IndexOfOwn(_pinned[k].InstanceId);
                     if (i < 0 || !mask[i] || _done[i]) continue;
-                    Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);
+                    Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonPinnedBuilder, true);
                 }
                 return mask;
             }
@@ -599,14 +655,27 @@ namespace WhiskeyRealism.Strategic.Planner
                 return !_done[i] && WlChainRules.MayMove(_s.Own[i].Chain) && TheaterPlanner.Movable(_s.Own[i]);
             }
 
+            // D11 requirement-depot-builder. A task's builder is, in this order: (1) the incumbent of a Marching task (ClaimIncumbent), kept
+            // whatever its readiness; else (2) the smallest formation of the task's sector that the mass could use (SmallestIn: readiness step 2
+            // and above, so the unready screen of the investigation is never taken) and that the sector can spare (a surplus: the formations
+            // that stand in it hold the sector's target without it); else (3) the smallest member of the mass that stands in the sector, never
+            // the mass's last free body. The incumbents are claimed first, before any task's pick, so one task's pick cannot take another's
+            // builder. A Wished task's builder is pinned earlier (AssignPinnedBuilders).
             private void AssignDepotBuilders()
             {
+                var served = new bool[_plan.DepotTasks.Count];
                 for (int t = 0; t < _plan.DepotTasks.Count; t++)
                 {
                     var task = _plan.DepotTasks[t];
-                    if (HasPinnedBuilder(task)) continue;   // one task, one builder
-                    int pick = SmallestIn(task, false);
-                    if (pick < 0) pick = SmallestIn(task, true);
+                    if (HasPinnedBuilder(task)) { served[t] = true; continue; }   // one task, one builder
+                    served[t] = ClaimIncumbent(task);
+                }
+                for (int t = 0; t < _plan.DepotTasks.Count; t++)
+                {
+                    if (served[t]) continue;
+                    var task = _plan.DepotTasks[t];
+                    int pick = SmallestIn(task, fromMass: false);
+                    if (pick < 0) pick = SmallestIn(task, fromMass: true);
                     if (pick < 0) continue;
                     Assign(pick, FormationRole.DepotBuilder, task.SectorId, task.X, task.Z, ReasonDepotTask, true);
                 }
@@ -622,26 +691,73 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (!_pinned[k].Wished) continue;
                     int i = _s.IndexOfOwn(_pinned[k].InstanceId);
                     if (i < 0 || !_pinnedMask[i]) continue;
-                    float dx = _pinned[k].SiteX - task.X, dz = _pinned[k].SiteZ - task.Z;
-                    if (dx * dx + dz * dz <= DepotTaskLedger.SiteMatchRadius * DepotTaskLedger.SiteMatchRadius) return true;
+                    if (AtTaskSite(_pinned[k], task)) return true;
                 }
                 return false;
             }
 
-            // The smallest fighting formation of the sector (lower instance id on a tie); a formation
-            // of the mass only when allowMass (G3 obligation: take from outside the mass while one qualifies).
-            private int SmallestIn(DepotTask task, bool allowMass)
+            private static bool AtTaskSite(in HeldBuilder held, DepotTask task)
+            {
+                float dx = held.SiteX - task.X, dz = held.SiteZ - task.Z;
+                return dx * dx + dz * dz <= DepotTaskLedger.SiteMatchRadius * DepotTaskLedger.SiteMatchRadius;
+            }
+
+            // A Marching task's builder (the ledger's HeldBuilder with Wished false, its site within the ledger's match radius of the plan
+            // task) keeps its pick while the planner may still send it: still free (a reserve that took it first wins), movable, standing in the
+            // task's sector, and not given up on at the site. Readiness and the sector's surplus do not apply: it was picked when it was, and a
+            // readiness dip on the march must not re-bind the task. It is assigned at the PLAN task's x and z, since the ledger abandons a task
+            // whose builder is not within AssignmentEpsilon of the new site (DepotTaskLedger.FollowPlan); the reason is the pinned builder's,
+            // so the mover's row reads pick=pinned.
+            private bool ClaimIncumbent(DepotTask task)
+            {
+                if (_pinned == null) return false;
+                for (int k = 0; k < _pinned.Count; k++)
+                {
+                    if (_pinned[k].Wished || !AtTaskSite(_pinned[k], task)) continue;
+                    int i = _s.IndexOfOwn(_pinned[k].InstanceId);
+                    if (i < 0 || !Free(i) || _sector[i] != task.SectorId || GaveUpAt(i, task.X, task.Z)) continue;
+                    Assign(i, FormationRole.DepotBuilder, task.SectorId, task.X, task.Z, ReasonPinnedBuilder, true);
+                    return true;
+                }
+                return false;
+            }
+
+            // The smallest formation of the task's sector (lower instance id on a tie) that the mass could use (TheaterPlanner.MassEligible:
+            // ready, supplied, in good morale). Outside the mass (fromMass false) only one the sector can spare (IsSurplus); from the mass
+            // (G3 obligation: only when no formation outside it qualifies) a member of it, never its last free body (the rule recon keeps).
+            private int SmallestIn(DepotTask task, bool fromMass)
             {
                 int sector = task.SectorId;
+                if (fromMass && FreeMassBodies() <= 1) return -1;
+                float standing = fromMass ? 0f : StandingHold(sector);
                 int best = -1;
                 for (int i = 0; i < _n; i++)
                 {
-                    if (!Free(i) || _sector[i] != sector || (_inMass[i] && !allowMass) || GaveUpAt(i, task.X, task.Z)) continue;
+                    if (!Free(i) || _sector[i] != sector || _inMass[i] != fromMass || GaveUpAt(i, task.X, task.Z)) continue;
+                    if (!TheaterPlanner.MassEligible(_s.Own[i], _s.MinMoraleForMovement)) continue;
+                    if (!fromMass && standing - Counts(i) < Target(sector)) continue;
                     if (best < 0 || _s.Own[i].Strength < _s.Own[best].Strength
                         || (_s.Own[i].Strength == _s.Own[best].Strength && _s.Own[i].InstanceId < _s.Own[best].InstanceId))
                         best = i;
                 }
                 return best;
+            }
+
+            // What the sector holds by the formations that stand in it, measured directly (ReserveRules.Hold's tally is 0 in a sector with no
+            // need, where the surpluses live): HoldStrength of every formation at WlChainRules.CountsTowardCoverage whose HoldSectorOf is the
+            // sector, that is not in the mass and not leaving (Recover, a march, a recon): one not yet given a role, or one that holds the
+            // sector as Hold or CapitalGuard, the Counted rule (standing sector equals role sector) that CountedHold applies to a finished
+            // allocation. Read at the depot step: the recon and garrison steps that follow take their formations from what is left.
+            private float StandingHold(int sector)
+            {
+                float sum = 0f;
+                for (int j = 0; j < _n; j++)
+                {
+                    if (_sector[j] != sector || _inMass[j]) continue;
+                    if (_done[j] && !((_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector)) continue;
+                    sum += Counts(j);
+                }
+                return sum;
             }
 
             private void AssignRecon()
@@ -786,7 +902,12 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 int k = _roleSector[i];
                 if (k < 0 || k >= _sectorCount) return true;
-                bool beliefDriven = _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
+                // D9: a sector's hold is belief-driven when its believed part is above the minimum and at least the rest of the need (the
+                // presumed men it holds against at the same ratio): foresight's need is the sum of the two, so the believed part is at least
+                // the presumed part. Picture off: the earlier test, the need being the larger of the two.
+                bool beliefDriven = PlannerSettings.ForesightPicture
+                    ? _believed[k] > _plan.MinGarrisonStrength && _believed[k] >= _need[k] - _believed[k]
+                    : _believed[k] > _plan.MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
                 return !beliefDriven || _held.Sector[k] - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
             }
 
@@ -834,7 +955,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 free = mass = 0;
                 for (int i = 0; i < _n; i++)
                 {
-                    if (_done[i] || !ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard) || IsRecalling(i)) continue;
+                    if (_done[i] || !ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard, _plan.MinGarrisonStrength) || IsRecalling(i)) continue;
                     if (_inMass[i]) mass++;
                     else free++;
                 }
@@ -854,7 +975,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 int claimedBy = -1, claimed = 0, gaveUp = 0, free = 0, recalling = 0;
                 for (int i = 0; i < _n; i++)
                 {
-                    if (!ReconPlanner.CouldScout(_s, _s.Own[i], task.Kind)) continue;
+                    if (!ReconPlanner.CouldScout(_s, _s.Own[i], task.Kind, _plan.MinGarrisonStrength)) continue;
                     if (IsRecalling(i)) recalling++;
                     else if (GaveUpAt(i, task.HoldX, task.HoldZ)) gaveUp++;
                     else if (_done[i])
@@ -987,18 +1108,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private float Target(int sector)
             {
-                return Math.Max(_need[sector], MinGarrisonStrength);
-            }
-
-            // The hold a sector has by the roles assigned: its Hold formations, and the capital guards that stand in the capital's own sector
-            // (a guard elsewhere is on the march and holds nothing where it stands), the way ReserveRules.Hold counts them.
-            private float Counted(int sector)
-            {
-                float sum = 0f;
-                for (int i = 0; i < _n; i++)
-                    if ((_role[i] == FormationRole.Hold || _role[i] == FormationRole.CapitalGuard) && _sector[i] == sector && _roleSector[i] == sector)
-                        sum += Counts(i);
-                return sum;
+                return Math.Max(_need[sector], _plan.MinGarrisonStrength);
             }
 
             // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardCoverage (the player's own
@@ -1075,7 +1185,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 if (_s.HasCapital && _plan.CapitalFloorStrength > 0f)
                 {
-                    float guards = SumOf(FormationRole.CapitalGuard);
+                    float guards = RoleStrength(_s, allocation, FormationRole.CapitalGuard);
                     int guard = NearestWith(FormationRole.CapitalGuard, _s.CapitalX, _s.CapitalZ);
                     if (guard >= 0 && guards < _plan.CapitalFloorStrength)
                         carriers.Add(new KeyValuePair<int, float>(_s.Own[guard].InstanceId, (_plan.CapitalFloorStrength - guards) / _plan.CapitalFloorStrength));
@@ -1087,7 +1197,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         if (_role[i] == FormationRole.Hold && _sector[i] == k && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
                             && !IsImmobileReason(_reason[i])) holds.Add(i);
                     float target = Target(k);
-                    float counted = Counted(k);
+                    float counted = CountedHold(_s, _sectors, allocation, k);
                     if (counted >= target) continue;
                     if (holds.Count == 0)
                     {
@@ -1131,14 +1241,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < _n; i++)
                     if (_role[i] == FormationRole.Hold && _sector[i] == sector && _s.Own[i].Chain == WlChainClass.PlayerMapGroup) return i;
                 return -1;
-            }
-
-            private float SumOf(FormationRole role)
-            {
-                float sum = 0f;
-                for (int i = 0; i < _n; i++)
-                    if (_role[i] == role) sum += Math.Max(0f, _s.Own[i].Strength);
-                return sum;
             }
 
             private int NearestWith(FormationRole role, float x, float z)

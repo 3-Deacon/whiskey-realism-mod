@@ -141,7 +141,7 @@ namespace WhiskeyRealism.Patches
                         RemoveFromList(faction, "unitsconstructingsupplydepots", pledged);
                     }
 
-                    EmitCapitalFloor(allianceId, vanillaNeed, plan.CapitalFloorStrength, pledged);
+                    EmitCapitalFloor(allianceId, vanillaNeed, plan.CapitalFloorStrength, plan.CapitalReach, pledged);
                 }
                 catch (Exception ex)
                 {
@@ -234,7 +234,7 @@ namespace WhiskeyRealism.Patches
 
         // [CapitalFloor] on change of (floor, pledged unit, whether vanilla's need is positive): the need
         // moves continuously, so the signature buckets it.
-        private static void EmitCapitalFloor(int allianceId, float vanillaNeed, float floor, Regiment pledged)
+        private static void EmitCapitalFloor(int allianceId, float vanillaNeed, float floor, float reach, Regiment pledged)
         {
             string unit = pledged == null ? "none" : ((UnityEngine.Object)pledged).name;
             string signature = floor.ToString("0", CultureInfo.InvariantCulture) + "|" + unit + "|" + (vanillaNeed > 0f ? "short" : "met");
@@ -244,6 +244,7 @@ namespace WhiskeyRealism.Patches
                 "[CapitalFloor] alliance=" + allianceId +
                 " vanillaNeed=" + vanillaNeed.ToString("0", CultureInfo.InvariantCulture) +
                 " floor=" + floor.ToString("0", CultureInfo.InvariantCulture) +
+                " reach=" + reach.ToString("0", CultureInfo.InvariantCulture) +
                 " pledged=" + unit,
                 TelemetryLayer.Campaign);
         }

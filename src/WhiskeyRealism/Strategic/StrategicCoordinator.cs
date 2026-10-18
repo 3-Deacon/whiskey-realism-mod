@@ -794,6 +794,7 @@ namespace WhiskeyRealism.Strategic
             try
             {
                 PlannerSettings.PlanTrace = ConfigValue(plugin.PlanTrace);
+                PlannerSettings.ForesightPicture = ConfigValue(Plugin.EnableStrategicForesightPicture, true);
                 SuccessionScheduler.TraceEnabled = ConfigValue(plugin.SuccessionTrace);
             }
             catch (Exception ex)

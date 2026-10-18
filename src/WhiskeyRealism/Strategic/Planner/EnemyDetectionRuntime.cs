@@ -65,6 +65,23 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly Func<Regiment, bool> HiddenProbe = IsHiddenFromGrid;
 
         private static FogOfWar[] _fows;
+        // Spotting marks (foresight F4): the campaign seed the AI side's stream is derived from, vanilla's SpottedEnemy (found once per scene, as
+        // vanilla does, 67365), and the pooled per-review sets.
+        private static long _probeSeed;
+        private static SpottedEnemy _spotted;
+        private static readonly HashSet<int> DetectedToday = new HashSet<int>();
+        private static readonly HashSet<string> PresentKeys = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly List<float> MarkTimes = new List<float>();
+        private static readonly Func<float, float, bool> GridHiddenAt = IsHiddenAt;
+        private static float _markY;
+        // Foresight F4b: the frame and game date of the side's last mark evaluation (the interval vanilla's rolls ran over), and what the
+        // review's marks were for [EnemyBeliefs] marksNew= / hiddenGroups=. NewestMarkTimes remembers, for the player's side, each hidden
+        // enemy group's newest mark time as the last review saw it, so a change is a new mark.
+        private static readonly int[] LastReviewFrame = { -1, -1 };
+        private static readonly float[] LastReviewYears = { float.NaN, float.NaN };
+        private static readonly int[] LastMarksNew = new int[Alliances];
+        private static readonly int[] LastHiddenGroups = new int[Alliances];
+        private static readonly Dictionary<int, float> NewestMarkTimes = new Dictionary<int, float>();
         private static readonly FieldMask<DLC_WL.Incident, float> IncidentMask = new FieldMask<DLC_WL.Incident, float>(
             i => i.launchedtime, (i, v) => i.launchedtime = v, PlayerIntelIncidents.NotLaunched);
         private static readonly DLC_WL.Incident[] IntelIncidents = new DLC_WL.Incident[PlayerIntelIncidents.Ids.Length];
@@ -95,8 +112,17 @@ namespace WhiskeyRealism.Strategic.Planner
                 OmniscientCacheDay[a] = int.MinValue;
                 Omniscient[a].Clear();
             }
+            for (int a = 0; a < Alliances; a++)
+            {
+                LastReviewFrame[a] = -1;
+                LastReviewYears[a] = float.NaN;
+                LastMarksNew[a] = 0;
+                LastHiddenGroups[a] = 0;
+            }
+            NewestMarkTimes.Clear();
             _reviewDay = -1;
             _fows = null;
+            _spotted = null;
             _probeSnapshot = null;
             _probeGrid = null;
         }
@@ -134,7 +160,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return alliance >= 0 && alliance < Alliances ? LastDaySerial[alliance] : -1;
         }
 
-        internal static void Detect(CampaignSnapshot s, int playerAlliance, bool fogHonest)
+        internal static void Detect(CampaignSnapshot s, int playerAlliance, bool fogHonest, long campaignSeed)
         {
             using (TelemetryPerf.Scope("campaign.planner.detect", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
@@ -154,6 +180,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 CollectHarbours(side);
 
                 _probeSnapshot = s;
+                _probeSeed = campaignSeed;
                 _probeNoFog = DetectionRules.IsOmniscient(mode);
                 _probeSidePlayer = sidePlayer;
                 _probeGrid = mode == DetectionMode.FogGrid ? Grid(1) : null;
@@ -219,20 +246,21 @@ namespace WhiskeyRealism.Strategic.Planner
             int contact = 0;
             for (int i = 0; i < s.Detections.Count; i++)
                 if (s.Detections[i].Source == DetectionSource.Contact) contact++;
-            int seen = s.Detections.Count;
-            int remembered = 0;
-            for (int i = 0; i < model.Beliefs.Count; i++)
-                if (model.Beliefs[i].LastSeenDay != s.DaySerial) remembered++;
+            int seen = DetectionRules.SeenCount(s.Detections);
+            int remembered = model.RememberedCount(s.DaySerial);
             int mode = LastMode[side];
             string line = "[EnemyBeliefs] alliance=" + side +
                 " mode=" + (mode >= 0 ? ((DetectionMode)mode).ToString() : "None") +
                 " seen=" + seen +
                 " remembered=" + remembered +
                 " expired=" + model.ExpiredKeys.Count +
-                " contact=" + contact;
+                " contact=" + contact +
+                " marks=" + model.AppliedMarkKeys.Count +
+                " marksNew=" + LastMarksNew[side] +
+                " hiddenGroups=" + LastHiddenGroups[side];
             if (string.Equals(LastSignature[side], line, StringComparison.Ordinal)) return;
             LastSignature[side] = line;
-            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(line, s.DaySerial), TelemetryLayer.Campaign);
         }
 
         private static void CollectUnits(CampaignSnapshot s, int side)
@@ -355,6 +383,224 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             ProbeObjectiveGarrisons(s, side);
+            ProbeMarks(s, side);
+        }
+
+        // ---- spotting marks (foresight F4; D11 requirements marks-player-side and marks-ai-side) ----
+
+        // The marks of the hidden enemy groups, after the day's sightings and garrisons (they run in the incident mask, as the grid probes do).
+        // The W&L player's side reads vanilla's own newest mark per group; any other side keeps its own ledger with vanilla's formula on its
+        // grid. Fog off, the rollback modes and the flag off make no mark.
+        private static void ProbeMarks(CampaignSnapshot s, int side)
+        {
+            LastMarksNew[side] = 0;
+            LastHiddenGroups[side] = 0;
+            if (_probeNoFog || !GameVars.usefow || !FlagOn(Plugin.EnableSpottingMarkBeliefs)) return;
+            DetectedToday.Clear();
+            for (int i = 0; i < s.Detections.Count; i++) DetectedToday.Add(s.Detections[i].InstanceId);
+            try
+            {
+                if (_probeSidePlayer) ReadPlayerSideMarks(s, side);
+                else EvaluateAiSideMarks(s, side);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("campaign-planner:marks-failed", "[EnemyBeliefs] spotting marks could not be read, this review keeps the sightings: " + ex.Message);
+            }
+        }
+
+        // The player side: for each registered enemy group (SpottedEnemy.unitsattached, which AddUnit fills for every non-player-alliance
+        // group on the map and never for the player's, 142938) that no rule a-d detected today and that holds a mark, the newest mark.
+        private static void ReadPlayerSideMarks(CampaignSnapshot s, int side)
+        {
+            var spotted = SpottedEnemyInstance();
+            var attached = (UnityEngine.Object)spotted != null ? spotted.unitsattached : null;
+            if (attached == null) return;
+            var alliances = GameVars.alliance;
+            var sideState = alliances[side];
+            for (int i = 0; i < attached.Count; i++)
+            {
+                var entry = attached[i];
+                var reg = entry != null ? entry.regref : null;
+                if ((UnityEngine.Object)reg == null || !((Component)reg).gameObject.activeInHierarchy) continue;
+                int other = reg.alliance;
+                if (other < 0 || other >= alliances.Length || BattleUnits.GetUnitVisibilityStateOnCampaignMap(reg) == 0) continue;
+                var marks = entry.spottedmarks;
+                MarkTimes.Clear();
+                for (int k = 0; marks != null && k < marks.Count; k++) MarkTimes.Add(marks[k].timeshown);
+                var relation = DetectionRules.RelationOf(side, other, sideState.IsInAllianceWith(other), sideState.IsAtWarWith(other), reg.unittyp == 17, (UnityEngine.Object)reg.garrisonreference != null);
+                bool detected = DetectedToday.Contains(reg.GetInstanceID());
+                if (relation == UnitRelation.Enemy && !detected) CountPlayerSideGroup(side, reg.GetInstanceID(), MarkRules.NewestMark(MarkTimes) >= 0 ? MarkTimes[MarkTimes.Count - 1] : -1f);
+                if (!MarkRules.PlayerSideMark(relation, detected, MarkTimes.Count)) continue;
+                var newest = marks[MarkRules.NewestMark(MarkTimes)];
+                if ((UnityEngine.Object)newest.obj == null) continue;
+                Vector3 at = newest.obj.transform.position;
+                var mark = new EnemyDetection
+                {
+                    X = at.x,
+                    Z = at.z,
+                    Source = DetectionSource.Mark,
+                    MarkDay = MarkRules.MarkDay(newest.timeshown, s.DaySerial),
+                    MarkRadius = MarkRules.MarkRadius(newest.intelligence, GamePrefs.intelligencedistancevariationfactor)
+                };
+                s.Detections.Add(FillMark(mark, reg, side, s.RelocationRange));
+            }
+        }
+
+        // [EnemyBeliefs] marksNew= / hiddenGroups= for the player's side: a hidden enemy group is counted, and a newest-mark time later than the
+        // last review's reading (of a group already tracked) is a new mark.
+        private static void CountPlayerSideGroup(int side, int instanceId, float newest)
+        {
+            LastHiddenGroups[side]++;
+            if (NewestMarkTimes.TryGetValue(instanceId, out float before) && newest > before) LastMarksNew[side]++;
+            NewestMarkTimes[instanceId] = newest;
+        }
+
+        // The AI side: every enemy group of the review's list that nothing detected today is a hidden group; the ledger decides whether it
+        // makes a new mark and returns the newest it holds. A group detected today (rule a-d) or in battle loses its marks, as vanilla's
+        // UpdateMarks removes them (142800-142807); an entry whose group has left the list for PruneAfterMissedReviews reviews goes too.
+        private static void EvaluateAiSideMarks(CampaignSnapshot s, int side)
+        {
+            var ledger = MarkLedgers.For(side);
+            if (ledger == null) return;
+            PresentKeys.Clear();
+            bool gridUsable = !_gridBroken && (UnityEngine.Object)_probeGrid != null;
+            float dateYears = GameVars.GetCampaignFloatingDate();
+            // Foresight F4b: with the timing fixed vanilla rolls the chance once per frame the group's turn comes round (one registered unit a
+            // frame, 142646-142654), many times a game day: the review draws its mark with the chance those rolls give since the last review
+            // (frames over the units the round-robin walks). The bug kept, the chance sits at the cap and one roll a review is the same rate.
+            int frame = Time.frameCount;
+            bool haveLast = LastReviewFrame[side] >= 0 && !float.IsNaN(LastReviewYears[side]);
+            var spotted = SpottedEnemyInstance();
+            int units = (UnityEngine.Object)spotted != null && spotted.unitsattached != null ? Math.Max(1, spotted.unitsattached.Count) : 1;
+            bool useInterval = FlagOn(Plugin.FixSpottingMarkTiming) && haveLast;
+            float intervalYears = haveLast ? Math.Max(0f, dateYears - LastReviewYears[side]) : 0f;
+            float ticks = haveLast ? Math.Max(0, frame - LastReviewFrame[side]) / (float)units : 0f;
+            ledger.BeginReview();
+            for (int i = 0; i < Enemies.Count; i++)
+            {
+                var e = Enemies[i];
+                try
+                {
+                    string key = SnapshotRules.UnitKey(((UnityEngine.Object)e).name, e.commander);
+                    PresentKeys.Add(key);
+                    if (DetectedToday.Contains(e.GetInstanceID()) || e.inbattle)
+                    {
+                        ledger.Drop(key);
+                        continue;
+                    }
+                    Vector3 p = e.GetPosition();
+                    _markY = p.y;
+                    var inputs = ReadMarkInputs(e, gridUsable, useInterval, intervalYears, ticks);
+                    var rng = MarkRules.RngFor(_probeSeed, side, s.DaySerial, key);
+                    if (ledger.Evaluate(key, p.x, p.z, s.DaySerial, dateYears, in inputs, rng, gridUsable ? GridHiddenAt : null, out EnemyDetection mark))
+                        s.Detections.Add(FillMark(mark, e, side, s.RelocationRange));
+                }
+                catch (Exception ex)
+                {
+                    // The rest of the review makes no new mark but still returns the marks it holds, and every key stays present for the prune.
+                    gridUsable = false;
+                    _gridBroken = true;
+                    OnceLog.Warning("campaign-planner:marks-grid-failed", "[EnemyBeliefs] a spotting-mark probe threw, the rest of this review makes no new mark: " + ex.Message);
+                }
+            }
+            ledger.PruneUnseen(PresentKeys);
+            LastReviewFrame[side] = frame;
+            LastReviewYears[side] = dateYears;
+            LastMarksNew[side] = ledger.Created;
+            LastHiddenGroups[side] = ledger.Judged;
+        }
+
+        // What the mark ledger needs of one hidden group: vanilla's prefs and the group's live perks and surroundings (142818-142862).
+        private static MarkInputs ReadMarkInputs(Regiment e, bool gridUsable, bool useInterval, float intervalYears, float ticks)
+        {
+            // The time-constant pair is the patch's, from the one function: the fixed pair when Fix Spotting Mark Timing is on and the pref is usable.
+            bool fixedTiming = MarkRules.TimingPair(FlagOn(Plugin.FixSpottingMarkTiming), GamePrefs.spottingfactor, GamePrefs.timefactorspottings, out float spotting0, out float spotting1);
+            var variation = GamePrefs.intelligencedistancevariationfactor;
+            var inputs = new MarkInputs
+            {
+                Intel = gridUsable ? _probeGrid.GetIntelligenceOnPos(e.GetPosition()) : 1f,
+                Spotting0 = spotting0,
+                Spotting1 = spotting1,
+                UseInterval = useInterval && fixedTiming,
+                IntervalYears = intervalYears,
+                Ticks = ticks,
+                SpottingVariation = GamePrefs.spottingvariationfactor,
+                PerkFactor = PerkFactorOf(e),
+                Cap = GamePrefs.maximumcreationprobability,
+                MinDistance = GamePrefs.minimumdistanceforspotmark,
+                DistanceVariation0 = variation != null && variation.Length > 0 ? variation[0] : 0f,
+                DistanceVariation1 = variation != null && variation.Length > 1 ? variation[1] : 0f,
+                Active = ((Component)e).gameObject.activeInHierarchy,
+                Garrison = (UnityEngine.Object)e.garrisonreference != null,
+                Fleet = e.unittyp == 17
+            };
+            var closest = e.unitrange.closestenemyunitfarreg;
+            if ((UnityEngine.Object)closest != null)
+            {
+                Vector3 c = ((Component)closest).transform.position;
+                inputs.HasClosestEnemy = true;
+                inputs.ClosestEnemyX = c.x;
+                inputs.ClosestEnemyZ = c.z;
+            }
+            return inputs;
+        }
+
+        // The perk terms of 142823-142844: information delay (perk 1) of the group and its parent multiply the chance's clock; the bureau of
+        // military information (perk 3) divides it once for each enemy inside the commander's range. No perks, and fleets: 1.
+        private static float PerkFactorOf(Regiment e)
+        {
+            if (e.unittyp == 17) return 1f;
+            float factor = 1f;
+            var delay = GamePrefs.informationdelay;
+            var bureau = GamePrefs.informationdelaybureauofmilitaryinformation;
+            if (e.HasPerk(1)) factor *= At(delay, e.GetPerkLevel(1), 1f);
+            if (e.HasPerkParent(1)) factor *= At(delay, e.GetPerkLevelParent(1), 1f);
+            var near = e.unitrange.enemyinrange;
+            for (int i = 0; near != null && i < near.Count; i++)
+            {
+                if ((UnityEngine.Object)near[i] == null) continue;
+                if (Tools.GetXZDistance(((Component)e).gameObject.transform.position, near[i].transform.position) >= e.commanderrange) continue;
+                if (e.HasPerk(3)) factor /= At(bureau, e.GetPerkLevel(3), 1f);
+                if (e.HasPerkParent(3)) factor /= At(bureau, e.GetPerkLevelParent(3), 1f);
+            }
+            return factor;
+        }
+
+        private static float At(float[] values, int index, float fallback)
+        {
+            return values != null && index >= 0 && index < values.Length && values[index] > 0f ? values[index] : fallback;
+        }
+
+        // A mark shows where the group was, not what it is: vanilla hides the symbol below neededintelligenceforunitsymbol (143006), but the
+        // key and type are kept (decision 2). The strength is the group's live one in vanilla's approximation band, read every review
+        // (a mark stores none, 143060); Embarked when the group is embarked; OnOwnSoil and NearOwnCoast at the mark's own position; the
+        // arms are not shown (quality 0, the belief keeps its older reading).
+        private static EnemyDetection FillMark(EnemyDetection mark, Regiment group, int side, float relocationRange)
+        {
+            mark.InstanceId = group.GetInstanceID();
+            mark.UnitKey = SnapshotRules.UnitKey(((UnityEngine.Object)group).name, group.commander);
+            mark.UnitTyp = group.unittyp;
+            mark.Strength = MarkRules.BandRound(group.groupstrengthdirect, GamePrefs.approximationvalues);
+            mark.Traits = TraitsOf(group, new Vector3(mark.X, group.GetPosition().y, mark.Z), side, relocationRange);
+            return mark;
+        }
+
+        // The masked one-argument UnitIsHidden of the side's grid at a map position: true while the grid does not see it.
+        private static bool IsHiddenAt(float x, float z)
+        {
+            return _probeGrid.UnitIsHidden(new Vector3(x, _markY, z));
+        }
+
+        // vanilla's SpottedEnemy lives on the GameController (67365); found once per scene.
+        private static SpottedEnemy SpottedEnemyInstance()
+        {
+            if ((UnityEngine.Object)_spotted == null)
+            {
+                var go = GameObject.Find("GameController");
+                _spotted = (UnityEngine.Object)go != null ? go.GetComponent<SpottedEnemy>() : null;
+            }
+            return _spotted;
         }
 
         // Enemy forts at enemy-held objective targets (G0 landing F2): the snapshot's objective

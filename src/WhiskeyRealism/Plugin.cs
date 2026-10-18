@@ -282,6 +282,10 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal static ConfigEntry<bool> EnableCampaignPlanner;
         internal static ConfigEntry<bool> EnableCampaignPlannerExecutors;
+        internal static ConfigEntry<bool> EnableVanillaDefensiveInterception;
+        internal static ConfigEntry<bool> EnableStrategicForesightPicture;
+        internal static ConfigEntry<bool> EnableSpottingMarkBeliefs;
+        internal static ConfigEntry<bool> FixSpottingMarkTiming;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1399,6 +1403,38 @@ namespace WhiskeyRealism
                 "Campaign Planner", "Enable Campaign Planner Executors", true,
                 "Default ON. Lets the planner steer vanilla: offensive target pointers, campaign objective, theater boxes, availability, capital pledges, " +
                 "transfers, MoveUnitTo, depots, forts, railroads. Never moves or orders the W&L player's own command. OFF = plan and telemetry only.");
+            EnableVanillaDefensiveInterception = Config.Bind(
+                "Campaign Planner", "Enable Vanilla Defensive Interception", true,
+                "Default ON. While the campaign planner runs for an AI alliance (a fresh published plan, executors on), vanilla's own defensive operations " +
+                "(CheckForDefensiveOperations, the side's only reaction to an advance onto its soil) choose from the side's whole formation list again: " +
+                "the defense intent ledger's candidate filter (patch #25) removes nothing and reverts nothing, and only logs what it would have removed " +
+                "(DefenseIntent filter-observed). The planner's withheld formations (reserve, capital guard, depot builder, scout, recovering) stay out " +
+                "of vanilla's defence through the availability patch. OFF = #25 removes the ledger's forbidden formations from vanilla's candidates and " +
+                "reverts a forbidden commit, as before. Needs Enable Campaign Planner and Enable Campaign Planner Executors; without them #25 always filters.");
+            EnableStrategicForesightPicture = Config.Bind(
+                "Campaign Planner", "Enable Strategic Foresight Picture", true,
+                "Default ON. Each AI side plans from a fog-honest picture of the whole enemy army: the enemy's public total (the strategy screen's " +
+                "men fielded) less every army the side believes in is presumed at the enemy capital and the enemy-held objectives that are not " +
+                "scouted, the sectors facing them hold against those men at the same ratio as against seen armies, the hold on a front is " +
+                "released for a target only when every army it faces is at the target, and the capital floor counts every enemy that can reach " +
+                "the capital before the capital's own department can concentrate, with vanilla's own baseline. OFF = the earlier rules: a " +
+                "presumption under every unscouted sector, the capital threat within the relocation range and a floor without vanilla's baseline, " +
+                "the nearest-belief hold release, the department sum of the sector needs, and a minimum strength of 5000. The eligibility floor " +
+                "(a candidate needs a capacity of at least the minimum strength) does not read this flag: it applies ON or OFF. Needs Enable Campaign Planner.");
+            EnableSpottingMarkBeliefs = Config.Bind(
+                "Campaign Planner", "Enable Spotting Mark Beliefs", true,
+                "Default ON. Vanilla draws a spotting mark on the W&L player's map for each enemy group he cannot see, within 25 map units of the truth, " +
+                "and gives the AI no such channel. With this on both sides plan from them: the player's side reads the newest mark of each hidden enemy " +
+                "group off the campaign map, and an AI side draws its own marks with vanilla's formula on its own fog grid (seeded, never Unity's random). " +
+                "A mark is a belief that counts in every strength sum and the picture's accounting, widens from its radius, and never scouts a target, " +
+                "lands a group, raises a raid or counts as contact. OFF = no mark detections on either side. Needs Enable Campaign Planner.");
+            FixSpottingMarkTiming = Config.Bind(
+                "Campaign Planner", "Fix Spotting Mark Timing", true,
+                "Default ON. Vanilla's spotting marks (the enemy symbols on the W&L player's campaign map) read the unit concealment array where the " +
+                "time-factor pref is meant (BUG-INTEL-001), so a hidden enemy group gets a new mark every time it moves 50 map units. With this on " +
+                "vanilla's mark timer reads the time-factor pref (0.1 and 0.006 game years), so marks appear over days; the AI side's own marks " +
+                "follow the same rate. It changes the player's own map, whether or not the campaign planner runs. OFF = vanilla's timing on both " +
+                "sides. Needs fog of war.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

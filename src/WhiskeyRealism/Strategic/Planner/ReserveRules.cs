@@ -59,6 +59,25 @@ namespace WhiskeyRealism.Strategic.Planner
             return weighted;
         }
 
+        // The same weight over the enemy picture (foresight F3, D11 requirement-capital-window): every element of all five kinds (the live and
+        // faded masses of beliefs, afloat or ashore, and the anchors' shares) within `reach` of the place, mass / max(10, d)^0.3 x 0.5, d the
+        // river-effective distance for a land element and the straight one for an afloat element. VanillaThreat stays for G8's posts, which
+        // keep their belief-only threat.
+        internal static float PictureThreat(CampaignSnapshot s, EnemyPicture picture, float x, float z, float reach, ITerrainLineProbe probe)
+        {
+            float weighted = 0f;
+            for (int i = 0; i < picture.Elements.Count; i++)
+            {
+                var e = picture.Elements[i];
+                float straight = RiverLines.Distance(e.X, e.Z, x, z);
+                if (e.Mass <= 0f || straight >= reach) continue;
+                bool afloat = e.Kind == PictureElementKind.AfloatLive || e.Kind == PictureElementKind.AfloatFaded;
+                float d = afloat ? straight : RiverLines.EffectiveDistance(e.X, e.Z, x, z, probe, s.Crossings);
+                weighted += e.Mass / (float)System.Math.Pow(System.Math.Max(VanillaThreatMinDistance, d), VanillaThreatExponent) * VanillaThreatScale;
+            }
+            return weighted;
+        }
+
         // Afloat armies cannot be engaged by land (EstablishCampaignBattle 80632-80635).
         internal static bool Afloat(in EnemyBelief b)
         {

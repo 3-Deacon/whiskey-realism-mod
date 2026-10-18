@@ -87,6 +87,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if ((belief.Traits & EnemyTraits.Embarked) != 0)
                 return (belief.Traits & EnemyTraits.NearOwnCoast) != 0;
             if ((belief.Traits & EnemyTraits.OnOwnSoil) == 0 || belief.LastEmbarkedDay < 0) return false;
+            if (belief.LastSource == DetectionSource.Mark) return false;   // a mark never lands a group (foresight F4)
             landed = belief.LastSeenDay - belief.LastEmbarkedDay <= LandingWindowDays && SeenRecently(in belief, today);
             return landed;
         }
@@ -95,7 +96,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // (never vanilla's raidforces state).
         internal static bool IsRaidThreat(in EnemyBelief belief, int today)
         {
-            if (!SeenRecently(in belief, today)) return false;
+            if (!SeenRecently(in belief, today) || belief.LastSource == DetectionSource.Mark) return false;   // a mark raises no raid (foresight F4)
             const EnemyTraits raid = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil;
             return (belief.Traits & raid) == raid && (belief.Traits & EnemyTraits.Embarked) == 0;
         }

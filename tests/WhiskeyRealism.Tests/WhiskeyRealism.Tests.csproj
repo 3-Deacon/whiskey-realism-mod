@@ -99,6 +99,12 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveTracker.cs" Link="Planner\MoveTracker.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveIssue.cs" Link="Planner\MoveIssue.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignWithholdView.cs" Link="Planner\CampaignWithholdView.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReservesRow.cs" Link="Planner\ReservesRow.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyPicture.cs" Link="Planner\EnemyPicture.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MarkRules.cs" Link="Planner\MarkRules.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MarkLedger.cs" Link="Planner\MarkLedger.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseFilterTally.cs" Link="DefenseFilterTally.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseInterceptionGate.cs" Link="DefenseInterceptionGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringRules.cs" Link="Planner\SteeringRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignMover.cs" Link="Planner\CampaignMover.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CapitalFloorPolicy.cs" Link="Planner\CapitalFloorPolicy.cs" />
