@@ -82,7 +82,7 @@ internal static class UnitChurnTests
         int decide = leaf.IndexOf("LeafBrigadeMovePolicy.Decide(", StringComparison.Ordinal);
         int exit = leaf.IndexOf("if (!move.Move)", StringComparison.Ordinal);
         AssertTrue(record >= 0 && decide > record && exit > decide, "before the move decision, so a brigade that does not move (a reserve, a hold) is recorded too");
-        FlankResponseTests.AssertPinned(leaf, "t.Groups[i].Submitted = true;", "and marked when the move was submitted, as the pool path marks it");
+        FlankResponseTests.AssertPinned(leaf, "sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));\n            t.Groups[i].Submitted = true;", "and marked when the slot move was submitted, as the pool path marks it (the flank guard's own mark above it is not this one)");
     }
 
     // ------------------------------------------------------------------ a fixing force at assault
