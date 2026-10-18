@@ -101,15 +101,29 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
-        public static bool Marks(in ApproachLineInput i)
+        /// <summary>
+        /// One pass over a regiment: <see cref="ApproachVerdict.Mark"/> when every arm holds, <see cref="ApproachVerdict.Release"/> when a hard arm fails (the
+        /// regiment is not Whiskey's to hold in line, or its group is marching on purpose or withdrawing: the mark ends at once), and
+        /// <see cref="ApproachVerdict.Hold"/> when only a soft arm fails (the group's recorded task is not an advance or hold this tick, the enemy is not
+        /// perceived within the range this tick): the mark it already has is left to run out its latch. The soft arms flicker with the doctrine's
+        /// per-second task swaps (FixEnemy, Screen, Probe, FormUp) and the perceived enemy, and a mark that fell with each flicker let vanilla column the
+        /// regiment a second after its deploy (smoke 2026-10-18, the 1st Division at 05:06:19, 9 of 38 approach deploys).
+        /// </summary>
+        public static ApproachVerdict Judge(in ApproachLineInput i)
         {
             const UnitFlags needed = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry;
             const UnitFlags refused = UnitFlags.IsGroup | UnitFlags.PlayerOwned | UnitFlags.Feud | UnitFlags.PermanentlyDetached | UnitFlags.Routed |
                 UnitFlags.MarkedForRout | UnitFlags.OnRetreat | UnitFlags.Mounted;
-            if ((i.Flags & needed) != needed || (i.Flags & refused) != 0) return false;
-            if (!i.GroupRecorded || !TaskKeepsLine(i.GroupTask)) return false;
-            if (i.GroupRouteColumn || i.GroupFormation == RoadRoutePlanner.ColumnGroupFormation || i.Withdrawing) return false;
-            return i.HasEnemy && i.EnemyDistance <= AssaultRangeMeters;
+            if ((i.Flags & needed) != needed || (i.Flags & refused) != 0) return ApproachVerdict.Release;
+            if (i.GroupRouteColumn || i.GroupFormation == RoadRoutePlanner.ColumnGroupFormation || i.Withdrawing) return ApproachVerdict.Release;
+            if (!i.GroupRecorded || !TaskKeepsLine(i.GroupTask)) return ApproachVerdict.Hold;
+            return i.HasEnemy && i.EnemyDistance <= AssaultRangeMeters ? ApproachVerdict.Mark : ApproachVerdict.Hold;
+        }
+
+        /// <summary>The regiment is marked this pass (every arm holds).</summary>
+        public static bool Marks(in ApproachLineInput i)
+        {
+            return Judge(in i) == ApproachVerdict.Mark;
         }
 
         /// <summary>The Prefix's cheap tests, run first for every regiment on every regular cycle: its flag is on, and the regiment is infantry that is not already in column.</summary>
@@ -125,49 +139,77 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
-    // The marked regiments, per alliance, by GameObject instance id (the snapshot's key). Rebuilt by the facing-pulse producer on every pass and read by the
-    // patch; main thread only, allocation-free after warm-up. A mark expires ValidHours of battle time after its pass (the arbiter stopped, a side stood
-    // down), and a stamp from the future (a reload) is none.
+    internal enum ApproachVerdict
+    {
+        /// <summary>A hard arm fails: end the regiment's mark now.</summary>
+        Release = 0,
+        /// <summary>Only a soft arm fails this pass: leave its mark, if any, to run out its latch.</summary>
+        Hold,
+        /// <summary>Every arm holds: mark it, or refresh its mark.</summary>
+        Mark,
+    }
+
+    // The marked regiments, per alliance, by GameObject instance id (the snapshot's key). Filled by the facing-pulse producer on every pass and read by the
+    // patch; main thread only, allocation-free after warm-up. A mark is the doctrine time of the last pass that marked the regiment and is read as set for
+    // LatchHours after it: the latch carries a regiment through the doctrine's per-second task swaps and an enemy that drops out of perception for a pass,
+    // and is also the expiry when the arbiter stops or a side stands down. A hard disqualifier releases the mark at once (Release), and a stamp from the
+    // future (a reload) is none.
     internal sealed class ApproachLineTable
     {
-        public const double ValidHours = 0.1;
+        /// <summary>How long a mark outlives the pass that set it: 30 real seconds at 1x on the doctrine clock (600 s real per battle hour).</summary>
+        public const double LatchHours = 0.05;
 
         internal static readonly ApproachLineTable Shared = new ApproachLineTable();
 
-        private readonly HashSet<int>[] _marked = { new HashSet<int>(), new HashSet<int>() };
-        private readonly double[] _stamp = { double.NegativeInfinity, double.NegativeInfinity };
+        private readonly Dictionary<int, double>[] _last = { new Dictionary<int, double>(), new Dictionary<int, double>() };
+        private readonly double[] _pass = { double.NegativeInfinity, double.NegativeInfinity };
+        private readonly List<int> _expired = new List<int>();
 
         static ApproachLineTable()
         {
             WhiskeyRealism.Util.BattleScope.Register("approach-line-table", Shared.Clear);
         }
 
+        /// <summary>Starts a pass at <paramref name="nowHours"/>: marks set by this pass are stamped with it; marks that ran out their latch are dropped.</summary>
         public void Begin(int alliance, double nowHours)
         {
-            if (alliance < 0 || alliance >= _marked.Length) return;
-            _marked[alliance].Clear();
-            _stamp[alliance] = nowHours;
+            if (alliance < 0 || alliance >= _last.Length) return;
+            _pass[alliance] = nowHours;
+            _expired.Clear();
+            foreach (KeyValuePair<int, double> entry in _last[alliance])
+            {
+                double age = nowHours - entry.Value;
+                if (age < 0.0 || age >= LatchHours) _expired.Add(entry.Key);
+            }
+            for (int k = 0; k < _expired.Count; k++) _last[alliance].Remove(_expired[k]);
         }
 
         public void Mark(int alliance, int instanceId)
         {
-            if (alliance < 0 || alliance >= _marked.Length) return;
-            _marked[alliance].Add(instanceId);
+            if (alliance < 0 || alliance >= _last.Length) return;
+            _last[alliance][instanceId] = _pass[alliance];
+        }
+
+        public void Release(int alliance, int instanceId)
+        {
+            if (alliance < 0 || alliance >= _last.Length) return;
+            _last[alliance].Remove(instanceId);
         }
 
         public bool Contains(int alliance, int instanceId, double nowHours)
         {
-            if (alliance < 0 || alliance >= _marked.Length) return false;
-            double age = nowHours - _stamp[alliance];
-            return age >= 0.0 && age < ValidHours && _marked[alliance].Contains(instanceId);
+            if (alliance < 0 || alliance >= _last.Length) return false;
+            if (!_last[alliance].TryGetValue(instanceId, out double stamp)) return false;
+            double age = nowHours - stamp;
+            return age >= 0.0 && age < LatchHours;
         }
 
         public void Clear()
         {
-            for (int a = 0; a < _marked.Length; a++)
+            for (int a = 0; a < _last.Length; a++)
             {
-                _marked[a].Clear();
-                _stamp[a] = double.NegativeInfinity;
+                _last[a].Clear();
+                _pass[a] = double.NegativeInfinity;
             }
         }
     }

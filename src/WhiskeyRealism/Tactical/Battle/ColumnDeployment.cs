@@ -8,6 +8,11 @@ namespace WhiskeyRealism.Tactical.Battle
         FiredOn,
         Flanked,
         Engaged,
+        /// <summary>
+        /// Only the group's perceived flank risk (BattleWriterPolicy.PerceivedFlankRisk: the group's outflanked state over the snapshot's flank pressure, or a
+        /// positive mean vanilla outflanked weight): the regiment itself took no fire from the flank and is not outflanked. Deployed in march, never stopped.
+        /// </summary>
+        FlankRisk,
         /// <summary>Marked for the approach in line (ApproachLine): the enemy is inside the assault range and the group advances or holds in line.</summary>
         Approaching,
     }
@@ -74,8 +79,9 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!i.Infantry || i.Mounted || i.Formation != RegimentMarchColumn) return ColumnDeployReason.None;
             if (i.Withdrawing || i.Routed || i.RecentDeploy) return ColumnDeployReason.None;
             if (i.ReceivedFire) return ColumnDeployReason.FiredOn;
-            if (i.FireFromFlank != 0 || i.Outflanked != 0 || i.GroupFlankRisk) return ColumnDeployReason.Flanked;
+            if (i.FireFromFlank != 0 || i.Outflanked != 0) return ColumnDeployReason.Flanked;
             if (i.GroupCloseEngaged) return ColumnDeployReason.Engaged;
+            if (i.GroupFlankRisk) return ColumnDeployReason.FlankRisk;
             if (i.Approaching) return ColumnDeployReason.Approaching;
             return ColumnDeployReason.None;
         }
@@ -94,12 +100,20 @@ namespace WhiskeyRealism.Tactical.Battle
                 case ColumnDeployReason.FiredOn: return "column-deploy:FiredOn";
                 case ColumnDeployReason.Flanked: return "column-deploy:Flanked";
                 case ColumnDeployReason.Engaged: return "column-deploy:Engaged";
+                case ColumnDeployReason.FlankRisk: return "column-deploy:FlankRisk";
                 case ColumnDeployReason.Approaching: return "column-deploy:Approaching";
                 default: return "column-deploy";
             }
         }
 
-        /// <summary>The one formation intent: stop the march, then face <paramref name="heading"/> (negative: keep the facing) in the formation the stop restores.</summary>
+        /// <summary>
+        /// The one formation intent. A deploy that has a threat to face stops the march and turns to <paramref name="heading"/> in the formation the stop
+        /// restores (fire, a flank taken, close contact: fight in place). A deploy that is not an answer to fire (the approach, a perceived flank risk) or has
+        /// no bearing to face keeps marching (<see cref="IntentFlags.DeployInMarch"/>): a stop clears the regiment's path (StopRegiment 132397) and the
+        /// group's re-issued move is a duplicate while its other regiments walk (CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint), so a stopped
+        /// regiment would be left behind, and with no bearing the stop would turn it to nothing. Smoke 2026-10-18: 45 of 96 Flanked deploys stopped a
+        /// regiment with no bearing (KeptFacing 34, NoBearing 11).
+        /// </summary>
         public static BattleOrderIntent Intent(int regimentId, float heading, ColumnDeployReason reason)
         {
             return new BattleOrderIntent
@@ -108,13 +122,43 @@ namespace WhiskeyRealism.Tactical.Battle
                 Channel = OrderChannel.Formation,
                 Value = RegimentLine,
                 Heading = heading >= 0f ? heading : -1f,
-                // The approach in line must keep marching: a stop clears the regiment's path (StopRegiment 132397) and the group's re-issued move is a
-                // duplicate while its other regiments walk (CommandWaypointWritePolicy.ShouldSkipDuplicateWaypoint), so a stopped regiment would be left behind.
-                Flags = reason == ColumnDeployReason.Approaching ? IntentFlags.Deploy | IntentFlags.DeployInMarch : IntentFlags.Deploy,
+                Flags = KeepsMarching(reason, heading) ? IntentFlags.Deploy | IntentFlags.DeployInMarch : IntentFlags.Deploy,
                 Priority = IntentPriority.Executor,
                 Source = IntentSource.FacingPulse,
                 Reason = ReasonLabel(reason),
             };
+        }
+
+        /// <summary>The deploy keeps the regiment marching: the approach and a perceived flank risk always, any other reason when there is no bearing to turn to.</summary>
+        public static bool KeepsMarching(ColumnDeployReason reason, float heading)
+        {
+            return reason == ColumnDeployReason.Approaching || reason == ColumnDeployReason.FlankRisk || heading < 0f;
+        }
+
+        /// <summary>How far off its walking direction a deployed line may face before it faces the way it walks instead.</summary>
+        public const float MaxOffWalkDegrees = 60f;
+
+        /// <summary>
+        /// The facing of a line deployed in march. A line whose facing is more than 90 degrees off its path walks backwards, so the regiment faces its walking
+        /// direction (<paramref name="walk"/>, the bearing to its path's end; negative when it has none) unless the threat bearing is within
+        /// <see cref="MaxOffWalkDegrees"/> of it. With no path it faces the threat, and with neither it takes the facing vanilla's own deploy takes
+        /// (<paramref name="vanillaFinal"/>, lastwaypointrotation[0], 127679; negative keeps the regiment's facing). Smoke 2026-10-18: a deploy with no bearing
+        /// kept the column's facing (targetFacing -1) while the user watched the 15th Indiana march backwards.
+        /// </summary>
+        public static float MarchFacing(float threat, float walk, float vanillaFinal)
+        {
+            if (walk >= 0f)
+            {
+                if (threat >= 0f && AngleBetween(threat, walk) <= MaxOffWalkDegrees) return threat;
+                return walk;
+            }
+            return threat >= 0f ? threat : vanillaFinal;
+        }
+
+        private static float AngleBetween(float a, float b)
+        {
+            float d = System.Math.Abs(a - b) % 360f;
+            return d > 180f ? 360f - d : d;
         }
 
         /// <summary>
@@ -128,24 +172,29 @@ namespace WhiskeyRealism.Tactical.Battle
         /// formation and lastformation are both the restored line, so RotateRegiment (StopRegiment, then ChangeRegimentFormation(lastformation), 130165-130167)
         /// re-forms the line it already has. (SetDistanceMarchColumn, 127702, entered the column with a non-manual call, which is how lastformation came to hold the line.)
         /// </summary>
-        public static ColumnDeployApplied Apply<THost>(ref THost host, float heading, bool keepMarching) where THost : struct, IColumnDeployHost
+        public static ColumnDeployApplied Apply<THost>(ref THost host, float heading, bool keepMarching, out float facing) where THost : struct, IColumnDeployHost
         {
+            facing = -1f;
             if (!host.OffBridgeOrCrossing) return ColumnDeployApplied.HeldOnBridge;
             // The approach in line keeps its path: vanilla's own deploy in march (127676-127682), which re-lays the line from the regiment's position
             // and re-targets the last corner of its path (RegimentSetPath, target default with modifylastwaypoint). A stop would clear that path.
             if (keepMarching)
             {
-                host.DeployInMarch(heading);
+                facing = MarchFacing(heading, host.WalkHeading, host.VanillaFinalRotation);
+                host.DeployInMarch(facing);
                 return ColumnDeployApplied.DeployedInMarch;
             }
             host.Stop();
             if (host.Formation == RegimentMarchColumn)
             {
                 host.ReformToLine(heading);
+                facing = heading;
                 return ColumnDeployApplied.Reformed;
             }
             if (heading < 0f) return ColumnDeployApplied.NoBearing;
-            return host.Rotate(heading) ? ColumnDeployApplied.Faced : ColumnDeployApplied.KeptFacing;
+            if (!host.Rotate(heading)) return ColumnDeployApplied.KeptFacing;
+            facing = heading;
+            return ColumnDeployApplied.Faced;
         }
     }
 
@@ -179,6 +228,10 @@ namespace WhiskeyRealism.Tactical.Battle
         void ReformToLine(float heading);
         /// <summary>Vanilla's deploy in march (127677-127682): the same call without the stop, then distancemarchcolumn = false.</summary>
         void DeployInMarch(float heading);
+        /// <summary>The bearing from the regiment to the end of its path, in degrees; negative when it has no path or the end is within a block's length.</summary>
+        float WalkHeading { get; }
+        /// <summary>lastwaypointrotation[0], the final rotation of the regiment's path, which vanilla's own deploy uses (127679); negative when it has none.</summary>
+        float VanillaFinalRotation { get; }
         /// <summary>The executor's rotate-in-place; false when it did not turn the regiment.</summary>
         bool Rotate(float heading);
     }

@@ -606,8 +606,8 @@ namespace WhiskeyRealism.Tactical.Battle
             GameObject go = ((Component)unit).gameObject;
             if (go == null) return false;
             var host = new DeployHost(bunits, unit, go);
-            ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading, (w.Flags & IntentFlags.DeployInMarch) != 0);
-            EmitColumnDeploy(view, targetIndex, w, applied);
+            ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading, (w.Flags & IntentFlags.DeployInMarch) != 0, out float facing);
+            EmitColumnDeploy(view, targetIndex, w, applied, facing);
             return applied != ColumnDeployApplied.HeldOnBridge;
         }
 
@@ -649,13 +649,39 @@ namespace WhiskeyRealism.Tactical.Battle
             }
 
             public bool Rotate(float heading) => RotateInPlace(_unit, heading);
+
+            // The bearing to the end of the regiment's path (vanilla's own end-of-path test, 127552-127590, is GetLastTransmittedPathPos), or -1.
+            public float WalkHeading
+            {
+                get
+                {
+                    if (_unit.regimentpaths <= 0) return -1f;
+                    Vector3 here = ((Component)_unit).transform.position;
+                    Vector3 end = _unit.GetLastTransmittedPathPos(ignoreorderdelay: true);
+                    float dx = end.x - here.x, dz = end.z - here.z;
+                    if (dx * dx + dz * dz < WalkHeadingMinMeters * WalkHeadingMinMeters) return -1f;
+                    return PostureSense.HeadingTo(here.x, here.z, end.x, end.z);
+                }
+            }
+
+            public float VanillaFinalRotation
+            {
+                get
+                {
+                    float[] rotation = _unit.lastwaypointrotation;
+                    return rotation != null && rotation.Length > 0 && rotation[0] >= 0f ? rotation[0] : -1f;
+                }
+            }
         }
+
+        // A path end nearer than this is no walking direction (a block's length).
+        private const float WalkHeadingMinMeters = 20f;
 
         private static readonly Dictionary<string, float> _lastColumnDeployRowAt = new Dictionary<string, float>();
 
         // One TacticalColumnDeploy row per regiment per 30 s and outcome: why it was deployed (the intent's reason), the bearing it was given and what the
         // executor applied. Emitted here and not at the submit, so a deploy the executor refused or held on a bridge is not reported as done.
-        private static void EmitColumnDeploy(BattleSnapshot view, int targetIndex, in BattleOrderIntent w, ColumnDeployApplied applied)
+        private static void EmitColumnDeploy(BattleSnapshot view, int targetIndex, in BattleOrderIntent w, ColumnDeployApplied applied, float facing)
         {
             try
             {
@@ -678,6 +704,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         .WithDecision("ColumnDeploy", reason, signature)
                         .WithField("reason", reason)
                         .WithField("applied", appliedName)
+                        .WithField("facing", facing)
                         .WithField("targetFacing", heading)
                         .WithField("receivedFire", rec.ReceivedFire)
                         .WithField("fireFromFlank", rec.FireFromFlank)

@@ -2037,12 +2037,17 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     flankRisk = t.Groups[group].FlankRisk;
                 }
 
+                // The mark is a latch (ApproachLineTable): a pass that marks refreshes it, a hard disqualifier releases it, and a soft one (the group's
+                // task or the perceived enemy flickering for a pass) leaves it to run out. Only a fresh mark deploys a column regiment.
                 bool approaching = false;
-                if (approachOn && recorded)
+                if (approachOn)
                 {
-                    int enemy = s.ClosestVisibleEnemy(group, out float enemyDistance);
-                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, true));
-                    if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);
+                    float enemyDistance = 0f;
+                    int enemy = recorded ? s.ClosestVisibleEnemy(group, out enemyDistance) : -1;
+                    ApproachVerdict verdict = ApproachLine.Judge(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, recorded));
+                    if (verdict == ApproachVerdict.Mark) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);
+                    else if (verdict == ApproachVerdict.Release) ApproachLineTable.Shared.Release(s.Alliance, rec.InstanceId);
+                    approaching = verdict == ApproachVerdict.Mark;
                 }
                 if (!deployOn || !inColumn || submitted >= MaxDeploymentsPerTick) continue;
 
