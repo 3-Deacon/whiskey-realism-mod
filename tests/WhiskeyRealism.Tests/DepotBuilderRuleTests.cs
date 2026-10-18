@@ -295,8 +295,8 @@ internal static class DepotBuilderRuleTests
         AssertEqual(ForceAllocator.ReasonPinnedBuilder, Of(a, 40).Reason, "pinned");
     }
 
-    // The claim is for a formation the planner may still send there: one that is busy, one the tracker gave up on at the site, and one that no
-    // longer stands in the task's sector are not claimed, and the task is served by the next candidate.
+    // The claim is for a formation the planner may still send there: one that is busy, one the tracker gave up on at the site, one that no
+    // longer stands in the task's sector and the map-group player's are not claimed, and the task is served by the next candidate.
     private static void AnIncumbentTheTaskCannotUseIsNotClaimed()
     {
         int sector;
@@ -328,6 +328,18 @@ internal static class DepotBuilderRuleTests
         var c = Run(QuietPlan(away), away, new[] { Marching(40, SiteX, sector) });
         AssertEqual(FormationRole.Hold, Of(c, 40).Role, "an incumbent outside the task's sector is not claimed");
         AssertEqual("41", Builders(c), "the sector's own formation builds");
+
+        // The map-group player's group is movable (an order only) but the planner may not move it: a held builder naming it (the ledger binds
+        // none, but the allocator holds the line itself) is never claimed, and the task is served by the next candidate.
+        var player = ExecutorFixtures.Wide();
+        var mapGroup = Formation(40, 350f, 3000f);
+        mapGroup.Chain = WlChainClass.PlayerMapGroup;
+        player.Own.Add(mapGroup);
+        player.Own.Add(Formation(41, 330f, 5000f));
+        player.Own.Add(Formation(42, 380f, 6000f));
+        var d = Run(QuietPlan(player), player, new[] { Marching(40, SiteX, sector) });
+        AssertTrue(Of(d, 40).Role != FormationRole.DepotBuilder, "the map-group player is never a depot builder, whoever names it");
+        AssertEqual("41", Builders(d), "the next candidate builds");
     }
 
     // A Wished builder is the pinned-builder step's (AssignPinnedBuilders, at the wish position), not the incumbent claim's.
