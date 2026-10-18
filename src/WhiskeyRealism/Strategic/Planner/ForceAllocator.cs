@@ -33,7 +33,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   DepotBuilder  a depot task's builder, withheld: the incumbent of a Marching task (kept whatever its readiness), else the smallest formation of the
     //                 task's sector that the mass could use (readiness step 2 and above) and the sector can spare (its standing hold meets its
     //                 target without it), else the smallest member of the mass that stands there, never the mass's last free body. Never a hold
-    //                 reserve (claimed before the depot step) and never an unready formation (D11 requirement-depot-builder).
+    //                 reserve (claimed before the depot step) and never an unready new pick (D11 requirement-depot-builder).
     //   Recon         ReconPlanner.PickFormation per recon task, highest priority first; the Recon
     //                 assignment copies the task's SectorId and hold point so ReconMissionLedger.Sync
     //                 can pair them back (G1b contract); withheld. A staged main effort with no free scout draws one from a sector's hold

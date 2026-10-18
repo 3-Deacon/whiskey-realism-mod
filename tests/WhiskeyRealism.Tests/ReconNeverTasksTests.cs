@@ -708,7 +708,7 @@ internal static class ReconNeverTasksTests
         AssertEqual(last.Reason, Of(alloc, 30).Reason, "the last main task");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "the East reserve was refused for the first");
         AssertFalse(Refused(alloc), "and the push has its eyes: no reason is told");
-        // A free formation that fills a task that does not see the main objective (the capital approach) leaves the push without eyes: the
+        // A free formation that fills a task that does not see the main objective leaves the push without eyes: the
         // reason stands.
         var other = new List<GaveUpMove>();
         foreach (var task in tasks) if (ReconPlanner.ScoutsMainObjective(task))

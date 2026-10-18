@@ -31,6 +31,8 @@ internal static class DepotBuilderRuleTests
             ("AReserveThatTookTheIncumbentWins", AReserveThatTookTheIncumbentWins),
             ("TheIncumbentSkipsTheSurplusTest", TheIncumbentSkipsTheSurplusTest),
             ("AnIncumbentTheTaskCannotUseIsNotClaimed", AnIncumbentTheTaskCannotUseIsNotClaimed),
+            ("EveryTasksIncumbentIsClaimedBeforeAnyTasksPick", EveryTasksIncumbentIsClaimedBeforeAnyTasksPick),
+            ("ACapitalGuardMarchingElsewhereDoesNotHoldTheTasksSector", ACapitalGuardMarchingElsewhereDoesNotHoldTheTasksSector),
             ("AWishedBuilderKeepsItsWishPosition", AWishedBuilderKeepsItsWishPosition),
         });
     }
@@ -353,5 +355,39 @@ internal static class DepotBuilderRuleTests
         AssertEqual(FormationRole.DepotBuilder, x.Role, "a Wished builder stays");
         AssertEqual(345f, x.TargetX, "at the wish position, not the plan task");
         AssertEqual(2f, x.TargetZ, "z");
+    }
+
+    // Two tasks in one sector: the first task's smallest surplus formation (10) is the second task's Marching incumbent. Every incumbent is
+    // claimed before any task picks, so the first task cannot take it: 10 stays with the second task, at the second task's site, and the
+    // first task takes the next surplus (11).
+    private static void EveryTasksIncumbentIsClaimedBeforeAnyTasksPick()
+    {
+        var s = ExecutorFixtures.Wide();
+        s.Own.Add(Formation(10, 330f, 3000f));
+        s.Own.Add(Formation(11, 350f, 5000f));
+        s.Own.Add(Formation(12, 380f, 6000f));
+        var plan = QuietPlan(s);   // task 0 at x 300
+        plan.DepotTasks.Add(new DepotTask { X = 340f, Z = 0f, SectorId = TaskSector(s), Priority = 0.5f });   // task 1, 40 away: another site
+        var a = Run(plan, s, new[] { Marching(10, 340f, TaskSector(s)) });
+        AssertEqual("10,11", Builders(a), "each task has a builder");
+        AssertEqual(340f, Of(a, 10).TargetX, "the incumbent stays with the task it was bound to");
+        AssertEqual(ForceAllocator.ReasonPinnedBuilder, Of(a, 10).Reason, "as that task's kept pick");
+        AssertEqual(300f, Of(a, 11).TargetX, "and the first task takes the next surplus formation");
+        AssertEqual(ForceAllocator.ReasonDepotTask, Of(a, 11).Reason, "as a new pick");
+    }
+
+    // A capital guard that stands in the task's sector but is raised for a capital in another sector is marching away: it holds nothing where
+    // it stands (the Counted rule, role sector equal to standing sector), so the one other formation there is no surplus.
+    private static void ACapitalGuardMarchingElsewhereDoesNotHoldTheTasksSector()
+    {
+        var s = ExecutorFixtures.Wide();   // the capital is at x 0, in the west sector; the task's sector is {300, 400}
+        s.Own.Add(Formation(20, 310f, 3000f));   // the formation nearest the capital: raised as its guard
+        s.Own.Add(Formation(21, 380f, 4000f));
+        var plan = QuietPlan(s);
+        plan.CapitalFloorStrength = 3000f;
+        var a = Run(plan, s);
+        AssertEqual(FormationRole.CapitalGuard, Of(a, 20).Role, "fixture: the nearer formation guards the capital");
+        AssertTrue(Of(a, 20).SectorId != TaskSector(s), "fixture: its role sector is the capital's, not the task's");
+        AssertEqual("", Builders(a), "4000 alone holds the sector: leaving would take it under the target, and the guard on the march is no hold");
     }
 }
