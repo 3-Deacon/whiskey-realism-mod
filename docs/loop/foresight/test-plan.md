@@ -26,7 +26,7 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 - TC-CAP-SMOKE (SMOKE-30): `[CapitalThreat] alliance=1` rows with `weighted>0` and `floor>=2000` on 100 % of review days while the Union holds Washington (baseline FX-BASE: `capitalThreat=0.00 floor=0` in every `CampaignPlan:trace` row); `switch=capital-threat` at most once per latch.
 
 ### S4 Spotting marks (F4)
-- TC-MARK-BAND `BandRoundingMatchesVanillasBands`; TC-MARK-NEWEST `PlayerSideReadsOnlyTheNewestMark`, `PlayerAllianceUnitsNeverRegisteredByVanilla`, `GarrisonsAndFleetsGetNoMark`; TC-MARK-CHANCE `CreationChanceCappedAtVanillasMaximum`, `BugIntel001NegativeTimeConstantFloorsAtAThousandthOfAYear`; TC-MARK-50 `NoMarkUntilTheGroupMovesFiftyUnits`; TC-MARK-OFFSET `OffsetPointsAwayFromTheClosestEnemy`, `OffsetBlendsWithThePreviousByAge`, `MarkRadiusFromStoredIntelligence`, `MarkRadiusGrowsWithDrift`; TC-MARK-SEED `SeededRollsAreReproducible`, `NoUnityRandomInTheMarkChannel`; TC-MARK-KEY `MarkMatchesByExactKeyOnly`; TC-MARK-NORETIRE `MarkNeverRetiresAnotherBelief`; TC-MARK-SAMEDAY `SameDaySightingBeatsAMark`, `OlderMarkIgnored`; TC-MARK-NOSCOUT `MarkBeliefNeverScouts`, `MarkBeliefCountsInTheTotals`; TC-MARK-SIDECAR `MarkSourceRoundTripsInTheSidecar`, `AnOlderFileReadsBaseRadiusZero`.
+- TC-MARK-BAND `BandRoundingMatchesVanillasBands`; TC-MARK-NEWEST `PlayerSideReadsOnlyTheNewestMark`, `PlayerAllianceUnitsNeverRegisteredByVanilla`, `GarrisonsAndFleetsGetNoMark`; TC-MARK-CHANCE `CreationChanceCappedAtVanillasMaximum`, `BugIntel001NegativeTimeConstantFloorsAtAThousandthOfAYear`; TC-MARK-50 `NoMarkUntilTheGroupMovesFiftyUnits`; TC-MARK-OFFSET `OffsetPointsAwayFromTheClosestEnemy`, `OffsetBlendsWithThePreviousByAge`, `MarkRadiusFromStoredIntelligence`, `MarkRadiusGrowsWithDrift`; TC-MARK-SEED `SeededRollsAreReproducible`, `NoUnityRandomInTheMarkChannel`; TC-MARK-KEY `MarkMatchesByExactKeyOnly`; TC-MARK-NORETIRE `MarkNeverRetiresAnotherBelief`; TC-MARK-SAMEDAY `SameDaySightingBeatsAMark`, `OlderMarkIgnored`, `AStaleNewestMarkKeepsNoBeliefAlive`, `MarkDayDecodesTheCalendarDate`; TC-MARK-REVERSE `ASightingNeverRetiresAMarkBelief`, `AMarkBeliefReKeysWithinItsBaseRadius`, `AMarkCarriesNoEmbarkedTrait`, `SeenCountExcludesMarks`; TC-MARK-FIDELITY `FirstMarkComesAtTheCap`, `AGridSeenMarkIsRefusedAndDropsTheMarks`; TC-MARK-NOSCOUT `MarkBeliefNeverScouts`, `MarkBeliefCountsInTheTotals`; TC-MARK-SIDECAR `MarkSourceRoundTripsInTheSidecar`, `AnOlderFileReadsBaseRadiusZero`.
 - TC-MARK-SMOKE (SMOKE-30): on both alliances, `[EnemyBeliefs]` with `marks>0` on at least one review in every 7 game days.
 
 ### S5 Covering force and Redeploy (F6)
@@ -37,12 +37,12 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 
 ### S6 Commitment and return home (F7)
 - TC-COM-DIP `ADispatchedMemberStaysMassedThroughAReadinessDip`, `AnUncommittedFormationStillNeedsStepTwo`; TC-COM-RELIEF `RetreatOrLowMoraleStillRelieves`, `LowSupplyStillRecovers`; TC-COM-CHAIN `TheCsaMainEffortSurvivesTheMarch`; TC-COM-NOMARCH `NoNewMarchAtStepOne`; TC-COM-WAIT `AnIssuedMoveIsNotJudgedWhileReadinessIsLow`, `TheReadinessWaitEndsAfterFourteenDays`; flag `FlagOffRestoresD5`.
-- TC-RET-SEND `SortieRecordedAtFirstDispatchOnly`, `OriginKeptAcrossReissues`, `AnEndedDecisionSendsItsSortiesHome`, `TheNewMassTakesFirst`; TC-RET-LIFE `ArrivedSortieIsDeleted`, `GaveUpSortieHoldsInPlace`, `AReserveMayTakeAReturningFormation`, `ReturningCountsInNoHold`, `PlayerCommandNeverHasASortie`, `SortiesRoundTripInTheSidecar`; TC-RET-CAP `ReturnHomeNeverCrowdsOutTheMass`.
+- TC-COM-KEY `CommitmentSurvivesANoCandidateReview`, `TheReinforcementHasASortie`, `HoldNeverReservesACommittedFormation`, `AnAppointmentRekeysTheSortie`; TC-COM-DELIST `RedeployIsTakenOffVanillasOffensiveList`; TC-RET-SEND `ACommittedFormationTheMassLeftGoesHome`, `SortieRecordedAtFirstDispatchOnly`, `OriginKeptAcrossReissues`, `AnEndedDecisionSendsItsSortiesHome`, `TheNewMassTakesFirst`; TC-RET-LIFE `ArrivedSortieIsDeleted`, `GaveUpSortieHoldsInPlace`, `AReserveMayTakeAReturningFormation`, `ReturningCountsInNoHold`, `PlayerCommandNeverHasASortie`, `SortiesRoundTripInTheSidecar`; TC-RET-CAP `ReturnHomeNeverCrowdsOutTheMass`.
 - TC-COM-SMOKE (SMOKE-30): criterion-mass-kept (0 `switch=no-candidate` while `[Reserves] committed>0`; baseline FX-BASE: CSA 2 `no-candidate` rows in 06-22..06-27) and its guardrail (0 `MainEffort` issue rows at `readiness<2`).
 - TC-RET-SMOKE (SMOKE-30): criterion-return-home (100 % within 2 reviews) and its guardrail.
 
 ### S7 Department reinforcement (F8)
-- TC-DEP-ONE `TheShortestDepartmentGetsOneFormation`, `OneInFlightPerReceivingDepartment`, `AtMostOnePickPerReview`, `WorksWithNoMainEffort`; TC-DEP-DONOR `TheDonorsHoldStaysMet`, `SoonestWithinTenDaysRailCredited`, `NeverAReserveMassCoveringGarrisonOrBuilder`, `NeverThePlayersCommandOrMapGroup`; TC-DEP-LIFE `ThePickTransfersTheDepartmentAtOnce`, `ArrivalClearsTheRecord`, `GiveUpTransfersBack`, `PrunedFormationClearsTheRecord`, `DepartmentInFlightRoundTripsInTheSidecar`.
+- TC-DEP-ONE `TheShortestDepartmentGetsOneFormation`, `OneInFlightPerReceivingDepartment`, `AtMostOnePickPerReview`, `WorksWithNoMainEffort`; TC-DEP-DONOR `TheDonorsHoldStaysMet`, `SoonestWithinTenDaysRailCredited`, `NeverAReserveMassCoveringGarrisonOrBuilder`, `NeverThePlayersCommandOrMapGroup`, `AMarchingArmyDoesNotHoldItsDepartment`, `NoReturningOrCommittedDonor`; TC-DEP-EXPIRE `ARecordExpiresAfterTwentyDays`; TC-DEP-LIFE `ThePickTransfersTheDepartmentAtOnce`, `ArrivalClearsTheRecord`, `GiveUpTransfersBack`, `PrunedFormationClearsTheRecord`, `DepartmentInFlightRoundTripsInTheSidecar`.
 - TC-DEP-SMOKE (SMOKE-30): criterion-department-reinforced and its guardrail.
 
 ### S8 Depot builders (F9)
@@ -54,7 +54,8 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 - TC-MIN-SMOKE (SMOKE-30): `[CampaignPlanner] first review` with `minStrength=2000` for both alliances.
 
 ### S10 Interception (F2)
-- TC-INT-MODE `ObservesWhileThePlannerRunsForTheAlliance`, `FiltersWhenTheFlagIsOff`, `FiltersWhenThePlanIsStale`, `FiltersForEurope`, `FiltersForACicSide`; TC-INT-NOREMOVE `ObservingPrefixRemovesNothingAndPostfixRevertsNothing`, `ObservedRowCountsWhatWouldBeRemoved`.
+- TC-INT-MODE `ObservesWhileThePlannerRunsForTheAlliance`, `FiltersWhenTheFlagIsOff`, `FiltersWhenThePlanIsStale`, `FiltersForEurope`, `FiltersForACicSide`, `FiltersWhenThePlannerOrItsExecutorsAreOff`; TC-INT-NOREMOVE `ObservingPrefixRemovesNothingAndPostfixRevertsNothing`, `ObservedRowCountsWhatWouldBeRemoved`, `ObservedRowNotGatedOnVerbose`.
+- TC-INT-SMOKE guard: the count is valid only with at least one observed row per alliance in the run (a run with none is inconclusive, not a pass).
 - TC-INT-SMOKE (SMOKE-30): criterion-interception-restored (every alliance-0/1 #25 row `filter-observed`; baseline FX-BASE: 45 rows `removed=forbidden` for alliance 1) and its guardrail (`[Reserves] vanillaDefWithheld=0`).
 
 ### S11 Telemetry (F1)
@@ -74,8 +75,8 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 | requirement-hold-release | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:283 | TC-REL-EVERY, TC-REL-NOTHING |  |  |
 | requirement-candidate-floor-capacity | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:284 | TC-ELIG-MIN, TC-ELIG-ODDS |  |  |
 | requirement-marks-player-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:288 | TC-MARK-NEWEST, TC-MARK-BAND, TC-MARK-SMOKE |  |  |
-| requirement-marks-ai-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:289 | TC-MARK-CHANCE, TC-MARK-50, TC-MARK-OFFSET, TC-MARK-SEED, TC-MARK-SMOKE |  |  |
-| requirement-mark-beliefs | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:290 | TC-MARK-KEY, TC-MARK-NORETIRE, TC-MARK-SAMEDAY, TC-MARK-NOSCOUT, TC-MARK-SIDECAR |  |  |
+| requirement-marks-ai-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:289 | TC-MARK-CHANCE, TC-MARK-50, TC-MARK-OFFSET, TC-MARK-SEED, TC-MARK-FIDELITY, TC-MARK-SMOKE |  |  |
+| requirement-mark-beliefs | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:290 | TC-MARK-KEY, TC-MARK-NORETIRE, TC-MARK-SAMEDAY, TC-MARK-REVERSE, TC-MARK-NOSCOUT, TC-MARK-SIDECAR |  |  |
 | requirement-capital-window | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:294 | TC-CAP-REACH, TC-CAP-WASH, TC-CAP-RAILS, TC-CAP-SMOKE |  |  |
 | requirement-capital-floor | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:295 | TC-CAP-BASE, TC-CAP-THREAT, TC-CAP-VSFOUR, TC-CAP-SMOKE |  |  |
 | requirement-covering-post | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:300 | TC-COV-CORRIDOR, TC-COV-FWD, TC-COV-REAR, TC-COV-NONE, TC-COV-CENSUS |  |  |
@@ -85,9 +86,9 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 | requirement-covering-hold | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:304 | TC-COV-MASSFOR, TC-COV-POOLS, TC-COV-ROLE, TC-COV-DEFENCE, TC-COV-SMOKE |  |  |
 | requirement-covering-lifecycle | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:305 | TC-COV-UNBIND, TC-COV-SIDECAR |  |  |
 | requirement-redeploy-role | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:309 | TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD |  |  |
-| requirement-department-reinforcement | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:313 | TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-LIFE, TC-DEP-SMOKE |  |  |
-| requirement-commitment | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:317 | TC-COM-DIP, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE |  |  |
-| requirement-commitment-mover | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:318 | TC-COM-NOMARCH, TC-COM-WAIT |  |  |
+| requirement-department-reinforcement | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:313 | TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-LIFE, TC-DEP-EXPIRE, TC-DEP-SMOKE |  |  |
+| requirement-commitment | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:317 | TC-COM-DIP, TC-COM-KEY, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE |  |  |
+| requirement-commitment-mover | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:318 | TC-COM-NOMARCH, TC-COM-WAIT, TC-COM-DELIST |  |  |
 | requirement-return-home | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:319 | TC-RET-SEND, TC-RET-LIFE, TC-RET-CAP, TC-RET-SMOKE |  |  |
 | requirement-depot-builder | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:323 | TC-DEPOT-READY, TC-DEPOT-SURPLUS, TC-DEPOT-AOV, TC-DEPOT-SMOKE |  |  |
 | requirement-live-min-strength | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:327 | TC-MIN-PUBLISH, TC-MIN-ONESITE, TC-MIN-SMOKE |  |  |
