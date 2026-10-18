@@ -687,7 +687,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // parent does, a group in a fight and a group in vanilla's assault are left to what moves them.
             CommandPhysicalState observed = physical;
             bool foreignStay = recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentMarches(s, i) &&
-                IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical);
+                IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical, ReleasedFromReserve(army, rec.InstanceId));
             if (foreignStay)
             {
                 physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);
@@ -948,31 +948,51 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         // The group's active move is not the one Whiskey last issued it, and the group is in a state where a stay task is Whiskey's to keep.
-        private static bool IsForeignStayMove(BattleSnapshot s, in UnitRecord rec, bool inFight, CommandTaskType task, in CommandPhysicalState physical)
+        private static bool IsForeignStayMove(BattleSnapshot s, in UnitRecord rec, bool inFight, CommandTaskType task, in CommandPhysicalState physical, bool releasedFromReserve)
         {
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
             float issuedX = 0f, issuedZ = 0f;
             double issuedHours = 0.0;
             bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out issuedHours);
-            return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, hasIssued, rec.LastWaypointX, rec.LastWaypointZ, issuedX, issuedZ);
+            return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ),
+                hasIssued, rec.LastWaypointX, rec.LastWaypointZ, issuedX, issuedZ, releasedFromReserve);
         }
 
-        // The group walks its parent's march (MoveContest.FollowsParentMarch): an ancestor has a path of its own that is a move Whiskey issued it and the
-        // group's waypoint lies on the slot of it. The parent's own order is not what the group is contested for; a waypoint of the group's own is.
+        // The allocator released the group out of Reserve (CommandNodeIntent.ReleasedFromReserve, inherited by its descendants): vanilla's regiment-level
+        // reserve commit that #59 allows for a real release moves its subordinates, and a group-wide Stop would undo it.
+        private static bool ReleasedFromReserve(ArmyOrchestrator army, int instanceId)
+        {
+            try
+            {
+                CommandIntentResolution resolution = army?.ResolveCommandIntentForGroup(0, instanceId) ?? default(CommandIntentResolution);
+                return resolution.Found && resolution.Intent.ReleasedFromReserve;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // The group walks its parent's march (MoveContest.FollowsParentMarch): an ancestor has a path of its own that is a move Whiskey issued it, the group has
+        // had no Whiskey move of its own since, and it has no waypoint (vanilla writes none for a group its parent re-lays) or one on the parent's slot. The
+        // parent's own order is not what the group is contested for; a move of the group's own is.
         private static bool ParentMarches(BattleSnapshot s, int i)
         {
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
+            if (executor == null) return false;
             ref UnitRecord rec = ref s.Own[i];
+            bool childHasMove = executor.LastIssuedMove(rec.InstanceId, out _, out _, out double childHours);
             int a = rec.ParentIndex;
             for (int hops = 0; a >= 0 && a < s.OwnCount && hops < 4; hops++, a = s.Own[a].ParentIndex)
             {
                 ref UnitRecord parent = ref s.Own[a];
                 bool hasPath = parent.RegimentPaths > 0 || parent.MovementMode > 0;
-                float issuedX = 0f, issuedZ = 0f;
-                double issuedHours = 0.0;
-                bool hasIssued = executor != null && executor.LastIssuedMove(parent.InstanceId, out issuedX, out issuedZ, out issuedHours);
-                bool own = MoveContest.IsOwnMove(hasIssued, parent.LastWaypointX, parent.LastWaypointZ, issuedX, issuedZ);
-                if (MoveContest.FollowsParentMarch(hasPath, own, rec.LastWaypointX, rec.LastWaypointZ, parent.LastWaypointX, parent.LastWaypointZ)) return true;
+                if (!hasPath || !executor.LastIssuedMove(parent.InstanceId, out float issuedX, out float issuedZ, out double parentHours)) continue;
+                bool parentHasWaypoint = PostureSense.HasPoint(parent.LastWaypointX, parent.LastWaypointZ);
+                bool own = !parentHasWaypoint || MoveContest.IsOwnMove(true, parent.LastWaypointX, parent.LastWaypointZ, issuedX, issuedZ);
+                bool childMovedSince = childHasMove && childHours >= parentHours;
+                if (MoveContest.FollowsParentMarch(hasPath, own, childMovedSince, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ), rec.LastWaypointX,
+                        rec.LastWaypointZ, parentHasWaypoint, parent.LastWaypointX, parent.LastWaypointZ)) return true;
             }
             return false;
         }

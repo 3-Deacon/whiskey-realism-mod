@@ -105,11 +105,16 @@ namespace WhiskeyRealism.Tactical.Battle
         /// <summary>
         /// Whether the group's active move is a foreign one the posture executor must not read as "already correct": the group walks, is not in a fight
         /// (<paramref name="inFight"/>: engaged or flanked, where vanilla's reactions are left alone) nor in vanilla's assault stance, its task is a stay task
-        /// and the move is not the one Whiskey last issued. A group that walks because its parent does is no case of this: the caller asks that first.
+        /// and the move is not the one Whiskey last issued. A group with no waypoint of its own (<paramref name="hasWaypoint"/> false: vanilla writes
+        /// <c>lastsetwaypointposition</c> for a group only when the group itself is ordered, 131250-131259; smoke16's 2nd_Brigade reads 0,0 with a path all
+        /// battle) has nothing to compare, and a group released from reserve (<paramref name="releasedFromReserve"/>: vanilla's regiment-level commit, #59,
+        /// is allowed for it, and the Stop is group-wide) is left to the commit. A group that walks because its parent does is no case of this: the caller
+        /// asks that first (<see cref="FollowsParentMarch"/>).
         /// </summary>
-        public static bool IsForeignStayMove(bool activeMove, bool inFight, int stance, Operations.CommandTaskType task,
-            bool hasLastIssued, float waypointX, float waypointZ, float issuedX, float issuedZ)
-            => activeMove && !inFight && stance != AssaultStanceOf && IsStayTask(task) && !IsOwnMove(hasLastIssued, waypointX, waypointZ, issuedX, issuedZ);
+        public static bool IsForeignStayMove(bool activeMove, bool inFight, int stance, Operations.CommandTaskType task, bool hasWaypoint,
+            bool hasLastIssued, float waypointX, float waypointZ, float issuedX, float issuedZ, bool releasedFromReserve)
+            => activeMove && !inFight && stance != AssaultStanceOf && IsStayTask(task) && hasWaypoint && !releasedFromReserve &&
+               !IsOwnMove(hasLastIssued, waypointX, waypointZ, issuedX, issuedZ);
 
         /// <summary>groupstancename (65061): 4 = assault.</summary>
         public const int AssaultStanceOf = 4;
@@ -122,12 +127,21 @@ namespace WhiskeyRealism.Tactical.Battle
         public const float ParentSlotMeters = 150f;
 
         /// <summary>
-        /// The child walks its parent's march: the parent has a path of its own that is the move Whiskey last issued it (<paramref name="parentOwnMove"/>),
-        /// and the child's waypoint lies within <see cref="ParentSlotMeters"/> of the parent's. A parent that walks a foreign move is not followed here: its
-        /// own stay task contests it, and the child's contest stands on its own.
+        /// The child walks its parent's march: an ancestor has a path of its own that is the move Whiskey last issued it (<paramref name="parentOwnMove"/>),
+        /// the child has had no Whiskey move of its own since (<paramref name="childMovedSince"/> false) and either has no waypoint (vanilla writes none for a
+        /// group its parent re-lays) or one within <see cref="ParentSlotMeters"/> of the parent's. A parent that walks a foreign move is not followed here:
+        /// its own stay task contests it, and the child's contest stands on its own.
         /// </summary>
-        public static bool FollowsParentMarch(bool parentHasPath, bool parentOwnMove, float childWaypointX, float childWaypointZ, float parentWaypointX, float parentWaypointZ)
-            => parentHasPath && parentOwnMove && Distance(childWaypointX, childWaypointZ, parentWaypointX, parentWaypointZ) <= ParentSlotMeters;
+        public static bool FollowsParentMarch(bool parentHasPath, bool parentOwnMove, bool childMovedSince, bool childHasWaypoint, float childWaypointX,
+            float childWaypointZ, bool parentHasWaypoint, float parentWaypointX, float parentWaypointZ)
+        {
+            // A parent with no path of its own, or one walking a foreign move, leads nobody here; a child that has had a Whiskey move of its own since the
+            // parent's is not carried by the parent's (whether its move is its own is the foreign test's).
+            if (!parentHasPath || !parentOwnMove || childMovedSince) return false;
+            // Vanilla does not write the waypoint of a group its parent re-lays: no waypoint is a child carried by the parent's order.
+            if (!childHasWaypoint || !parentHasWaypoint) return true;
+            return Distance(childWaypointX, childWaypointZ, parentWaypointX, parentWaypointZ) <= ParentSlotMeters;
+        }
 
         public static ContestAction Decide(in ContestInput c)
         {

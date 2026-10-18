@@ -37,6 +37,8 @@ internal static class TaskChurnTests
             ("task churn: a move is foreign when it is not the executor's last move for a group that is not in a fight", ForeignMoveTruthTable),
             ("task churn: the posture pipeline stops reading a foreign move as already correct", ThePipelineReadsForeignMoves),
             ("task churn: a child on its parent's slot follows the parent's march, a waypoint of its own is contested", AChildOnItsParentsSlotFollowsIt),
+            ("task churn: a brigade re-laid by its Whiskey-marched parent (waypoint 0,0) is not contested on a reserve, hold or form-up", AReLaidChildIsNotContested),
+            ("task churn: a group released from reserve is not contested", AReleasedGroupIsNotContested),
             ("task churn: smoke 2026-10-18 replay, the 4th Brigade is contested at the first stay row, then every macro cycle while it walks vanilla's march", TheSmokeReplay),
             ("task churn: a group that saw the enemy within the horizon is still in contact", AGroupKeepsItsContact),
             ("task churn: the reconnaissance rule reads the group's remembered contact, not the tick's sight", ReconReadsRememberedContact),
@@ -468,12 +470,15 @@ internal static class TaskChurnTests
     private static void ForeignMoveTruthTable()
     {
         const CommandTaskType Screen = CommandTaskType.Screen;
-        bool Foreign(bool active = true, bool fight = false, int stance = 3, CommandTaskType task = Screen, bool issued = true, float wx = 505f, float ix = 100f)
-            => MoveContest.IsForeignStayMove(active, fight, stance, task, issued, wx, 495f, ix, 495f);
+        bool Foreign(bool active = true, bool fight = false, int stance = 3, CommandTaskType task = Screen, bool issued = true, float wx = 505f, float ix = 100f,
+            bool hasWaypoint = true, bool released = false)
+            => MoveContest.IsForeignStayMove(active, fight, stance, task, hasWaypoint, issued, wx, 495f, ix, 495f, released);
         AssertTrue(Foreign(), "a walking screen whose waypoint is not the executor's last move");
         AssertFalse(Foreign(ix: 505f), "the executor's last move is the group's own");
         AssertFalse(Foreign(ix: 530f), "within the contest's tolerance of it too");
         AssertTrue(Foreign(issued: false), "a group Whiskey never moved walks someone else's move");
+        AssertFalse(Foreign(hasWaypoint: false, wx: 0f), "a group with no waypoint of its own (vanilla wrote none: smoke16's 2nd_Brigade, 0,0 with a path all battle) cannot be shown to walk a foreign move");
+        AssertFalse(Foreign(released: true), "a group released from reserve is left to the #59 commit whose subordinates move");
         AssertFalse(Foreign(active: false), "a group that does not walk has no move to read");
         AssertFalse(Foreign(fight: true), "a group in a fight is left to what moves it");
         AssertFalse(Foreign(stance: MoveContest.AssaultStanceOf), "and a group in vanilla's assault stance");
@@ -488,8 +493,8 @@ internal static class TaskChurnTests
     {
         string text = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         string run = FlankResponseTests.Between(text, "internal static bool Run(", "// #61 CanBypassStaleQueuedOrder");
-        FlankResponseTests.AssertPinned(run, "bool foreignStay = recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentMarches(s, i) && IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical);",
-            "a foreign move of a stay task, behind the BC14O flag, not a recon or exploit group, not a parent's march");
+        FlankResponseTests.AssertPinned(run, "bool foreignStay = recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentMarches(s, i) && IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical, ReleasedFromReserve(army, rec.InstanceId));",
+            "a foreign move of a stay task, behind the BC14O flag, not a recon or exploit group, not a parent's march, not a group released from reserve");
         FlankResponseTests.AssertPinned(run, "physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);",
             "is no active move for the posture decision");
         FlankResponseTests.AssertPinned(run, "closeEngaged, foreignStay, state.Task, army, observed, priority, source, sink);",
@@ -498,8 +503,12 @@ internal static class TaskChurnTests
             "before the idle classification and the eligibility read the move");
         FlankResponseTests.AssertPinned(text, "bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out issuedHours);",
             "the executor's last outcome for the group is what the move is compared with");
-        FlankResponseTests.AssertPinned(text, "if (MoveContest.FollowsParentMarch(hasPath, own, rec.LastWaypointX, rec.LastWaypointZ, parent.LastWaypointX, parent.LastWaypointZ)) return true;",
-            "a group on the slot of a parent's own march is the parent's");
+        FlankResponseTests.AssertPinned(text, "if (MoveContest.FollowsParentMarch(hasPath, own, childMovedSince, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ), rec.LastWaypointX,",
+            "a group the parent re-lays (no waypoint of its own, no move of its own since) or on the slot of a parent's own march is the parent's");
+        FlankResponseTests.AssertPinned(text, "bool childMovedSince = childHasMove && childHours >= parentHours;", "a Whiskey move of the child's own since the parent's is the child's");
+        FlankResponseTests.AssertPinned(text, "return resolution.Found && resolution.Intent.ReleasedFromReserve;", "the allocator's release mark is read from the command intent");
+        FlankResponseTests.AssertPinned(text, "return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ),",
+            "a child's waypoint is compared only when vanilla wrote one");
         FlankResponseTests.AssertPinned(text, "bool hasPath = parent.RegimentPaths > 0 || parent.MovementMode > 0;", "the parent walks by a path of its own, not by the moving children it is counted from");
         FlankResponseTests.AssertPinned(text, "ForeignStayMove = foreignStay,", "the contest turn is told the verdict");
         FlankResponseTests.AssertPinned(text, "HasStayPoint = hasOrder && order.PrimaryTarget.HasValue && (task == CommandTaskType.FormUp || task == CommandTaskType.Screen),",
@@ -508,10 +517,60 @@ internal static class TaskChurnTests
 
     private static void AChildOnItsParentsSlotFollowsIt()
     {
-        AssertTrue(MoveContest.FollowsParentMarch(true, true, 1000f, -1000f, 1100f, -1000f), "a child 100 m from the parent's waypoint, the parent on a move of Whiskey's own, follows it");
-        AssertFalse(MoveContest.FollowsParentMarch(true, true, 1000f, -1000f, 1300f, -1000f), "300 m off is an order of its own");
-        AssertFalse(MoveContest.FollowsParentMarch(true, false, 1000f, -1000f, 1100f, -1000f), "a parent that walks a foreign move is not followed: the child is contested for its own waypoint");
-        AssertFalse(MoveContest.FollowsParentMarch(false, true, 1000f, -1000f, 1100f, -1000f), "a parent with no path leads nobody");
+        bool Follows(bool parentPath = true, bool parentOwn = true, bool childMoved = false, bool childWp = true, float cwx = 1000f, bool parentWp = true, float pwx = 1100f)
+            => MoveContest.FollowsParentMarch(parentPath, parentOwn, childMoved, childWp, cwx, -1000f, parentWp, pwx, -1000f);
+        AssertTrue(Follows(), "a child 100 m from the parent's waypoint, the parent on a move of Whiskey's own, follows it");
+        AssertFalse(Follows(pwx: 1300f), "300 m off is an order of its own");
+        AssertFalse(Follows(parentOwn: false), "a parent that walks a foreign move is not followed: the child is contested for its own waypoint");
+        AssertFalse(Follows(parentPath: false), "a parent with no path leads nobody");
+        AssertTrue(Follows(childWp: false, cwx: 0f), "a child with no waypoint (vanilla writes none for a group its parent re-lays) follows the parent whatever the parent's waypoint is");
+        AssertTrue(Follows(childWp: false, cwx: 0f, parentWp: false, pwx: 0f), "and when neither waypoint is known");
+        AssertFalse(Follows(childWp: false, cwx: 0f, childMoved: true), "a Whiskey move of the child's own since the parent's is the child's: it is contested like a lone brigade");
+        AssertFalse(Follows(childMoved: true), "on the slot too");
+    }
+
+    // Verify round 1 of f237af5b, major: smoke16's 2nd_Brigade (#-930560) marched with its Whiskey-moved division with waypoint 0,0 and a path all battle. The
+    // verdict the pipeline composes (not foreign when the group has no waypoint; not a parent's march needs the child's move since) leaves a brigade on a stay
+    // task alone, and the contest turn answers nothing. The same brigade after a Whiskey move of its own is contested again.
+    private static void AReLaidChildIsNotContested()
+    {
+        WithChain(() =>
+        {
+            long tick = 0;
+            double now = 10.0;
+            foreach (CommandTaskType task in new[] { CommandTaskType.ReserveWait, CommandTaskType.HoldObjective, CommandTaskType.FormUp })
+            {
+                // Waypoint 0,0, a path, the division on a Whiskey move (its waypoint is its issued move), the brigade without a move of its own.
+                bool parentMarches = MoveContest.FollowsParentMarch(true, MoveContest.IsOwnMove(true, 1132f, -327f, 1132f, -327f), false, false, 0f, 0f, true, 1132f, -327f);
+                bool foreign = MoveContest.IsForeignStayMove(true, false, 3, task, false, false, 0f, 0f, 0f, 0f, false) && !parentMarches;
+                AssertTrue(parentMarches, task + ": the brigade moves with its Whiskey-marched division");
+                var sink = new Sink();
+                var facts = StayFacts(task, ++tick, now += 1.0);
+                facts.GroupId = 930560; facts.WaypointX = 0f; facts.WaypointZ = 0f; facts.ForeignStayMove = foreign;
+                AssertEqual(0, ContestTurn.Run(in facts, sink), task + ": a brigade re-laid by its parent is not contested");
+            }
+            // The same brigade with a Whiskey move of its own since the parent's, walking a waypoint that is not that move: contested.
+            bool carried = MoveContest.FollowsParentMarch(true, true, true, true, 505f, 495f, true, 1132f, -327f);
+            AssertFalse(carried, "a brigade with a move of its own is not carried by the parent");
+            AssertTrue(MoveContest.IsForeignStayMove(true, false, 3, CommandTaskType.HoldObjective, true, true, 505f, 495f, 100f, 495f, false) && !carried,
+                "and a walk that is not its own move is foreign");
+        });
+    }
+
+    // Verify round 1, minor: a group released from reserve is left to the #59 commit.
+    private static void AReleasedGroupIsNotContested()
+    {
+        WithChain(() =>
+        {
+            bool foreign = MoveContest.IsForeignStayMove(true, false, 3, CommandTaskType.HoldObjective, true, false, 505f, 495f, 0f, 0f, true);
+            var sink = new Sink();
+            var facts = StayFacts(CommandTaskType.HoldObjective, 1, 10.0);
+            facts.ForeignStayMove = foreign;
+            AssertEqual(0, ContestTurn.Run(in facts, sink), "a group carrying the release mark is not contested (Stop is group-wide and would undo the commit)");
+            facts = StayFacts(CommandTaskType.HoldObjective, 2, 11.0);
+            facts.ForeignStayMove = MoveContest.IsForeignStayMove(true, false, 3, CommandTaskType.HoldObjective, true, false, 505f, 495f, 0f, 0f, false);
+            AssertEqual(1, ContestTurn.Run(in facts, sink), "the same group without the mark is");
+        });
     }
 
     // Smoke 2026-10-18, the 4th Brigade (#-927726): its rows from the tactical sidecar, the doctrine hour interpolated from the TacticalCrossingWatch rows
@@ -545,8 +604,8 @@ internal static class TaskChurnTests
             for (int k = 0; k < rows.Length; k++)
             {
                 var r = rows[k];
-                bool foreign = MoveContest.IsForeignStayMove(r.Item8, r.Item9 > 0f, 3, r.Item3, true, r.Item6, r.Item7, 1018f, -1240.5f)
-                    && !MoveContest.FollowsParentMarch(r.Item10, true, r.Item6, r.Item7, r.Item11, r.Item12);
+                bool foreign = MoveContest.IsForeignStayMove(r.Item8, r.Item9 > 0f, 3, r.Item3, true, true, r.Item6, r.Item7, 1018f, -1240.5f, false)
+                    && !MoveContest.FollowsParentMarch(r.Item10, true, true, true, r.Item6, r.Item7, true, r.Item11, r.Item12);
                 var sink = new Sink();
                 var facts = new ContestTurnFacts
                 {
@@ -555,6 +614,10 @@ internal static class TaskChurnTests
                     X = r.Item4, Z = r.Item5, WaypointX = r.Item6, WaypointZ = r.Item7, ForeignStayMove = foreign,
                 };
                 int n = ContestTurn.Run(in facts, sink);
+                // The same verdict when Whiskey's FixEnemy move for the brigade is not in the sidecar (unrecorded): no issued move, no move of its own since.
+                bool unrecorded = MoveContest.IsForeignStayMove(r.Item8, r.Item9 > 0f, 3, r.Item3, true, false, r.Item6, r.Item7, 0f, 0f, false)
+                    && !MoveContest.FollowsParentMarch(r.Item10, true, false, true, r.Item6, r.Item7, true, r.Item11, r.Item12);
+                AssertEqual(foreign, unrecorded, "row " + r.Item1 + ": the verdict does not depend on the FixEnemy move being recorded");
                 AssertEqual(expected[k] ? 1 : 0, n, "row " + r.Item1 + " (" + r.Item3 + ", the group is off the chain table)");
                 if (n > 0) AssertTrue((sink.Intents[0].Flags & IntentFlags.Contest) != 0, "contest-flagged at " + r.Item1);
             }
