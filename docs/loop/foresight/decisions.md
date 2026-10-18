@@ -24,3 +24,11 @@ Kept: a dispatched member stays in the mass through readiness dips while its obj
 2. Department reinforcement reuses D6's ReinforcementPick for the shortest department when there is no push, under D6's own lock (one reinforcement per decision), with no in-flight record of its own. The user may override this.
 
 Spec: D11 requirement-commitment and requirement-department-reinforcement.
+
+## Integrator refinements, 2026-10-18 (strategic foresight phase 2, third round)
+
+1. A stalled push: commitment ends exactly when D4's existing main-effort rule ends the push (odds below the required ratio for SwitchDays reviews, or the objective unavailable or accomplished), with no new constant. Corps waiting in committed-wait are taken off vanilla's offensive list; once the commitment ends they are unclaimed and placed by the holds.
+2. The department lock: derived from live state, not from the decision counter. A department is locked while any formation in the last published allocation holds a reinforcement role toward it, and released when that formation arrives or its role changes.
+3. An interrupted transfer: a formation's home department changes only when it arrives; an interrupted pick leaves it in the donor's department and the next review re-decides from scratch.
+
+The user may override each of these. Spec: D11 requirement-commitment and requirement-department-reinforcement.
