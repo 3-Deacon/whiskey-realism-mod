@@ -53,6 +53,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<FortRecord> Forts { get; } = new List<FortRecord>();               // G8: the side's own forts (post sites and their garrison dummies)
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
+        // Foresight F4: how many of the review's detections were sightings (everything but a mark) and how many marks the belief model applied;
+        // the review fills them after the model update, the [EnemyPicture] row prints them.
+        public int DetectionsSeen, DetectionsMarked;
 
         internal void Reset(int alliance, int factionIndex, int daySerial, PlayerCommandClass player,
                             int playerCommandInstanceId, DirectorPosture tempo)
@@ -89,6 +92,8 @@ namespace WhiskeyRealism.Strategic.Planner
             Forts.Clear();
             Detections.Clear();
             Beliefs.Clear();
+            DetectionsSeen = 0;
+            DetectionsMarked = 0;
         }
 
         public int IndexOfOwn(int instanceId)

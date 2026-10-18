@@ -27,6 +27,13 @@ namespace WhiskeyRealism.Strategic.Planner
     // .RoadMarchPerDay) x days unseen, at least one day and at most PlausibleDaysCap: identity
     // asks where the group could normally be, not P6's loose uncertainty bound, which is for
     // planning only (integrator decision 2026-10-15, verify-g1 F2).
+    //
+    // Marks (foresight F4, D11 requirement-mark-beliefs): a Mark detection (a vanilla spotting mark, where a hidden group was last shown) is
+    // applied in a second pass, after steps 1-5 ran over the day's other detections only. It matches a belief by exact UnitKey alone (never
+    // the re-key of step 3 or the retirement of step 4, and a noisy position never retires another belief); a mark of a group already
+    // detected that day, or older than the belief's last-seen day, is ignored; an applied mark sets the position, strength, LastSeenDay =
+    // MarkDay, LastSource = Mark and BaseRadius = MarkRadius, and the radius then widens from that base. Step 4 never retires a Mark belief
+    // and step 3 re-keys one within PlausibleRadius + BaseRadius. A mark never writes LastEmbarkedDay.
     public sealed class EnemyArmyModel
     {
         public const int ExpireDays = 30;
@@ -50,8 +57,24 @@ namespace WhiskeyRealism.Strategic.Planner
         private readonly List<float> _radius = new List<float>(); // per belief, at this review
         private readonly List<float> _plausible = new List<float>(); // per belief, identity matching
         private readonly List<EnemyBelief> _next = new List<EnemyBelief>();
+        private readonly List<EnemyDetection> _real = new List<EnemyDetection>();    // the detections that are not marks
+        private readonly List<EnemyDetection> _marks = new List<EnemyDetection>();
+        private readonly List<string> _applied = new List<string>();
+        private readonly HashSet<string> _appliedSet = new HashSet<string>(StringComparer.Ordinal);
 
         public IReadOnlyList<EnemyBelief> Beliefs => _beliefs;
+
+        // UnitKeys of the marks the last Update applied (the [EnemyBeliefs] marks= count and the remembered= exclusion).
+        public IReadOnlyList<string> AppliedMarkKeys => _applied;
+
+        // The [EnemyBeliefs] remembered= count: beliefs not last seen today, other than the ones a mark refreshed this review.
+        public int RememberedCount(int daySerial)
+        {
+            int count = 0;
+            for (int i = 0; i < _beliefs.Count; i++)
+                if (_beliefs[i].LastSeenDay != daySerial && !_appliedSet.Contains(_beliefs[i].UnitKey ?? string.Empty)) count++;
+            return count;
+        }
 
         // UnitKeys of the beliefs that expired in the last Update (the sea-invasion "collapsed" signal).
         public IReadOnlyList<string> ExpiredKeys => _expired;
@@ -61,10 +84,14 @@ namespace WhiskeyRealism.Strategic.Planner
             return (float)Math.Pow(0.5, Math.Max(0, days) / (double)HalfLifeDays);
         }
 
-        public void Update(IReadOnlyList<EnemyDetection> seen, int daySerial, Func<int, float> driftPerDay, Func<int, float> marchPerDay)
+        public void Update(IReadOnlyList<EnemyDetection> detected, int daySerial, Func<int, float> driftPerDay, Func<int, float> marchPerDay)
         {
             _expired.Clear();
-            int detections = seen != null ? seen.Count : 0;
+            _applied.Clear();
+            _appliedSet.Clear();
+            SplitMarks(detected);
+            IReadOnlyList<EnemyDetection> seen = _real;
+            int detections = seen.Count;
             EffectiveKeys(seen, detections);
 
             int beliefs = _beliefs.Count;
@@ -100,7 +127,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (_matched[b] || _beliefs[b].UnitTyp != seen[d].UnitTyp) continue;
                     if (!string.Equals(NameOf(_beliefs[b].UnitKey), name, StringComparison.Ordinal)) continue;
-                    if (!WithinPlausible(b, seen[d].X, seen[d].Z)) continue;
+                    if (!WithinPlausible(b, seen[d].X, seen[d].Z, _beliefs[b].BaseRadius)) continue;
                     _assigned[d] = b;
                     _matched[b] = true;
                     break;
@@ -115,7 +142,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int b = 0; b < beliefs; b++)
                 {
                     if (_matched[b] || _retired[b] || _beliefs[b].UnitTyp != seen[d].UnitTyp) continue;
-                    if (!WithinPlausible(b, seen[d].X, seen[d].Z)) continue;
+                    if (_beliefs[b].LastSource == DetectionSource.Mark) continue;   // a mark carries its group's identity, so a noisy position retires nothing
+                    if (!WithinPlausible(b, seen[d].X, seen[d].Z, 0f)) continue;
                     float dx = _beliefs[b].X - seen[d].X;
                     float dz = _beliefs[b].Z - seen[d].Z;
                     float distSq = dx * dx + dz * dz;
@@ -171,9 +199,65 @@ namespace WhiskeyRealism.Strategic.Planner
                 });
             }
 
+            ApplyMarks(daySerial, driftPerDay);
+
             _beliefs.Clear();
             _beliefs.AddRange(_next);
             _next.Clear();
+        }
+
+        private void SplitMarks(IReadOnlyList<EnemyDetection> detected)
+        {
+            _real.Clear();
+            _marks.Clear();
+            if (detected == null) return;
+            for (int d = 0; d < detected.Count; d++)
+            {
+                if (detected[d].Source == DetectionSource.Mark) _marks.Add(detected[d]);
+                else _real.Add(detected[d]);
+            }
+        }
+
+        // The second pass over _next (the carried beliefs and the day's new ones). A mark that is too old to count (the belief expiry rule
+        // applied to its own age) makes no belief and keeps none alive.
+        private void ApplyMarks(int daySerial, Func<int, float> driftPerDay)
+        {
+            for (int m = 0; m < _marks.Count; m++)
+            {
+                EnemyDetection mark = _marks[m];
+                if (string.IsNullOrEmpty(mark.UnitKey)) continue;
+                int age = Math.Max(0, daySerial - mark.MarkDay);
+                float confidence = Confidence(age);
+                if (age >= ExpireDays || confidence < MinConfidence) continue;
+                int at = -1;
+                for (int b = 0; b < _next.Count && at < 0; b++)
+                    if (string.Equals(_next[b].UnitKey, mark.UnitKey, StringComparison.Ordinal)) at = b;
+                EnemyBelief belief = at >= 0 ? _next[at] : default(EnemyBelief);
+                if (at >= 0)
+                {
+                    if (belief.LastSeenDay > mark.MarkDay) continue;                                         // older than what is held
+                    if (belief.LastSeenDay == mark.MarkDay && belief.LastSource != DetectionSource.Mark) continue;   // a sighting that day wins
+                }
+                else belief.LastEmbarkedDay = -1;
+                float drift = driftPerDay != null ? driftPerDay(mark.UnitTyp) : 0f;
+                if (float.IsNaN(drift) || drift < 0f) drift = 0f;
+                belief.InstanceId = mark.InstanceId;
+                belief.UnitKey = mark.UnitKey;
+                belief.UnitTyp = mark.UnitTyp;
+                belief.X = mark.X;
+                belief.Z = mark.Z;
+                belief.Strength = mark.Strength;
+                belief.LastSeenDay = mark.MarkDay;
+                belief.LastSource = DetectionSource.Mark;
+                belief.Traits = mark.Traits;
+                belief.BaseRadius = Math.Max(0f, mark.MarkRadius);
+                belief.Confidence01 = confidence;
+                belief.UncertaintyRadius = SeenRadius + belief.BaseRadius + drift * age;
+                if (at >= 0) _next[at] = belief;
+                else _next.Add(belief);
+                _applied.Add(mark.UnitKey);
+                _appliedSet.Add(mark.UnitKey);
+            }
         }
 
         // Sidecar (G6): the persisted beliefs, keyed by UnitKey; InstanceId is rebound by the next
@@ -182,6 +266,8 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             _beliefs.Clear();
             _expired.Clear();
+            _applied.Clear();
+            _appliedSet.Clear();
             if (beliefs == null) return;
             foreach (var belief in beliefs)
                 if (!string.IsNullOrEmpty(belief.UnitKey)) _beliefs.Add(belief);
@@ -191,6 +277,8 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             _beliefs.Clear();
             _expired.Clear();
+            _applied.Clear();
+            _appliedSet.Clear();
         }
 
         // The unit name of a UnitKey ("name:commander", optionally "#instance"): the part before the
@@ -228,11 +316,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     "[EnemyBeliefs] two live enemy groups share one name:commander key; each is kept under name:commander#instance");
         }
 
-        private bool WithinPlausible(int belief, float x, float z)
+        private bool WithinPlausible(int belief, float x, float z, float extraRadius)
         {
             float dx = _beliefs[belief].X - x;
             float dz = _beliefs[belief].Z - z;
-            float r = _plausible[belief];
+            float r = _plausible[belief] + extraRadius;
             return dx * dx + dz * dz <= r * r;
         }
 
@@ -252,7 +340,7 @@ namespace WhiskeyRealism.Strategic.Planner
             int days = Math.Max(0, daySerial - belief.LastSeenDay);
             float drift = driftPerDay != null ? driftPerDay(belief.UnitTyp) : 0f;
             if (float.IsNaN(drift) || drift < 0f) drift = 0f;
-            return SeenRadius + drift * days;
+            return SeenRadius + belief.BaseRadius + drift * days;
         }
     }
 
@@ -479,6 +567,16 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 if (mask != null && mask.Active) restoreFailure = mask.Restore(missing);
             }
+        }
+
+        // [EnemyBeliefs] seen= counts the detections that are not marks; the marks are counted apart (the model's applied ones, marks=).
+        internal static int SeenCount(IReadOnlyList<EnemyDetection> detections)
+        {
+            int count = 0;
+            if (detections != null)
+                for (int i = 0; i < detections.Count; i++)
+                    if (detections[i].Source != DetectionSource.Mark) count++;
+            return count;
         }
 
         internal static bool NeedsGridProbe(bool noFog, bool contact, bool sideIsPlayerAlliance, bool viewerCovers)

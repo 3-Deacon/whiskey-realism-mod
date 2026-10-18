@@ -110,11 +110,18 @@ namespace WhiskeyRealism.Strategic.Planner
                         player, in chain, tempo, Snapshots[alliance]);
                     RebindSaved(alliance, snapshot);
 
+                    // The campaign seed is fixed on a campaign's first review, before Detect: the AI side's spotting-mark stream is seeded from it
+                    // (foresight F4), in every mode.
+                    var state = States[alliance];
+                    if (state.CampaignSeed == 0L)
+                        state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
                     // G1: fog-honest detection and the belief update. Bookkeeping: it runs in every
                     // mode, for a W&L CIC player's stand-down alliance and during the pause (no writes).
-                    EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn());
+                    EnemyDetectionRuntime.Detect(snapshot, GameVars.playeralliance, EnemyDetectionRuntime.FogHonestFlagsOn(), States[alliance].CampaignSeed);
                     var beliefs = EnemyDetectionRuntime.ModelFor(alliance);
                     beliefs.Update(snapshot.Detections, snapshot.DaySerial, EnemyDetectionRuntime.DriftFor(alliance), EnemyDetectionRuntime.MarchFor());
+                    snapshot.DetectionsSeen = DetectionRules.SeenCount(snapshot.Detections);
+                    snapshot.DetectionsMarked = beliefs.AppliedMarkKeys.Count;
                     snapshot.Beliefs.AddRange(beliefs.Beliefs);
                     EnemyDetectionRuntime.Report(snapshot, beliefs);
                     if (mode == PlannerReviewMode.StandDown) return;
@@ -125,9 +132,6 @@ namespace WhiskeyRealism.Strategic.Planner
 
                     var sectors = SectorModel.Build(snapshot);
                     // G3 plan step (P3-P5): profiles -> plan with logistics and depot tasks.
-                    var state = States[alliance];
-                    if (state.CampaignSeed == 0L)
-                        state.CampaignSeed = PlannerState.ComputeCampaignSeed(SceneManagement.currentcampaignscenario, year, month, day);
                     Battles.Take(alliance, snapshot.DaySerial, PendingBattles);
                     // P8: the moves the tracker gave up on (not yet lapsed). G3 leaves a formation out of the mass of the objective
                     // each move was issued for, G4 takes the role from a formation that gave up on the target it would send it to.

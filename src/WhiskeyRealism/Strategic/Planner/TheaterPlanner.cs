@@ -1446,6 +1446,8 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Beliefs.Count; i++)
             {
                 var b = s.Beliefs[i];
+                // A mark belief never scouts (foresight F4): it is where a hidden group was last shown, within a mark radius of the truth.
+                if (b.LastSource == DetectionSource.Mark) continue;
                 if (b.Confidence01 >= ScoutFreshConfidence && !Afloat(b) && RiverLines.Distance(b.X, b.Z, x, z) <= radius) return true;
             }
             return false;

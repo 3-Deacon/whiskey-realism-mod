@@ -156,6 +156,8 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("lastEmbarkedDay")] public int LastEmbarkedDay = -1;
         [JsonProperty("rifleQuality")] public float RifleQuality;
         [JsonProperty("gunQuality")] public float GunQuality;
+        // Foresight F4: the radius a mark belief starts from; absent in an older file, which reads 0 (a sighting's radius).
+        [JsonProperty("baseRadius")] public float BaseRadius;
     }
 
     internal class AppointmentDto

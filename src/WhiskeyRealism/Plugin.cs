@@ -284,6 +284,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableCampaignPlannerExecutors;
         internal static ConfigEntry<bool> EnableVanillaDefensiveInterception;
         internal static ConfigEntry<bool> EnableStrategicForesightPicture;
+        internal static ConfigEntry<bool> EnableSpottingMarkBeliefs;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1419,6 +1420,13 @@ namespace WhiskeyRealism
                 "presumption under every unscouted sector, the capital threat within the relocation range and a floor without vanilla's baseline, " +
                 "the nearest-belief hold release, the department sum of the sector needs, and a minimum strength of 5000. The eligibility floor " +
                 "(a candidate needs a capacity of at least the minimum strength) does not read this flag: it applies ON or OFF. Needs Enable Campaign Planner.");
+            EnableSpottingMarkBeliefs = Config.Bind(
+                "Campaign Planner", "Enable Spotting Mark Beliefs", true,
+                "Default ON. Vanilla draws a spotting mark on the W&L player's map for each enemy group he cannot see, within 25 map units of the truth, " +
+                "and gives the AI no such channel. With this on both sides plan from them: the player's side reads the newest mark of each hidden enemy " +
+                "group off the campaign map, and an AI side draws its own marks with vanilla's formula on its own fog grid (seeded, never Unity's random). " +
+                "A mark is a belief that counts in every strength sum and the picture's accounting, widens from its radius, and never scouts a target, " +
+                "lands a group, raises a raid or counts as contact. OFF = no mark detections on either side. Needs Enable Campaign Planner.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

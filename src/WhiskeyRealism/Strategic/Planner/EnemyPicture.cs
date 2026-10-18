@@ -53,7 +53,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public float Believed, Faded, Unaccounted, Unplaced;
         public float CapitalShareUsed, CapitalShareProp;    // the fraction of the unaccounted men the capital anchor took, under each rule
         public int DisplacedCount;
-        public int Seen, Marks;                             // 0 until foresight F4 counts them (the [EnemyBeliefs] counts)
+        public int Seen, Marks;                             // the review's sightings and applied marks (the [EnemyBeliefs] counts, foresight F4)
         public string EnemyCapitalName;
         public bool HasEnemyCapital;
         public float EnemyCapitalX, EnemyCapitalZ;
@@ -66,7 +66,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // isScouted is TheaterPlanner.IsScouted (D1's rule): marks are excluded from it from foresight F4 on.
         internal static EnemyPicture Build(CampaignSnapshot s, Func<float, float, bool> isScouted)
         {
-            var p = new EnemyPicture { _crossings = s.Crossings };
+            var p = new EnemyPicture { _crossings = s.Crossings, Seen = s.DetectionsSeen, Marks = s.DetectionsMarked };
             int enemy = s.Alliance == 0 ? 1 : s.Alliance == 1 ? 0 : -1;
             bool known = enemy >= 0 && IsFinite(s.EnemyTroopsFielded) && s.EnemyTroopsFielded >= 0f;
             if (known) p.Total = s.EnemyTroopsFielded;
@@ -308,7 +308,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // ---- rows ----
 
         // "[EnemyPicture]" (State): the partition and its anchors, sums with one decimal, on change of signature (the runtime dates it).
-        // seen and marks are 0 until foresight F4.
+        // seen counts the sightings and marks the applied spotting marks of the review (foresight F4).
         internal static string Row(EnemyPicture p, CampaignSnapshot s)
         {
             var inv = CultureInfo.InvariantCulture;

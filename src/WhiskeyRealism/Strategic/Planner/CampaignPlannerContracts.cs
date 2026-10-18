@@ -193,21 +193,25 @@ namespace WhiskeyRealism.Strategic.Planner
     // sighting (the three provenances that used to be told apart were only ever assigned, never branched on;
     // sidecars written with the old values 1 and 3 load as Seen, see DetectionSources.FromSaved), Contact is
     // vanilla's campaign contact (counted in [EnemyBeliefs]), ObjectiveGarrison a fort or town garrison
-    // sighting (keeps its radius). The numbers are persisted: 2 and 4 stay as they were.
+    // sighting (keeps its radius), Mark a vanilla spotting mark (foresight F4, decision 2: where a hidden group was last shown, within a
+    // MarkRadius of the truth; it counts in every strength sum and never scouts, lands a group, raises a raid or counts as contact).
+    // The numbers are persisted: 2 and 4 stay as they were, Mark is 5.
     public enum DetectionSource
     {
         Seen = 0,
         Contact = 2,
-        ObjectiveGarrison = 4
+        ObjectiveGarrison = 4,
+        Mark = 5
     }
 
     public static class DetectionSources
     {
-        // A saved DetectionSource: 2 and 4 as before; 0, 1 and 3 (FogGrid, OwnSideWithinFog, NoFog) and anything unknown are Seen.
+        // A saved DetectionSource: 2, 4 and 5 as written; 0, 1 and 3 (FogGrid, OwnSideWithinFog, NoFog) and anything unknown are Seen.
         public static DetectionSource FromSaved(int saved)
         {
             if (saved == (int)DetectionSource.Contact) return DetectionSource.Contact;
             if (saved == (int)DetectionSource.ObjectiveGarrison) return DetectionSource.ObjectiveGarrison;
+            if (saved == (int)DetectionSource.Mark) return DetectionSource.Mark;
             return DetectionSource.Seen;
         }
     }
@@ -233,6 +237,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // G9: the strength-weighted WSF of the seen group's armed units, per weapon lane (infantry and cavalry rifles, guns), 0 when
         // none was seen in the lane. What a sighting shows of the enemy's arms, never read from an alliance's averageweaponstrength*.
         public float RifleQuality, GunQuality;
+        // Foresight F4: a Mark detection's calendar day (MarkRules.MarkDay, at most today) and its radius (MarkRules.MarkRadius); 0 otherwise.
+        public int MarkDay;
+        public float MarkRadius;
     }
 
     public struct EnemyBelief
@@ -251,6 +258,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // G9: the lane qualities of the last sighting that showed the lane (EnemyDetection.RifleQuality/GunQuality); carried unchanged
         // while the group is unseen, 0 until a sighting shows it.
         public float RifleQuality, GunQuality;
+        // Foresight F4: the radius a mark belief starts from (MarkRadius), 0 for a sighting or a contact; the uncertainty radius is this plus
+        // the drift of the days since the mark. Persisted (baseRadius).
+        public float BaseRadius;
     }
 
     public struct CommanderRecord

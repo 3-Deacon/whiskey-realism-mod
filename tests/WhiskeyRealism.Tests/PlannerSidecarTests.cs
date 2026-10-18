@@ -26,6 +26,8 @@ internal static class PlannerSidecarTests
             ("V3FileDropsNoPlans", V3FileDropsNoPlans),
             ("V3RoundTripsThePlannerState", V3RoundTripsThePlannerState),
             ("V3RoundTripsBeliefsAndAppointments", V3RoundTripsBeliefsAndAppointments),
+            ("MarkSourceRoundTripsInTheSidecar", MarkSourceRoundTripsInTheSidecar),
+            ("AnOlderFileReadsBaseRadiusZero", AnOlderFileReadsBaseRadiusZero),
             ("MoveObjectiveIdRoundTrips", MoveObjectiveIdRoundTrips),
             ("TempoReleasedDecisionAndLastFullReviewDayRoundTrip", TempoReleasedDecisionAndLastFullReviewDayRoundTrip),
             ("PlannerFieldsAbsentFromAV3FileDecodeToTheirDefaults", PlannerFieldsAbsentFromAV3FileDecodeToTheirDefaults),
@@ -229,6 +231,37 @@ internal static class PlannerSidecarTests
             AssertEqual(1, back.Planner[0].Beliefs.Count, "the belief loads with source " + e.saved);
             AssertEqual(e.loaded, back.Planner[0].Beliefs[0].LastSource, "saved source " + e.saved);
         }
+    }
+
+    // Foresight F4: a mark belief keeps its source (5) and its base radius across a save; the radius is what makes it a mark belief on a load.
+    private static void MarkSourceRoundTripsInTheSidecar()
+    {
+        var planner = SamplePlanner();
+        planner.Beliefs.Add(new EnemyBelief
+        {
+            InstanceId = -1, UnitKey = "1st Corps:3", UnitTyp = 15, X = 410.5f, Z = -12.25f, Strength = 9000f, LastSeenDay = 806,
+            Confidence01 = 0.5f, UncertaintyRadius = 40f, LastSource = DetectionSource.Mark, BaseRadius = 25f, LastEmbarkedDay = -1
+        });
+        var back = Decoded(planner);
+        EnemyBelief mark = default;
+        foreach (var b in back.Beliefs) if (b.UnitKey == "1st Corps:3") mark = b;
+        AssertEqual(DetectionSource.Mark, mark.LastSource, "source 5 loads as Mark");
+        AssertNear(25f, mark.BaseRadius, 1e-4f, "the base radius");
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(WithPlanner(planner)));
+        AssertContains(json, "\"baseRadius\": 25", "written under baseRadius");
+        AssertEqual(DetectionSource.Mark, DetectionSources.FromSaved(5), "FromSaved maps 5");
+    }
+
+    // A file written before F4 has no baseRadius: every belief reads 0 (a sighting's radius), whatever its source.
+    private static void AnOlderFileReadsBaseRadiusZero()
+    {
+        string json = SidecarDtoCodec.Serialize(SidecarDtoCodec.Encode(WithPlanner(SamplePlanner())));
+        string without = System.Text.RegularExpressions.Regex.Replace(json, "\\s*\"baseRadius\":\\s*[-0-9.eE]+,?", "");
+        AssertFalse(without.Contains("baseRadius"), "fixture: the key is stripped");
+        AssertTrue(SidecarDtoCodec.TryDeserialize(without, out var dto, out var reason), "deserialize: " + reason);
+        AssertTrue(SidecarDtoCodec.TryDecode(dto, out var back, out reason), "decode: " + reason);
+        AssertEqual(1, back.Planner[0].Beliefs.Count, "the belief loads");
+        AssertEqual(0f, back.Planner[0].Beliefs[0].BaseRadius, "baseRadius reads 0");
     }
 
     private static void V3RoundTripsBeliefsAndAppointments()

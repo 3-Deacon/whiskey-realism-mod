@@ -43,9 +43,11 @@ internal static class ReconPlannerTests
             ("AdvanceGuardRecalledOnCloseBelief", AdvanceGuardRecalledOnCloseBelief),
             ("ScreenPostureSectorGetsAScreen", ScreenPostureSectorGetsAScreen),
             ("ProbeWhenMainObjectiveBeliefsStale", ProbeWhenMainObjectiveBeliefsStale),
+            ("AMarkNeverAnswersTheProbe", AMarkNeverAnswersTheProbe),
             ("NoProbeWhileMainEffortInContact", NoProbeWhileMainEffortInContact),
             ("SyncAssignsMissionIdsAndClearsUnassigned", SyncAssignsMissionIdsAndClearsUnassigned),
             ("ContactRecallsScreen", ContactRecallsScreen),
+            ("AMarkIsNoRecontact", AMarkIsNoRecontact),
             ("LowSupplyRecallsScreen", LowSupplyRecallsScreen),
             ("RecalledMissionClearsAtRecallPoint", RecalledMissionClearsAtRecallPoint),
             ("MissingFormationClearsMission", MissingFormationClearsMission),
@@ -529,6 +531,22 @@ internal static class ReconPlannerTests
         AssertEqual(-1, Find(Plan(s, sectors, plan), ReconKind.Probe, null), "a fresh belief there: no probe");
     }
 
+    // Foresight F4: a mark belief at the objective is where a hidden group was last shown, not an answer to the probe's question.
+    private static void AMarkNeverAnswersTheProbe()
+    {
+        var s = LineWorld();
+        s.Own.Add(Unit(1, 400f, 0f, 30000f, 0f, 15));
+        s.Own.Add(Unit(2, 410f, 0f, 4000f, 0.9f, 14));
+        var mark = Belief("marked", 790f, 0f, 8000f, Today, 0.9f, 25f);
+        mark.LastSource = DetectionSource.Mark;
+        s.Beliefs.Add(mark);
+        var sectors = SectorModel.Build(s);
+        var plan = MainPlan(2, 800f);
+        AssertTrue(Find(Plan(s, sectors, plan), ReconKind.Probe, null) >= 0, "a fresh mark at the objective leaves the probe wanted");
+        s.Beliefs[0] = Belief("fresh", 790f, 0f, 8000f, Today, 0.9f, 5f);
+        AssertEqual(-1, Find(Plan(s, sectors, plan), ReconKind.Probe, null), "control: the same belief as a sighting answers it");
+    }
+
     private static void NoProbeWhileMainEffortInContact()
     {
         var s = LineWorld();
@@ -574,6 +592,24 @@ internal static class ReconPlannerTests
         AssertEqual(first, MissionOf(ledger, 2).MissionId, "kept mission keeps its id");
         AssertEqual(ReconState.Cleared, MissionOf(ledger, 3).State, "a mission whose group lost its recon role is cleared");
         AssertFalse(ledger.IsRecon(3), "not on a mission any more");
+    }
+
+    // Foresight F4: a mark seen today inside bugle range is no contact, so it recalls no screen; the same belief as a sighting does.
+    private static void AMarkIsNoRecontact()
+    {
+        var s = World();
+        s.Own.Add(Unit(1, 0f, 0f, 20000f, 0f, 15));
+        s.Own.Add(Unit(2, 300f, 0f, 3000f, 0.9f, 14));
+        var ledger = new ReconMissionLedger();
+        AddMission(ledger, s, ReconKind.Screen, 2, 300f, 0f, -1);
+        var mark = Belief("contact", 305f, 0f, 9000f, Today, 1f, 5f);
+        mark.LastSource = DetectionSource.Mark;
+        s.Beliefs.Add(mark);
+        ledger.OnReview(s, HoldAlloc());
+        AssertEqual(ReconState.Holding, ledger.Missions[0].State, "a mark inside bugle range recalls nothing");
+        s.Beliefs[0] = Belief("contact", 305f, 0f, 9000f, Today, 1f, 5f);
+        ledger.OnReview(s, HoldAlloc());
+        AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "control: a sighting does");
     }
 
     private static void ContactRecallsScreen()

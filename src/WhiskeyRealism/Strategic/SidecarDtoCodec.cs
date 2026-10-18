@@ -466,7 +466,7 @@ namespace WhiskeyRealism.Strategic
                     UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                     LastSeenDay = b.LastSeenDay, Confidence = b.Confidence01, Radius = b.UncertaintyRadius,
                     Source = (int)b.LastSource, Traits = (int)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay,
-                    RifleQuality = b.RifleQuality, GunQuality = b.GunQuality
+                    RifleQuality = b.RifleQuality, GunQuality = b.GunQuality, BaseRadius = b.BaseRadius
                 });
             }
             foreach (var a in p.Appointments)
@@ -528,7 +528,7 @@ namespace WhiskeyRealism.Strategic
                         InstanceId = -1, UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                         LastSeenDay = b.LastSeenDay, Confidence01 = b.Confidence, UncertaintyRadius = b.Radius,
                         LastSource = DetectionSources.FromSaved(b.Source), Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay,
-                        RifleQuality = b.RifleQuality, GunQuality = b.GunQuality
+                        RifleQuality = b.RifleQuality, GunQuality = b.GunQuality, BaseRadius = b.BaseRadius
                     });
                 }
             if (dto.Appointments != null)

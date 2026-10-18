@@ -460,6 +460,7 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Beliefs.Count; i++)
             {
                 var b = s.Beliefs[i];
+                if (b.LastSource == DetectionSource.Mark) continue;   // a mark never answers the probe's question (foresight F4)
                 if (b.Confidence01 >= ProbeStaleConfidence && Distance(b.X, b.Z, m.TargetX, m.TargetZ) <= radius) return false;
             }
             return true;
