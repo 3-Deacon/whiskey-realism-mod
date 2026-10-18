@@ -102,40 +102,48 @@ namespace WhiskeyRealism.Tactical.Battle
         }
 
         /// <summary>
-        /// One pass over a regiment: <see cref="ApproachVerdict.Mark"/> when every arm holds, <see cref="ApproachVerdict.Release"/> when a hard arm fails (the
-        /// regiment is not Whiskey's to hold in line, or its group is marching on purpose or withdrawing: the mark ends at once), and
-        /// <see cref="ApproachVerdict.Hold"/> when only a soft arm fails (the group's recorded task is not an advance or hold this tick, the enemy is not
-        /// perceived within the range this tick): the mark it already has is left to run out its latch. The soft arms flicker with the doctrine's
-        /// per-second task swaps (FixEnemy, Screen, Probe, FormUp) and the perceived enemy, and a mark that fell with each flicker let vanilla column the
-        /// regiment a second after its deploy (smoke 2026-10-18, the 1st Division at 05:06:19, 9 of 38 approach deploys).
+        /// The regiment is marked this pass: every arm holds. Each arm reads a stable input. The task is the one the operations ledger committed to the
+        /// group (<see cref="GroupPosture.LedgerTask"/>), which changes when the ledger changes its mind and not when a per-tick rewrite's input flickers
+        /// (the 2026-10-18 smoke's FixEnemy, Screen, FixEnemy, Screen, Probe in seven seconds was the reconnaissance rule reading one tick of sight). The enemy is
+        /// the closest one the side perceives, seen or remembered (<see cref="ClosestPerceivedEnemy"/>): perception keeps an enemy that dropped out of sight.
+        /// The ownership, route and withdrawal arms are state, not signals. The table is rebuilt every pass, so a regiment that fails any arm is unmarked at once.
         /// </summary>
-        public static ApproachVerdict Judge(in ApproachLineInput i)
+        public static bool Marks(in ApproachLineInput i)
         {
             const UnitFlags needed = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry;
             const UnitFlags refused = UnitFlags.IsGroup | UnitFlags.PlayerOwned | UnitFlags.Feud | UnitFlags.PermanentlyDetached | UnitFlags.Routed |
                 UnitFlags.MarkedForRout | UnitFlags.OnRetreat | UnitFlags.Mounted;
-            if ((i.Flags & needed) != needed || (i.Flags & refused) != 0) return ApproachVerdict.Release;
-            if (i.GroupRouteColumn || i.GroupFormation == RoadRoutePlanner.ColumnGroupFormation || i.Withdrawing) return ApproachVerdict.Release;
-            if (!i.GroupRecorded || !TaskKeepsLine(i.GroupTask)) return ApproachVerdict.Hold;
-            return i.HasEnemy && i.EnemyDistance <= AssaultRangeMeters ? ApproachVerdict.Mark : ApproachVerdict.Hold;
-        }
-
-        /// <summary>The regiment is marked this pass (every arm holds).</summary>
-        public static bool Marks(in ApproachLineInput i)
-        {
-            return Judge(in i) == ApproachVerdict.Mark;
+            if ((i.Flags & needed) != needed || (i.Flags & refused) != 0) return false;
+            if (!i.GroupRecorded || !TaskKeepsLine(i.GroupTask)) return false;
+            if (i.GroupRouteColumn || i.GroupFormation == RoadRoutePlanner.ColumnGroupFormation || i.Withdrawing) return false;
+            return i.HasEnemy && i.EnemyDistance <= AssaultRangeMeters;
         }
 
         /// <summary>
-        /// The deploy pass looks at a unit only if it is a live, active infantry regiment that is not a group, not the player's, not detached, not feuding
-        /// and not mounted. Any other unit is released from the table before the pass moves on: Judge never sees it, and a mark left on a regiment that was
-        /// detached or taken over would outlast it by the latch (the Prefix's write guard does not test detachment).
+        /// The closest enemy the side perceives to the unit at <paramref name="ownIndex"/>, seen now or remembered (the snapshot's observations are
+        /// BattlePerception's fog-honest memory: an enemy that dropped out of sight stays a Remembered observation at the place it was seen). Index of the
+        /// observation, or -1. <see cref="BattleSnapshot.ClosestVisibleEnemy"/> reads sight alone and loses the enemy for a tick behind a rise.
         /// </summary>
-        public static bool PassEligible(UnitFlags f)
+        public static int ClosestPerceivedEnemy(BattleSnapshot s, int ownIndex, out float distance)
         {
-            const UnitFlags barred = UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted;
-            return (f & UnitFlags.IsInfantry) != 0 && (f & UnitFlags.IsGroup) == 0 &&
-                (f & (UnitFlags.Alive | UnitFlags.Active)) == (UnitFlags.Alive | UnitFlags.Active) && (f & barred) == 0;
+            distance = 0f;
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return -1;
+            float x = s.Own[ownIndex].X, z = s.Own[ownIndex].Z;
+            int best = -1;
+            float bestSq = float.MaxValue;
+            EnemyObservation[] observations = s.Observations;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                float dx = observations[k].X - x, dz = observations[k].Z - z;
+                float sq = dx * dx + dz * dz;
+                if (sq < bestSq)
+                {
+                    bestSq = sq;
+                    best = k;
+                }
+            }
+            if (best >= 0) distance = (float)System.Math.Sqrt(bestSq);
+            return best;
         }
 
         /// <summary>The Prefix's cheap tests, run first for every regiment on every regular cycle: its flag is on, and the regiment is infantry that is not already in column.</summary>
@@ -151,77 +159,50 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
-    internal enum ApproachVerdict
-    {
-        /// <summary>A hard arm fails: end the regiment's mark now.</summary>
-        Release = 0,
-        /// <summary>Only a soft arm fails this pass: leave its mark, if any, to run out its latch.</summary>
-        Hold,
-        /// <summary>Every arm holds: mark it, or refresh its mark.</summary>
-        Mark,
-    }
-
-    // The marked regiments, per alliance, by GameObject instance id (the snapshot's key). Filled by the facing-pulse producer on every pass and read by the
-    // patch; main thread only, allocation-free after warm-up. A mark is the doctrine time of the last pass that marked the regiment and is read as set for
-    // LatchHours after it: the latch carries a regiment through the doctrine's per-second task swaps and an enemy that drops out of perception for a pass,
-    // and is also the expiry when the arbiter stops or a side stands down. A hard disqualifier releases the mark at once (Release), and a stamp from the
-    // future (a reload) is none.
+    // The marked regiments, per alliance, by GameObject instance id (the snapshot's key). Rebuilt by the facing-pulse producer on every pass (a regiment
+    // that fails any arm, or that the pass does not look at, is not in it) and read by the patch; main thread only, allocation-free after warm-up. It carries
+    // no hold: a mark is only what the last pass found. FreshHours is not a hold but a guard on a pass that never came: a table whose last pass is older than
+    // that was not maintained (the producer stopped, a side stood down) and marks nothing; a stamp from the future (a reload) is none.
     internal sealed class ApproachLineTable
     {
-        /// <summary>How long a mark outlives the pass that set it: 30 real seconds at 1x on the doctrine clock (600 s real per battle hour).</summary>
-        public const double LatchHours = 0.05;
+        public const double FreshHours = 0.1;
 
         internal static readonly ApproachLineTable Shared = new ApproachLineTable();
 
-        private readonly Dictionary<int, double>[] _last = { new Dictionary<int, double>(), new Dictionary<int, double>() };
-        private readonly double[] _pass = { double.NegativeInfinity, double.NegativeInfinity };
-        private readonly List<int> _expired = new List<int>();
+        private readonly HashSet<int>[] _marked = { new HashSet<int>(), new HashSet<int>() };
+        private readonly double[] _stamp = { double.NegativeInfinity, double.NegativeInfinity };
 
         static ApproachLineTable()
         {
             WhiskeyRealism.Util.BattleScope.Register("approach-line-table", Shared.Clear);
         }
 
-        /// <summary>Starts a pass at <paramref name="nowHours"/>: marks set by this pass are stamped with it; marks that ran out their latch are dropped.</summary>
         public void Begin(int alliance, double nowHours)
         {
-            if (alliance < 0 || alliance >= _last.Length) return;
-            _pass[alliance] = nowHours;
-            _expired.Clear();
-            foreach (KeyValuePair<int, double> entry in _last[alliance])
-            {
-                double age = nowHours - entry.Value;
-                if (age < 0.0 || age >= LatchHours) _expired.Add(entry.Key);
-            }
-            for (int k = 0; k < _expired.Count; k++) _last[alliance].Remove(_expired[k]);
+            if (alliance < 0 || alliance >= _marked.Length) return;
+            _marked[alliance].Clear();
+            _stamp[alliance] = nowHours;
         }
 
         public void Mark(int alliance, int instanceId)
         {
-            if (alliance < 0 || alliance >= _last.Length) return;
-            _last[alliance][instanceId] = _pass[alliance];
-        }
-
-        public void Release(int alliance, int instanceId)
-        {
-            if (alliance < 0 || alliance >= _last.Length) return;
-            _last[alliance].Remove(instanceId);
+            if (alliance < 0 || alliance >= _marked.Length) return;
+            _marked[alliance].Add(instanceId);
         }
 
         public bool Contains(int alliance, int instanceId, double nowHours)
         {
-            if (alliance < 0 || alliance >= _last.Length) return false;
-            if (!_last[alliance].TryGetValue(instanceId, out double stamp)) return false;
-            double age = nowHours - stamp;
-            return age >= 0.0 && age < LatchHours;
+            if (alliance < 0 || alliance >= _marked.Length) return false;
+            double age = nowHours - _stamp[alliance];
+            return age >= 0.0 && age < FreshHours && _marked[alliance].Contains(instanceId);
         }
 
         public void Clear()
         {
-            for (int a = 0; a < _last.Length; a++)
+            for (int a = 0; a < _marked.Length; a++)
             {
-                _last[a].Clear();
-                _pass[a] = double.NegativeInfinity;
+                _marked[a].Clear();
+                _stamp[a] = double.NegativeInfinity;
             }
         }
     }

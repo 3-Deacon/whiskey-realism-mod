@@ -25,7 +25,7 @@ internal static class UnitChurnTests
             ("unit-churn APPROACH-MARCH an approach deploy keeps the regiment's path, so the advance goes on in line; a deploy under fire stops it", ApproachDeployKeepsMarching),
             ("unit-churn APPROACH-FACING an in-march deploy faces the way the regiment walks unless the threat is within 60 degrees of it, so a line never walks backwards", ApproachDeployFacesTheWay),
             ("unit-churn APPROACH-NEEDS-MARK an in-march deploy is submitted only for a marked regiment; an unmarked one is left in vanilla's column, not stopped", ApproachDeployNeedsTheMark),
-            ("unit-churn APPROACH-PASS-RELEASE a unit the deploy pass does not look at loses its mark at once, not after the latch", ApproachPassReleasesWhatItSkips),
+            ("unit-churn APPROACH-PASS the pass rebuilds the table: a unit it does not look at, or that fails an arm, is unmarked at once", ApproachPassMarksOnlyWhatItSees),
             ("unit-churn APPROACH-WALK-MIN a path end within a block's length is no walking direction", ApproachWalkHeadingMinimum),
             ("unit-churn APPROACH-WALK the group a regiment follows is found up to four ancestors away, and a withdrawal in that reach holds it back", ApproachWalkReachesTheGroup),
             ("unit-churn COLUMN-DEPLOY-PLAN the deploy intent is planned for a column regiment and is a duplicate for one already in line", ColumnDeployPlan),
@@ -33,9 +33,9 @@ internal static class UnitChurnTests
             ("unit-churn APPROACH-SKIP every arm of the re-column skip: the flag, Commander Mode Active, the write guard, infantry, a regiment not already in column, a marked regiment", ApproachSkipArms),
             ("unit-churn APPROACH-MARK a regiment is marked only for an AI line advance or hold with the enemy inside the assault range; never a road march, a withdrawal, a player or a feud unit", ApproachMarkArms),
             ("unit-churn APPROACH-ROAD a road march or column wait far from the enemy is never skipped, and one near it is not marked either", ApproachRoadMarchNeverSkipped),
-            ("unit-churn APPROACH-TABLE the marks are per alliance, rebuilt every pass and expire", ApproachTableMarksExpire),
-            ("unit-churn APPROACH-VERDICT hard arms release a mark at once, soft arms leave it to its latch, every arm holds to mark", ApproachVerdictArms),
-            ("unit-churn APPROACH-FLICKER a mark survives the doctrine's per-second task swaps and an enemy dropping out of perception, and ends at once on a hard change", ApproachMarkSurvivesTaskFlicker),
+            ("unit-churn APPROACH-TABLE the marks are per alliance, rebuilt every pass, and a table the producer stopped maintaining marks nothing", ApproachTableMarksExpire),
+            ("unit-churn APPROACH-STABLE the mark reads the ledger's committed task and the perceived enemy: a rewrite's task flicker or one tick of lost sight does not drop it, a real change does", ApproachMarkHoldsStill),
+            ("unit-churn APPROACH-PERCEIVED the closest enemy is the closest one the side perceives, seen or remembered", ApproachPerceivedEnemy),
             ("unit-churn APPROACH-DEPLOY a column regiment marked for the approach deploys into line before the enemy is in rifle range", ApproachDeploysColumn),
             ("unit-churn APPROACH-WIRING the Prefix passes the live flag, mode and write guard to ApproachLine.Skips as whole statements, never throws and allocates nothing; the pulse producer builds the marks behind the approach flag alone", ApproachWiring),
         });
@@ -365,31 +365,30 @@ internal static class UnitChurnTests
                     AssertTrue((ColumnDeployment.Intent(77, heading, r).Flags & IntentFlags.DeployInMarch) == 0, r + " " + heading + ": an unmarked deploy is never in march");
     }
 
-    private static void ApproachPassReleasesWhatItSkips()
+    // The table is rebuilt every pass (Begin clears the alliance), so a regiment is unmarked at the next pass if it fails any arm or the pass does not look at
+    // it (detached, taken over by the player, feuding, mounted, dead, inactive). Nothing outlasts the pass, so there is no release to forget.
+    private static void ApproachPassMarksOnlyWhatItSees()
     {
         UnitFlags live = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry;
-        AssertTrue(ApproachLine.PassEligible(live), "a live, active infantry regiment");
-        foreach (UnitFlags bad in new[] { UnitFlags.PlayerOwned, UnitFlags.PermanentlyDetached, UnitFlags.Feud, UnitFlags.Mounted, UnitFlags.IsGroup })
-            AssertFalse(ApproachLine.PassEligible(live | bad), "not looked at: " + bad);
-        AssertFalse(ApproachLine.PassEligible(UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsCavalry), "cavalry");
-        AssertFalse(ApproachLine.PassEligible(UnitFlags.Alive | UnitFlags.IsInfantry), "inactive");
-        AssertFalse(ApproachLine.PassEligible(UnitFlags.Active | UnitFlags.IsInfantry), "dead");
-
-        // The pass, as the producer runs it: an ineligible unit is released before the loop moves on; Judge never sees it.
         var table = new ApproachLineTable();
         double now = 50.0;
-        table.Begin(0, now);
-        table.Mark(0, 77);
-        foreach (UnitFlags bad in new[] { UnitFlags.PermanentlyDetached, UnitFlags.PlayerOwned, UnitFlags.Feud, UnitFlags.Mounted })
+        foreach (UnitFlags bad in new[] { UnitFlags.PermanentlyDetached, UnitFlags.PlayerOwned, UnitFlags.Feud, UnitFlags.Mounted, UnitFlags.IsGroup, UnitFlags.Routed, UnitFlags.OnRetreat })
         {
             now += 0.001;
             table.Begin(0, now);
-            table.Mark(0, 77);
+            if (ApproachLine.Marks(Mark())) table.Mark(0, 77);
             AssertTrue(table.Contains(0, 77, now), "marked");
             now += 0.001;
             table.Begin(0, now);
-            if (!ApproachLine.PassEligible(live | bad)) table.Release(0, 77);
-            AssertFalse(table.Contains(0, 77, now), bad + " loses the mark at once, not after the latch");
+            if (ApproachLine.Marks(Mark(flags: live | bad))) table.Mark(0, 77);
+            AssertFalse(table.Contains(0, 77, now), bad + " is unmarked at the next pass, with no hold");
+        }
+        foreach (UnitFlags missing in new[] { UnitFlags.Alive, UnitFlags.Active, UnitFlags.IsInfantry })
+        {
+            now += 0.001;
+            table.Begin(0, now);
+            if (ApproachLine.Marks(Mark(flags: live & ~missing))) table.Mark(0, 77);
+            AssertFalse(table.Contains(0, 77, now), "a unit without " + missing + " is not marked");
         }
     }
 
@@ -686,117 +685,109 @@ internal static class UnitChurnTests
 
     private static void ApproachTableMarksExpire()
     {
-        const double latch = ApproachLineTable.LatchHours;
         var table = new ApproachLineTable();
         table.Begin(0, 10.0);
         table.Mark(0, 77);
         AssertTrue(table.Contains(0, 77, 10.0), "marked");
         AssertFalse(table.Contains(1, 77, 10.0), "the other alliance has no mark");
         AssertFalse(table.Contains(0, 78, 10.0), "nor another regiment");
-        AssertTrue(table.Contains(0, 77, 10.0 + latch * 0.9), "set inside the latch");
-        AssertFalse(table.Contains(0, 77, 10.0 + latch + 0.001), "expired past the latch (the arbiter stopped)");
+        AssertTrue(table.Contains(0, 77, 10.0 + ApproachLineTable.FreshHours * 0.9), "fresh inside the window");
+        AssertFalse(table.Contains(0, 77, 10.0 + ApproachLineTable.FreshHours + 0.001), "a table whose last pass is older than that was not maintained (the producer stopped)");
         AssertFalse(table.Contains(0, 77, 9.0), "a stamp from the future (a reload) is no mark");
-
-        // A later pass that does not mark the regiment leaves its mark to run out; it does not clear the table.
-        table.Begin(0, 10.0 + latch * 0.5);
-        AssertTrue(table.Contains(0, 77, 10.0 + latch * 0.5), "a pass that only holds keeps the mark");
-        AssertFalse(table.Contains(0, 77, 10.0 + latch + 0.001), "and it still runs out from the pass that set it");
-        table.Begin(0, 10.0 + latch * 0.9);
+        table.Begin(0, 10.1);
+        AssertFalse(table.Contains(0, 77, 10.1), "every pass rebuilds the alliance's table: a regiment the pass did not mark is not in it");
         table.Mark(0, 77);
-        AssertTrue(table.Contains(0, 77, 10.0 + latch * 1.5), "a pass that marks again refreshes the latch");
-        table.Begin(0, 10.0 + latch * 3.0);
-        AssertFalse(table.Contains(0, 77, 10.0 + latch * 3.0), "a pass past the latch drops it");
-
-        table.Begin(0, 20.0);
-        table.Mark(0, 5);
-        table.Mark(0, 6);
-        table.Release(0, 5);
-        AssertFalse(table.Contains(0, 5, 20.0), "a release ends the mark at once");
-        AssertTrue(table.Contains(0, 6, 20.0), "of that regiment only");
-        table.Begin(0, 19.0);
-        AssertFalse(table.Contains(0, 6, 19.0), "a pass stamped before the mark (a reload) drops it");
-
-        table.Begin(0, 30.0);
+        table.Begin(1, 10.1);
+        table.Mark(1, 5);
+        AssertTrue(table.Contains(0, 77, 10.1) && table.Contains(1, 5, 10.1), "each alliance keeps its own");
         table.Mark(5, 1);
-        AssertFalse(table.Contains(5, 1, 30.0), "an alliance out of range is never marked");
-        table.Begin(-1, 30.0);
-        table.Release(-1, 1);
-        AssertFalse(table.Contains(-1, 1, 30.0), "nor read");
-        table.Mark(0, 9);
+        AssertFalse(table.Contains(5, 1, 10.1), "an alliance out of range is never marked");
+        table.Begin(-1, 10.1);
+        AssertFalse(table.Contains(-1, 1, 10.1), "nor read");
         table.Clear();
-        AssertFalse(table.Contains(0, 9, 30.0), "Clear (battle end)");
+        AssertFalse(table.Contains(0, 77, 10.1), "Clear (battle end)");
     }
 
-    // One pass of the producer over one regiment, as SubmitColumnDeployments does it: mark, release, or leave the latch to run.
-    private static bool PassOver(ApproachLineTable table, double now, in ApproachLineInput input, int id = 77)
-    {
-        table.Begin(0, now);
-        ApproachVerdict verdict = ApproachLine.Judge(in input);
-        if (verdict == ApproachVerdict.Mark) table.Mark(0, id);
-        else if (verdict == ApproachVerdict.Release) table.Release(0, id);
-        return table.Contains(0, id, now);
-    }
-
-    private static void ApproachVerdictArms()
-    {
-        AssertEqual(ApproachVerdict.Mark, ApproachLine.Judge(Mark()), "every arm holds");
-        // Hard arms: the mark ends at once.
-        UnitFlags infantry = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry;
-        foreach (UnitFlags bad in new[] { UnitFlags.PlayerOwned, UnitFlags.Feud, UnitFlags.PermanentlyDetached, UnitFlags.Routed, UnitFlags.MarkedForRout, UnitFlags.OnRetreat, UnitFlags.Mounted, UnitFlags.IsGroup })
-            AssertEqual(ApproachVerdict.Release, ApproachLine.Judge(Mark(flags: infantry | bad)), "released: " + bad);
-        AssertEqual(ApproachVerdict.Release, ApproachLine.Judge(Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsCavalry)), "cavalry is not infantry");
-        AssertEqual(ApproachVerdict.Release, ApproachLine.Judge(Mark(routeColumn: true)), "a road route or column wait");
-        AssertEqual(ApproachVerdict.Release, ApproachLine.Judge(Mark(groupFormation: RoadRoutePlanner.ColumnGroupFormation)), "the route's column formation");
-        AssertEqual(ApproachVerdict.Release, ApproachLine.Judge(Mark(withdrawing: true)), "a withdrawing group");
-        // Soft arms: the mark it has runs out its latch.
-        foreach (CommandTaskType soft in new[] { CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.FormUp, CommandTaskType.AdvanceToAssembly })
-            AssertEqual(ApproachVerdict.Hold, ApproachLine.Judge(Mark(task: soft)), "held: the group's task this pass is " + soft);
-        AssertEqual(ApproachVerdict.Hold, ApproachLine.Judge(Mark(hasEnemy: false)), "held: no perceived enemy this pass");
-        AssertEqual(ApproachVerdict.Hold, ApproachLine.Judge(Mark(distance: ApproachLine.AssaultRangeMeters + 1f)), "held: a metre beyond the range");
-        AssertEqual(ApproachVerdict.Hold, ApproachLine.Judge(Mark(groupRecorded: false)), "held: no recorded group this pass");
-        AssertTrue(ApproachLine.Marks(Mark()) && !ApproachLine.Marks(Mark(task: CommandTaskType.Screen)), "Marks is the Mark verdict");
-    }
-
-    // The 2026-10-18 smoke, 4th Brigade: its recorded task went FixEnemy, Screen, FixEnemy, Screen, Probe inside seven seconds (a probe-screen local reaction
-    // and the recon probe rewrite), and the table, rebuilt each pass, let vanilla column the regiments a second after their approach deploy: 9 of 38.
-    private static void ApproachMarkSurvivesTaskFlicker()
+    // The 2026-10-18 smoke: the 4th Brigade's task row went FixEnemy, Screen, FixEnemy, Screen, Probe in seven seconds because the reconnaissance rule read one
+    // tick of sight, and the mark, rebuilt from that task and from sight alone, dropped with each flicker: vanilla columned the regiments a second after their
+    // approach deploy (9 of 38). No hold fixes that. The mark reads the ledger's committed task (GroupPosture.LedgerTask) and the perceived enemy (seen or
+    // remembered), which change when something really changes.
+    private static void ApproachMarkHoldsStill()
     {
         var table = new ApproachLineTable();
-        const double pass = 0.005;   // about half a real second at the smoke's 6x compression
         double now = 100.0;
-        AssertTrue(PassOver(table, now, Mark(task: CommandTaskType.FixEnemy)), "marked on FixEnemy");
-        CommandTaskType[] flicker = { CommandTaskType.Screen, CommandTaskType.FixEnemy, CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.FormUp, CommandTaskType.FixEnemy };
-        foreach (CommandTaskType task in flicker)
+        // The posture row as the pipeline records it: LedgerTask the ledger's, State.Task what the per-tick rewrites made of it.
+        GroupPosture Row(CommandTaskType ledger, CommandTaskType rewritten)
         {
-            now += pass;
-            AssertTrue(PassOver(table, now, Mark(task: task)), "still marked through " + task + ": vanilla's re-column stays skipped");
+            GroupPosture row = LeafPosture.Record(DirectChildRole.Fix, ledger, 927726, false, false, BattleStance.Attacker);
+            row.State = row.State.WithRoleAndTask(row.State.Role, rewritten);
+            return row;
         }
-        now += pass;
-        AssertTrue(PassOver(table, now, Mark(hasEnemy: false)), "and through a pass that does not perceive the enemy");
-
-        // A real change of intent ends it once the latch has run out.
-        double last = now;
-        for (int i = 0; i < 20; i++)
+        bool pass(GroupPosture row, bool hasEnemy = true, float distance = 300f, bool withdrawing = false, bool routeColumn = false)
         {
-            now += pass;
-            PassOver(table, now, Mark(task: CommandTaskType.FormUp));
+            now += 0.005;
+            table.Begin(0, now);
+            if (ApproachLine.Marks(Mark(task: row.LedgerTask, hasEnemy: hasEnemy, distance: distance, withdrawing: withdrawing, routeColumn: routeColumn))) table.Mark(0, 77);
+            return table.Contains(0, 77, now);
         }
-        AssertTrue(now - last > ApproachLineTable.LatchHours, "(the march lasted past the latch)");
-        AssertFalse(table.Contains(0, 77, now), "a group that has marched on for longer than the latch is no longer held in line");
 
-        // A hard change ends it at once, inside the latch.
-        now += pass;
-        AssertTrue(PassOver(table, now, Mark(task: CommandTaskType.FixEnemy)), "marked again");
-        now += pass;
-        AssertFalse(PassOver(table, now, Mark(withdrawing: true)), "withdrawing releases it at once");
-        now += pass;
-        AssertTrue(PassOver(table, now, Mark(task: CommandTaskType.FixEnemy)), "marked again");
-        now += pass;
-        AssertFalse(PassOver(table, now, Mark(routeColumn: true)), "a road route releases it at once");
-        now += pass;
-        AssertTrue(PassOver(table, now, Mark(task: CommandTaskType.FixEnemy)), "marked again");
-        now += pass;
-        AssertFalse(PassOver(table, now, Mark(flags: UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry | UnitFlags.Routed)), "a routed regiment loses it at once");
+        AssertTrue(pass(Row(CommandTaskType.FixEnemy, CommandTaskType.FixEnemy)), "marked on the committed FixEnemy");
+        foreach (CommandTaskType rewritten in new[] { CommandTaskType.Screen, CommandTaskType.FixEnemy, CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.FormUp })
+            AssertTrue(pass(Row(CommandTaskType.FixEnemy, rewritten)), "the rewritten task " + rewritten + " is not the ledger's: the mark stands");
+        // Sight: the enemy the side perceives does not vanish with a tick of lost sight.
+        AssertTrue(pass(Row(CommandTaskType.FixEnemy, CommandTaskType.FixEnemy), hasEnemy: true, distance: 300f), "perceived (remembered) at 300 m while out of sight");
+
+        // A real change ends it at the next pass.
+        AssertFalse(pass(Row(CommandTaskType.FormUp, CommandTaskType.FormUp)), "the ledger committed the group to FormUp");
+        AssertTrue(pass(Row(CommandTaskType.AttackObjective, CommandTaskType.AttackObjective)), "and an attack marks it again");
+        AssertFalse(pass(Row(CommandTaskType.AttackObjective, CommandTaskType.AttackObjective), hasEnemy: false), "no enemy perceived at all");
+        AssertFalse(pass(Row(CommandTaskType.AttackObjective, CommandTaskType.AttackObjective), distance: ApproachLine.AssaultRangeMeters + 1f), "the perceived enemy beyond the assault range");
+        AssertTrue(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective)), "a hold marks it");
+        AssertFalse(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective), withdrawing: true), "withdrawing");
+        AssertTrue(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective)), "marked again");
+        AssertFalse(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective), routeColumn: true), "a road route or a column wait");
+        AssertEqual(CommandTaskType.FixEnemy, Row(CommandTaskType.FixEnemy, CommandTaskType.Probe).LedgerTask, "(the row keeps the ledger's task apart from the rewritten one)");
+        AssertEqual(CommandTaskType.Probe, Row(CommandTaskType.FixEnemy, CommandTaskType.Probe).State.Task, "(and the rewritten one as it was)");
+    }
+
+    private static BattleSnapshot PerceivedSnapshot(ObservationState state, float enemyX, float enemyZ, bool withEnemy = true)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        s.AddOwn(new UnitRecord { InstanceId = 20, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+        if (withEnemy)
+            s.AddObservation(new EnemyObservation { InstanceId = 900, UnitTyp = TacticalUnitType.Infantry, X = enemyX, Z = enemyZ, Strength = 400, State = state, Confidence01 = 0.9f, LastSeenHours = 0.9 });
+        s.IndexCommandTree(null);
+        return s;
+    }
+
+    private static void ApproachPerceivedEnemy()
+    {
+        BattleSnapshot visible = PerceivedSnapshot(ObservationState.Visible, 300f, 400f);
+        int k = ApproachLine.ClosestPerceivedEnemy(visible, 0, out float d);
+        AssertTrue(k >= 0, "a visible enemy");
+        AssertNear(500f, d, 0.01f, "at 500 m (3-4-5)");
+        BattleSnapshot remembered = PerceivedSnapshot(ObservationState.Remembered, 300f, 400f);
+        int r = ApproachLine.ClosestPerceivedEnemy(remembered, 0, out float dr);
+        AssertTrue(r >= 0, "the same enemy after it dropped out of sight is still perceived");
+        AssertNear(500f, dr, 0.01f, "at the place it was seen");
+        AssertEqual(-1, remembered.ClosestVisibleEnemy(0, out _), "while sight alone has lost it: the input the smoke's mark read");
+        AssertTrue(ApproachLine.Marks(Mark(distance: dr)) , "so the mark stands through the tick");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(PerceivedSnapshot(ObservationState.Visible, 0f, 0f, withEnemy: false), 0, out _), "no observation, no enemy");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(visible, 5, out _), "an index outside the roster");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(null, 0, out _), "no snapshot");
+
+        var two = new BattleSnapshot();
+        two.BeginBuild(1, 0, 0, 1, 1.0);
+        two.SetSliceCount(20);
+        two.AddOwn(new UnitRecord { InstanceId = 20, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+        two.AddObservation(new EnemyObservation { InstanceId = 901, UnitTyp = TacticalUnitType.Infantry, X = 900f, Z = 0f, State = ObservationState.Visible, Confidence01 = 1f });
+        two.AddObservation(new EnemyObservation { InstanceId = 902, UnitTyp = TacticalUnitType.Infantry, X = 0f, Z = -200f, State = ObservationState.Remembered, Confidence01 = 0.5f });
+        two.IndexCommandTree(null);
+        int near = ApproachLine.ClosestPerceivedEnemy(two, 0, out float dn);
+        AssertEqual(902, two.Observations[near].InstanceId, "the nearer one wins, remembered or not");
+        AssertNear(200f, dn, 0.01f, "at 200 m");
     }
 
     private static void ApproachDeploysColumn()
@@ -865,29 +856,35 @@ internal static class UnitChurnTests
         string pass = Code(FlankResponseTests.Between(producerFile, "private static void SubmitColumnDeployments(", "// ApproachLine.Walk over the posture table and the executor's outcomes"));
         PinStatement(pass, "if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);", "the pass is stamped while the flag is on");
         AssertFalse(pass.Contains("if (!deployOn && !approachOn) continue;"), "no dead check: the caller runs the pass only for one of them");
-        PinStatement(pass, "if (!ApproachLine.PassEligible(f)) { if (approachOn) ApproachLineTable.Shared.Release(s.Alliance, rec.InstanceId); continue; }", "a unit the pass skips is released first");
+        PinStatement(pass, "if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;", "a unit the pass does not look at: not infantry, or a group");
+        PinStatement(pass, "if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;", "dead or inactive");
+        PinStatement(pass, "if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;", "the player's, detached, feuding or mounted: never marked, and the table was cleared at the top of the pass");
         PinStatement(pass, "if (!ColumnDeployment.MayDeploy(reason, heading, approachOn && ApproachLineTable.Shared.Contains(s.Alliance, rec.InstanceId, s.DoctrineHours))) continue;", "an in-march deploy only for a marked regiment");
         PinStatement(pass, "var walk = new GroupWalkHost(t.Groups, own, executor, s.DoctrineHours);", "the walk over the posture table and the executor's outcomes");
         PinStatement(pass, "ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);", "the one ancestor walk");
         PinStatement(pass, "bool withdrawing = (f & UnitFlags.OnRetreat) != 0 || walkWithdrawing;", "a retreating regiment is withdrawing, as is one the walk found withdrawing");
         PinStatement(pass, "bool recorded = group >= 0;", "a group was found");
-        PinStatement(pass, "groupTask = t.Groups[group].State.Task;", "the group's recorded task");
         PinStatement(pass, "groupFormation = own[group].Formation;", "the group's formation (4 is the route's column)");
         PinStatement(pass, "routeColumn = t.Groups[group].RouteColumn;", "the group's route column is the pipeline's record");
         string walkHost = Code(FlankResponseTests.Between(producerFile, "internal readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
         PinStatement(walkHost, "public bool HasPosture(int index) => _groups[index].Has;", "the posture row exists");
-        PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].State.Task;", "its task");
+        PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].LedgerTask;", "its committed task");
         PinStatement(walkHost, "public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);", "the executor's last move for that unit");
         string approachFile = Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs"));
         PinStatement(approachFile, "public const int MaxGroupHops = 4;", "the reach of the walk");
         PinStatement(approachFile, "for (int hops = 0; a >= 0 && a < ownCount && hops < MaxGroupHops; hops++, a = own[a].ParentIndex)", "the one hop cap");
-        PinStatement(pass, "if (approachOn) { float enemyDistance = 0f;", "judged only behind the flag");
-        PinStatement(pass, "int enemy = recorded ? s.ClosestVisibleEnemy(group, out enemyDistance) : -1;", "the group's closest perceived enemy, when there is a group");
-        PinStatement(pass, "ApproachVerdict verdict = ApproachLine.Judge(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, recorded));", "the pure verdict, over the live facts");
-        PinStatement(pass, "if (verdict == ApproachVerdict.Mark) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);", "a pass that marks refreshes the latch");
-        PinStatement(pass, "else if (verdict == ApproachVerdict.Release) ApproachLineTable.Shared.Release(s.Alliance, rec.InstanceId);", "a hard disqualifier releases it at once");
-        PinStatement(pass, "approaching = verdict == ApproachVerdict.Mark;", "only a fresh mark deploys a column regiment");
+        PinStatement(pass, "if (approachOn) { float enemyDistance = 0f;", "marked only behind the flag");
+        PinStatement(pass, "int enemy = recorded ? ApproachLine.ClosestPerceivedEnemy(s, group, out enemyDistance) : -1;", "the enemy the side perceives, seen or remembered: not sight alone");
+        PinStatement(pass, "approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, recorded));", "the pure marking rule, over the live facts");
+        PinStatement(pass, "if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);", "and the table filled from it");
+        PinStatement(pass, "groupTask = t.Groups[group].LedgerTask;", "the task the ledger committed, not the pipeline's per-tick rewrite");
+        AssertFalse(pass.Contains("State.Task"), "the pass never reads the rewritten task");
+        AssertFalse(pass.Contains("ClosestVisibleEnemy(group"), "nor sight alone for the group");
         PinStatement(producer, "if (recordTick) t.Groups[i].RouteColumn = roadRoute.Use || columnWait;", "recorded where the pipeline decides the route");
+        FlankResponseTests.AssertPinned(producer, "state = state.WithRoleAndTask(order.Role, order.Task);\n            CommandTaskType ledgerTask = state.Task;", "the ledger's task is taken before every rewrite");
+        PinStatement(producer, "g.LedgerTask = ledgerTask;", "and recorded on the row");
+        PinStatement(producer, "followed.LedgerTask = ledgerTask;", "also for a follower");
+        PinStatement(producer, "contestedGroup.LedgerTask = ledgerTask;", "and for a contested group");
         PinStatement(producer, "g.RouteColumn = false;", "cleared with the rest of the row each tick");
         string posture = FlankResponseTests.SourceText("Tactical", "Battle", "PostureRecords.cs");
         FlankResponseTests.AssertPinned(posture, "public bool RouteColumn;", "a field of the posture row");

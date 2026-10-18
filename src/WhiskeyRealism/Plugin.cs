@@ -1128,9 +1128,9 @@ namespace WhiskeyRealism
                 "(Commander Mode Active, never a player's unit, never the W&L feud instance) in a group whose current intent is a line advance or hold (not a " +
                 "road route or a march column) and whose closest perceived enemy is inside 500 m, the game's re-column step is skipped, so the regiment keeps " +
                 "its line and advances in line instead of falling back into march column. Independent of Enable Column Deployment and of the contact " +
-                "facing pulse: only this switch, Commander Mode Active and the battle core's posture record decide which regiments are marked. A mark " +
-                "is held for 30 seconds at 1x after the last pass that set it, so a group whose task swaps every second does not lose it; a withdrawal, a road " +
-                "route or a lost ownership ends it at once. With " +
+                "facing pulse: only this switch, Commander Mode Active and the battle core's posture record decide which regiments are marked. The " +
+                "mark reads the task the operations ledger committed to the group and the closest enemy the side perceives (seen or remembered), which change " +
+                "only when something really changes, and is rebuilt every pass; a withdrawal, a road route or a lost ownership unmarks at once. With " +
                 "Enable Column Deployment on, a column regiment inside 500 m also deploys to line first, where it stands, and keeps marching. Every other regiment runs the game's method " +
                 "unchanged. Disable for rollback: vanilla's formation change runs for every regiment.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(

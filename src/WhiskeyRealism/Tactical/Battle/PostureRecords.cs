@@ -11,6 +11,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     {
         public bool Has;
         public CommandNodeOperationalState State;
+        // The task the operations ledger committed to the group, before the pipeline's per-tick rewrites (probe nomination, reconnaissance rule, cavalry
+        // follow, local flank emergency, opportunity override, stance guard). State.Task is the rewritten one. The approach mark and the withdrawal test read
+        // this one: it changes when the ledger changes its mind, not when a rewrite's input flickers.
+        public CommandTaskType LedgerTask;
         public bool CloseEngaged;
         public bool FlankRisk;
         public bool Submitted;
@@ -53,6 +57,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             {
                 Has = true,
                 State = new CommandNodeOperationalState(NodeId(groupId), CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role, stance), task, CommandTaskState.Committed),
+                LedgerTask = task,
                 CloseEngaged = closeEngaged,
                 FlankRisk = flankRisk,
             };
