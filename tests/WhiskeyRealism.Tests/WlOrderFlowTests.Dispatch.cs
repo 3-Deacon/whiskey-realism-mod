@@ -218,7 +218,8 @@ internal static partial class WlOrderFlowTests
         string pursuit = BodyOf(code, "private static bool TryPursuit(");
         AssertTrue(pursuit.Contains("!WlMoveQueue.IsMoving(unit)") && pursuit.Contains("X = position.x, Z = position.z") && pursuit.Contains("WlMoveCarrier.NoQueueEntry"),
             "the called unit must hold a path now; its target is the order's position, not the waypoint read at capture; no queue entry is waited for");
-        AssertFalse(pursuit.Contains("lastsetwaypointposition"), "the waypoint read at capture can be the previous move's (BlockedMovingOrder sets it two frames later, 3382)");
+        AssertFalse(pursuit.Substring(pursuit.IndexOf("pursuit = new WlMoveCarrier", StringComparison.Ordinal)).Contains("last"),
+            "the carrier's target never comes from the waypoint read at capture (it can be the previous move's: BlockedMovingOrder sets it two frames later, 3382); it is read for the type-12 shape test only");
         AssertTrue(pursuit.Contains("SlackMeters = WlMoveState.VanillaWaypointSlackMeters"), "with the callers' waypoint slack");
         AssertTrue(pursuit.Contains("unit.gameObject.GetInstanceID()"), "the carrier is the called unit itself");
     }
@@ -290,5 +291,45 @@ internal static partial class WlOrderFlowTests
     {
         string pursuit = BodyOf(Code(FlowRuntime), "private static bool TryPursuit(");
         AssertTrue(pursuit.Contains("(UnityEngine.Object)unit == (UnityEngine.Object)_command) return false;"), "an order to the player's own command is not armed");
+    }
+
+    // Verify round 2, major: UpdateMovingTargets (6958-7002) moves the unit and orders 12 at its objective; CheckGlobalAIStrategy (6463) orders 12 at
+    // the closest objective or the parent's centre without a move.
+    private static void Type12IsArmedOnlyInTheShapeOfTheWaypointCaller()
+    {
+        float slack = WlMoveState.VanillaWaypointSlackMeters;
+        AssertTrue(WlMoveState.ArmsVanillaOrder(12, 70f), "6958-7002: the waypoint lies 70 m from the objective the 12 names");
+        AssertTrue(WlMoveState.ArmsVanillaOrder(12, 0f), "6463's else branch names the unit's own last waypoint: it passes while the unit pursues it");
+        AssertTrue(WlMoveState.ArmsVanillaOrder(12, slack), "the slack is inclusive");
+        AssertFalse(WlMoveState.ArmsVanillaOrder(12, slack + 1f), "6463 at an objective or the parent's centre, the marching parent's waypoint elsewhere: not armed");
+        AssertFalse(WlMoveState.ArmsVanillaOrder(12, 2500f), "a parent marching across the field when the macro turns defensive: its defend order is not discarded as abandoned");
+        AssertFalse(WlMoveState.ArmsVanillaOrder(12, float.MaxValue), "no waypoint set at all");
+        foreach (int t in new[] { 0, 2, 3, 4 })
+            AssertTrue(WlMoveState.ArmsVanillaOrder(t, 2500f), "type " + t + " is always the waypoint callers': armed whatever the distance (the pursuit reading carries its own slack)");
+        foreach (int t in new[] { 1, 5, 11, 13, 14, 15 })
+            AssertFalse(WlMoveState.ArmsVanillaOrder(t, 0f), "type " + t + " is never armed");
+        string pursuit = BodyOf(Code(FlowRuntime), "private static bool TryPursuit(");
+        AssertTrue(pursuit.Contains("WlMoveState.ArmsVanillaOrder(type,") && pursuit.Contains("last.x == 0f && last.z == 0f") && pursuit.Contains("float.MaxValue"),
+            "the runtime asks the rule with the distance from the unit's last waypoint to the order's point");
+    }
+
+    // Verify round 2, minor 7: the division's fan-out sends a brigade's regiments to B while the brigade's own waypoint, and so its pursuit reading,
+    // still says A; its queued executor dispatch for A is voided when the fan-out moves it.
+    private static void AFanOutVoidsTheMovedChildrensStaleOrders()
+    {
+        var sink = new RecordingSink();
+        var q = new WlCourierQueue(sink);
+        // the brigade (unit 101) was ordered to A = (0, 0); another brigade (102) to C; the division (103) has its own order.
+        Enq(q, QEntry(issuer: 1, type: 1, origin: OrderOrigin.Executor, x: 0, issuedAt: 1.0, dueAt: 9.0), out _);
+        Enq(q, QEntry(issuer: 2, type: 1, origin: OrderOrigin.Executor, x: 3000, issuedAt: 1.0, dueAt: 9.0), out _);
+        Enq(q, QEntry(issuer: 3, type: 12, origin: OrderOrigin.Executor, x: 6000, issuedAt: 1.0, dueAt: 9.0), out _);
+        // the executor fans the division's move (103) out to brigade 101 at B = (1500, 0), offset 380 m: the same calls the runtime makes
+        AssertEqual(1, q.DiscardSupersededIntents(101, 1500f, 0f, WlCourierQueue.SupersededIntent), "the brigade's order to A is voided by its own move to B");
+        AssertEqual(0, q.DiscardSupersededIntents(101, 1500f, 0f, WlCourierQueue.SupersededIntent), "once");
+        AssertEqual(2, q.Count, "the other brigade's and the division's orders stay");
+        string exec = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs"), "internal static int Execute(");
+        AssertTrue(Regex.IsMatch(exec, @"for \(int k = 0; k < issued; k\+\+\)\s*if \(_issued\[k\]\.InstanceId != winner\.GroupId\)\s*WlOrderFlowRuntime\.SupersedeExecutorOrders\(_issued\[k\]\.InstanceId, _issued\[k\]\.X, _issued\[k\]\.Z\);"),
+            "every child the move reached, with its own target, voids its queued executor orders");
+        AssertTrue(exec.IndexOf("_issued[k].InstanceId, _issued[k].X", StringComparison.Ordinal) < exec.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal), "before the new order is queued");
     }
 }

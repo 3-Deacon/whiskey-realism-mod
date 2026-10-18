@@ -147,6 +147,8 @@ internal static partial class WlOrderFlowTests
             ("wl order move executor carriers carry no slack", ExecutorCarriersCarryNoSlack),
             ("wl order move a group whose regiments march is still moving", AGroupWhoseRegimentsMarchIsStillMoving),
             ("wl order pin the player is never his own chain", ThePlayerIsNeverHisOwnChain),
+            ("wl order vanilla type 12 is armed only in the shape of the waypoint caller", Type12IsArmedOnlyInTheShapeOfTheWaypointCaller),
+            ("wl order a fan out voids the moved children's stale orders", AFanOutVoidsTheMovedChildrensStaleOrders),
             ("wl order pin runtime arms vanilla orders from the called unit", RuntimeArmsVanillaOrdersFromTheCalledUnit),
             ("wl order pin executor voids the groups old orders before queueing the new one", ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne),
             // follow-up

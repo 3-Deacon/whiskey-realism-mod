@@ -425,11 +425,18 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // move's. By delivery (a courier leg later) it has been set; the callers' waypoint differs from the order's point by
         // at most WlMoveState.VanillaWaypointSlackMeters. Some callers set the waypoint only for units that are not under the
         // player's command (6958, 8185) with the order outside that test: a unit with no path was not sent, and the order is
-        // not armed.
+        // not armed. Type 12 is armed only when its point is within that slack of the unit's last waypoint (the one caller that
+        // moves the unit); the waypoint is read for that shape test only, never as the carrier's target.
         private static bool TryPursuit(Regiment unit, int type, Vector3 position, out WlMoveCarrier pursuit)
         {
             pursuit = default(WlMoveCarrier);
             if (!WlMoveState.VanillaFollowsAWaypoint(type) || (UnityEngine.Object)unit == null || !WlMoveQueue.IsMoving(unit)) return false;
+            // A type 12 is armed only in the shape of the waypoint caller (6958-7002): its point lies near the unit's last waypoint.
+            // Its other caller (6463) orders a defence at an objective or the parent's centre with no move (WlMoveState.ArmsVanillaOrder).
+            Vector3 last = unit.lastsetwaypointposition;
+            float dx = last.x - position.x;
+            float dz = last.z - position.z;
+            if (!WlMoveState.ArmsVanillaOrder(type, (last.x == 0f && last.z == 0f) ? float.MaxValue : Mathf.Sqrt(dx * dx + dz * dz))) return false;
             // The player is never his own chain: an order to his own command asks nothing of anyone else.
             if ((UnityEngine.Object)unit == (UnityEngine.Object)_command) return false;
             pursuit = new WlMoveCarrier

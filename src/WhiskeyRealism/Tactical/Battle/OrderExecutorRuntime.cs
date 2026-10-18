@@ -244,7 +244,15 @@ namespace WhiskeyRealism.Tactical.Battle
             // move just replaced); the new move's own order is queued after. A Maintenance move (an interrupted-path
             // recovery, whose target can be a fresh assembly point, or a formation slot) is no new order and voids none.
             if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner) && (winner.Flags & IntentFlags.Maintenance) == 0)
+            {
                 WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);
+                // A fan-out sends the group's children (a brigade of a division) to their own offsets: a dispatch queued for such a
+                // child under an earlier move describes where it was bound, while its regiments now march elsewhere, and the child's
+                // own waypoint can still read the old place. Each child that was moved voids its queued executor orders too.
+                for (int k = 0; k < issued; k++)
+                    if (_issued[k].InstanceId != winner.GroupId)
+                        WlOrderFlowRuntime.SupersedeExecutorOrders(_issued[k].InstanceId, _issued[k].X, _issued[k].Z);
+            }
             // The group's task, for the task-hold test of the dispatch queued below or earlier. Every channel carries the group's
             // real task (stance and formation intents take the posture decision's), except the works hold's stance, which names
             // HoldObjective whatever the group is doing.

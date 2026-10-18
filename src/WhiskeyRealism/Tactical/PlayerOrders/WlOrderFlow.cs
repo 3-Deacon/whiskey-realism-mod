@@ -139,11 +139,22 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // waypoint, then 0 for an enemy-held objective and 12 for an own-held one, both move the unit to it), march to the sound of
         // guns (2, 3759-3766), an assault on an isolated target (3, 8185-8210) and an assault move (4, 3640-3646).
         // The others describe no move of the called unit: engage (1, 117383) is the halt itself, reserve (11) only shows the
-        // zone (6813-6834), 13-15 are the player's contact state and retreat. The other caller of type 12 (CheckGlobalAIStrategy,
-        // 6463) sets no waypoint: its order names the unit's own last waypoint, so an armed one passes while the unit pursues it.
+        // zone (6813-6834), 13-15 are the player's contact state and retreat.
         public static bool VanillaFollowsAWaypoint(int type)
         {
             return type == 0 || type == 2 || type == 3 || type == 4 || type == 12;
+        }
+
+        // Whether a vanilla order is armed with its called unit (WlOrderFlowRuntime.TryPursuit). Type 12 has two callers and only
+        // one sets a waypoint: UpdateMovingTargets (6958-7002) moves the unit to the objective and orders 12 at it, so the order's
+        // point lies within VanillaWaypointSlackMeters of the unit's last waypoint; CheckGlobalAIStrategy (6463) orders 12 at the
+        // closest objective or the parent's centre, with no move, so a marching parent's waypoint is elsewhere and the order
+        // says nothing about where the chain is going. A 12 is armed only in the first shape; 0, 2, 3 and 4 are always the
+        // waypoint callers'. `lastWaypointToOrderMeters` is the distance from the unit's last set waypoint to the order's point.
+        public static bool ArmsVanillaOrder(int type, float lastWaypointToOrderMeters)
+        {
+            if (!VanillaFollowsAWaypoint(type)) return false;
+            return type != 12 || lastWaypointToOrderMeters <= VanillaWaypointSlackMeters;
         }
 
         // The unit is on a march: it holds a path, or its subordinate regiments do. A group's own path can be empty while its

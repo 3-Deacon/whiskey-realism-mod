@@ -284,7 +284,7 @@ internal static partial class WlOrderFlowTests
         int voidAt = body.IndexOf("WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);", StringComparison.Ordinal);
         int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
         AssertTrue(voidAt > 0 && emit > voidAt, "the group's old executor orders are voided before Emit queues the new one");
-        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\) && \(winner\.Flags & IntentFlags\.Maintenance\) == 0\)\s*WlOrderFlowRuntime\.SupersedeExecutorOrders"),
+        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\) && \(winner\.Flags & IntentFlags\.Maintenance\) == 0\)\s*\{\s*WlOrderFlowRuntime\.SupersedeExecutorOrders\(winner\.GroupId, plan\.X, plan\.Z\);"),
             "only an executed Move that is not a deployment placement and not maintenance voids: a recovery's target can be a fresh assembly point (TryRecoveryPath), and it would void a real order the brigade is still carrying out");
         string flow = Code(FlowRuntime);
         string supersede = BodyOf(flow, "internal static void SupersedeExecutorOrders(");
