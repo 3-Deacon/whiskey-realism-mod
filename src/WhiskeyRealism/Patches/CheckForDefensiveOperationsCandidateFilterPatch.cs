@@ -42,7 +42,9 @@ namespace WhiskeyRealism.Patches
     // allocation with executors allowed, alliances 0 and 1) and Enable Vanilla Defensive Interception is on, the Prefix removes nothing and the
     // Postfix reverts nothing: vanilla's only interception of an advance onto own soil (13505-13780) chooses from the side's whole list again,
     // and the Prefix reports what it would have removed (DefenseIntent filter-observed, wouldRemove=, reasons=). The planner's withheld
-    // formations stay out of vanilla's defence through PlannerDefensiveAvailabilityPatch (#127), which is then the only Whiskey gate on it.
+    // formations stay out of vanilla's defence through PlannerDefensiveAvailabilityPatch (#127), which is then the only Whiskey gate on it and
+    // also withholds every formation Whiskey may not move (WlChainRules.MayMove false: the W&L player's own command, a unit in his operation,
+    // his map group, a CIC side), the clause the ledger's player-controlled suppression carried here (integrator decision 2026-10-18).
     // In every other case (planner off, stale or no plan, a CIC side, Europe, flag off) the call is filtered and reverted as above, and its
     // row names why (mode=filter:<why>, DefenseInterceptionGate.ModeFor). Smoke 2026-10-18: every alliance-1 row read removed=forbidden
     // (the CSA's whole list), so the interception never ran for either side.
@@ -458,9 +460,11 @@ namespace WhiskeyRealism.Patches
                 PresentIds.Add(unityObj.GetInstanceID());
             }
             int wouldRemove = DefenseInterceptionGate.WouldRemove(PresentIds, forbidden, WouldIds);
+            // The dedupe compares the count and a fingerprint of the reasons, so a call that finds what the last row said allocates nothing;
+            // the reasons text and the signature are built only for a row that is written.
+            if (!ObservedLog.ShouldEmit(allianceId, wouldRemove, DefenseFilterTally.Fingerprint(reasonByUnitId, WouldIds))) return;
             string reasons = DefenseFilterTally.Reasons(reasonByUnitId, WouldIds);
             string signature = DefenseInterceptionGate.ObservedSignature(allianceId, wouldRemove, reasons);
-            if (!ObservedLog.ShouldEmit(allianceId, signature)) return;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(allianceId)
                 .WithDecision("filter-observed", "interception-left-to-vanilla", signature)

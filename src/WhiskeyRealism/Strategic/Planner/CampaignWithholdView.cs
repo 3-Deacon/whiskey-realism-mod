@@ -108,9 +108,14 @@ namespace WhiskeyRealism.Strategic.Planner
         // within bugle range, so the hold outlasts the allocation's role, G5c), when it is a MainEffort member of the plan's mass
         // (decision 5: only the mover launches the mass, so vanilla's own roll cannot also send it) or a Support formation of a decision whose launch the tempo roll has not released (no Support goes ahead of the main
         // effort). The mass and the deferred Support are offense-only clauses: WithheldFromDefense never applies them.
-        public static bool WithheldFromOffense(int alliance, int instanceId)
+        // mayMove is WlChainRules.MayMove of the formation's chain class (the patch reads it from vanilla): a formation Whiskey may not move
+        // (the W&L player's own command, a unit in his operation, his map group, a CIC side) is withheld from vanilla's offensive and defensive
+        // pools alike while the planner runs, so nothing the planner runs moves the player's units (integrator decision 2026-10-18 under
+        // decision 1, BUG-WL-024). It is the clause that #25 used to carry as the ledger's player-controlled suppression.
+        public static bool WithheldFromOffense(int alliance, int instanceId, bool mayMove = true)
         {
             if (!Read(alliance, out var allocation, out _, out var ctx)) return false;
+            if (!mayMove) return true;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
             if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a)) return false;
@@ -119,13 +124,14 @@ namespace WhiskeyRealism.Strategic.Planner
             return a.Role == FormationRole.Support && !ctx.Released;
         }
 
-        // Vanilla's defence (IsUnitAvailableForDefensiveOperation 13460): withheld when the allocation withholds it, it is in
-        // transit or it builds an active depot task; never the mass or the deferred-Support clause, and a Hold formation withheld
+        // Vanilla's defence (IsUnitAvailableForDefensiveOperation 13460): withheld when Whiskey may not move it (mayMove, above), the
+        // allocation withholds it, it is in transit or it builds an active depot task; never the mass or the deferred-Support clause, and a Hold formation withheld
         // at its sector's need stays available when the enemy vanilla asks about stands in that sector (vanilla passes
         // enemyunits[j]'s position, 13610).
-        public static bool WithheldFromDefense(int alliance, int instanceId, float enemyX, float enemyZ)
+        public static bool WithheldFromDefense(int alliance, int instanceId, float enemyX, float enemyZ, bool mayMove = true)
         {
             if (!Read(alliance, out var allocation, out var sectors, out _)) return false;
+            if (!mayMove) return true;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
             if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a) || !a.Withheld) return false;

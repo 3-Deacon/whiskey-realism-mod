@@ -28,6 +28,7 @@ internal static class ForesightTelemetryTests
             ("ARefusedRetryWritesNoIssueRow", ARefusedRetryWritesNoIssueRow),
             ("IssueRowPickIsPinnedNewOrDash", IssueRowPickIsPinnedNewOrDash),
             ("RowNamesAreQuoted", RowNamesAreQuoted),
+            ("TheMoverRuntimeWritesTheIssueAndTheMissRows", TheMoverRuntimeWritesTheIssueAndTheMissRows),
             ("TraceCarriesEachCandidatesCoordinates", TraceCarriesEachCandidatesCoordinates),
             ("NewRowsAreRegisteredInTheTagPolicy", NewRowsAreRegisteredInTheTagPolicy),
             ("PinnedBuilderCarriesItsOwnReason", PinnedBuilderCarriesItsOwnReason),
@@ -224,6 +225,20 @@ internal static class ForesightTelemetryTests
         AssertEqual("10th Indiana:5", ev.Unit, "the whole name survives");
         AssertEqual("MainEffort", ev.Fields.GetString("role"), "and the field after it is its own");
         AssertEqual("1861-06-15", ev.CampaignDate, "the parser lifts date= into the event's campaign date");
+    }
+
+    // The tally's rows are built in the pure mover and written by the runtime: a row nobody writes is no telemetry (verify, F1). Both loops are
+    // pinned in the runtime's Execute, each through TelemetryRouter.LegacyInfo, the issue rows beside the miss rows.
+    private static void TheMoverRuntimeWritesTheIssueAndTheMissRows()
+    {
+        string execute = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMoverRuntime.cs"), "internal static void Execute(");
+        AssertContains(execute, "for (int m = 0; m < tally.IssueRows.Count; m++) TelemetryRouter.LegacyInfo(tally.IssueRows[m], TelemetryLayer.Campaign);", "the issue rows are written");
+        AssertContains(execute, "for (int m = 0; m < tally.MissRows.Count; m++) TelemetryRouter.LegacyInfo(tally.MissRows[m], TelemetryLayer.Campaign);", "so are the miss rows");
+        AssertInOrder(execute, "Execute", "CampaignMover.Review(", "tally.IssueRows.Count", "tally.MissRows.Count");
+        // Every list of rows the tally builds has its write loop: a new list that nobody writes fails here.
+        string mover = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMover.cs");
+        foreach (Match list in Regex.Matches(mover, @"public readonly List<string> (\w+Rows) = new List<string>\(\);"))
+            AssertContains(execute, "tally." + list.Groups[1].Value + "[m]", "the runtime writes " + list.Groups[1].Value);
     }
 
     // ---- the plan trace ----

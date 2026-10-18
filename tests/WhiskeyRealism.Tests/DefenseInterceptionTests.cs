@@ -32,7 +32,11 @@ internal static class DefenseInterceptionTests
             ("ObservedRowEmittedWithNothingToRemove", ObservedRowEmittedWithNothingToRemove),
             ("ObservedRowNotGatedOnVerbose", ObservedRowNotGatedOnVerbose),
             ("ObservedRowDedupesPerCampaign", ObservedRowDedupesPerCampaign),
+            ("TheFingerprintFollowsTheReasonsNotTheOrder", TheFingerprintFollowsTheReasonsNotTheOrder),
+            ("ObservedDedupePathAllocatesNothing", ObservedDedupePathAllocatesNothing),
             ("ObservedLogIgnoresAllianceTwo", ObservedLogIgnoresAllianceTwo),
+            ("TheDefenceAvailabilityClauseWithholdsWhatWhiskeyMayNotMove", TheDefenceAvailabilityClauseWithholdsWhatWhiskeyMayNotMove),
+            ("TheAvailabilityPatchesReadTheChainOfTheUnit", TheAvailabilityPatchesReadTheChainOfTheUnit),
             ("ObservingPrefixRemovesNothingAndPostfixRevertsNothing", ObservingPrefixRemovesNothingAndPostfixRevertsNothing),
             ("TheFlagIsBoundOnAndReadByThePatch", TheFlagIsBoundOnAndReadByThePatch),
             ("ReservesRowCountsEnemiesOnOwnSoilAndVanillasActiveDefence", ReservesRowCountsEnemiesOnOwnSoilAndVanillasActiveDefence),
@@ -138,7 +142,7 @@ internal static class DefenseInterceptionTests
         CampaignScope.ResetAll();
         string signature = DefenseInterceptionGate.ObservedSignature(1, 0, "-");
         AssertEqual("alliance=1|wouldRemove=0|reasons=-", signature, "a zero count is a signature");
-        AssertTrue(ObservedLog.ShouldEmit(1, signature), "and it is written the first time");
+        AssertTrue(ObservedLog.ShouldEmit(1, 0, DefenseFilterTally.Fingerprint(new Dictionary<int, string>(), new List<int>())), "and it is written the first time");
         string observe = BodyOf(ReadRepoFile(PatchPath), "private static void ObserveCandidates(");
         AssertFalse(observe.Contains("wouldRemove > 0") || observe.Contains("wouldRemove == 0) return") || observe.Contains("if (would.Count == 0)"), "the observe path does not skip a zero count");
         string prefix = BodyOf(ReadRepoFile(PatchPath), "internal static void Prefix(");
@@ -150,7 +154,7 @@ internal static class DefenseInterceptionTests
         string observe = BodyOf(ReadRepoFile(PatchPath), "private static void ObserveCandidates(");
         AssertFalse(observe.Contains("DefenseIntentVerboseLogging") || observe.Contains("verbose"), "the observed branch tests no verbose flag");
         AssertContains(observe, "\"filter-observed\"", "it writes the filter-observed decision");
-        AssertContains(observe, "ObservedLog.ShouldEmit(", "bounded by the per-alliance signature");
+        AssertContains(observe, "ObservedLog.ShouldEmit(", "bounded by the per-alliance state");
         // The filter row stays verbose-gated, as shipped.
         AssertContains(BodyOf(ReadRepoFile(PatchPath), "internal static void Prefix("), "removed > 0 && verbose", "the filter row is still behind the verbose flag");
     }
@@ -158,16 +162,57 @@ internal static class DefenseInterceptionTests
     private static void ObservedRowDedupesPerCampaign()
     {
         CampaignScope.ResetAll();
-        string a = DefenseInterceptionGate.ObservedSignature(1, 8, "min-hold:8");
-        AssertTrue(ObservedLog.ShouldEmit(1, a), "the first row is written");
-        AssertFalse(ObservedLog.ShouldEmit(1, a), "the same signature is not written again");
-        AssertTrue(ObservedLog.ShouldEmit(0, a.Replace("alliance=1", "alliance=0")), "the other alliance has a memory of its own");
-        AssertTrue(ObservedLog.ShouldEmit(1, DefenseInterceptionGate.ObservedSignature(1, 7, "min-hold:7")), "a change of the count is written");
-        AssertTrue(ObservedLog.ShouldEmit(1, a), "and back again");
+        var reasons = new Dictionary<int, string> { { 1, "min-hold" }, { 2, "min-hold" }, { 3, "player-controlled" } };
+        long some = DefenseFilterTally.Fingerprint(reasons, new List<int> { 1, 2 });
+        long other = DefenseFilterTally.Fingerprint(reasons, new List<int> { 1, 3 });
+        AssertTrue(ObservedLog.ShouldEmit(1, 2, some), "the first row is written");
+        AssertFalse(ObservedLog.ShouldEmit(1, 2, some), "the same state is not written again");
+        AssertTrue(ObservedLog.ShouldEmit(0, 2, some), "the other alliance has a memory of its own");
+        AssertTrue(ObservedLog.ShouldEmit(1, 2, other), "a change of the reasons is written");
+        AssertTrue(ObservedLog.ShouldEmit(1, 3, other), "so is a change of the count");
+        AssertTrue(ObservedLog.ShouldEmit(1, 2, some), "and back again");
         CampaignScope.ResetAll();
-        AssertTrue(ObservedLog.ShouldEmit(1, a), "a new campaign starts afresh: the log registered its own reset with CampaignScope");
+        AssertTrue(ObservedLog.ShouldEmit(1, 2, some), "a new campaign starts afresh: the log registered its own reset with CampaignScope");
         string log = ReadRepoFile("src/WhiskeyRealism/Strategic/DefenseInterceptionGate.cs");
         AssertContains(BodyOf(log, "static ObservedLog()"), "CampaignScope.Register(\"defense-filter-observed-log\"", "registered from the static constructor");
+    }
+
+    // The fingerprint is the reasons tally without its text: the same reasons in any order, the same value; different reasons, a different one.
+    private static void TheFingerprintFollowsTheReasonsNotTheOrder()
+    {
+        var reasons = new Dictionary<int, string> { { 1, "min-hold" }, { 2, "player-controlled" }, { 3, "min-hold" }, { 4, "formation-donor" } };
+        long a = DefenseFilterTally.Fingerprint(reasons, new List<int> { 1, 2, 3 });
+        AssertEqual(a, DefenseFilterTally.Fingerprint(reasons, new List<int> { 3, 1, 2 }), "order does not matter");
+        AssertTrue(a != DefenseFilterTally.Fingerprint(reasons, new List<int> { 1, 2, 4 }), "another reason changes it");
+        AssertTrue(a != DefenseFilterTally.Fingerprint(reasons, new List<int> { 1, 2 }), "so does a count");
+        AssertEqual(0L, DefenseFilterTally.Fingerprint(reasons, new List<int>()), "nothing counted is 0");
+        AssertEqual(0L, DefenseFilterTally.Fingerprint(null, new List<int> { 1 }), "no reasons is 0");
+    }
+
+    // The observed branch's dedupe path allocates nothing when the state is the one the last row said: the reasons text is built only for a row
+    // that is written.
+    private static void ObservedDedupePathAllocatesNothing()
+    {
+        CampaignScope.ResetAll();
+        var reasons = new Dictionary<int, string> { { 1, "min-hold" }, { 2, "player-controlled" }, { 3, "min-hold" } };
+        var present = new List<int> { 1, 2, 3, 4, 5 };
+        var forbidden = new HashSet<int> { 1, 2, 3, 9 };
+        var would = new List<int>(8);
+        would.Clear();
+        int count = DefenseInterceptionGate.WouldRemove(present, forbidden, would);
+        AssertTrue(ObservedLog.ShouldEmit(1, count, DefenseFilterTally.Fingerprint(reasons, would)), "the first call writes");
+        would.Clear();
+        long begin = BeginAllocationWindow();
+        for (int round = 0; round < 50; round++)
+        {
+            would.Clear();
+            int n = DefenseInterceptionGate.WouldRemove(present, forbidden, would);
+            if (ObservedLog.ShouldEmit(1, n, DefenseFilterTally.Fingerprint(reasons, would))) throw new Exception("the unchanged state was written again");
+        }
+        AssertEqual(0L, AllocatedSince(begin), "fifty unchanged calls allocate nothing");
+        string observe = BodyOf(ReadRepoFile(PatchPath), "private static void ObserveCandidates(");
+        AssertTrue(observe.IndexOf("ObservedLog.ShouldEmit(", StringComparison.Ordinal) < observe.IndexOf("DefenseFilterTally.Reasons(", StringComparison.Ordinal),
+            "and the patch builds the text only after the compare");
     }
 
     private static void ObservedLogIgnoresAllianceTwo()
@@ -175,8 +220,8 @@ internal static class DefenseInterceptionTests
         CampaignScope.ResetAll();
         foreach (int alliance in new[] { 2, 3, -1, 100 })
         {
-            AssertFalse(ObservedLog.ShouldEmit(alliance, "x"), "alliance " + alliance + " is never indexed and never written");
-            AssertFalse(ObservedLog.ShouldEmit(alliance, "x"), "again");
+            AssertFalse(ObservedLog.ShouldEmit(alliance, 1, 7L), "alliance " + alliance + " is never indexed and never written");
+            AssertFalse(ObservedLog.ShouldEmit(alliance, 1, 7L), "again");
         }
     }
 
@@ -209,6 +254,53 @@ internal static class DefenseInterceptionTests
         string plugin = ReadRepoFile("src/WhiskeyRealism/Plugin.cs");
         AssertTrue(Regex.IsMatch(plugin, "\"Campaign Planner\", \"Enable Vanilla Defensive Interception\", true,"), "bound in the Campaign Planner section, default on");
         AssertContains(ReadRepoFile(PatchPath), "FlagOn(Plugin.EnableVanillaDefensiveInterception)", "the patch reads it");
+    }
+
+    // ---- #127 and the player's units (integrator decision 2026-10-18 under decision 1, BUG-WL-024) ----
+
+    // While #25 observes, vanilla's defence chooses from the whole list; the clause that keeps the player's units out of it is #127's:
+    // every formation Whiskey may not move is withheld from vanilla's defensive and offensive pools, an AI unit and the group that carries the
+    // player below map level are not.
+    private static void TheDefenceAvailabilityClauseWithholdsWhatWhiskeyMayNotMove()
+    {
+        var world = ExecutorFixtures.PublishedWorld(out _);
+        int free = world.FreeHold;   // a Hold formation the allocation does not withhold: nothing but the chain can hold it back
+        AssertEqual(DefenseFilterMode.Observe, DefenseInterceptionGate.ModeFor(0, true, true, true, true, true, 6, out _), "#25 observes in this world");
+        AssertFalse(CampaignWithholdView.WithheldFromDefense(0, free, 560f, 0f), "the control: an AI unit with no chain is not withheld");
+
+        var takeover = new WlStrategicRoleFacts(true, true, isMovedByPlayer: true);   // in his operation, not under his command
+        var carrying = new WlStrategicRoleFacts(true, true, isPartOfPlayerUnit: true, isPlayerCampaignGroup: true);
+        var underCommand = new WlStrategicRoleFacts(true, true, isUnderCommander: true);
+        var mapGroup = new WlStrategicRoleFacts(true, true, isUnderCommander: true, currentCommandIsCampaignGroup: true);
+        var cic = new WlStrategicRoleFacts(true, true, isPlayerCic: true);
+        var notWl = new WlStrategicRoleFacts(false, false);
+        foreach (var (name, facts, withheld) in new[]
+        {
+            ("a unit in the player's takeover operation", takeover, true), ("a unit under his command", underCommand, true), ("his map group", mapGroup, true),
+            ("a CIC side", cic, true), ("the group carrying him below map level", carrying, false), ("an AI unit", notWl, false)
+        })
+        {
+            bool mayMove = WlChainRules.MayMove(WlChainRules.Classify(in facts));
+            AssertEqual(withheld, CampaignWithholdView.WithheldFromDefense(0, free, 560f, 0f, mayMove), name + ": withheld from vanilla's defence = " + withheld);
+            AssertEqual(withheld, CampaignWithholdView.WithheldFromOffense(0, free, mayMove), name + ": and from its offence");
+        }
+        // Planner off or no plan: the clause is the planner's, so nothing is withheld and #25 filters as before.
+        CampaignScope.ResetAll();
+        AssertFalse(CampaignWithholdView.WithheldFromDefense(0, free, 560f, 0f, false), "no published plan, no clause");
+    }
+
+    // The patches hand the unit's chain to the view; the clause is not in the view alone.
+    private static void TheAvailabilityPatchesReadTheChainOfTheUnit()
+    {
+        string patch = ReadRepoFile("src/WhiskeyRealism/Patches/CampaignAvailabilityFilterPatch.cs");
+        AssertContains(patch, "CampaignWithholdView.WithheldFromOffense(alliance, unit.GetInstanceID(), PlannerChainGate.MayMove(alliance, unit))", "the offensive Postfix passes the chain");
+        AssertContains(patch, "enemyposition.x, enemyposition.z, PlannerChainGate.MayMove(alliance, unit))", "and the defensive one");
+        string gate = BodyOf(patch, "internal static bool MayMove(int alliance, Regiment unit)");
+        AssertContains(gate, "WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, alliance, unit))", "the chain class is the one every other Whiskey writer asks");
+        AssertContains(gate, "if (!DLC_WL.dlc_scenarioactive || GameVars.playeralliance != alliance) return true;", "read only for the player's alliance in a W&L career");
+        string view = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignWithholdView.cs");
+        AssertContains(BodyOf(view, "public static bool WithheldFromDefense("), "if (!mayMove) return true;", "the view withholds what Whiskey may not move");
+        AssertContains(BodyOf(view, "public static bool WithheldFromOffense("), "if (!mayMove) return true;", "from the offensive pool too");
     }
 
     // ---- [Reserves] ----

@@ -47,12 +47,13 @@ namespace WhiskeyRealism.Strategic
 
         // How many of the forbidden ids stand in vanilla's candidate list (ownunits): what the filter's removed= counts. The ids it
         // counted are appended to `into` when given, in the order they stand, so the caller can tally their reasons.
-        internal static int WouldRemove(IReadOnlyCollection<int> presentIds, ICollection<int> forbidden, List<int> into = null)
+        internal static int WouldRemove(IReadOnlyList<int> presentIds, ICollection<int> forbidden, List<int> into = null)
         {
             int count = 0;
             if (presentIds == null || forbidden == null) return 0;
-            foreach (int id in presentIds)
+            for (int i = 0; i < presentIds.Count; i++)
             {
+                int id = presentIds[i];
                 if (!forbidden.Contains(id)) continue;
                 count++;
                 if (into != null) into.Add(id);
@@ -67,26 +68,32 @@ namespace WhiskeyRealism.Strategic
         }
     }
 
-    // Per alliance, the last observed row's signature, so a call that finds the same thing writes nothing. Per campaign
-    // (CampaignScope), bound-checked: alliance 2 (Europe) and anything outside 0 and 1 is never indexed and never written.
+    // Per alliance, the last observed row's count and reasons fingerprint (DefenseFilterTally.Fingerprint), so a call that finds the same thing
+    // writes nothing and allocates nothing: the row's text is built only for a row that is written. Per campaign (CampaignScope),
+    // bound-checked: alliance 2 (Europe) and anything outside 0 and 1 is never indexed and never written.
     internal static class ObservedLog
     {
         private const int Alliances = 2;
-        private static readonly string[] Last = new string[Alliances];
+        private static readonly bool[] Has = new bool[Alliances];
+        private static readonly int[] LastCount = new int[Alliances];
+        private static readonly long[] LastFingerprint = new long[Alliances];
 
         static ObservedLog()
         {
             CampaignScope.Register("defense-filter-observed-log", () =>
             {
-                for (int a = 0; a < Last.Length; a++) Last[a] = null;
+                for (int a = 0; a < Has.Length; a++) Has[a] = false;
             });
         }
 
-        internal static bool ShouldEmit(int allianceId, string signature)
+        // True when this state differs from the last one written for the alliance (or none was): the caller then builds the row and writes it.
+        internal static bool ShouldEmit(int allianceId, int wouldRemove, long reasonsFingerprint)
         {
             if (allianceId < 0 || allianceId >= Alliances) return false;
-            if (string.Equals(Last[allianceId], signature, System.StringComparison.Ordinal)) return false;
-            Last[allianceId] = signature;
+            if (Has[allianceId] && LastCount[allianceId] == wouldRemove && LastFingerprint[allianceId] == reasonsFingerprint) return false;
+            Has[allianceId] = true;
+            LastCount[allianceId] = wouldRemove;
+            LastFingerprint[allianceId] = reasonsFingerprint;
             return true;
         }
     }
