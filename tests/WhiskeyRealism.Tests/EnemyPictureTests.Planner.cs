@@ -505,6 +505,13 @@ internal static partial class EnemyPictureTests
         live.MinStrength = 2000f;
         TheaterPlanner.CapitalThreat(live, out float liveFloor, out _);
         AssertNear(2000f, liveFloor, 0.01f, "and follows MinStrength(inputs)");
+        // With own men at the capital vanilla's num2 is the minimum less them (4000 for 1000 men): the baseline keeps the floor at the minimum.
+        var held = Csa(float.NaN);
+        held.Own.Add(Corps(1, RichmondX, RichmondZ, 1000f));
+        var heldInputs = InputsFor(held);
+        TheaterPlanner.CapitalThreat(heldInputs, out float heldFloor, out _);
+        AssertTrue(CapitalFloorPolicy.VanillaNeed(TheaterPlanner.MinStrength(heldInputs), held.Beliefs, 1f, held.CapitalX, held.CapitalZ, held.RelocationRange, held.Own) < TheaterPlanner.MinStrength(heldInputs), "fixture: vanilla's own need is under the minimum here");
+        AssertNear(TheaterPlanner.MinStrength(heldInputs), heldFloor, 0.01f, "the baseline holds the floor at the minimum however many men stand at the capital");
     }
 
     // The capital trigger reads the threat without the baseline, so it never fires on an empty map.
@@ -673,12 +680,13 @@ internal static partial class EnemyPictureTests
     private static void EnemyCapitalEstimateReportedUnderBothShares()
     {
         var s = Csa(100000f);
-        s.Beliefs.Add(Belief(WashingtonX - 50f, WashingtonZ, 4000f));
+        s.Beliefs.Add(Belief(1100f, -1000f, 4000f));          // far from every anchor: it scouts none of them and is not near the capital
         var plan = TheaterPlanner.Plan(s, SectorModel.Build(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, out EnemyPicture picture);
         AssertTrue(picture != null && picture.HasEnemyCapital, "the plan hands the picture back");
-        float believed = 4000f;
-        AssertNear(believed + AnchorAt(picture, WashingtonX, WashingtonZ).Share, picture.EnemyCapitalEst, 5f, "the estimate under the share in force: believed plus the capital's share");
-        AssertNear(believed + AnchorAt(picture, WashingtonX, WashingtonZ).ShareProp, picture.EnemyCapitalEstProp, 5f, "and under the proportional one");
+        var capital = AnchorAt(picture, WashingtonX, WashingtonZ);
+        AssertTrue(capital.Share > 0f && capital.Share != capital.ShareProp, "the two rules give the capital different masses: " + capital.Share + " and " + capital.ShareProp);
+        AssertNear(capital.Share, picture.EnemyCapitalEst, 5f, "the estimate under the share in force: what is presumed at the capital (nothing believed near it)");
+        AssertNear(capital.ShareProp, picture.EnemyCapitalEstProp, 5f, "and under the proportional one");
         AssertTrue(picture.EnemyCapitalEst != picture.EnemyCapitalEstProp, "reported apart");
         AssertContains(EnemyPicture.Row(picture, s), " enemyCapitalEstProp=", "both in the row");
     }

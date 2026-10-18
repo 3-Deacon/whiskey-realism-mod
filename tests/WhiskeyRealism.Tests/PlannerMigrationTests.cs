@@ -52,6 +52,7 @@ internal static class PlannerMigrationTests
     {
         s = ExecutorFixtures.Wide();
         s.Own.Add(ExecutorFixtures.Corps(1, 200f, 20000f));
+        s.Own.Add(ExecutorFixtures.Corps(900, 0f, 9000f));   // the capital guard: D11's capital floor is never under the minimum strength
         return ExecutorFixtures.RealPlan(s, ExecutorFixtures.State());
     }
 
@@ -101,7 +102,8 @@ internal static class PlannerMigrationTests
     private static void MainTargetIsTheObjectivesOwnTownNotTheClampedFrontier()
     {
         var s = ExecutorFixtures.Line(0, 7);
-        s.Own.Add(ExecutorFixtures.Corps(1, 0f, 20000f));
+        s.Own.Add(ExecutorFixtures.Corps(1, 0f, 20000f));    // the capital's guard (D11's floor keeps one there)
+        s.Own.Add(ExecutorFixtures.Corps(2, 100f, 20000f));   // the body the push is made with
         // Richmond, far beyond the single IIP the corps is supplied from.
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 3, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 1f });
         var plan = ExecutorFixtures.RealPlan(s, ExecutorFixtures.State());

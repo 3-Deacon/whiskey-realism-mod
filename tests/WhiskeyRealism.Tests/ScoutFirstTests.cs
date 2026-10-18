@@ -165,11 +165,12 @@ internal static class ScoutFirstTests
         var s = Union();
         var c = CandidateOf(s, 31);
         AssertFalse(c.Scouted, "no belief and no viewer near the target: unscouted");
-        // 5000 x (1 + 0.8): the importance of the enemy-held ground within the relocation range (objective 31's own 0.8).
-        AssertNear(9000f, c.Presumed, 0.5f, "presumed threat = MinGarrisonStrength x (1 + importance)");
-        AssertNear(9000f, c.Enemy, 0.5f, "the odds are judged against the presumption");
+        // D11: no men are unaccounted for in this fixture (the snapshot carries no enemy troop total), so nothing is presumed; the floor is
+        // 5000 x (1 + 0.8): the importance of the undisplaced enemy-held ground within the relocation range (objective 31's own 0.8).
+        AssertNear(0f, c.Presumed, 0.5f, "no unaccounted men to place at the anchors");
+        AssertNear(9000f, c.Enemy, 0.5f, "the odds are judged against the floor of the unscouted ground");
         AssertTrue(c.Ratio < float.MaxValue, "the odds are finite");
-        AssertNear(c.Mass / 9000f, c.Ratio, 0.01f, "capacity over the presumed enemy");
+        AssertNear(c.Mass / 9000f, c.Ratio, 0.01f, "capacity over the floored enemy");
         AssertTrue(c.Eligible, "an unscouted main effort may still be chosen (D1): 87000 against 9000");
 
         // The presumption does not make a weak force eligible.
@@ -185,8 +186,8 @@ internal static class ScoutFirstTests
         var c = CandidateOf(s, 31);
         AssertTrue(c.Scouted, "a fresh land belief within the relocation range scouts the target");
         AssertEqual(0f, c.Presumed, "nothing presumed once scouted");
-        AssertNear(3000f, c.Enemy, 0.5f, "the believed enemy");
-        AssertTrue(c.Eligible, "87000 against 3000");
+        AssertNear(ForceAllocator.MinGarrisonStrength, c.Enemy, 0.5f, "the believed 3000, floored at the plain minimum (the anchor is displaced, so no importance on it, D11)");
+        AssertTrue(c.Eligible, "87000 against 5000");
 
         var far = Union();
         far.Beliefs.Add(Seen(300f, 3000f));
@@ -199,12 +200,12 @@ internal static class ScoutFirstTests
         s.Beliefs.Add(Seen(850f, 20000f, 0.3f));
         var c = CandidateOf(s, 31);
         AssertFalse(c.Scouted, "confidence 0.3 is below the freshness bar (ContactEvidenceLedger.MinEscalationConfidence 0.5)");
-        AssertNear(20000f, c.Presumed, 0.5f, "the aged-out sighting is remembered at its last-seen strength");
-        AssertNear(20000f, c.Enemy, 0.5f, "and the odds are judged on it, not on the 6000 its confidence weights it to");
+        AssertNear(14000f, c.Presumed, 0.5f, "the aged-out sighting is remembered: the faded 70% is presumed (D11)");
+        AssertNear(20000f, c.Enemy, 0.5f, "and the odds are judged on the live 6000 and the faded 14000 together, its last-seen strength");
 
         var small = Union();
         small.Beliefs.Add(Seen(850f, 2000f, 0.3f));
-        AssertNear(9000f, CandidateOf(small, 31).Presumed, 0.5f, "a small old sighting does not lower the floor");
+        AssertNear(9000f, CandidateOf(small, 31).Enemy, 0.5f, "a small old sighting does not lower the floor (600 live and 1400 faded under the 9000)");
     }
 
     private static void AnOwnViewerCoveringTheTargetScoutsIt()
@@ -215,7 +216,7 @@ internal static class ScoutFirstTests
         var c = CandidateOf(s, 31);
         AssertTrue(c.Scouted, "an own viewer's sight covers the target: what it sees, it sees");
         AssertEqual(0f, c.Presumed, "the empty target is a reading, not a presumption");
-        AssertTrue(c.Ratio >= float.MaxValue, "seen empty: unbounded odds");
+        AssertNear(c.Mass / ForceAllocator.MinGarrisonStrength, c.Ratio, 0.01f, "seen empty: the odds are against the plain minimum (D11's floor), finite");
 
         var blind = Union();
         var shortSighted = Corps(99, 780f, 6700f);
@@ -306,6 +307,16 @@ internal static class ScoutFirstTests
         return s;
     }
 
+    // D11's capital floor never falls under the minimum strength: a front whose own corps stand away from the capital keeps a guard
+    // there, or the capital reserve takes the nearest of them.
+    private static CampaignSnapshot Guarded(CampaignSnapshot s, float strength = 6000f)
+    {
+        s.Own.Add(Corps(CapitalGuardId, 0f, strength));
+        return s;
+    }
+
+    private const int CapitalGuardId = 900;
+
     private static int Index(CampaignSnapshot s, int id) { return s.IndexOfOwn(id); }
 
     private static void HomeDepartmentIsTheSectorsTheaterAtFirstReviewAndStaysUntilATransfer()
@@ -370,7 +381,7 @@ internal static class ScoutFirstTests
         var far = Corps(2, -1100f, 30000f);
         var guard = Corps(3, 300f, 7000f);
         guard.Flags |= FormationFlags.InBattle;       // a busy West guard holds the West (counted, never massed): the far corps could leave it
-        var s = Fronts(Corps(1, 800f, 8000f), far, guard);
+        var s = Guarded(Fronts(Corps(1, 800f, 8000f), far, guard));
         var east = CandidateOf(s, 31);
         AssertNear(8000f, east.Mass, 0.5f, "the East push can concentrate its own 8000, not the 30000 24 march-days away");
         var plan = Plan(s, new PlannerState());
@@ -455,14 +466,14 @@ internal static class ScoutFirstTests
         var army2 = Corps(3, 760f, 6000f);
         army1.ParentInstanceId = 90;
         army2.ParentInstanceId = 90;
-        var s = Fronts(lone, army1, army2);
+        var s = Guarded(Fronts(lone, army1, army2));
         var plan = Plan(s, new PlannerState());
         AssertEqual(31, plan.MainObjectiveId, "the East objective");
         AssertTrue(plan.MassInstanceIds.Contains(1), "the nearest formation");
         AssertTrue(plan.MassInstanceIds.Contains(2) && plan.MassInstanceIds.Contains(3), "and the army, both corps: " + string.Join(",", plan.MassInstanceIds));
 
         // Not the army's: lone corps first, then the army whole even if the lone corps alone would not do.
-        var solo = Fronts(Corps(1, 800f, 12000f), army1, army2);
+        var solo = Guarded(Fronts(Corps(1, 800f, 12000f), army1, army2));
         var soloPlan = Plan(solo, new PlannerState());
         AssertEqual("1", string.Join(",", soloPlan.MassInstanceIds), "a lone corps that is enough leaves the army where it is");
     }
@@ -574,7 +585,7 @@ internal static class ScoutFirstTests
 
     private static void ADetachmentNeedsNoOffensiveStrengthMinimumButAScreenDoes()
     {
-        var s = Union(0);
+        var s = Guarded(Union(0));
         var small = Corps(1, 700f, 2500f);                    // under aiminimumstrengthformovement (5000)
         var big = Corps(2, 500f, 30000f);
         s.Own.Add(small);
@@ -588,7 +599,7 @@ internal static class ScoutFirstTests
         int guardPick = ReconPlanner.PickFormation(s, sectors, plan, null, guard, taken, true);
         int screenPick = ReconPlanner.PickFormation(s, sectors, plan, null, screen, taken, true);
         AssertEqual(1, guardPick, "the small division leads the advance (a detachment of the main body)");
-        AssertEqual(2, screenPick, "a screen is held to vanilla's minimum strength");
+        AssertTrue(screenPick != 1 && s.Own[s.IndexOfOwn(screenPick)].Strength >= 5000f, "a screen is held to vanilla's minimum strength: not the 2500 division");
     }
 
     private static void ACavalryScreenGoesOutWhenACavalryFormationExists()
@@ -693,15 +704,16 @@ internal static class ScoutFirstTests
     private static void ASectorFacingEnemyGroundKeepsAHoldWithNothingBelieved()
     {
         var guard = Corps(2, 300f, 7000f);
-        var s = Fronts(Corps(1, 800f, 30000f), guard);
+        guard.Z = guard.WaypointZ = 60f;          // 60 off objective 30, outside its sight (50): the anchor's ground is not scouted
+        var s = Guarded(Fronts(Corps(1, 800f, 30000f), guard), 5600f);   // the capital's own sector is the West: it meets the 5000 floor (at 0.9 morale) but not the West's 6000, so the second guard is a hold reserve
         s.Beliefs.Clear();                        // nothing believed anywhere: both objectives unscouted
         var plan = Plan(s);
         var sectors = ExecutorFixtures.Sectors(s);
         int west = sectors.SectorAt(300f, 0f);
         float need = 0f;
         foreach (var sp in plan.Sectors) if (sp.SectorId == west) need = sp.HoldNeed;
-        // 5000 x (1 + 0.2, objective 30's importance): the presumption, above the 5000 floor.
-        AssertNear(6000f, need, 0.5f, "the West sector faces objective 30: presumed 6000");
+        // D11 Floor: 5000 x (1 + 0.2, objective 30's importance, the anchor undisplaced), above the plain 5000 minimum.
+        AssertNear(6000f, need, 0.5f, "the West sector faces objective 30: the floor is 6000");
         var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
         alloc.TryGet(2, out var g);
         AssertEqual(FormationRole.Hold, g.Role, "the guard holds");
@@ -749,11 +761,11 @@ internal static class ScoutFirstTests
     {
         var s = Union();
         TheaterPlanner.Plan(s, ExecutorFixtures.Sectors(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out string trace);
-        AssertContains(trace, "unscouted est=9000 pres=9000", "an unseen target: the presumption is the estimate");
+        AssertContains(trace, "unscouted est=9000 pres=0", "an unseen target: the importance floor is the estimate (no unaccounted men to place)");
         var seen = Union();
         seen.Beliefs.Add(Seen(850f, 3000f));
         TheaterPlanner.Plan(seen, ExecutorFixtures.Sectors(seen), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out string traceSeen);
-        AssertContains(traceSeen, " scouted est=3000 pres=0", "a sighting: the believed enemy, nothing presumed");
+        AssertContains(traceSeen, " scouted est=5000 pres=0", "a sighting: the believed 3000 floored at the minimum, nothing presumed");
         AssertFalse(trace.Contains("odds=inf"), "no candidate reads 'inf' odds against an unseen enemy");
     }
 
@@ -836,7 +848,7 @@ internal static class ScoutFirstTests
         var native = Corps(1, 700f, 8000f);
         native.Z = 400f;
         native.WaypointZ = 400f;
-        var s = Fronts(native, Corps(2, 590f, 20000f));
+        var s = Guarded(Fronts(native, Corps(2, 590f, 20000f)));
         s.Beliefs.Clear();                      // unscouted: staged
         s.Objectives[s.Objectives.FindIndex(o => o.ObjectiveId == 30)] = new ObjectiveRecord { ObjectiveId = 30, X = 300f, Z = 0f, HolderAlliance = 0, Available = false, Importance01 = 0.2f };   // our own: the West has no push of its own
         var plan = Plan(s, new PlannerState());
@@ -850,7 +862,7 @@ internal static class ScoutFirstTests
     // V34: a probe is a detachment too: a division under vanilla's 5000-man offensive minimum may go out as one.
     private static void AProbeNeedsNoOffensiveStrengthMinimumEither()
     {
-        var s = Union(0);
+        var s = Guarded(Union(0));
         s.Own.Add(Corps(1, 700f, 2500f));          // under aiminimumstrengthformovement
         s.Own.Add(Corps(2, 500f, 30000f));
         s.Beliefs.Clear();

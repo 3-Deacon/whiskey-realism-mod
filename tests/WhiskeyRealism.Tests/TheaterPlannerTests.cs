@@ -276,6 +276,7 @@ internal static class TheaterPlannerTests
         // 0.067: 98 now leads by 0.05, below SwitchMargin, but the trigger switches at once. A second
         // corps beside the first: the capital reserve (nearest the capital) takes one of them.
         var s = TwoTargets(0.5f, 0.6f);
+        DropGuard(s);
         s.Own.Add(Corps(2, 200f, 20000f));
         s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
         var state = StateOn(99);
@@ -479,12 +480,17 @@ internal static class TheaterPlannerTests
         var s = TwoTargets(0.5f, 0.6f);
         s.Beliefs.Add(Belief(-100f, 0f, 10000f, 0.5f));
         var plan = Plan(s, new PlannerState());
-        float expected = 0.5f * 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f;
-        AssertNear(expected, plan.CapitalFloorStrength, 0.01f, "11712-11741 weighting on the confidence-weighted belief");
+        // The belief at confidence 0.5 is a live 5000 and a faded 5000 (D11: both weigh, the picture holds the whole 10000), each at
+        // mass / distance^0.3 x vanilla's 0.5 (11712-11741).
+        float weighted = 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f;
+        AssertNear(weighted, plan.CapitalWeighted, 0.01f, "11712-11741 weighting over the live and the faded men");
+        AssertNear(ForceAllocator.MinGarrisonStrength + TheaterPlanner.CapitalFloorRatio * weighted, plan.CapitalFloorStrength, 0.01f, "D11: the floor is the minimum plus the ratio times that weight");
 
         var far = TwoTargets(0.5f, 0.6f);
-        far.Beliefs.Add(Belief(-200f, 0f, 10000f, 1f));
-        AssertNear(0f, Plan(far, new PlannerState()).CapitalFloorStrength, 0f, "beyond relocation range: no floor");
+        far.Beliefs.Add(Belief(-1500f, 0f, 10000f, 1f));
+        var farPlan = Plan(far, new PlannerState());
+        AssertNear(0f, farPlan.CapitalWeighted, 0f, "beyond the capital reach: nothing weighed");
+        AssertNear(ForceAllocator.MinGarrisonStrength, farPlan.CapitalFloorStrength, 0.01f, "D11: and the floor is the minimum alone");
     }
 
     // ---- river lines (G0 landing B) ----
@@ -912,6 +918,7 @@ internal static class TheaterPlannerTests
         {
             bool even = day % 2 == 0;
             var s = TwoTargets(even ? 0.9f : 0.1f, even ? 0.1f : 0.9f);
+            DropGuard(s);
             s.Own.Add(Corps(2, 200f, 20000f));
             s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
             var plan = Plan(s, state);
@@ -928,13 +935,15 @@ internal static class TheaterPlannerTests
     {
         var state = StateOn(99);
         var threatened = TwoTargets(0.5f, 0.6f);
+        DropGuard(threatened);
         threatened.Own.Add(Corps(2, 200f, 20000f));
         threatened.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
         AssertEqual("capital-threat", Plan(threatened, state).SwitchReason, "onset");
         state.Restore(99, -1, 0, state.DecisionSerial, state.CampaignSeed, 0, state.CapitalThreatLatched);
         AssertEqual("hold", Plan(threatened, state).SwitchReason, "standing threat: no trigger");
-        float floor = 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f; // vanilla weighting (11735): 1256
+        float floor = TheaterPlanner.CapitalFloorRatio * 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f; // the weighted threat (11735) times the ratio
         var easing = TwoTargets(0.5f, 0.6f);
+        DropGuard(easing);
         easing.Own.Add(Corps(2, 200f, 20000f));
         easing.Own.Add(Corps(3, 0f, floor / 0.5f)); // threat 0.5: below the trigger, above the release
         easing.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
@@ -1285,8 +1294,9 @@ internal static class TheaterPlannerTests
     {
         var s = Line();
         s.Objectives.Add(Target(99, 300f, 1f));
+        DropGuard(s);
         s.Own.Add(Corps(1, 250f, 20000f));
-        s.Own.Add(Corps(3, 0f, 2000f));
+        s.Own.Add(Corps(3, 0f, 12000f));   // above the floor (the minimum plus the weighted threat), so the guard alone meets it
         s.Beliefs.Add(Belief(-100f, 0f, 10000f, 1f));
         var c = Candidate(s, null, 99);
         AssertNear(20000f, c.Mass, 0.01f, "the capital guard is not massable");
@@ -1323,6 +1333,7 @@ internal static class TheaterPlannerTests
     private static CampaignSnapshot Mirror(bool reversed)
     {
         var s = Line();
+        DropGuard(s);
         s.HasCapital = false;
         var a = Target(98, 100f, 0.5f);
         var b = Target(99, 300f, 0.5f);
@@ -1349,9 +1360,9 @@ internal static class TheaterPlannerTests
             var near = Corps(1, 250f, 30000f);
             near.Flags |= busy;
             s.Own.Add(near);
-            s.Own.Add(Corps(2, 0f, 15000f));
+            s.Own.Add(Corps(2, 150f, 15000f));
             var c = Candidate(s, null, 99);
-            AssertEqual(1, c.Force, "the free corps is the force, not the one " + busy);
+            AssertEqual(2, s.Own[c.Force].InstanceId, "the free corps is the force, not the one " + busy);
             AssertNear(15000f, c.Mass, 0.01f, busy + " formation never masses");
         }
     }
@@ -1363,7 +1374,7 @@ internal static class TheaterPlannerTests
         s.Objectives.Add(Target(99, 300f, 1f));
         s.Own.Add(Corps(1, 200f, 20000f));
         s.Own.Add(Corps(2, 290f, 5000f));
-        AssertEqual(0, Candidate(s, null, 99).Force, "the main body, not the nearer small corps");
+        AssertEqual(1, s.Own[Candidate(s, null, 99).Force].InstanceId, "the main body, not the nearer small corps");
     }
 
     // P08 / P09: the draw's seed folds the decision serial and the alliance.
@@ -1412,6 +1423,7 @@ internal static class TheaterPlannerTests
             if (reversed) { s.Objectives.Add(b); s.Objectives.Add(a); s.Objectives.Add(low); }
             else { s.Objectives.Add(low); s.Objectives.Add(a); s.Objectives.Add(b); }
             s.Own.Add(Corps(1, 200f, 20000f));
+            s.Own.Add(Corps(2, 200f, 20000f));   // each sector that faces enemy ground keeps a hold (D11), so the second target has a free body of its own
             var state = StateOn(97);
             Plan(s, state);
             AssertEqual(98, state.ChallengerObjective, "lower id first, reversed=" + reversed);
@@ -1582,8 +1594,15 @@ internal static class TheaterPlannerTests
             s.Areas.Add(new AreaRecord { Index = 10 + i, X = i * 100f, Z = 0f, EdgeX = new[] { i * 100f }, EdgeZ = new[] { 0f }, Importance = 1f, SupplyCapacity = 100f });
         s.Supply.Add(Iip(501, 100f, alliance));
         s.Supply.Add(Iip(503, 300f, alliance));
+        s.Own.Add(Corps(GuardId, 0f, 9000f));   // the capital guard: D11's floor always keeps the minimum at the capital
         return s;
     }
+
+    // D11 (capital floor): the floor is never below the minimum strength, so a fixture that wants a mass keeps a corps at the
+    // capital. A test about the capital's own exposure takes it out.
+    private const int GuardId = 900;
+
+    private static void DropGuard(CampaignSnapshot s) => s.Own.RemoveAll(f => f.InstanceId == GuardId);
 
     // Objectives 98 (x 100) and 99 (x 300), a corps between them at x 200.
     private static CampaignSnapshot TwoTargets(float importance98, float importance99)
@@ -1691,7 +1710,7 @@ internal static class TheaterPlannerTests
 
     private static float BalanceAt(CampaignSnapshot s, ITerrainLineProbe probe, int objectiveId)
     {
-        if (s.Own.Count == 0) s.Own.Add(Corps(1, 200f, 20000f));
+        if (s.Own.TrueForAll(f => f.InstanceId == GuardId)) s.Own.Add(Corps(1, 200f, 20000f));
         return Candidate(s, probe, objectiveId).Balance;
     }
 

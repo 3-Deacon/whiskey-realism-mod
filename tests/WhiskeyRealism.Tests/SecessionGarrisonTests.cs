@@ -62,8 +62,11 @@ internal static class SecessionGarrisonTests
             ObjectiveId = KentuckyObjective, StateId = KentuckyState, StateAlliance = stateAlliance,
             Live = SecessionRules.IsLive(stateAlliance, csaSupport), HasTown = true, TownX = 300f, TownZ = 0f
         });
+        s.Own.Add(Corps(GuardId, 0f, 9000f));   // the capital guard: D11's floor is never under the minimum strength, so the capital always keeps one
         return s;
     }
+
+    private const int GuardId = 900;
 
     private static FormationRecord Corps(int id, float x, float strength, int state = -1)
     {
@@ -274,7 +277,7 @@ internal static class SecessionGarrisonTests
         // The replacement is capped at one, whatever the need: valuable enemy ground by the town makes the presumed need 10000, which a
         // 6000-man corps does not meet, and three such free corps are available; still only one is posted.
         var presumed = Day(KentuckyState);
-        presumed.Objectives.Add(new ObjectiveRecord { ObjectiveId = 50, X = 380f, Z = 0f, HolderAlliance = 1, Available = false, Importance01 = 1f });
+        presumed.Objectives.Add(new ObjectiveRecord { ObjectiveId = 50, X = 380f, Z = 0f, HolderAlliance = 1, Available = false, Importance01 = 0.5f });
         for (int i = 0; i < 3; i++) presumed.Own.Add(Corps(5 + i, 130f + 20f * i, 6000f));
         var presumedPlan = Plan(presumed, new PlannerState());
         var presumedPost = presumedPlan.Garrisons[0];
@@ -608,6 +611,7 @@ internal static class SecessionGarrisonTests
 
         // A need that takes two: an army of 50000 (30000), one West corps holding (9000), the garrison's 4000: 17000 -> two corps of 9000.
         var big = FlagAlone(4000f, 50000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
+        big.Own[big.IndexOfOwn(GuardId)] = Corps(GuardId, 0f, 14000f);   // the capital's floor (the minimum plus this army's weight) is met by its guard, so corps 1 stays the town's hold
         var bigPlan = Plan(big);
         AssertNear(17000f, bigPlan.Garrisons[0].Need, 1f, "30000 - 9000 - 4000: " + bigPlan.Garrisons[0].Need);
         AssertEqual(2, bigPlan.Garrisons[0].InstanceIds.Count, "two corps are needed: " + string.Join(",", bigPlan.Garrisons[0].InstanceIds));
@@ -624,6 +628,7 @@ internal static class SecessionGarrisonTests
 
         // The hold already kept covers the army: nothing is needed (the same army is not counted twice).
         var covered = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), Corps(2, 220f, 9000f), Corps(3, 700f, 9000f), Corps(4, 720f, 9000f));
+        covered.Own[covered.IndexOfOwn(GuardId)] = Corps(GuardId, 0f, 8800f);   // meets the capital's floor but leaves the town's sector short, so both corps are its hold reserve (a guard in the sector counts toward its hold first)
         var coveredPlan = Plan(covered);
         AssertNear(0f, coveredPlan.Garrisons[0].Need, 1f, "two corps hold 18000 against the army: the garrison needs nothing more");
         AssertEqual(0, coveredPlan.Garrisons[0].InstanceIds.Count, "nobody is posted");

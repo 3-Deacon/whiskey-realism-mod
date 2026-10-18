@@ -1189,7 +1189,7 @@ internal static class ConstructionSteeringTests
         string planner = Src("Strategic/Planner/CampaignPlannerRuntime.cs");
         AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);"), "the review reads the ledger's held set once");
         AssertEqual(1, CountOccurrences(planner, "CollectHeldBuilders("), "from one source");
-        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);"), "and hands it to G3's plan");
+        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);"), "and hands it to G3's plan");
         AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "and hands them to the allocator");
         string allocator = Src("Strategic/Planner/ForceAllocator.cs");
         string run = BodyOf(allocator, "internal void Run(Allocation allocation)");
@@ -1311,6 +1311,7 @@ internal static class ConstructionSteeringTests
             w.Own.Add(ExecutorFixtures.Corps(1, 10f, 20000f));    // the builder: nearest the capital, alone in its sector
             w.Own.Add(ExecutorFixtures.Corps(2, 300f, 25000f));
             w.Own.Add(ExecutorFixtures.Corps(3, 320f, 25000f));
+            w.Own.Add(ExecutorFixtures.Corps(4, 0f, 6000f));      // the baseline guard: D11's floor is never under the minimum strength
             if (threat) w.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 40000f));
             sectors = ExecutorFixtures.Sectors(w);
             plan = TheaterPlanner.Plan(w, sectors, null, ExecutorFixtures.State(), null, null, ExecutorFixtures.Speed(), out _);
@@ -1320,7 +1321,7 @@ internal static class ConstructionSteeringTests
         }
         var ledger = new DepotTaskLedger();
         var w1 = W(0, false, out _, out var p1, out var a1);
-        AssertEqual(0f, p1.CapitalFloorStrength, "fixture: no capital reserve on the first review");
+        AssertEqual(ForceAllocator.MinGarrisonStrength, p1.CapitalFloorStrength, "fixture: the first review's capital reserve is the baseline minimum, met by its own guard");
         AssertTrue(a1.TryGet(1, out var first) && first.Role == FormationRole.DepotBuilder, "fixture: the formation alone in its sector is the depot builder");
         ledger.Sync(p1, a1, w1, null);
         AssertTrue(ledger.Tasks.Count == 1 && ledger.Tasks[0].State == DepotTaskState.Marching && ledger.HoldsBuilder(1), "the task starts Marching and holds it");

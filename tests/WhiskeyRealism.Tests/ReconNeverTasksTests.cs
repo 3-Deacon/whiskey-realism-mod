@@ -160,6 +160,7 @@ internal static class ReconNeverTasksTests
     private static CampaignSnapshot OneReadyFormation()
     {
         var s = Base();
+        s.Own.Add(CapitalGuard());
         s.Own.Add(Corps(1, 330f, 4000f));
         s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
         return s;
@@ -247,7 +248,8 @@ internal static class ReconNeverTasksTests
     private static void EveryPlannerRowThatCarriesANameQuotesIt()
     {
         var offenders = new List<string>();
-        var rx = new System.Text.RegularExpressions.Regex("\" ?(unit|commander|displaced|post|builder|reseated|to|from)=\" \\+ (?!TelemetryLegacyParser\\.Quote\\()(?!fromX)");
+        // from=fromX/fromZ are numbers, and [EnemyPicture]'s displaced= is a count of anchors (plan F3's smoke row), not a name.
+        var rx = new System.Text.RegularExpressions.Regex("\" ?(unit|commander|displaced|post|builder|reseated|to|from)=\" \\+ (?!TelemetryLegacyParser\\.Quote\\()(?!fromX)(?!p\\.DisplacedCount)");
         int rows = 0;
         foreach (string path in System.IO.Directory.GetFiles(TestFixtures.FindRepoPath("src/WhiskeyRealism/Strategic/Planner"), "*.cs"))
         {
@@ -382,6 +384,7 @@ internal static class ReconNeverTasksTests
         AssertEqual(0, counts.Free, "but a role claimed it: " + counts.Row(0));
         // A quiet map: nothing is claimed, so every ready formation is free or the main effort's mass, and the two are told apart.
         var open = Base();
+        open.Own.Add(CapitalGuard());
         for (int i = 1; i <= 4; i++) open.Own.Add(Corps(i, 100f + 20f * i, 4000f));
         var calm = Review(open);
         var calmCounts = ReconStep.CountsOf(calm.S, calm.Ledger, calm.Tasks, calm.Allocation);
@@ -454,12 +457,20 @@ internal static class ReconNeverTasksTests
         return s;
     }
 
+    // D11: the capital's floor is never under the minimum strength, so every world keeps a guard at the capital. It stands in vanilla's
+    // capital-defence list, as the smoke's body does: CanMove refuses it as a scout, so it adds nothing to the scout pool.
+    private static FormationRecord CapitalGuard()
+    {
+        return Corps(900, 0f, 5600f, 3, FormationFlags.CapitalDefense);
+    }
+
     // Body 1: ready, 9563 strong, in vanilla's capital-defence list (CanMove refuses it as a scout; the mass takes it). Unready 9, 10 and
     // the busy 15 cover the West's need (6000); the busy 13, 14 cover two thirds of the East's (9000) and the ready 3000-man
     // formation 2 is the East hold reserve that completes it.
     private static CampaignSnapshot SmokeUnion(FormationFlags bodyFlags = FormationFlags.CapitalDefense, bool withReserve = true, bool secondEastBusy = true)
     {
         var s = Base();
+        s.Own.Add(CapitalGuard());
         s.Own.Add(Corps(1, 100f, 9563f, 3, bodyFlags));
         if (withReserve) s.Own.Add(Corps(2, 760f, 3000f));
         s.Own.Add(Corps(9, 200f, 4000f, 1));
@@ -782,14 +793,15 @@ internal static class ReconNeverTasksTests
         var drawn = Review(SmokeUnion());
         var row = ReconStep.CountsOf(drawn.S, drawn.Ledger, drawn.Tasks, drawn.Allocation).Row(0);
         AssertContains(row, " tasks=" + drawn.Tasks.Count + " unfilled=" + (drawn.Tasks.Count - 1) + " ", "one task has its scout: " + row);
-        AssertContains(row, " listed=1 why=claimed-recon pool=1 free=0 mass=0", "the capital-defence body is named, the one formation the pick can take went to the first task and the others say so: " + row);
-        AssertEqual(1, ReconPlanner.ListedCount(SmokeUnion(FormationFlags.InOffensiveOps)), "an offensive-operations entry is listed too");
-        AssertEqual(0, ReconPlanner.ListedCount(SmokeUnion(0)), "an unlisted body is not");
+        AssertContains(row, " listed=2 why=claimed-recon pool=1 free=0 mass=0", "the capital-defence body and the capital guard (also on vanilla's list) are named, the one formation the pick can take went to the first task and the others say so: " + row);
+        int guardOnly = ReconPlanner.ListedCount(SmokeUnion(0));
+        AssertEqual(1, guardOnly, "an unlisted body is not listed: only the capital guard is");
+        AssertEqual(guardOnly + 1, ReconPlanner.ListedCount(SmokeUnion(FormationFlags.InOffensiveOps)), "an offensive-operations entry is listed too");
         var busyListed = SmokeUnion(0);
         var inBattle = busyListed.Own[busyListed.IndexOfOwn(13)];
         inBattle.Flags |= FormationFlags.CapitalDefense;
         busyListed.Own[busyListed.IndexOfOwn(13)] = inBattle;
-        AssertEqual(0, ReconPlanner.ListedCount(busyListed), "a busy formation is not massable, so its list entry says nothing about the mass");
+        AssertEqual(guardOnly, ReconPlanner.ListedCount(busyListed), "a busy formation is not massable, so its list entry says nothing about the mass");
     }
 
     // The probe/screen is a question, not a post: answered by sight or a fresh belief, the task is gone and the formation goes back to
@@ -819,6 +831,7 @@ internal static class ReconNeverTasksTests
         s.Objectives.Clear();
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.6f });
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 700f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.6f });
+        s.Own.Add(Corps(900, 0f, 30000f, 3, FormationFlags.CapitalDefense));   // the capital guard, sized for the floor the 300000 army in reach of the capital raises
         for (int i = 0; i < 8; i++) s.Own.Add(Corps(i + 1, 450f + 30f * i, 7000f));
         s.Beliefs.Add(ExecutorFixtures.Belief(410f, 0f, beliefAtFirst));
         if (beliefAtSecond > 0f) s.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, beliefAtSecond));
@@ -855,6 +868,7 @@ internal static class ReconNeverTasksTests
         s.Objectives.Clear();
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceFirst });
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 700f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceSecond });
+        s.Own.Add(CapitalGuard());
         for (int i = 0; i < 8; i++) s.Own.Add(Corps(i + 1, 450f + 30f * i, 7000f));
         if (beliefAtFirst > 0f) s.Beliefs.Add(ExecutorFixtures.Belief(410f, 0f, beliefAtFirst));
         return s;
@@ -1267,6 +1281,7 @@ internal static class ReconNeverTasksTests
     private static CampaignSnapshot EastWithAnUnreadyHolder()
     {
         var s = Base();
+        s.Own.Add(CapitalGuard());
         s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
         s.Own.Add(Corps(9, 200f, 4000f, 1));
         s.Own.Add(Corps(10, 220f, 4000f, 1));
@@ -1347,6 +1362,7 @@ internal static class ReconNeverTasksTests
     private static void AReservedFormationPinnedAsABuilderIsNoLongerCounted()
     {
         var s = Base();
+        s.Own.Add(CapitalGuard());
         s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
         s.Own.Add(Corps(9, 200f, 4000f, 1));
         s.Own.Add(Corps(10, 220f, 4000f, 1));
@@ -1379,18 +1395,19 @@ internal static class ReconNeverTasksTests
         s.Own.Add(Corps(9, 200f, 4000f, 1));
         s.Own.Add(Corps(10, 220f, 4000f, 1));
         s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
-        s.Own.Add(Corps(31, 755f, 6000f));             // nearest the capital: the capital reserve
+        s.Own.Add(Corps(31, 755f, 7000f));             // nearest the capital: the capital reserve (D11: the minimum plus the weighted threat, met by it alone)
         s.Own.Add(Corps(2, 800f, 1000f));              // ready, nearest the believed army
         s.Own.Add(Corps(3, 790f, 5000f));              // ready, behind it
         s.Beliefs.Add(ExecutorFixtures.Belief(900f, 0f, 12000f));
         var day = Review(s);
         int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
         AssertEqual(FormationRole.CapitalGuard, Of(day.Allocation, 31).Role, "31 is the capital guard");
-        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 3).Reason, "3 stays in the East reserve");
         float need = 0f;
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
         AssertNear(7200f, need, 1f, "the East need");
-        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 1000 is drawn: the guard's 6000 and the 5000 still hold the East");
+        // D11's floor (the minimum plus the weighted threat) needs a guard of 7000 here, which with the 1000 meets the 7200 alone, so the
+        // 5000 is not in the reserve and either ready formation may be drawn: one is, and the East still holds its need with the guard counted.
+        AssertEqual(1, Roles(day.Allocation, FormationRole.Recon), "one ready formation is drawn: the guard's 7000 with the other still hold the East");
         AssertFalse(Refused(day.Allocation), "nothing refused");
         AssertTrue(HeldAtEnd(day, east, true) >= need, "the East holds " + HeldAtEnd(day, east, true) + " with its guard, against " + need);
     }
@@ -1406,7 +1423,7 @@ internal static class ReconNeverTasksTests
         s.Own.Add(Corps(9, 200f, 4000f, 1));
         s.Own.Add(Corps(10, 220f, 4000f, 1));
         s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
-        s.Own.Add(Corps(31, 760f, 4000f));             // the capital reserve: nearest the capital that has anything, standing in the East
+        s.Own.Add(Corps(31, 760f, 8000f));             // the capital reserve: nearest the capital that has anything, standing in the East (met by it alone)
         s.Own.Add(Corps(2, 820f, 1000f));
         s.Own.Add(Corps(3, 830f, 6500f));
         s.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, 12000f));
@@ -1443,7 +1460,7 @@ internal static class ReconNeverTasksTests
         s.Own.Add(Corps(9, 200f, 4000f, 1));
         s.Own.Add(Corps(10, 220f, 4000f, 1));
         s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
-        s.Own.Add(Corps(31, 755f, 6000f));
+        s.Own.Add(Corps(31, 755f, 7000f));
         s.Own.Add(Corps(3, 790f, 5000f));
         s.Beliefs.Add(ExecutorFixtures.Belief(900f, 0f, 12000f));
         var day = Review(s);
@@ -1458,7 +1475,7 @@ internal static class ReconNeverTasksTests
         away.CapitalZ = 0f;
         away.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
         away.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
-        away.Own.Add(Corps(31, 760f, 6000f));
+        away.Own.Add(Corps(31, 760f, 8000f));
         away.Own.Add(Corps(3, 790f, 5000f));
         away.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, 12000f));          // near the capital, so it keeps a floor and a guard
         var other = Review(away);
@@ -1467,8 +1484,9 @@ internal static class ReconNeverTasksTests
         AssertTrue(other.Allocation.Shortfalls.Contains(15), "nor does it cover the capital's sector from where it stands: " + string.Join(",", other.Allocation.Shortfalls));
     }
 
-    // A stale belief (confidence 0.3) leaves a presumption: the East need is 20000, set by the remembered army, not by the believed term
-    // (0.6 x 20000 x 0.3 = 3600). The need is presumption-backed, so the scout goes, and the shortfall names the nearest immobile holder.
+    // A stale belief (confidence 0.3) leaves a presumption: D11's East need is 0.6 x (the live 6000 + the faded 14000 placed there) = 12000,
+    // the faded men held against at the same ratio as the seen ones, not the believed term alone (0.6 x 20000 x 0.3 = 3600). The need is
+    // presumption-backed, so the scout goes, and the shortfall names the nearest immobile holder.
     private static CampaignSnapshot EastWithAStaleArmy(float busyAX, float busyBX, float confidence = 0.3f)
     {
         var s = SmokeUnion();
@@ -1486,24 +1504,25 @@ internal static class ReconNeverTasksTests
         int east = ExecutorFixtures.Sectors(day.S).SectorAt(800f, 0f);
         float need = 0f, believed = 0f;
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) { need = sp.HoldNeed; believed = sp.BelievedHold; }
-        AssertNear(20000f, need, 1f, "the remembered army sets the need");
+        AssertNear(12000f, need, 1f, "0.6 x (the live 6000 + the faded 14000): the remembered army sets the need");
         AssertTrue(believed > 0f && believed < need, "a believed force exists but does not drive it: " + believed);
-        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "so the East gives its scout though it cannot cover 20000 without it");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "so the East gives its scout though it cannot cover 12000 without it");
         AssertFalse(Refused(day.Allocation), "nothing refused");
-        // A fresher belief (confidence 0.45: 0.6 x 20000 x 0.45 = 5400) puts a believed term above the floor, still under the presumption that sets the need: the
-        // sector is still presumption-backed, not belief-driven.
+        // A fresher belief (confidence 0.45: 0.6 x 20000 x 0.45 = 5400) puts a believed term above the floor, still under half the need that the
+        // faded men share (D11): the sector is still presumption-backed, not belief-driven.
         var fresher = Review(EastWithAStaleArmy(790f, 800f, 0.45f));
         float need2 = 0f, believed2 = 0f;
         foreach (var sp in fresher.Plan.Sectors) if (sp.SectorId == east) { need2 = sp.HoldNeed; believed2 = sp.BelievedHold; }
-        AssertNear(20000f, need2, 1f, "the remembered army still sets the need");
+        AssertNear(12000f, need2, 1f, "the live and the faded men still sum to the same need");
         AssertTrue(believed2 > ForceAllocator.MinGarrisonStrength && believed2 < need2 - 0.01f, "a believed term above the floor but under the need: " + believed2);
         AssertEqual(FormationRole.Recon, Of(fresher.Allocation, 2).Role, "and the East still gives its scout");
         AssertFalse(Refused(fresher.Allocation), "nothing refused");
     }
 
-    // The threshold between the two causes of a need: the believed term close to the presumption (three remembered armies of 20000 at confidence
-    // 0.49: the believed term is 0.6 x 29400 = 17640 against a presumption of 20000, 0.88 of it) is still not what sets the need, so the
-    // scout still goes. Only a believed term that reaches the need makes the sector belief-driven.
+    // The threshold between the two causes of a need: the believed term close to the half of the need that the live men make (three remembered
+    // armies of 20000 at confidence 0.49: the believed term is 0.6 x 29400 = 17640 against a need of 0.6 x (29400 live + 30600 faded) = 36000,
+    // 0.49 of it) is still not what sets the need, so the scout still goes. Only a believed term of at least the rest of the need (D11: the live
+    // men being at least the faded ones) makes the sector belief-driven.
     private static void ABelievedTermNearTheNeedButUnderItIsStillPresumptionBacked()
     {
         var s = SmokeUnion();
@@ -1517,8 +1536,8 @@ internal static class ReconNeverTasksTests
         int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
         float need = 0f, believed = 0f;
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) { need = sp.HoldNeed; believed = sp.BelievedHold; }
-        AssertNear(20000f, need, 1f, "the remembered army sets the need");
-        AssertTrue(believed > 0.85f * need && believed < need - 0.01f, "the believed term is near the need and under it: " + believed + " / " + need);
+        AssertNear(36000f, need, 1f, "the live and the faded men set the need");
+        AssertTrue(believed > 0.45f * need && believed < 0.5f * need - 0.01f, "the believed term is near half the need and under it: " + believed + " / " + need);
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the East still gives its scout");
         AssertFalse(Refused(day.Allocation), "nothing refused");
     }

@@ -698,7 +698,7 @@ internal static class CapitalAndReplacementTests
         AssertTrue(defensivePrefix.Contains("CapitalFloorPolicy.VanillaNeed("), "#4's need is the belief-based formula");
         AssertTrue(defensivePrefix.Contains("EnemyDetectionRuntime.BeliefsFor(allianceId)"), "...on the side's beliefs");
         AssertTrue(defensivePrefix.Contains("CapitalFloorPolicy.PickPledge(allocation, vanillaNeed, CandidatePool)"), "#4 pledges the allocation's guard");
-        AssertTrue(defensivePrefix.Contains("EmitCapitalFloor(allianceId, vanillaNeed, plan.CapitalFloorStrength, pledged);"), "#4 reports the floor");
+        AssertTrue(defensivePrefix.Contains("EmitCapitalFloor(allianceId, vanillaNeed, plan.CapitalFloorStrength, plan.CapitalReach, pledged);"), "#4 reports the floor");
         AssertTrue(defensivePrefix.Contains("PatchFirstFire.Mark(\"campaign.patch.defensive-ops\");"), "first-fire id kept");
         AssertFalse(defensive.Contains("enemyunits"), "#4 no longer reads vanilla's enemy list");
         foreach (string gone in new[] { "CICs", "Effective(", "DirectorMemories", "EraStageManager", "PersonalityVector", "SearchRadiusMultiplier" })
