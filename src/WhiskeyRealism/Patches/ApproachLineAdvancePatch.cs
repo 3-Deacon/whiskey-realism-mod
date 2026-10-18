@@ -9,7 +9,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // ApproachLineAdvancePatch (provisional #129, ordinal assigned at merge) - a skipping Prefix on Regiment.CheckFormationChange, approved by the
+    // ApproachLineAdvancePatch (#132) - a skipping Prefix on Regiment.CheckFormationChange, approved by the
     // user 2026-10-17 ("Yes, allow it (Recommended)": a patch that skips the game's re-column step only for AI regiments Whiskey has ordered to advance or
     // hold in line near the enemy, never the player's units, never road marches far from the enemy, with its own on/off switch).
     //
