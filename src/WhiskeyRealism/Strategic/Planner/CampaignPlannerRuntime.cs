@@ -40,6 +40,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // unreliable days (telemetry: the row reports it; the allocator never counts the player, C4).
         // Per campaign; the sidecar carries the run (Export/Restore).
         private static readonly string[] LastAllocationRow = new string[2];
+        // Foresight F3: the [EnemyPicture] and [CapitalThreat] rows' last signatures (rows on change). Per campaign.
+        private static readonly string[] LastPictureRow = new string[2];
+        private static readonly string[] LastCapitalThreatRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
         // G1b: each alliance's recon missions and this review's tasks (pooled), the last [Recon] row's counts
@@ -73,6 +76,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 States[a] = new PlannerState();
                 LastPlanRow[a] = null;
                 LastAllocationRow[a] = null;
+                LastPictureRow[a] = null;
+                LastCapitalThreatRow[a] = null;
                 NonCompliance[a].Reset();
                 Recon[a] = new ReconMissionLedger();
                 ReconTasks[a].Clear();
@@ -134,10 +139,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);
                     TheaterPlan plan;
                     string trace;
+                    EnemyPicture picture;
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
-                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, gaveUp, heldBuilders);
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);
                     }
                     // G8: the ordinary garrison posts join D8's secession posts in the plan, where the allocation seats both.
                     GarrisonRuntime.PlanPosts(snapshot, plan);
@@ -162,6 +168,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
+                    EmitPicture(snapshot, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
                     EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
@@ -412,6 +419,24 @@ namespace WhiskeyRealism.Strategic.Planner
                 .WithDecision("trace", plan.SwitchReason ?? "none", row)
                 .WithField("date", year.ToString("D4") + "-" + month.ToString("D2") + "-" + day.ToString("D2"))
                 .WithField("candidates", trace ?? ""));
+        }
+
+        // [EnemyPicture] and [CapitalThreat] on change of their text (one row per alliance per change), dated after the compare. The picture
+        // is built and its row written with the picture flag off too, as telemetry.
+        private static void EmitPicture(CampaignSnapshot snapshot, TheaterPlan plan, EnemyPicture picture)
+        {
+            int a = plan.Alliance;
+            if (picture == null || a < 0 || a >= LastPictureRow.Length) return;
+            string row = EnemyPicture.Row(picture, snapshot);
+            if (!string.Equals(LastPictureRow[a], row, StringComparison.Ordinal))
+            {
+                LastPictureRow[a] = row;
+                TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+            }
+            string capital = EnemyPicture.CapitalRow(plan, picture, snapshot);
+            if (string.Equals(LastCapitalThreatRow[a], capital, StringComparison.Ordinal)) return;
+            LastCapitalThreatRow[a] = capital;
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(capital, plan.DaySerial), TelemetryLayer.Campaign);
         }
 
         // A map-group player (stage F's PlayerMapGroup) stands in this alliance's formations only on the

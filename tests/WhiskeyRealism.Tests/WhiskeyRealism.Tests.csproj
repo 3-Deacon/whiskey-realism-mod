@@ -100,6 +100,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveIssue.cs" Link="Planner\MoveIssue.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignWithholdView.cs" Link="Planner\CampaignWithholdView.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReservesRow.cs" Link="Planner\ReservesRow.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyPicture.cs" Link="Planner\EnemyPicture.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseFilterTally.cs" Link="DefenseFilterTally.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\DefenseInterceptionGate.cs" Link="DefenseInterceptionGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringRules.cs" Link="Planner\SteeringRules.cs" />

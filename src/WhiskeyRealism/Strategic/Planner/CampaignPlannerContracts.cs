@@ -366,6 +366,10 @@ namespace WhiskeyRealism.Strategic.Planner
         public float MainRequiredRatio;
         public List<SectorPlan> Sectors = new List<SectorPlan>();
         public float CapitalFloorStrength;
+        // Foresight F3 (D11 requirement-capital-window and -floor): the numbers behind the capital floor, for the [CapitalThreat] row and
+        // the [CapitalFloor] row. CapitalReach is the race, max(RelocationRange, CapitalReliefDays x CapitalCorpsPerDay); CapitalWeighted
+        // vanilla's weight (11727) over the picture's elements inside it; CapitalThreat01 the 0.6 trigger's input (baseline excluded).
+        public float CapitalReach, CapitalWeighted, CapitalThreat01, CapitalReliefDays, CapitalCorpsPerDay;
         public List<DepotTask> DepotTasks = new List<DepotTask>();
         public string SwitchReason;
         public string PriorId;

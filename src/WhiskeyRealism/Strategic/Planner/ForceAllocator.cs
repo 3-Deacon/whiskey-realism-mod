@@ -838,7 +838,12 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 int k = _roleSector[i];
                 if (k < 0 || k >= _sectorCount) return true;
-                bool beliefDriven = _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
+                // D9: a sector's hold is belief-driven when its believed part is above the minimum and at least the rest of the need (the
+                // presumed men it holds against at the same ratio): foresight's need is the sum of the two, so the believed part is at least
+                // the presumed part. Picture off: the earlier test, the need being the larger of the two.
+                bool beliefDriven = PlannerSettings.ForesightPicture
+                    ? _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - _believed[k]
+                    : _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
                 return !beliefDriven || _held.Sector[k] - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
             }
 

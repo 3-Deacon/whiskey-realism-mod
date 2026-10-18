@@ -23,6 +23,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public float CapitalX, CapitalZ;
         public bool HasCapital;
+        // The opposing major alliance's public facts (foresight F3, D11 requirement-enemy-total): its capital (position and name, as the strategy
+        // screen and the map show them) and its total men in the field, GameVars.alliance[e].troopsfielded for e = 1 - Alliance (alliances 0
+        // and 1 only). NaN is unknown: an unreadable alliance, or Europe's snapshot. Read by EnemyPicture.Build.
+        public float EnemyCapitalX, EnemyCapitalZ;
+        public bool HasEnemyCapital;
+        public string EnemyCapitalName;
+        public float EnemyTroopsFielded = float.NaN;
         public float RelocationRange;       // GamePrefs.aimaximumdistancetosearchforunitrelocations
         // GamePrefs.theatersize is a Vector2 (49166): IsWithinOperationsTheater tests x against
         // theatersize.x and z against theatersize.y (17105).
@@ -59,6 +66,10 @@ namespace WhiskeyRealism.Strategic.Planner
 
             CapitalX = CapitalZ = 0f;
             HasCapital = false;
+            EnemyCapitalX = EnemyCapitalZ = 0f;
+            HasEnemyCapital = false;
+            EnemyCapitalName = null;
+            EnemyTroopsFielded = float.NaN;
             RelocationRange = 0f;
             TheaterHalfExtentX = TheaterHalfExtentZ = 0f;
             OffensiveDominance = 0f;
