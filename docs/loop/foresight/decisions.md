@@ -60,3 +60,12 @@ Spec: D11 requirement-commitment-mover, requirement-picture-partition, requireme
 ## Integrator decision, 2026-10-18 (phase 1 build gap 20, the mark-day decode)
 
 D11's `MarkDay` decode contradicts its own pins (gap 20 in gaps-build-phase1.md). The builder shipped the inverse the pins need: the earliest calendar date whose day window holds the stored year fraction, with a float32 slack. Kept. The encoding cannot tell 31 January after 10:30 from 1 February before 12:27, so no decode is exact, and a mark one day early in that overlap changes no belief that fades over days. If vanilla has its own inverse of the encoding, the planner uses that instead. The user may override this.
+
+## Resolved at F10a, 2026-10-18 (gap 20, verified on ba13f602)
+
+The verify of F4, F4b and F5 (covered commit `ba13f602`) read the conditional of the decision above. Two facts to keep, so no later seat reopens it:
+
+1. **The vanilla-inverse condition came out negative.** Vanilla has two inverses of `GetCampaignFloatingDate` and neither meets the pins. `Tools.GetDateFromFraction` (152985-153012) returns month 13 of the previous year for 1 January, 1 February and 31 January 23:00, "31 February" for 1 March, "31 June" for 1 July 06:00 and 1/13 for 31 December 23:00. The mark tooltip (143024) computes today minus `ceil((now - timeshown) x 365.25)` days, the straight multiplication D11 rejects (it misorders month ends by up to 2 days). The planner keeps `MarkRules.MarkDay` and does not switch to either.
+2. **At the year boundary the decode errs one day late, not early.** The "worst case one day early" above holds inside the month overlap (31 January after about 10:30 and 1 February before about 12:27 store the same value). At the year boundary, 31 December after about 10:30 stores at or above the next year and decodes as 1 January (capped at today): one day late. A mark a day off in either direction changes no belief that fades over days. The spec's *Mark day* paragraph (requirement-marks-player-side) and its phase 1 as-built note state the rule as built.
+
+The user may override this.
