@@ -13,16 +13,16 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 ## Scenarios and cases
 
 ### S1 Enemy picture (F3)
-- TC-PIC-ONCE `EveryManIsPlacedOnce`; TC-PIC-FADE `AFadingBeliefKeepsItsStrengthWhereLastSeen`; TC-PIC-EXPIRE `AnExpiredBeliefReturnsItsMenToTheAnchors`; TC-PIC-ANCHORS `CapitalTakesItsShareWhenUnscouted`, `ObjectiveAnchorsShareByImportance`, `AfloatBeliefsAddNoLandMass`, `AlliancesTwoToFourIgnored`; TC-PIC-DISPLACE `AScoutedAnchorPassesItsShareOn`, `EveryAnchorScoutedLeavesTheRestAtTheCapital`; TC-PIC-SUM `EstimateIsBelievedPlusPresumed`, `AScoutedTargetStillCarriesUnscoutedAnchorsNearIt`, `BalanceStillRanksByTheBelievedLayer`; TC-PIC-UNKNOWN `UnknownTotalSpreadsNothing`; flag `FlagOffRestoresTheD2Presumption`.
+- TC-PIC-ONCE `EveryManIsPlacedOnce`; TC-PIC-FADE `AFadingBeliefKeepsItsStrengthWhereLastSeen`; TC-PIC-EXPIRE `AnExpiredBeliefReturnsItsMenToTheAnchors`; TC-PIC-ANCHORS `CapitalTakesItsShareWhenUnscouted`, `ObjectiveAnchorsShareByImportance`, `AfloatBeliefsAddNoLandMass`, `AlliancesTwoToFourIgnored`; TC-PIC-DISPLACE `AScoutedAnchorPassesItsShareOn`, `EveryAnchorScoutedLeavesTheRestAtTheCapital`; TC-PIC-SUM `EstimateIsBelievedPlusPresumed`, `AScoutedTargetStillCarriesUnscoutedAnchorsNearIt`, `BalanceStillRanksByTheBelievedLayer`; TC-PIC-UNKNOWN `UnknownTotalSpreadsNothing`, `NoAnchorMeansUnplacedNotUnaccounted`; TC-PIC-BUILD `PictureBuiltOncePerReview`, `CapitalAnchorImportanceIsOne`; flags `FlagOffRestoresTheD2Presumption`, `FlagOffRestoresTheDepartmentSumAndTheOldScoutTest`.
 - TC-PIC-CONSERVE (SMOKE-30): every `[EnemyPicture]` row with `total` known has `believed + faded + unaccounted + unplaced` within 2 of `total`, or `unaccounted=0` with the last-seen sum above `total`. Count: `grep -c '"event":"EnemyPicture"'` against the rows passing that test (a `python3 -I` one-liner over the `fields`).
 
 ### S2 Hold need, release, eligibility (F3)
-- TC-HOLD-RATIO `HoldNeedHoldsUnseenMenAtTheHoldRatio`; TC-HOLD-165 `ASightingAt165DoesNotSwitchOffWashington` (FX-002A); TC-HOLD-FLOOR `FloorUsesOnlyUndisplacedImportance`; TC-HOLD-FACE `AnAnchorAloneMakesASectorFace`; TC-HOLD-DEPT `DepartmentNeedCountsEachElementOnce`; TC-HOLD-D9 `ASectorHoldingAgainstABelievedArmyStillRefusesAScout`.
+- TC-HOLD-RATIO `HoldNeedHoldsUnseenMenAtTheHoldRatio`; TC-HOLD-165 `ASightingAt165DoesNotSwitchOffWashington` (FX-002A); TC-HOLD-FLOOR `FloorUsesOnlyUndisplacedImportance`; TC-HOLD-FACE `AnAnchorAloneMakesASectorFace`; TC-HOLD-DEPT `DepartmentNeedCountsEachElementOnce`, `DepartmentNeedLandKindsWeightedTieToLowerSector`; TC-HOLD-D9 `ASectorHoldingAgainstABelievedArmyStillRefusesAScout`.
 - TC-REL-EVERY `AHoldIsReleasedOnlyWhenEveryElementItFacesIsAtTheTarget` (FX-002A: Romney does not release Manassas); TC-REL-NOTHING `ASectorFacingNothingReleasesNothing`.
-- TC-ELIG-MIN `ACapacityBelowTheLiveMinimumIsIneligible`; TC-ELIG-ODDS `OddsRuleUnchangedAboveTheMinimum`.
+- TC-ELIG-MIN `ACapacityBelowTheLiveMinimumIsIneligible`; TC-ELIG-ODDS `OddsRuleUnchangedAboveTheMinimum`, `RetainNeverReenablesBelowTheMinimum`.
 
 ### S3 Capital reach and floor (F3)
-- TC-CAP-REACH `CapitalReachIsTheLargerOfRangeAndTenRoadDays`; TC-CAP-WASH `WashingtonCountsTowardRichmondsFloor` (FX-002A); TC-CAP-RAILS `RailsNotCreditedInTheReach`; TC-CAP-BASE `FloorHasVanillasBaseline`; TC-CAP-THREAT `ThreatExcludesTheBaseline`; TC-CAP-VSFOUR `FloorIsNeverBelowFourVanillaNeed`.
+- TC-CAP-REACH `CapitalReachIsTheLargerOfRangeAndTenRoadDays`; TC-CAP-WASH `WashingtonCountsTowardRichmondsFloor` (FX-002A); TC-CAP-RAILS `RailsNotCreditedInTheReach`, `MissingSpeedArrayFallsBackToTheRange`; TC-CAP-BASE `FloorHasVanillasBaseline`; TC-CAP-THREAT `ThreatExcludesTheBaseline`; TC-CAP-VSFOUR `FloorIsNeverBelowFourVanillaNeed`.
 - TC-CAP-SMOKE (SMOKE-30): `[CapitalThreat] alliance=1` rows with `weighted>0` and `floor>=2000` on 100 % of review days while the Union holds Washington (baseline FX-BASE: `capitalThreat=0.00 floor=0` in every `CampaignPlan:trace` row); `switch=capital-threat` at most once per latch.
 
 ### S4 Spotting marks (F4)
@@ -30,7 +30,7 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 - TC-MARK-SMOKE (SMOKE-30): on both alliances, `[EnemyBeliefs]` with `marks>0` on at least one review in every 7 game days.
 
 ### S5 Covering force and Redeploy (F6)
-- TC-COV-CORRIDOR `CorridorBandAndBetweenness`; TC-COV-FWD `ForwardPostIsManassasJunctionIn002A`, `FairfaxInsideTheStandoffIsNotForward`; TC-COV-REAR `RearPostIsFredericksburgIn002A`, `KingGeorgeWithoutRailIsNotRear`, `ScenarioOneRangeMovesTheRearPost`; TC-COV-NONE `NoCorridorPlaceNoCoveringForce`, `CicSideHasNoCoveringForce`; TC-COV-NEED `NeedIsTheHoldRatioOfTheEnemyCapitalsEstimate`; TC-COV-MIN `NeedNeverBelowTheLiveMinimum`; TC-COV-INCUMBENT `IncumbentsKeepTheirPlace`; TC-COV-NEAREST `MembersNearestThePostWithTheHomeDiscount`, `PoolLimitedToTenDaysMarch`, `ACapitalGuardIsNeverACoveringMember`; TC-COV-WL `MapGroupPlayerNeverTheOnlyHolder`, `PlayerCommandNeverAMemberAndCountsNothing`, `CarryingGroupMayBeAMember`; TC-COV-BUSY `BusyFormationsAtThePostCount`; TC-COV-SECTOR `MembersCountInThePostsSectorOnly`; TC-COV-VERDICT `ForwardWhenMetElseRear`, `VerdictNeedsThreeReviews`; TC-COV-MASSFOR `MassForExcludesMembersExceptAgainstTheEnemyCapital`; TC-COV-POOLS `ScoutDrawDepotAndPostsNeverTakeAMember`; TC-COV-ROLE `MemberAtPostHoldsWithheldElseRedeploys`; TC-COV-DEFENCE `DefenceMayTakeAMemberAgainstAnEnemyNearThePost`, `OffenceNeverTakesAMember`; TC-COV-UNBIND (unbind cases of requirement-covering-lifecycle: capital lost, no place, flag off, target the enemy capital); TC-COV-SIDECAR `CoveringStateRoundTripsInTheSidecar`; `UnionSideCoversToo`.
+- TC-COV-CORRIDOR `CorridorBandAndBetweenness`, `NoForwardPostPostsAtTheRear`; TC-COV-FWD `ForwardPostIsManassasJunctionIn002A`, `FairfaxInsideTheStandoffIsNotForward`; TC-COV-REAR `RearPostIsFredericksburgIn002A`, `KingGeorgeWithoutRailIsNotRear`, `ScenarioOneRangeMovesTheRearPost`; TC-COV-NONE `NoCorridorPlaceNoCoveringForce`, `CicSideHasNoCoveringForce`; TC-COV-NEED `NeedIsTheHoldRatioOfTheEnemyCapitalsEstimate`; TC-COV-MIN `NeedNeverBelowTheLiveMinimum`; TC-COV-INCUMBENT `IncumbentsKeepTheirPlace`; TC-COV-NEAREST `MembersNearestThePostWithTheHomeDiscount`, `PoolLimitedToTenDaysMarch`, `ACapitalGuardIsNeverACoveringMember`; TC-COV-WL `MapGroupPlayerNeverTheOnlyHolder`, `PlayerCommandNeverAMemberAndCountsNothing`, `CarryingGroupMayBeAMember`; TC-COV-BUSY `BusyFormationsAtThePostCount`; TC-COV-SECTOR `MembersCountInThePostsSectorOnly`, `RedeployingMemberInThePostSectorCountsInG4`; TC-COV-VERDICT `ForwardWhenMetElseRear`, `VerdictNeedsThreeReviews`, `ForwardVerdictOnCountedStrength`, `EnemyCapitalPushLeavesTheCoveringStateUntouched`, `LostCapitalWritesNoneKey`; TC-COV-MASSFOR `MassForExcludesMembersExceptAgainstTheEnemyCapital`; TC-COV-POOLS `ScoutDrawDepotAndPostsNeverTakeAMember`, `HeldBuildersAndGiveUpsNotInThePool`; TC-COV-ROLE `MemberAtPostHoldsWithheldElseRedeploys`; TC-COV-DEFENCE `DefenceMayTakeAMemberAgainstAnEnemyNearThePost`, `OffenceNeverTakesAMember`; TC-COV-UNBIND (unbind cases of requirement-covering-lifecycle: capital lost, no place, flag off, target the enemy capital); TC-COV-SIDECAR `CoveringStateRoundTripsInTheSidecar`; `UnionSideCoversToo`.
 - TC-RED-PRIORITY `RedeployMovePriorityOrder`; TC-RED-TEMPO `RedeployNeedsNoTempoRelease`; TC-RED-WITHHOLD (a `return-home` and a `department-reinforcement` formation are withheld from offense only; a `covering-force` member from both pools with its exception).
 - TC-COV-CENSUS (SMOKE-30, first review): `[CoveringCorridor] alliance=1` names `forward=Manassas Junction rear=Fredericksburg`; otherwise `question-corridor-posts` is raised and the run stops.
 - TC-COV-SMOKE (SMOKE-30): criterion-covering-held (at least 90 % of review days after the third with a post and `members>=1`; `short` reported); criterion-axis-not-stripped (0 covering members in `MainEffort`, `Support` or `DepotBuilder` issue rows while `short>0`); guardrail A/B with `Enable Covering Force` off on the same save.
@@ -59,7 +59,7 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 - TC-INT-SMOKE (SMOKE-30): criterion-interception-restored (every alliance-0/1 #25 row `filter-observed`; baseline FX-BASE: 45 rows `removed=forbidden` for alliance 1) and its guardrail (`[Reserves] vanillaDefWithheld=0`).
 
 ### S11 Telemetry (F1)
-- TC-TEL-ISSUE `IssueRowNamesUnitRoleTargetObjectiveAndOrigin`, `IssueRowsNeverExceedTheDailyCap`; TC-TEL-TRACE `TraceCarriesEachCandidatesCoordinates`; TC-TEL-RESERVES `ReservesRowNamesCapitalAndHoldShares`, `ReservesRowSignatureUnchangedWhenNothingChanges`; TC-TEL-REASONS `DefenseFilterReasonsAreTalliedAndSorted`; TC-TEL-TAGS `NewRowsAreRegisteredInTheTagPolicy`.
+- TC-TEL-ISSUE `IssueRowNamesUnitRoleTargetObjectiveAndOrigin`, `IssueRowsNeverExceedTheDailyCap`; TC-TEL-TRACE `TraceCarriesEachCandidatesCoordinates`; TC-TEL-RESERVES `ReservesRowNamesCapitalAndHoldShares`, `ReservesRowSignatureUnchangedWhenNothingChanges`; TC-TEL-REASONS `DefenseFilterReasonsAreTalliedAndSorted`; TC-TEL-TAGS `NewRowsAreRegisteredInTheTagPolicy`, `RowNamesAreQuoted`, `ARefusedRetryWritesNoIssueRow`, `ReservesRowEveryReview`, `ReservesDefenceCountsReadYesterdaysAllocation`.
 
 ### S12 Budget (all)
 - criterion-review-budget (SMOKE-30 at 20x): `campaign.planner.review` under 4 ms and `campaign.planner.detect` under 2 ms per alliance (their scope thresholds); a Performance row over either is a failure.
@@ -69,29 +69,29 @@ Frozen at the plan's gate. `prove` fills the Result column and may add cases; it
 <!-- matrix:begin -->
 | Requirement | Spec | Test cases | Result | Defect or concession |
 |---|---|---|---|---|
-| requirement-enemy-total | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:270 | TC-PIC-UNKNOWN, TC-PIC-CONSERVE |  |  |
-| requirement-picture-partition | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:271 | TC-PIC-ONCE, TC-PIC-FADE, TC-PIC-EXPIRE, TC-PIC-ANCHORS, TC-PIC-DISPLACE, TC-PIC-SUM, TC-PIC-CONSERVE |  |  |
-| requirement-hold-need | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:282 | TC-HOLD-RATIO, TC-HOLD-165, TC-HOLD-FLOOR, TC-HOLD-FACE, TC-HOLD-DEPT, TC-HOLD-D9 |  |  |
-| requirement-hold-release | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:283 | TC-REL-EVERY, TC-REL-NOTHING |  |  |
-| requirement-candidate-floor-capacity | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:284 | TC-ELIG-MIN, TC-ELIG-ODDS |  |  |
-| requirement-marks-player-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:288 | TC-MARK-NEWEST, TC-MARK-BAND, TC-MARK-SMOKE |  |  |
-| requirement-marks-ai-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:289 | TC-MARK-CHANCE, TC-MARK-50, TC-MARK-OFFSET, TC-MARK-SEED, TC-MARK-FIDELITY, TC-MARK-SMOKE |  |  |
-| requirement-mark-beliefs | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:290 | TC-MARK-KEY, TC-MARK-NORETIRE, TC-MARK-SAMEDAY, TC-MARK-REVERSE, TC-MARK-NOSCOUT, TC-MARK-SIDECAR |  |  |
-| requirement-capital-window | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:294 | TC-CAP-REACH, TC-CAP-WASH, TC-CAP-RAILS, TC-CAP-SMOKE |  |  |
-| requirement-capital-floor | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:295 | TC-CAP-BASE, TC-CAP-THREAT, TC-CAP-VSFOUR, TC-CAP-SMOKE |  |  |
-| requirement-covering-post | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:300 | TC-COV-CORRIDOR, TC-COV-FWD, TC-COV-REAR, TC-COV-NONE, TC-COV-CENSUS |  |  |
-| requirement-covering-size | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:301 | TC-COV-NEED, TC-COV-MIN |  |  |
-| requirement-covering-members | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:302 | TC-COV-INCUMBENT, TC-COV-NEAREST, TC-COV-WL, TC-COV-BUSY, TC-COV-SECTOR |  |  |
-| requirement-covering-post-choice | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:303 | TC-COV-VERDICT |  |  |
-| requirement-covering-hold | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:304 | TC-COV-MASSFOR, TC-COV-POOLS, TC-COV-ROLE, TC-COV-DEFENCE, TC-COV-SMOKE |  |  |
-| requirement-covering-lifecycle | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:305 | TC-COV-UNBIND, TC-COV-SIDECAR |  |  |
-| requirement-redeploy-role | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:309 | TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD |  |  |
-| requirement-department-reinforcement | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:313 | TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-LIFE, TC-DEP-EXPIRE, TC-DEP-SMOKE |  |  |
-| requirement-commitment | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:317 | TC-COM-DIP, TC-COM-KEY, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE |  |  |
-| requirement-commitment-mover | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:318 | TC-COM-NOMARCH, TC-COM-WAIT, TC-COM-DELIST |  |  |
-| requirement-return-home | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:319 | TC-RET-SEND, TC-RET-LIFE, TC-RET-CAP, TC-RET-SMOKE |  |  |
-| requirement-depot-builder | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:323 | TC-DEPOT-READY, TC-DEPOT-SURPLUS, TC-DEPOT-AOV, TC-DEPOT-SMOKE |  |  |
-| requirement-live-min-strength | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:327 | TC-MIN-PUBLISH, TC-MIN-ONESITE, TC-MIN-SMOKE |  |  |
-| requirement-interception | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:331 | TC-INT-MODE, TC-INT-NOREMOVE, TC-INT-SMOKE |  |  |
-| requirement-telemetry | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:335 | TC-TEL-ISSUE, TC-TEL-TRACE, TC-TEL-RESERVES, TC-TEL-REASONS, TC-TEL-TAGS |  |  |
+| requirement-enemy-total | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:271 | TC-PIC-UNKNOWN, TC-PIC-CONSERVE |  |  |
+| requirement-picture-partition | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:272 | TC-PIC-ONCE, TC-PIC-BUILD, TC-PIC-FADE, TC-PIC-EXPIRE, TC-PIC-ANCHORS, TC-PIC-DISPLACE, TC-PIC-SUM, TC-PIC-CONSERVE |  |  |
+| requirement-hold-need | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:283 | TC-HOLD-RATIO, TC-HOLD-165, TC-HOLD-FLOOR, TC-HOLD-FACE, TC-HOLD-DEPT, TC-HOLD-D9 |  |  |
+| requirement-hold-release | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:284 | TC-REL-EVERY, TC-REL-NOTHING |  |  |
+| requirement-candidate-floor-capacity | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:285 | TC-ELIG-MIN, TC-ELIG-ODDS |  |  |
+| requirement-marks-player-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:289 | TC-MARK-NEWEST, TC-MARK-BAND, TC-MARK-SMOKE |  |  |
+| requirement-marks-ai-side | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:290 | TC-MARK-CHANCE, TC-MARK-50, TC-MARK-OFFSET, TC-MARK-SEED, TC-MARK-FIDELITY, TC-MARK-SMOKE |  |  |
+| requirement-mark-beliefs | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:291 | TC-MARK-KEY, TC-MARK-NORETIRE, TC-MARK-SAMEDAY, TC-MARK-REVERSE, TC-MARK-NOSCOUT, TC-MARK-SIDECAR |  |  |
+| requirement-capital-window | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:295 | TC-CAP-REACH, TC-CAP-WASH, TC-CAP-RAILS, TC-CAP-SMOKE |  |  |
+| requirement-capital-floor | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:296 | TC-CAP-BASE, TC-CAP-THREAT, TC-CAP-VSFOUR, TC-CAP-SMOKE |  |  |
+| requirement-covering-post | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:301 | TC-COV-CORRIDOR, TC-COV-FWD, TC-COV-REAR, TC-COV-NONE, TC-COV-CENSUS |  |  |
+| requirement-covering-size | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:302 | TC-COV-NEED, TC-COV-MIN |  |  |
+| requirement-covering-members | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:303 | TC-COV-INCUMBENT, TC-COV-NEAREST, TC-COV-WL, TC-COV-BUSY, TC-COV-SECTOR |  |  |
+| requirement-covering-post-choice | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:304 | TC-COV-VERDICT |  |  |
+| requirement-covering-hold | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:305 | TC-COV-MASSFOR, TC-COV-POOLS, TC-COV-ROLE, TC-COV-DEFENCE, TC-COV-SMOKE |  |  |
+| requirement-covering-lifecycle | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:306 | TC-COV-UNBIND, TC-COV-SIDECAR |  |  |
+| requirement-redeploy-role | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:310 | TC-RED-PRIORITY, TC-RED-TEMPO, TC-RED-WITHHOLD |  |  |
+| requirement-department-reinforcement | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:314 | TC-DEP-ONE, TC-DEP-DONOR, TC-DEP-LIFE, TC-DEP-EXPIRE, TC-DEP-SMOKE |  |  |
+| requirement-commitment | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:318 | TC-COM-DIP, TC-COM-KEY, TC-COM-RELIEF, TC-COM-CHAIN, TC-COM-SMOKE |  |  |
+| requirement-commitment-mover | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:319 | TC-COM-NOMARCH, TC-COM-WAIT, TC-COM-DELIST |  |  |
+| requirement-return-home | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:320 | TC-RET-SEND, TC-RET-LIFE, TC-RET-CAP, TC-RET-SMOKE |  |  |
+| requirement-depot-builder | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:324 | TC-DEPOT-READY, TC-DEPOT-SURPLUS, TC-DEPOT-AOV, TC-DEPOT-SMOKE |  |  |
+| requirement-live-min-strength | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:328 | TC-MIN-PUBLISH, TC-MIN-ONESITE, TC-MIN-SMOKE |  |  |
+| requirement-interception | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:332 | TC-INT-MODE, TC-INT-NOREMOVE, TC-INT-SMOKE |  |  |
+| requirement-telemetry | docs/superpowers/specs/2026-10-14-campaign-planner-design.md:336 | TC-TEL-ISSUE, TC-TEL-TRACE, TC-TEL-RESERVES, TC-TEL-REASONS, TC-TEL-TAGS |  |  |
 <!-- matrix:end -->
