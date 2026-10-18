@@ -16,11 +16,12 @@ namespace WhiskeyRealism.Patches
     // BattleUnits.SetWaypoint, so TacticalObserverPatch.ObservePathShape (showmovementoptions only) cannot see them. This patch can.
     //
     //  * RegimentSetPath and SetMovementMode Postfixes write one TacticalPlayerUnitRepath row for a player-owned unit (dlcw_isundercommander, a
-    //    battle unit): kind=path or kind=mode, the routine on the stack, the target, the mode and path count before and after, the link, the stance,
-    //    the distance to the closest enemy and to the parent.
+    //    battle unit, in a W&L career only: outside one the flag is set on the whole player side): kind=path or kind=mode, the routine on the
+    //    stack, the target, the mode and path count before and after, the link, the stance, the distance to the closest enemy and to the parent.
     //  * A marker around each suspect routine (Prefix enters, Finalizer leaves; RepathRoutineMarker, one static, no StackTrace) names the caller. The
     //    player's own click is a marker around BattleUnits.SetWaypoint with showmovementoptions true (the only UI callers, 166134, 166165). A call
-    //    with no marker reads "unattributed": the brigade-level AIBattle code or a caller not named here.
+    //    with no marker reads "unattributed": the brigade-level AIBattle code, the player's own queued order (ProcessOrders then
+    //    RebuildAllManualWaypoints, 125344, 125463: it runs after the click, not inside it) or a caller not named here.
     //  * A routine that changed unitlinkedto or reattachmentorder with no path set (CheckNewTargetsOfSkirmishers' relink) writes kind=routine.
     // Every Prefix and Postfix is non-skipping and writes nothing into the battle: the only state touched is this file's own static marker. Rows are
     // bounded by RepathRowBudget. Gated by Enable Tactical Observer (the rollback valve).
@@ -437,10 +438,12 @@ namespace WhiskeyRealism.Patches
             return Plugin.Instance != null && Plugin.Instance.Enabled.Value && Plugin.Instance.EnableTacticalObserver.Value;
         }
 
-        // A battle unit the W&L player owns (dlcw_isundercommander, the flag DetachCompany copies to a company, 90477).
+        // A battle unit the W&L player owns (dlcw_isundercommander, the flag DetachCompany copies to a company, 90477), in a W&L career only: outside
+        // one every player-side unit has the flag set (113065, 91170-91176) and CheckForReattachmentOrder runs every frame (112052), so without the
+        // DLC_WL.dlc_scenarioactive test the whole player side would pay the scope pair on each frame.
         private static bool Tracked(Regiment unit)
         {
-            return (UnityEngine.Object)unit != null && !unit.calledfromcampaign && unit.dlcw_isundercommander;
+            return DLC_WL.dlc_scenarioactive && (UnityEngine.Object)unit != null && !unit.calledfromcampaign && unit.dlcw_isundercommander;
         }
 
         private static int LinkedId(Regiment unit)

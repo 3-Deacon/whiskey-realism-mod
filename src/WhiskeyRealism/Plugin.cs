@@ -471,7 +471,7 @@ namespace WhiskeyRealism
                 "It also gates the BC16 record-only formation observers (LayoutObserverPatch): TacticalLayoutMirror rows (how each group order laid its brigades' regiments out, left to right or mirrored), TacticalFormationFlip rows " +
                 "(a group whose formation changed twice within 0.1 battle-hours) and the once-per-battle [FormationProbe] line. They write nothing into the battle. " +
                 "It also gates the BUG-WL-024 record-only PlayerUnitRepathObserverPatch: TacticalPlayerUnitRepath rows naming the vanilla routine (fallback, skirmisher target, unit link, reattach, contact interruption, or the player's own click) " +
-                "that re-paths or changes the movement mode of a unit the W&L player owns, and origin=player-ui on a queued order that came from the player's click.");
+                "that re-paths or changes the movement mode of a unit the W&L player owns (a W&L career only), and origin=player-ui on a queued order that came from the player's click.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",

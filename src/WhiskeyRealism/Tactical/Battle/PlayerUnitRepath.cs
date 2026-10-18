@@ -10,7 +10,11 @@ namespace WhiskeyRealism.Tactical.Battle
     /// </summary>
     public enum RepathRoutine : byte
     {
-        /// <summary>No marker: another vanilla caller (the brigade-level AI in AIBattle, a stop, the link of a group unit) or one this build does not name.</summary>
+        /// <summary>
+        /// No marker: another vanilla caller (the brigade-level AI in AIBattle, a stop, the link of a group unit), the player's own queued order
+        /// (the click queues it; <c>ProcessOrders</c> then <c>RebuildAllManualWaypoints</c> re-paths the units later, 125344, 125463, outside the
+        /// click's marker), or one this build does not name.
+        /// </summary>
         Unattributed = 0,
         /// <summary>The player's own click or order: <c>BattleUnits.SetWaypoint</c> with showmovementoptions true (decompile 166134, 166165).</summary>
         PlayerOrder = 1,

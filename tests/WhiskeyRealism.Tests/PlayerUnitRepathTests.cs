@@ -32,7 +32,8 @@ internal static class PlayerUnitRepathTests
             ("wl-skirmisher PATCH every suspect routine and both movers resolve on the real Assembly-CSharp with the parameter names the Postfixes bind", TargetsResolveOnTheGame),
             ("wl-skirmisher PATCH each routine has a Prefix that enters its marker and a Finalizer that leaves it, with no skip and no Transpiler", MarkerPatchesAreNonSkipping),
             ("wl-skirmisher PATCH a patch entry has its scope and first-fire mark, the observer flag, a player-owned battle unit test, never throws, and builds no string per call", EntryDiscipline),
-            ("wl-skirmisher PATCH the observer writes nothing into the battle and reads no stack", WritesNothing),
+            ("wl-skirmisher PATCH the observer writes nothing into the battle: an allow-list of assignments and of the members it reads, no stack, no reflection", WritesNothing),
+            ("wl-skirmisher PATCH the marker is left first in the helper and as the one statement of every Finalizer, behind the entered guard", LeavePlacement),
             ("wl-skirmisher ROWS the row carries the routine and the context the next smoke needs, and is routed and described", RowsCarryTheFields),
             ("wl-skirmisher DOCS the bug entry, the catalog row, the telemetry rows and the smoke items name the observer", DocsNameTheObserver),
         });
@@ -303,7 +304,7 @@ internal static class PlayerUnitRepathTests
             AssertTrue(gated, name + " returns before its scope when there is nothing to observe");
         }
         AssertTrue(Regex.IsMatch(code, @"Plugin\.Instance\.Enabled\.Value\s*&&\s*Plugin\.Instance\.EnableTacticalObserver\.Value"), "under Enable Tactical Observer, the rollback valve");
-        UnitChurnTests.PinStatement(code, "return (UnityEngine.Object)unit != null && !unit.calledfromcampaign && unit.dlcw_isundercommander;", "a battle unit the W&L player owns, the flag DetachCompany copies to a company");
+        UnitChurnTests.PinStatement(code, "return DLC_WL.dlc_scenarioactive && (UnityEngine.Object)unit != null && !unit.calledfromcampaign && unit.dlcw_isundercommander;", "a battle unit the W&L player owns (the flag DetachCompany copies to a company), in a W&L career only: outside one the flag is on the whole player side (113065, 91170-91176) and CheckForReattachmentOrder runs every frame");
         AssertTrue(code.Contains("catch (Exception ex)") && code.Contains("Warn(ex);"), "a failure is caught, never thrown out of the patch");
         AssertTrue(code.Contains("OnceLog.Warning(\"tactical-battle-core:player-unit-repath-failed\""), "and warned once, by a static key");
         AssertTrue(code.Contains("BattleScope.Register(\"player-unit-repath-budget\", Budget.Reset);"), "the budget's reset is registered");
@@ -313,16 +314,65 @@ internal static class PlayerUnitRepathTests
         AssertEqual(2, Regex.Matches(code, Regex.Escape("if (!__state.Tracked) return;")).Count, "in both Postfixes");
     }
 
+    // An allow-list, not a deny-list: the file may read these members of a vanilla unit and may assign only to its own state structs. A new write (a field
+    // assignment, a ref/out into a unit, a vanilla call, a reflection setter) fails this whatever its name.
+    private static readonly string[] ReadableMembers =
+    {
+        "GetInstanceID", "movementmode", "regimentpaths", "ai_stance", "alliance", "calledfromcampaign", "combatbehavior", "dlcw_isundercommander",
+        "name", "parentregiment", "reattachmentorder", "transform", "unitlinkedto", "unitrange", "unittyp", "position", "closestenemyunitfarreg",
+    };
+
+    private static readonly string[] AssignableMembers =
+    {
+        "__state.Entered", "__state.Previous", "__state.Tracked", "__state.Paths", "__state.Mode",
+        "state.Entered", "state.Previous", "state.LinkedId", "state.Reattach",
+    };
+
     private static void WritesNothing()
     {
         string code = UnitChurnTests.Code(ReadRepoFile(PatchFile));
-        foreach (string call in new[] { ".RegimentSetPath(", ".SetWaypoint(", ".StopRegiment(", ".ChangeStance(", ".SetGroupFormation(", ".ReattachUnits(", "ReattachUnits(", ".SetMovementMode(", ".AddToOrderQueue(" })
-            AssertFalse(code.Contains(call), "no call to " + call);
-        foreach (string field in new[] { "unitlinkedto", "reattachmentorder", "movementmode", "regimentpaths", "ai_stance", "combatbehavior" })
-            AssertFalse(Regex.IsMatch(code, @"\." + field + @"\s*=[^=]"), "no assignment to " + field);
-        AssertFalse(code.Contains("StackTrace") || code.Contains("System.Diagnostics"), "no stack is read: the callers are named by markers (the brief's rule)");
-        AssertFalse(code.Contains("GetClosestEnemyUnit"), "no vanilla search is run to fill a row: the range list's own field is read");
+        // 1. Every assignment whose left side is a member access is one of the patch's own state fields.
+        foreach (Match m in Regex.Matches(code, @"([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+)\s*(?:=|\+=|-=|\*=|/=|\|=|&=)(?![=>])"))
+            AssertTrue(AssignableMembers.Contains(m.Groups[1].Value), "assignment to " + m.Groups[1].Value + " is one of the patch's own state fields");
+        AssertFalse(Regex.IsMatch(code, @"(\+\+|--)\s*[A-Za-z_][\w]*\.|[A-Za-z_][\w]*\.[A-Za-z_][\w]*\s*(\+\+|--)"), "no increment of a member");
+        // 2. A unit is never passed by reference into something that could write it.
+        AssertFalse(Regex.IsMatch(code, @"\b(ref|out)\s+(unit|__instance|linked|enemy|parent)\b"), "no ref or out of a vanilla object or one of its fields");
+        // 3. Every member read off a vanilla object is on the allow-list (a call such as StopRegiment, SetPath or GetComponent is not).
+        int reads = 0;
+        foreach (Match m in Regex.Matches(code, @"\b(unit|__instance|linked|enemy|parent)((?:\.[A-Za-z_][\w]*)+)(\s*\()?"))
+        {
+            foreach (string member in m.Groups[2].Value.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries))
+                AssertTrue(ReadableMembers.Contains(member), m.Groups[1].Value + "." + member + " is a member the observer may read");
+            if (m.Groups[3].Success)
+                AssertTrue(m.Groups[2].Value == ".GetInstanceID", m.Groups[1].Value + m.Groups[2].Value + "( is a call: only GetInstanceID is allowed");
+            reads++;
+        }
+        AssertTrue(reads > 40, "the scan read the file's member accesses: " + reads);
+        // 4. No reflection, no delegate into the game, no stack.
+        foreach (string banned in new[] { "SetValue(", "Invoke(", "FieldInfo", "AccessTools", "GetMethod(", "StackTrace", "System.Diagnostics", "GetClosestEnemyUnit", "GetComponent" })
+            AssertFalse(code.Contains(banned), "no " + banned);
         AssertTrue(code.Contains("EventName = \"TacticalPlayerUnitRepath\""), "one event name");
+    }
+
+    // The marker must be left on every path out of a routine: first thing in the shared Leave helper (before the row is built, which can throw), and
+    // as the one statement of each Finalizer's scope, behind the guard that it was entered.
+    private static void LeavePlacement()
+    {
+        string code = UnitChurnTests.Code(ReadRepoFile(PatchFile));
+        AssertTrue(Regex.IsMatch(code, @"private static void Leave\(Regiment unit, RepathRoutine routine, RoutineState state\)\s*\{\s*RepathRoutineMarker\.Leave\(state\.Previous\);\s*try\b"),
+            "the helper restores the marker before its try block, so a failing row cannot keep it");
+        AssertTrue(Regex.IsMatch(code, @"internal static void SetWaypointFinalizer\(RoutineState __state\)\s*\{\s*if \(!__state\.Entered\) return;\s*using \(TelemetryPerf\.Scope\(""[^""]+"", [^)]*\)\)\s*\{\s*PatchFirstFire\.Mark\(""[^""]+""\);\s*RepathRoutineMarker\.Leave\(__state\.Previous\);\s*\}\s*\}"),
+            "the click's Finalizer: the guard, then the scope, whose one statement after the first-fire mark is the Leave");
+        foreach (var (finalizer, routine) in new[]
+        {
+            ("FallbackFinalizer", "Fallback"), ("TargetsFinalizer", "SkirmisherTarget"), ("LinkFinalizer", "UnitLink"),
+            ("ReattachFinalizer", "Reattach"), ("ContactFinalizer", "ContactInterruption"),
+        })
+            AssertTrue(Regex.IsMatch(code, @"internal static void " + finalizer + @"\(Regiment __instance, RoutineState __state\)\s*\{\s*if \(!__state\.Entered\) return;\s*using \(TelemetryPerf\.Scope\(""[^""]+"", [^)]*\)\)\s*\{\s*PatchFirstFire\.Mark\(""[^""]+""\);\s*Leave\(__instance, RepathRoutine\." + routine + @", __state\);\s*\}\s*\}"),
+                finalizer + ": the guard, then the scope, whose one statement after the first-fire mark is the Leave of " + routine);
+        // Entered is true only after the marker was entered (a throw in Enter leaves nothing to leave).
+        AssertTrue(Regex.IsMatch(code, @"state\.Previous = RepathRoutineMarker\.Enter\(routine, unit\.GetInstanceID\(\)\);\s*state\.Entered = true;"), "Entered follows the Enter");
+        AssertTrue(Regex.IsMatch(code, @"__state\.Previous = RepathRoutineMarker\.Enter\(RepathRoutine\.PlayerOrder, RepathRoutineMarker\.AnyUnit\);\s*__state\.Entered = true;"), "and in the click's Prefix");
     }
 
     // ------------------------------------------------------------------------------------------------------------ rows
@@ -360,5 +410,13 @@ internal static class PlayerUnitRepathTests
         foreach (string text in new[] { "TacticalPlayerUnitRepath", "routine=player-order", "unattributed", "origin=player-ui", "ai-queue-to-player-unit", "player-unit-repath-failed", "S13", "S14" })
             AssertContains(telemetry, text, "docs/telemetry.md names " + text);
         AssertFalse(telemetry.Contains("relation=ai-to-player-subordinate"), "and no longer promises the old label");
+        AssertContains(telemetry, "in a W&L career only", "the row says it is off outside a W&L career");
+        AssertContains(telemetry, "RebuildAllManualWaypoints", "and that unattributed includes the player's own queued order");
+        AssertContains(ReadRepoFile("src/WhiskeyRealism/Plugin.cs"), "(a W&L career only)", "the flag text says so too");
+        foreach (string anchor in new[] { "91513-91516", "124469-124472", "128964-128969", "(128911)", "128947", "5107", "124467", "124440", "updatecyclelinkingbrigades" })
+            AssertContains(bug, anchor, "the entry's corrected anchor or condition " + anchor);
+        foreach (string stale in new[] { "91507-91510", "124473-124477", "128967-128972", "(128901)" })
+            AssertFalse(bug.Contains(stale), "the entry no longer cites " + stale);
+        AssertContains(ReadRepoFile("tools/smoke-situational.txt"), "tactical.patch.player-unit-repath.*", "the click's first-fire ids are situational in tools/smoke-situational.txt");
     }
 }
