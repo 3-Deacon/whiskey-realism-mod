@@ -154,6 +154,7 @@ internal static partial class WlOrderFlowTests
             ("wl order void an order already at the new offset target is kept", AnOrderAlreadyAtTheNewOffsetTargetIsKept),
             ("wl order void a fan out child and its descendants are voided", AFanOutChildAndItsDescendantsAreVoided),
             ("wl order void allocates nothing after warm up", TheVoidAllocatesNothingAfterWarmUp),
+            ("wl order void an armed vanilla order goes only beyond what its pursuit check accepts", AnArmedVanillaOrderIsVoidedOnlyBeyondWhatItsPursuitCheckAccepts),
             ("wl order pin the executor gives the void its inputs", TheExecutorGivesTheVoidItsOwnInputs),
             ("wl order pin runtime arms vanilla orders from the called unit", RuntimeArmsVanillaOrdersFromTheCalledUnit),
             ("wl order pin executor voids the groups old orders before queueing the new one", ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne),

@@ -83,6 +83,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public const string SupersededIntent = "superseded-intent";
         // Vanilla's own order dedupe radius (8643); the en-route and campaign target radius.
         public const float SamePointMeters = 110f;
+        // The distance from an armed vanilla order's point inside which the pursuit check (WlMoveState.BasisAfterGone with the callers' slack)
+        // still calls a unit bound there: arrival 60 m plus VanillaWaypointSlackMeters 220 m. A newer target farther than this makes the order stale.
+        public const float ArmedVanillaMeters = WlMoveState.ArrivalMeters + WlMoveState.VanillaWaypointSlackMeters;
         private const int Retreat = 15;
         private const int HistoryCapacity = 16;
 
@@ -154,15 +157,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // the same place again (within SamePointMeters of the new target, inclusive): that one keeps its place,
         // and the en-route test drops the repeat. Each is reported through the sink. Returns how many went.
         // `includeArmedVanilla`: a vanilla order armed with its called unit (Pursuit) goes too; used for descendants of a re-pathed group,
-        // whose last waypoint vanilla does not restamp (StaleDispatchVoid), so its pursuit reading cannot be trusted.
+        // whose last waypoint vanilla does not restamp (StaleDispatchVoid), so its pursuit reading cannot be trusted. An executor order is the
+        // same place within 110 m; an armed vanilla order within the distance its own pursuit check accepts (ArmedVanillaMeters), so the two
+        // tests agree: the check calls a unit within that distance of the order's point still bound there.
         public int DiscardSupersededIntents(int unitId, float newX, float newZ, string reason, bool includeArmedVanilla = false)
         {
             int voided = 0;
             int i = 0;
             while (i < _count)
             {
-                bool kind = _pending[i].Origin == OrderOrigin.Executor || (includeArmedVanilla && _pending[i].Pursuit);
-                if (!kind || _pending[i].UnitId != unitId || Near(_pending[i].X, _pending[i].Z, newX, newZ))
+                bool armedVanilla = includeArmedVanilla && _pending[i].Pursuit && _pending[i].Origin != OrderOrigin.Executor;
+                bool kind = _pending[i].Origin == OrderOrigin.Executor || armedVanilla;
+                if (!kind || _pending[i].UnitId != unitId
+                    || Within(_pending[i].X, _pending[i].Z, newX, newZ, armedVanilla ? ArmedVanillaMeters : SamePointMeters))
                 {
                     i++;
                     continue;
@@ -315,9 +322,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // Flat XZ, 110 inclusive (D8 (b), D11).
         private static bool Near(float ax, float az, float bx, float bz)
         {
+            return Within(ax, az, bx, bz, SamePointMeters);
+        }
+
+        private static bool Within(float ax, float az, float bx, float bz, float meters)
+        {
             float dx = ax - bx;
             float dz = az - bz;
-            return dx * dx + dz * dz <= SamePointMeters * SamePointMeters;
+            return dx * dx + dz * dz <= meters * meters;
         }
 
         // The queue is full: drops the entry with the earliest issue time (ties by enqueue order),

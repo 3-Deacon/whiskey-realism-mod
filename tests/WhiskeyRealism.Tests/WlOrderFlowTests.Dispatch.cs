@@ -450,4 +450,28 @@ internal static partial class WlOrderFlowTests
             "detached, player-owned and routed units are not re-pathed by a group order");
         AssertFalse(Code("src/WhiskeyRealism/Tactical/Battle/StaleDispatchVoid.cs").Contains("transform.parent"), "descendants come from the snapshot's parent map");
     }
+
+    // Verify round 4: the void and the pursuit check must agree. The check accepts a unit within 60 + 220 m of an armed order's point; an armed
+    // vanilla order is stale only beyond that, an executor order beyond 110 m.
+    private static void AnArmedVanillaOrderIsVoidedOnlyBeyondWhatItsPursuitCheckAccepts()
+    {
+        AssertNear(WlMoveState.ArrivalMeters + WlMoveState.VanillaWaypointSlackMeters, WlCourierQueue.ArmedVanillaMeters, 1e-4f, "the radius is the pursuit check's own");
+        foreach (var (type, label) in new[] { (2, "a type 2"), (12, "a type 12") })
+        {
+            var q = new WlCourierQueue(null);
+            CourierEntry armed = QEntry(issuer: 11, type: type, origin: OrderOrigin.Vanilla, x: 0f, issuedAt: 1.0, dueAt: 9.0);
+            armed.UnitId = 11;
+            armed.Pursuit = true;
+            AssertTrue(q.TryEnqueue(in armed, 0.0, out _), "fixture");
+            AssertEqual(0, q.DiscardSupersededIntents(11, 150f, 0f, WlCourierQueue.SupersededIntent, includeArmedVanilla: true), label + " 150 m from the new target: the pursuit check still accepts it");
+            AssertEqual(0, q.DiscardSupersededIntents(11, 200f, 0f, WlCourierQueue.SupersededIntent, includeArmedVanilla: true), label + " 200 m: still accepted");
+            AssertEqual(0, q.DiscardSupersededIntents(11, WlCourierQueue.ArmedVanillaMeters, 0f, WlCourierQueue.SupersededIntent, includeArmedVanilla: true), label + " exactly at the accepted distance (inclusive)");
+            AssertEqual(1, q.DiscardSupersededIntents(11, WlCourierQueue.ArmedVanillaMeters + 1f, 0f, WlCourierQueue.SupersededIntent, includeArmedVanilla: true), label + " one metre past it: stale");
+        }
+        var qe = new WlCourierQueue(null);
+        CourierEntry exec = QEntry(issuer: 12, type: 1, origin: OrderOrigin.Executor, x: 0f, issuedAt: 1.0, dueAt: 9.0);
+        exec.UnitId = 12;
+        AssertTrue(qe.TryEnqueue(in exec, 0.0, out _), "fixture");
+        AssertEqual(1, qe.DiscardSupersededIntents(12, 150f, 0f, WlCourierQueue.SupersededIntent, includeArmedVanilla: true), "an executor order keeps the 110 m rule: 150 m is another place");
+    }
 }
