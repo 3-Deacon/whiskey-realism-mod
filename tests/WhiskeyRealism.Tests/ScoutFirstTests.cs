@@ -595,11 +595,11 @@ internal static class ScoutFirstTests
         var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
         var guard = new ReconTask { Kind = ReconKind.AdvanceGuard, SectorId = plan.MainSectorId, FromX = 500f, FromZ = 0f, HoldX = 600f, HoldZ = 0f, Priority = 1f, Reason = "t" };
         var screen = new ReconTask { Kind = ReconKind.Screen, SectorId = plan.MainSectorId, FromX = 500f, FromZ = 0f, HoldX = 600f, HoldZ = 0f, Priority = 1f, Reason = "t" };
-        var taken = new List<int>();
+        var taken = new List<int> { CapitalGuardId };         // the allocator has already seated the capital guard, as it does before recon picks
         int guardPick = ReconPlanner.PickFormation(s, sectors, plan, null, guard, taken, true);
         int screenPick = ReconPlanner.PickFormation(s, sectors, plan, null, screen, taken, true);
         AssertEqual(1, guardPick, "the small division leads the advance (a detachment of the main body)");
-        AssertTrue(screenPick != 1 && s.Own[s.IndexOfOwn(screenPick)].Strength >= 5000f, "a screen is held to vanilla's minimum strength: not the 2500 division");
+        AssertEqual(2, screenPick, "a screen is held to vanilla's minimum strength");
     }
 
     private static void ACavalryScreenGoesOutWhenACavalryFormationExists()

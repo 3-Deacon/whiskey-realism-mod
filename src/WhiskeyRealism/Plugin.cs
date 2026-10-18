@@ -1414,10 +1414,11 @@ namespace WhiskeyRealism
                 "Default ON. Each AI side plans from a fog-honest picture of the whole enemy army: the enemy's public total (the strategy screen's " +
                 "men fielded) less every army the side believes in is presumed at the enemy capital and the enemy-held objectives that are not " +
                 "scouted, the sectors facing them hold against those men at the same ratio as against seen armies, the hold on a front is " +
-                "released for a target only when every army it faces is at the target, a candidate is eligible only with a capacity of at least " +
-                "the minimum strength, and the capital floor counts every enemy that can reach the capital before the capital's own department can " +
-                "concentrate, with vanilla's own baseline. OFF = the earlier rules: a presumption under every unscouted sector, the capital " +
-                "threat within the relocation range, the nearest-belief hold release and the department sum of the sector needs. Needs Enable Campaign Planner.");
+                "released for a target only when every army it faces is at the target, and the capital floor counts every enemy that can reach " +
+                "the capital before the capital's own department can concentrate, with vanilla's own baseline. OFF = the earlier rules: a " +
+                "presumption under every unscouted sector, the capital threat within the relocation range and a floor without vanilla's baseline, " +
+                "the nearest-belief hold release, the department sum of the sector needs, and a minimum strength of 5000. The eligibility floor " +
+                "(a candidate needs a capacity of at least the minimum strength) does not read this flag: it applies ON or OFF. Needs Enable Campaign Planner.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

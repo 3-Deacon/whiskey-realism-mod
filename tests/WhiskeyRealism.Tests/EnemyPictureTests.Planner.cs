@@ -629,6 +629,23 @@ internal static partial class EnemyPictureTests
         }
     }
 
+    // D11 requirement-hold-need: the men a sector has seen enter its need through the threat term, the presumption (Assigned) carries only the
+    // faded and anchor mass, so a sighting is never counted twice.
+    private static void SeenStrengthStaysOutOfASectorsPresumedShare()
+    {
+        var s = Csa(100000f);
+        s.Beliefs.Add(Belief(WinchesterX, WinchesterZ, 8000f));
+        var c = InputsFor(s);
+        var facts = FactsOf(c);
+        var live = c.Picture.Elements.Single(e => e.Kind == PictureElementKind.Live);
+        AssertTrue(live.AssignedSector >= 0 && live.Weight > 0f, "the sighting is assigned to a facing sector like any land element");
+        float presumed = 0f;
+        foreach (var e in c.Picture.Elements)
+            if (e.Kind != PictureElementKind.Live && e.AssignedSector >= 0) presumed += e.Mass * e.Weight;
+        AssertNear(presumed, facts.Assigned.Sum(), 0.5f, "the sectors' presumed shares sum the faded and anchor mass only");
+        AssertTrue(facts.Assigned.Sum() < presumed + live.Mass * live.Weight - 1f, "and not the 8000 the sector sees");
+    }
+
     // The assignment is overwritten every pass: a pass under another probe re-weights it, a pass with different facing re-assigns it.
     private static void TheAssignmentIsRewrittenEachPass()
     {
@@ -830,6 +847,7 @@ internal static partial class EnemyPictureTests
             ("AScoutedTargetStillCarriesUnscoutedAnchorsNearIt", AScoutedTargetStillCarriesUnscoutedAnchorsNearIt),
             ("BalanceStillRanksByTheBelievedLayer", BalanceStillRanksByTheBelievedLayer),
             ("ElementsCarryTheirAssignedSector", ElementsCarryTheirAssignedSector),
+            ("SeenStrengthStaysOutOfASectorsPresumedShare", SeenStrengthStaysOutOfASectorsPresumedShare),
             ("TheAssignmentIsRewrittenEachPass", TheAssignmentIsRewrittenEachPass),
             ("NearestByStraightDistanceWeightedByTheProbe", NearestByStraightDistanceWeightedByTheProbe),
             ("TheProportionalEstimateUsesEveryAnchorsShare", TheProportionalEstimateUsesEveryAnchorsShare),

@@ -1405,9 +1405,10 @@ internal static class ReconNeverTasksTests
         float need = 0f;
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
         AssertNear(7200f, need, 1f, "the East need");
-        // D11's floor (the minimum plus the weighted threat) needs a guard of 7000 here, which with the 1000 meets the 7200 alone, so the
-        // 5000 is not in the reserve and either ready formation may be drawn: one is, and the East still holds its need with the guard counted.
-        AssertEqual(1, Roles(day.Allocation, FormationRole.Recon), "one ready formation is drawn: the guard's 7000 with the other still hold the East");
+        // D11's floor (the minimum plus the weighted threat) needs a guard of 7000 here; it stands in the East and counts toward the East's
+        // cover, so the 5000 is drawn and the 1000 stays in the East reserve.
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "2 stays in the East reserve: the guard's 7000 and its 1000 hold 8000 against 7200");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 3).Role, "the 5000 is drawn: the East still holds its need without it");
         AssertFalse(Refused(day.Allocation), "nothing refused");
         AssertTrue(HeldAtEnd(day, east, true) >= need, "the East holds " + HeldAtEnd(day, east, true) + " with its guard, against " + need);
     }

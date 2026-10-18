@@ -274,8 +274,8 @@ internal static class SecessionGarrisonTests
         AssertEqual(FormationRole.Hold, holding.Role, "the posted corps holds");
         AssertEqual(ForceAllocator.ReasonSecession, holding.Reason, "for the secession");
 
-        // The replacement is capped at one, whatever the need: valuable enemy ground by the town makes the presumed need 10000, which a
-        // 6000-man corps does not meet, and three such free corps are available; still only one is posted.
+        // The replacement is capped at one, whatever the need: valuable enemy ground by the town makes the need 7500 (D11's floor, 5000 x (1 + 0.5)),
+        // which a 6000-man corps does not meet, and three such free corps are available; still only one is posted.
         var presumed = Day(KentuckyState);
         presumed.Objectives.Add(new ObjectiveRecord { ObjectiveId = 50, X = 380f, Z = 0f, HolderAlliance = 1, Available = false, Importance01 = 0.5f });
         for (int i = 0; i < 3; i++) presumed.Own.Add(Corps(5 + i, 130f + 20f * i, 6000f));

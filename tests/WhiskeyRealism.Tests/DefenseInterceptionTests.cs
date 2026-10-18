@@ -37,6 +37,7 @@ internal static class DefenseInterceptionTests
             ("ObservedLogIgnoresAllianceTwo", ObservedLogIgnoresAllianceTwo),
             ("TheDefenceAvailabilityClauseWithholdsWhatWhiskeyMayNotMove", TheDefenceAvailabilityClauseWithholdsWhatWhiskeyMayNotMove),
             ("TheAvailabilityPatchesReadTheChainOfTheUnit", TheAvailabilityPatchesReadTheChainOfTheUnit),
+            ("TheChainContextIsReadOncePerFrameNotOnEveryVanillaCall", TheChainContextIsReadOncePerFrameNotOnEveryVanillaCall),
             ("ObservingPrefixRemovesNothingAndPostfixRevertsNothing", ObservingPrefixRemovesNothingAndPostfixRevertsNothing),
             ("TheFlagIsBoundOnAndReadByThePatch", TheFlagIsBoundOnAndReadByThePatch),
             ("ReservesRowCountsEnemiesOnOwnSoilAndVanillasActiveDefence", ReservesRowCountsEnemiesOnOwnSoilAndVanillasActiveDefence),
@@ -296,11 +297,25 @@ internal static class DefenseInterceptionTests
         AssertContains(patch, "CampaignWithholdView.WithheldFromOffense(alliance, unit.GetInstanceID(), PlannerChainGate.MayMove(alliance, unit))", "the offensive Postfix passes the chain");
         AssertContains(patch, "enemyposition.x, enemyposition.z, PlannerChainGate.MayMove(alliance, unit))", "and the defensive one");
         string gate = BodyOf(patch, "internal static bool MayMove(int alliance, Regiment unit)");
-        AssertContains(gate, "WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, alliance, unit))", "the chain class is the one every other Whiskey writer asks");
+        AssertContains(gate, "WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in _chain, alliance, unit))", "the chain class is the one every other Whiskey writer asks");
         AssertContains(gate, "if (!DLC_WL.dlc_scenarioactive || GameVars.playeralliance != alliance) return true;", "read only for the player's alliance in a W&L career");
         string view = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignWithholdView.cs");
         AssertContains(BodyOf(view, "public static bool WithheldFromDefense("), "if (!mayMove) return true;", "the view withholds what Whiskey may not move");
         AssertContains(BodyOf(view, "public static bool WithheldFromOffense("), "if (!mayMove) return true;", "from the offensive pool too");
+    }
+
+    // The context (the chosen commander, its command, group and parent) is read once per Unity frame, which is one pass of vanilla's AI for
+    // a faction, not on each of the candidate calls inside it (verify F1-F3 landing item 5; the bridge: "loops capture the context once
+    // per pass"). A source pin: the Postfixes live in the game only.
+    private static void TheChainContextIsReadOncePerFrameNotOnEveryVanillaCall()
+    {
+        string patch = ReadRepoFile("src/WhiskeyRealism/Patches/CampaignAvailabilityFilterPatch.cs");
+        string gate = BodyOf(patch, "internal static bool MayMove(int alliance, Regiment unit)");
+        AssertContains(gate, "Time.frameCount", "the cache is keyed on the frame");
+        AssertContains(gate, "if (frame != _frame)", "and refreshed only when the frame changed");
+        AssertEqual(2, patch.Split(new[] { "WlChainContext.Capture()" }, StringSplitOptions.None).Length, "the patch file captures the context in one place");
+        AssertFalse(gate.Contains("var chain = WlChainContext.Capture();"), "never straight in the per-call path");
+        AssertContains(patch, "CampaignScope.Register(\"planner-chain-gate\"", "the cache registers its own reset");
     }
 
     // ---- [Reserves] ----

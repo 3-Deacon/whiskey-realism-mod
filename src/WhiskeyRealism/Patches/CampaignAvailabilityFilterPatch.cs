@@ -69,14 +69,32 @@ namespace WhiskeyRealism.Patches
     }
 
     // Whether Whiskey may move the unit (WlChainRules.MayMove of its chain class). Only the W&L player's alliance has a chain: any other
-    // answer is yes without reading the player's command.
+    // answer is yes without reading the player's command. The chain context (the chosen commander, its command, group and parent) is read
+    // once per Unity frame, which is one pass of vanilla's AI for a faction, not on each of the candidate calls inside it.
     internal static class PlannerChainGate
     {
+        private static int _frame = -1;
+        private static WlChainContext _chain;
+
+        static PlannerChainGate()
+        {
+            CampaignScope.Register("planner-chain-gate", () =>
+            {
+                _frame = -1;
+                _chain = default;
+            });
+        }
+
         internal static bool MayMove(int alliance, Regiment unit)
         {
             if (!DLC_WL.dlc_scenarioactive || GameVars.playeralliance != alliance) return true;
-            var chain = WlChainContext.Capture();
-            return WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in chain, alliance, unit));
+            int frame = Time.frameCount;
+            if (frame != _frame)
+            {
+                _frame = frame;
+                _chain = WlChainContext.Capture();
+            }
+            return WlChainRules.MayMove(WlStrategicOrderBridge.ChainClassOf(in _chain, alliance, unit));
         }
     }
 
