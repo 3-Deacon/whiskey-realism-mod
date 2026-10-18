@@ -597,7 +597,8 @@ internal static class ReconNeverTasksTests
 
     private static void TheHoldReserveIsDrawnOnceNotPerTask()
     {
-        // One busy formation covers a third of the East's 9000: the ready 2, 3 and 4 (3000 each) are all hold reserve.
+        // The East's need is the scenario's floor, 3600 (2000 x 1.8; foresight F5). The one busy formation holds 100 of it, so the ready 2 (3000)
+        // and the small 3 and 4 (400 each) are all hold reserve: 3900 against 3600.
         var s = SmokeUnion(secondEastBusy: false, eastBusy: 100f);
         s.Own.Add(Corps(3, 770f, 400f));
         s.Own.Add(Corps(4, 780f, 400f));
@@ -716,6 +717,7 @@ internal static class ReconNeverTasksTests
         // The nearest formation with the scenario's minimum is now the mass, so the scout stands behind the body and its first free task is the
         // sector's screen posture (it was the capital approach): either way a task that does not see the main objective.
         AssertEqual(FormationRole.Recon, Of(approach, 30).Role, "30 watches a task");
+        AssertEqual("screen-posture", Of(approach, 30).Reason, "the sector's screen posture, the task a scout behind the body takes once the main objective's tasks are given up on");
         AssertFalse(ReconPlanner.ScoutsMainObjective(ReconKind.Screen, Of(approach, 30).Reason), "that does not see the main objective: " + Of(approach, 30).Reason);
         AssertTrue(Refused(approach), "and the push still has no eyes: the reason stands");
         // Control: with the free formation gone the refusal stands.

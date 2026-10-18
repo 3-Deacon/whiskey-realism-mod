@@ -33,6 +33,7 @@ internal static class SpottingMarkTimingTests
             ("NoFramesNoTicksNoMark", NoFramesNoTicksNoMark),
             ("TheGateFractionIsWhereThePathLeavesTheFiftyUnitCircle", TheGateFractionIsWhereThePathLeavesTheFiftyUnitCircle),
             ("TheLedgerMarksOnlyAGroupThatLeftTheCircleDuringTheInterval", TheLedgerMarksOnlyAGroupThatLeftTheCircleDuringTheInterval),
+            ("TheLedgerAgesTheMarkFromTheIntervalsStartNotItsEnd", TheLedgerAgesTheMarkFromTheIntervalsStartNotItsEnd),
             ("TheLedgerCountsItsMarksAndTheGroupsItJudged", TheLedgerCountsItsMarksAndTheGroupsItJudged),
             ("TheRuntimeCountsFramesAndTicksForTheInterval", TheRuntimeCountsFramesAndTicksForTheInterval),
             ("TheReportCountsNewMarksPerHiddenGroup", TheReportCountsNewMarksPerHiddenGroup),
@@ -217,6 +218,57 @@ internal static class SpottingMarkTimingTests
         none.Ticks = 0f;
         ledger.Evaluate("Corps:1", 2400f, -500f, Today + 3, 1861.4f + 3 * Day, in none, new Random(4), (x, z) => true, out var still);
         AssertEqual(Today + 2, still.MarkDay, "no ticks: the newest mark stands");
+    }
+
+    // The chance of an interval's rolls is a function of the newest mark's age at the interval's START (e0), which the ledger takes as the age
+    // now less the interval (MarkLedger.Evaluate). A mark made at the last review is e0 = 0 and a one-day interval ramps over a day; the age at
+    // the interval's end (a day) puts every tick a day older and the chance far higher. A roll between the two chances tells them apart: the
+    // right age makes no mark, and a roll under the right chance still makes one (so the path is live, not shut).
+    private static void TheLedgerAgesTheMarkFromTheIntervalsStartNotItsEnd()
+    {
+        var inputs = Interval(true);
+        inputs.Ticks = 1f;
+        inputs.Cap = 0.9f;
+        const float markYear = 1861.4f, groupX = 6000f, groupZ = -500f;
+
+        // The mark of the last review: made at (1000, -500), certain (the first mark's chance is the cap of 1 over 1861 years of age).
+        MarkLedger Seeded(out EnemyDetection made)
+        {
+            var l = new MarkLedger();
+            var first = Interval(false);
+            l.Evaluate("Corps:1", 1000f, -500f, Today, markYear, in first, new Random(1), (x, z) => true, out made);
+            return l;
+        }
+        Seeded(out var seed);
+        float gate = MarkRules.GateFraction(1000f, -500f, groupX, groupZ, seed.X, seed.Z, inputs.MinDistance);
+        float timeConstant = inputs.Intel * inputs.Spotting1 + (1f - inputs.Intel) * inputs.Spotting0;
+        float right = MarkRules.IntervalChance(0f, Day, inputs.Ticks, timeConstant, inputs.PerkFactor, inputs.Cap, gate);
+        float shifted = MarkRules.IntervalChance(Day, Day, inputs.Ticks, timeConstant, inputs.PerkFactor, inputs.Cap, gate);
+        AssertTrue(right > 0.05f && shifted > right + 0.2f, "fixture: the two ages give clearly different chances, " + right + " against " + shifted);
+
+        // The roll the ledger will draw for a seed: the variation draw first, then the roll (MarkLedger.Evaluate).
+        double RollOf(int seedValue)
+        {
+            var r = new Random(seedValue);
+            MarkRules.VariationDraw(r, inputs.SpottingVariation);
+            return r.NextDouble();
+        }
+        int between = -1, under = -1;
+        for (int sd = 1; sd < 500 && (between < 0 || under < 0); sd++)
+        {
+            double roll = RollOf(sd);
+            if (between < 0 && roll > right + 0.05 && roll < shifted - 0.05) between = sd;
+            if (under < 0 && roll < right - 0.02) under = sd;
+        }
+        AssertTrue(between >= 0 && under >= 0, "fixture: seeds exist for a roll between the chances and under the right one");
+
+        var quiet = Seeded(out _);
+        quiet.Evaluate("Corps:1", groupX, groupZ, Today + 1, markYear + Day, in inputs, new Random(between), (x, z) => true, out var kept);
+        AssertEqual(Today, kept.MarkDay, "a roll above the right chance makes no mark: the mark's age at the interval's start is 0, not a day");
+
+        var live = Seeded(out _);
+        live.Evaluate("Corps:1", groupX, groupZ, Today + 1, markYear + Day, in inputs, new Random(under), (x, z) => true, out var fresh);
+        AssertEqual(Today + 1, fresh.MarkDay, "a roll under it makes one");
     }
 
     private static MarkInputs Interval(bool use)
