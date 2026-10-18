@@ -8,7 +8,7 @@ using static TestFixtures;
 
 // Stage G strategic foresight, slice F4b (decision 3, BUG-INTEL-001): vanilla's mark timer reads the concealment array spottingfactor
 // (-50, -60) where timefactorspottings (0.1, 0.006 game years) is meant, so a hidden group is marked every time it moves 50 units. The fix
-// swaps the right pair into the call (a non-skipping Prefix with a Finalizer restore, working label FS-F4b-1) and gives the AI side's
+// swaps the right pair into the call (a non-skipping Prefix with a Finalizer restore, patch #134) and gives the AI side's
 // mark ledger the same rate: the chance vanilla's many rolls per game day make over a review's interval (MarkRules.IntervalChance).
 // Plan: docs/superpowers/plans/2026-10-18-strategic-foresight.md F4b; cases TC-FIX-* in docs/loop/foresight/test-plan.md.
 internal static class SpottingMarkTimingTests

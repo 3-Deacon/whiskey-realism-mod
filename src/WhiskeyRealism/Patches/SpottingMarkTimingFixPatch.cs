@@ -7,7 +7,7 @@ using WhiskeyRealism.Util;
 
 namespace WhiskeyRealism.Patches
 {
-    // BUG-INTEL-001 (foresight F4b, working label FS-F4b-1). Vanilla SpottedEnemy.UpdateMarks (decompile 142773, private, one call per frame
+    // BUG-INTEL-001 (foresight F4b, patch #134). Vanilla SpottedEnemy.UpdateMarks (decompile 142773, private, one call per frame
     // for one registered enemy group) draws the chance of a new spotting mark on the W&L player's map from
     //     num3 = (intel x spottingfactor[1] + (1 - intel) x spottingfactor[0]) x Random(1 - v, 1 + v)      (142819)
     // where spottingfactor is the per-unit-type concealment array (002/A: -50, -60) and the pref meant is timefactorspottings (loaded
