@@ -37,8 +37,10 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         /// <summary>The group at <paramref name="index"/> has a recorded posture row this tick.</summary>
         bool HasPosture(int index);
-        /// <summary>The task of the posture row at <paramref name="index"/>.</summary>
+        /// <summary>The task the operations ledger committed to the group at <paramref name="index"/>.</summary>
         CommandTaskType TaskOf(int index);
+        /// <summary>The task the group is carrying out after the pipeline's rewrites (the opportunity override turns a committed role to FallBackToLine).</summary>
+        CommandTaskType EffectiveTaskOf(int index);
         /// <summary>A withdrawal move was issued for the unit at <paramref name="index"/> inside the withdrawal window.</summary>
         bool WithdrawalRecent(int index);
     }
@@ -76,7 +78,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (host.HasPosture(a))
                 {
                     if (group < 0) group = a;
-                    if (ColumnDeployment.WithdrawalTask(host.TaskOf(a))) withdrawing = true;
+                    if (ColumnDeployment.WithdrawalTask(host.TaskOf(a)) || ColumnDeployment.WithdrawalTask(host.EffectiveTaskOf(a))) withdrawing = true;
                 }
                 if (host.WithdrawalRecent(a)) withdrawing = true;
             }
@@ -101,6 +103,13 @@ namespace WhiskeyRealism.Tactical.Battle
             }
         }
 
+        /// <summary>
+        /// The regiment is marked this pass: every arm holds. Each arm reads a stable input. The task is the one the operations ledger committed to the
+        /// group (<see cref="GroupPosture.LedgerTask"/>), which changes when the ledger changes its mind and not when a per-tick rewrite's input flickers
+        /// (the 2026-10-18 smoke's FixEnemy, Screen, FixEnemy, Screen, Probe in seven seconds was the reconnaissance rule reading one tick of sight). The enemy is
+        /// the closest one the side perceives, seen or remembered (<see cref="ClosestPerceivedEnemy"/>): perception keeps an enemy that dropped out of sight.
+        /// The ownership, route and withdrawal arms are state, not signals. The table is rebuilt every pass, so a regiment that fails any arm is unmarked at once.
+        /// </summary>
         public static bool Marks(in ApproachLineInput i)
         {
             const UnitFlags needed = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry;
@@ -110,6 +119,36 @@ namespace WhiskeyRealism.Tactical.Battle
             if (!i.GroupRecorded || !TaskKeepsLine(i.GroupTask)) return false;
             if (i.GroupRouteColumn || i.GroupFormation == RoadRoutePlanner.ColumnGroupFormation || i.Withdrawing) return false;
             return i.HasEnemy && i.EnemyDistance <= AssaultRangeMeters;
+        }
+
+        /// <summary>
+        /// The closest enemy the side perceives to the unit at <paramref name="ownIndex"/>, seen now or remembered (the snapshot's observations are
+        /// BattlePerception's fog-honest memory: an enemy that dropped out of sight stays a Remembered observation at the place it was seen). Only what
+        /// <see cref="EnemySamples.Accepts"/> counts, the repo's one fog rule: Visible, or Remembered at <see cref="EnemySamples.RememberedMinConfidence"/> (0.5,
+        /// about 20 minutes of decay) or more, a combat arm, not a reinforcement column. A fainter memory is not something the side believes in. Index of the
+        /// observation, or -1. <see cref="BattleSnapshot.ClosestVisibleEnemy"/> reads sight alone and loses the enemy for a tick behind a rise.
+        /// </summary>
+        public static int ClosestPerceivedEnemy(BattleSnapshot s, int ownIndex, out float distance)
+        {
+            distance = 0f;
+            if (s == null || ownIndex < 0 || ownIndex >= s.OwnCount) return -1;
+            float x = s.Own[ownIndex].X, z = s.Own[ownIndex].Z;
+            int best = -1;
+            float bestSq = float.MaxValue;
+            EnemyObservation[] observations = s.Observations;
+            for (int k = 0; k < s.ObservationCount; k++)
+            {
+                if (!EnemySamples.Accepts(in observations[k])) continue;
+                float dx = observations[k].X - x, dz = observations[k].Z - z;
+                float sq = dx * dx + dz * dz;
+                if (sq < bestSq)
+                {
+                    bestSq = sq;
+                    best = k;
+                }
+            }
+            if (best >= 0) distance = (float)System.Math.Sqrt(bestSq);
+            return best;
         }
 
         /// <summary>The Prefix's cheap tests, run first for every regiment on every regular cycle: its flag is on, and the regiment is infantry that is not already in column.</summary>
@@ -125,12 +164,13 @@ namespace WhiskeyRealism.Tactical.Battle
         }
     }
 
-    // The marked regiments, per alliance, by GameObject instance id (the snapshot's key). Rebuilt by the facing-pulse producer on every pass and read by the
-    // patch; main thread only, allocation-free after warm-up. A mark expires ValidHours of battle time after its pass (the arbiter stopped, a side stood
-    // down), and a stamp from the future (a reload) is none.
+    // The marked regiments, per alliance, by GameObject instance id (the snapshot's key). Rebuilt by the facing-pulse producer on every pass (a regiment
+    // that fails any arm, or that the pass does not look at, is not in it) and read by the patch; main thread only, allocation-free after warm-up. It carries
+    // no hold: a mark is only what the last pass found. FreshHours is not a hold but a guard on a pass that never came: a table whose last pass is older than
+    // that was not maintained (the producer stopped, a side stood down) and marks nothing; a stamp from the future (a reload) is none.
     internal sealed class ApproachLineTable
     {
-        public const double ValidHours = 0.1;
+        public const double FreshHours = 0.1;
 
         internal static readonly ApproachLineTable Shared = new ApproachLineTable();
 
@@ -159,7 +199,7 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (alliance < 0 || alliance >= _marked.Length) return false;
             double age = nowHours - _stamp[alliance];
-            return age >= 0.0 && age < ValidHours && _marked[alliance].Contains(instanceId);
+            return age >= 0.0 && age < FreshHours && _marked[alliance].Contains(instanceId);
         }
 
         public void Clear()

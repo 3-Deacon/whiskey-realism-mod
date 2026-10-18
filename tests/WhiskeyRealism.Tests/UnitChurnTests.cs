@@ -23,13 +23,21 @@ internal static class UnitChurnTests
             ("unit-churn COLUMN-DEPLOY a march-column infantry regiment fired on, flanked or engaged deploys at once; a regiment in line, mounted, withdrawing or routed does not", ColumnDeployDecision),
             ("unit-churn COLUMN-DEPLOY-APPLY the deploy stops the march, then turns the regiment to the threat after the stop restored its line; a regiment on a bridge is not touched", ColumnDeployAppliesTheHeading),
             ("unit-churn APPROACH-MARCH an approach deploy keeps the regiment's path, so the advance goes on in line; a deploy under fire stops it", ApproachDeployKeepsMarching),
+            ("unit-churn APPROACH-FACING an in-march deploy faces the way the regiment walks unless the threat is within 60 degrees of it, so a line never walks backwards", ApproachDeployFacesTheWay),
+            ("unit-churn APPROACH-NEEDS-MARK an in-march deploy is submitted only for a marked regiment; an unmarked one is left in vanilla's column, not stopped", ApproachDeployNeedsTheMark),
+            ("unit-churn APPROACH-PASS the pass rebuilds the table: a unit it does not look at, or that fails an arm, is unmarked at once", ApproachPassMarksOnlyWhatItSees),
+            ("unit-churn APPROACH-FALLBACK a group whose ledger task or effective task is a fall back or a delay is withdrawing, and so is a leaf brigade the override sent back", ApproachFallBackOverrideIsWithdrawing),
+            ("unit-churn APPROACH-WITHDREW-MOVE a recent move of a fall back or a delay is a withdrawal whoever issued it", ApproachWithdrawalMoveWhateverTheSource),
+            ("unit-churn APPROACH-WALK-MIN a path end within a block's length is no walking direction", ApproachWalkHeadingMinimum),
             ("unit-churn APPROACH-WALK the group a regiment follows is found up to four ancestors away, and a withdrawal in that reach holds it back", ApproachWalkReachesTheGroup),
             ("unit-churn COLUMN-DEPLOY-PLAN the deploy intent is planned for a column regiment and is a duplicate for one already in line", ColumnDeployPlan),
             ("unit-churn COLUMN-DEPLOY-WIRING the executor holds a bridge, stops the march, applies the heading through the host and reports it; the pulse producer submits it behind its flag", ColumnDeployWiring),
             ("unit-churn APPROACH-SKIP every arm of the re-column skip: the flag, Commander Mode Active, the write guard, infantry, a regiment not already in column, a marked regiment", ApproachSkipArms),
             ("unit-churn APPROACH-MARK a regiment is marked only for an AI line advance or hold with the enemy inside the assault range; never a road march, a withdrawal, a player or a feud unit", ApproachMarkArms),
             ("unit-churn APPROACH-ROAD a road march or column wait far from the enemy is never skipped, and one near it is not marked either", ApproachRoadMarchNeverSkipped),
-            ("unit-churn APPROACH-TABLE the marks are per alliance, rebuilt every pass and expire", ApproachTableMarksExpire),
+            ("unit-churn APPROACH-TABLE the marks are per alliance, rebuilt every pass, and a table the producer stopped maintaining marks nothing", ApproachTableMarksExpire),
+            ("unit-churn APPROACH-STABLE the mark reads the ledger's committed task and the perceived enemy: a rewrite's task flicker or one tick of lost sight does not drop it, a real change does", ApproachMarkHoldsStill),
+            ("unit-churn APPROACH-PERCEIVED the closest enemy is the closest one the side perceives, seen or remembered", ApproachPerceivedEnemy),
             ("unit-churn APPROACH-DEPLOY a column regiment marked for the approach deploys into line before the enemy is in rifle range", ApproachDeploysColumn),
             ("unit-churn APPROACH-WIRING the Prefix passes the live flag, mode and write guard to ApproachLine.Skips as whole statements, never throws and allocates nothing; the pulse producer builds the marks behind the approach flag alone", ApproachWiring),
         });
@@ -42,7 +50,7 @@ internal static class UnitChurnTests
     // the brigade's GroupPosture row, and FacingPulseIntentProducer and FireControlIntentProducer read only groups with Has set.
     private static void LeafBrigadeRecordsItsPosture()
     {
-        GroupPosture reserve = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, closeEngaged: false, flankRisk: true, BattleStance.Defender);
+        GroupPosture reserve = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CommandTaskType.ReserveWait, 708956, closeEngaged: false, flankRisk: true, BattleStance.Defender);
         AssertTrue(reserve.Has, "the row exists");
         AssertEqual(CommandEchelonKind.BrigadeLike, reserve.State.Echelon, "a brigade: the pulse's Brigade scope");
         AssertEqual(CommandNodeRole.Reserve, reserve.State.Role, "the leaf role as the ledger names it");
@@ -50,15 +58,15 @@ internal static class UnitChurnTests
         AssertTrue(reserve.FlankRisk && !reserve.CloseEngaged, "the contact flags the pulse reads");
         AssertFalse(reserve.Submitted, "no move yet");
         AssertFalse(reserve.FacingSubmitted, "nor a pulse");
-        AssertEqual(CommandNodeRole.Defender, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Defender).State.Role, "a refused flank defends on the defending side");
+        AssertEqual(CommandNodeRole.Defender, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Defender).State.Role, "a refused flank defends on the defending side");
         foreach (BattleStance attacking in new[] { BattleStance.Attacker, BattleStance.Meeting })
-            AssertEqual(CommandNodeRole.FlankMarch, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false, attacking).State.Role,
+            AssertEqual(CommandNodeRole.FlankMarch, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, CommandTaskType.GuardFlank, 1, false, false, attacking).State.Role,
                 "and is a flank guard, never a Defender, on a side that is " + attacking);
-        AssertEqual(CommandNodeRole.Unknown, LeafPosture.Record(DirectChildRole.Unknown, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Attacker).State.Role, "an unknown role stays unknown");
+        AssertEqual(CommandNodeRole.Unknown, LeafPosture.Record(DirectChildRole.Unknown, CommandTaskType.GuardFlank, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Attacker).State.Role, "an unknown role stays unknown");
         // Record runs for every leaf brigade on every posture tick: the node id is built once per brigade, not concatenated per call.
         AssertEqual("leaf-708956", reserve.State.NodeId, "the node id names the brigade");
         AssertTrue(ReferenceEquals(LeafPosture.NodeId(708956), LeafPosture.NodeId(708956)), "and is the same string on every call");
-        AssertTrue(ReferenceEquals(LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, false, false, BattleStance.Attacker).State.NodeId, LeafPosture.NodeId(708956)),
+        AssertTrue(ReferenceEquals(LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CommandTaskType.ReserveWait, 708956, false, false, BattleStance.Attacker).State.NodeId, LeafPosture.NodeId(708956)),
             "Record takes it from the cache");
 
         // What the record buys: the pulse's brigade decision for a reserve brigade with a flank under pressure (a held task faces the threat).
@@ -74,12 +82,12 @@ internal static class UnitChurnTests
         string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         string leaf = FlankResponseTests.Between(producer, "private static void ProduceLeaf(", "// BR-M1: holds a Main-effort brigade");
         FlankResponseTests.AssertPinned(leaf, "t.Groups[i] = LeafPosture.Record(", "the leaf path fills the brigade's posture row");
-        FlankResponseTests.AssertPinned(leaf, "closeEngaged, flankRisk, army.CurrentBattleStance);", "with the side's real battle stance, so an attacking side's refused flank is a flank guard");
+        FlankResponseTests.AssertPinned(leaf, "LeafPosture.Record(leaf.LeafRole, task, leaf.LeafTask, id, closeEngaged, flankRisk, army.CurrentBattleStance);", "the effective task and the committed one (the leaf map's, before every rewrite), with the side's real battle stance, so an attacking side's refused flank is a flank guard");
         int record = leaf.IndexOf("t.Groups[i] = LeafPosture.Record(", StringComparison.Ordinal);
         int decide = leaf.IndexOf("LeafBrigadeMovePolicy.Decide(", StringComparison.Ordinal);
         int exit = leaf.IndexOf("if (!move.Move)", StringComparison.Ordinal);
         AssertTrue(record >= 0 && decide > record && exit > decide, "before the move decision, so a brigade that does not move (a reserve, a hold) is recorded too");
-        FlankResponseTests.AssertPinned(leaf, "t.Groups[i].Submitted = true;", "and marked when the move was submitted, as the pool path marks it");
+        FlankResponseTests.AssertPinned(leaf, "sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));\n            t.Groups[i].Submitted = true;", "and marked when the slot move was submitted, as the pool path marks it (the flank guard's own mark above it is not this one)");
     }
 
     // ------------------------------------------------------------------ a fixing force at assault
@@ -162,10 +170,13 @@ internal static class UnitChurnTests
         AssertEqual(ColumnDeployReason.FiredOn, ColumnDeployment.Decide(Column(receivedFire: true)), "fired on: deploy");
         AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(fireFromFlank: 1)), "fire from the flank");
         AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(outflanked: 2)), "outflanked");
-        AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(groupFlankRisk: true)), "its brigade's perceived flank risk");
+        AssertEqual(ColumnDeployReason.FlankRisk, ColumnDeployment.Decide(Column(groupFlankRisk: true)), "its brigade's perceived flank risk alone is not a flank taken: a reason of its own");
         AssertEqual(ColumnDeployReason.Engaged, ColumnDeployment.Decide(Column(groupCloseEngaged: true)), "its brigade in close contact");
         AssertEqual(ColumnDeployReason.FiredOn, ColumnDeployment.Decide(Column(receivedFire: true, fireFromFlank: 1, groupCloseEngaged: true)), "fire is named before the flank and the contact");
         AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(fireFromFlank: 1, groupCloseEngaged: true)), "the flank before the contact");
+        AssertEqual(ColumnDeployReason.Engaged, ColumnDeployment.Decide(Column(groupFlankRisk: true, groupCloseEngaged: true)), "close contact before a perceived risk");
+        AssertEqual(ColumnDeployReason.Flanked, ColumnDeployment.Decide(Column(groupFlankRisk: true, outflanked: 1)), "the regiment's own evidence names the flank, not the risk");
+        AssertEqual(ColumnDeployReason.FlankRisk, ColumnDeployment.Decide(new ColumnDeployInput(true, false, 3, false, 0, 0, true, false, false, false, false, true)), "a perceived risk before the approach");
 
         AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(formation: 0, receivedFire: true)), "already in line");
         AssertEqual(ColumnDeployReason.None, ColumnDeployment.Decide(Column(formation: 2, receivedFire: true)), "any other regiment formation");
@@ -192,6 +203,8 @@ internal static class UnitChurnTests
         public int Live;
         public bool RotateAccepted;
         public int Paths;
+        public float Walk = -1f;
+        public float Final = -1f;
         public readonly System.Collections.Generic.List<string> Calls;
 
         public FakeDeployHost(bool offBridge, int lastFormation, bool rotateAccepted = true)
@@ -206,6 +219,8 @@ internal static class UnitChurnTests
 
         public bool OffBridgeOrCrossing => OffBridge;
         public int Formation => Live;
+        public float WalkHeading => Walk;
+        public float VanillaFinalRotation => Final;
 
         public void Stop()
         {
@@ -237,27 +252,27 @@ internal static class UnitChurnTests
     {
         // The normal case: the stop restores the line, and the threat heading is applied after it.
         var normal = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine);
-        AssertEqual(ColumnDeployApplied.Faced, ColumnDeployment.Apply(ref normal, 135f, keepMarching: false), "stopped, out of the column, turned to the threat");
+        AssertEqual(ColumnDeployApplied.Faced, ColumnDeployment.Apply(ref normal, 135f, keepMarching: false, out _), "stopped, out of the column, turned to the threat");
         AssertEqual("stop,rotate:135", string.Join(",", normal.Calls), "the stop, then the rotation, and no forced re-form");
         AssertEqual(ColumnDeployment.RegimentLine, normal.Live, "in line");
 
         // The restored formation is the column itself (it was ordered column, not columned by vanilla's distance rule): re-form to line with the heading.
         var ordered = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentMarchColumn);
-        AssertEqual(ColumnDeployApplied.Reformed, ColumnDeployment.Apply(ref ordered, 200f, keepMarching: false), "re-formed to line facing the threat");
+        AssertEqual(ColumnDeployApplied.Reformed, ColumnDeployment.Apply(ref ordered, 200f, keepMarching: false, out _), "re-formed to line facing the threat");
         AssertEqual("stop,reform:200", string.Join(",", ordered.Calls), "the stop, then the re-form, and no second rotation");
 
         // Vanilla's guard: a regiment on a bridge or a crossing is not touched (127669, 127676, 132498-132511).
         var bridge = new FakeDeployHost(offBridge: false, lastFormation: ColumnDeployment.RegimentLine);
-        AssertEqual(ColumnDeployApplied.HeldOnBridge, ColumnDeployment.Apply(ref bridge, 135f, keepMarching: false), "on a bridge: held");
+        AssertEqual(ColumnDeployApplied.HeldOnBridge, ColumnDeployment.Apply(ref bridge, 135f, keepMarching: false, out _), "on a bridge: held");
         AssertEqual(0, bridge.Calls.Count, "nothing is written to a regiment on a bridge or crossing");
         AssertEqual(ColumnDeployment.RegimentMarchColumn, bridge.Live, "it keeps marching in column until it is off");
 
         var blind = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine);
-        AssertEqual(ColumnDeployApplied.NoBearing, ColumnDeployment.Apply(ref blind, -1f, keepMarching: false), "no threat bearing");
+        AssertEqual(ColumnDeployApplied.NoBearing, ColumnDeployment.Apply(ref blind, -1f, keepMarching: false, out _), "no threat bearing");
         AssertEqual("stop", string.Join(",", blind.Calls), "the stop alone: the regiment keeps its own facing");
 
         var refused = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine, rotateAccepted: false);
-        AssertEqual(ColumnDeployApplied.KeptFacing, ColumnDeployment.Apply(ref refused, 135f, keepMarching: false), "the rotation was refused or not needed");
+        AssertEqual(ColumnDeployApplied.KeptFacing, ColumnDeployment.Apply(ref refused, 135f, keepMarching: false, out _), "the rotation was refused or not needed");
         AssertEqual("stop,rotate:135", string.Join(",", refused.Calls), "it was asked after the stop");
     }
 
@@ -269,24 +284,29 @@ internal static class UnitChurnTests
     {
         var march = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine);
         AssertEqual(1, march.Paths, "the column regiment is marching");
-        AssertEqual(ColumnDeployApplied.DeployedInMarch, ColumnDeployment.Apply(ref march, 135f, keepMarching: true), "deployed where it stands");
+        AssertEqual(ColumnDeployApplied.DeployedInMarch, ColumnDeployment.Apply(ref march, 135f, keepMarching: true, out _), "deployed where it stands");
         AssertEqual("deploy-in-march:135", string.Join(",", march.Calls), "vanilla's own deploy in march, with no stop");
         AssertEqual(ColumnDeployment.RegimentLine, march.Live, "in line");
         AssertEqual(1, march.Paths, "with its path: the advance goes on in line");
 
         var halt = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine);
-        ColumnDeployment.Apply(ref halt, 135f, keepMarching: false);
+        ColumnDeployment.Apply(ref halt, 135f, keepMarching: false, out _);
         AssertEqual(0, halt.Paths, "a deploy under fire stops the regiment: that is its point (fight in place)");
 
         var bridge = new FakeDeployHost(offBridge: false, lastFormation: ColumnDeployment.RegimentLine);
-        AssertEqual(ColumnDeployApplied.HeldOnBridge, ColumnDeployment.Apply(ref bridge, 135f, keepMarching: true), "the bridge guard holds for the approach too");
+        AssertEqual(ColumnDeployApplied.HeldOnBridge, ColumnDeployment.Apply(ref bridge, 135f, keepMarching: true, out _), "the bridge guard holds for the approach too");
         AssertEqual(0, bridge.Calls.Count, "and nothing is written to it");
 
         // The intents: only the approach keeps marching.
         BattleOrderIntent approach = ColumnDeployment.Intent(77, 135f, ColumnDeployReason.Approaching);
         AssertTrue((approach.Flags & IntentFlags.DeployInMarch) != 0 && (approach.Flags & IntentFlags.Deploy) != 0, "the approach deploy is flagged to keep marching");
         foreach (ColumnDeployReason r in new[] { ColumnDeployReason.FiredOn, ColumnDeployReason.Flanked, ColumnDeployReason.Engaged })
-            AssertTrue((ColumnDeployment.Intent(77, 135f, r).Flags & IntentFlags.DeployInMarch) == 0, r + " stops and fights in place");
+        {
+            AssertTrue((ColumnDeployment.Intent(77, 135f, r).Flags & IntentFlags.DeployInMarch) == 0, r + " with a bearing stops and fights in place");
+            AssertTrue((ColumnDeployment.Intent(77, -1f, r).Flags & IntentFlags.DeployInMarch) != 0, r + " with no bearing keeps marching: a stop would turn it to nothing");
+        }
+        AssertTrue((ColumnDeployment.Intent(77, 135f, ColumnDeployReason.FlankRisk).Flags & IntentFlags.DeployInMarch) != 0, "a perceived flank risk never stops a regiment");
+        AssertEqual("column-deploy:FlankRisk", ColumnDeployment.Intent(77, 135f, ColumnDeployReason.FlankRisk).Reason, "and names itself");
         var executor = new OrderExecutor();
         executor.Bind(new AllowGuard(), null);
         AssertTrue(executor.Plan(ChurnSnapshot(regimentFormation: 3), approach, 1.0).Execute, "the executor plans the approach deploy for a column regiment");
@@ -296,14 +316,165 @@ internal static class UnitChurnTests
             regimentPaths: 1, activeMove: true, currentX: 200f, currentZ: -200f), "the same target, the group walking: the re-issue is skipped");
     }
 
+    // A line whose facing is more than 90 degrees off its path walks backwards. Smoke 2026-10-18: the 15th Indiana's deploy in march had targetFacing -1
+    // (the column's facing kept) and the user watched it march backwards. The deploy faces the way the regiment walks unless the threat is close to that.
+    private static void ApproachDeployFacesTheWay()
+    {
+        AssertEqual(200f, ColumnDeployment.MarchFacing(-1f, 200f, 10f), "no bearing: the way it walks, not the column's facing");
+        AssertEqual(190f, ColumnDeployment.MarchFacing(190f, 200f, 10f), "a threat within 60 degrees of the walk: the threat");
+        AssertEqual(200f, ColumnDeployment.MarchFacing(20f, 200f, 10f), "a threat behind it (180 off): the walk, never backwards");
+        AssertEqual(200f, ColumnDeployment.MarchFacing(139f, 200f, 10f), "61 degrees off: the walk");
+        AssertEqual(140f, ColumnDeployment.MarchFacing(140f, 200f, 10f), "exactly 60 degrees off (below): the threat");
+        AssertEqual(260f, ColumnDeployment.MarchFacing(260f, 200f, 10f), "exactly 60 degrees off: the threat");
+        AssertEqual(5f, ColumnDeployment.MarchFacing(5f, 350f, 10f), "the angle wraps at 360");
+        AssertEqual(135f, ColumnDeployment.MarchFacing(135f, -1f, 10f), "no path: the threat");
+        AssertEqual(10f, ColumnDeployment.MarchFacing(-1f, -1f, 10f), "neither: vanilla's own final rotation (127679)");
+        AssertEqual(-1f, ColumnDeployment.MarchFacing(-1f, -1f, -1f), "nothing at all keeps the regiment's facing");
+
+        var host = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine) { Walk = 200f, Final = 10f };
+        ColumnDeployment.Apply(ref host, -1f, keepMarching: true, out float none);
+        AssertEqual("deploy-in-march:200", string.Join(",", host.Calls), "the host is told the walking direction");
+        AssertEqual(200f, none, "and the row reports it");
+        var behind = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine) { Walk = 200f, Final = 10f };
+        ColumnDeployment.Apply(ref behind, 20f, keepMarching: true, out float chosen);
+        AssertEqual(200f, chosen, "a threat bearing behind the path does not turn it to walk backwards");
+        var pathless = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine) { Final = 10f };
+        ColumnDeployment.Apply(ref pathless, -1f, keepMarching: true, out float vanilla);
+        AssertEqual(10f, vanilla, "no path and no bearing: vanilla's final rotation");
+        var stop = new FakeDeployHost(offBridge: true, lastFormation: ColumnDeployment.RegimentLine) { Walk = 200f };
+        ColumnDeployment.Apply(ref stop, 20f, keepMarching: false, out float turned);
+        AssertEqual(20f, turned, "a stopping deploy still faces the threat it stopped for");
+    }
+
+    // Vanilla looks again at a line regiment with a path over 60 m and no enemy inside 100 m and columns it (CheckFormationChange 127665-127667); only the
+    // Prefix, which skips that look for a marked regiment, keeps an in-march deploy in line. An unmarked regiment deployed in march was columned within a
+    // second and, after the 20 s cooldown, deployed again: a Line/Column cycle (smoke 2026-10-18: 9 of 38 in-march deploys re-columned within 3 s).
+    private static void ApproachDeployNeedsTheMark()
+    {
+        foreach (ColumnDeployReason r in new[] { ColumnDeployReason.Approaching, ColumnDeployReason.FlankRisk })
+        {
+            AssertTrue(ColumnDeployment.MayDeploy(r, 135f, marked: true), r + " deploys in march for a marked regiment");
+            AssertFalse(ColumnDeployment.MayDeploy(r, 135f, marked: false), r + " submits nothing for an unmarked one: vanilla's column stands, the regiment is not stopped");
+        }
+        AssertFalse(ColumnDeployment.MayDeploy(ColumnDeployReason.FiredOn, -1f, marked: false), "a deploy with no bearing keeps marching, so it needs the mark too");
+        AssertTrue(ColumnDeployment.MayDeploy(ColumnDeployReason.FiredOn, -1f, marked: true), "and holds for a marked regiment");
+        foreach (ColumnDeployReason r in new[] { ColumnDeployReason.FiredOn, ColumnDeployReason.Flanked, ColumnDeployReason.Engaged })
+            AssertTrue(ColumnDeployment.MayDeploy(r, 135f, marked: false), r + " with a bearing stops the regiment and fights in place: no mark needed, there is no path to re-column");
+        // The rule and the intent agree: whatever MayDeploy lets through unmarked is a stop.
+        foreach (ColumnDeployReason r in new[] { ColumnDeployReason.FiredOn, ColumnDeployReason.Flanked, ColumnDeployReason.Engaged, ColumnDeployReason.FlankRisk, ColumnDeployReason.Approaching })
+            foreach (float heading in new[] { -1f, 90f })
+                if (ColumnDeployment.MayDeploy(r, heading, marked: false))
+                    AssertTrue((ColumnDeployment.Intent(77, heading, r).Flags & IntentFlags.DeployInMarch) == 0, r + " " + heading + ": an unmarked deploy is never in march");
+    }
+
+    // The table is rebuilt every pass (Begin clears the alliance), so a regiment is unmarked at the next pass if it fails any arm or the pass does not look at
+    // it (detached, taken over by the player, feuding, mounted, dead, inactive). Nothing outlasts the pass, so there is no release to forget.
+    private static void ApproachPassMarksOnlyWhatItSees()
+    {
+        UnitFlags live = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry;
+        var table = new ApproachLineTable();
+        double now = 50.0;
+        foreach (UnitFlags bad in new[] { UnitFlags.PermanentlyDetached, UnitFlags.PlayerOwned, UnitFlags.Feud, UnitFlags.Mounted, UnitFlags.IsGroup, UnitFlags.Routed, UnitFlags.OnRetreat })
+        {
+            now += 0.001;
+            table.Begin(0, now);
+            if (ApproachLine.Marks(Mark())) table.Mark(0, 77);
+            AssertTrue(table.Contains(0, 77, now), "marked");
+            now += 0.001;
+            table.Begin(0, now);
+            if (ApproachLine.Marks(Mark(flags: live | bad))) table.Mark(0, 77);
+            AssertFalse(table.Contains(0, 77, now), bad + " is unmarked at the next pass, with no hold");
+        }
+        foreach (UnitFlags missing in new[] { UnitFlags.Alive, UnitFlags.Active, UnitFlags.IsInfantry })
+        {
+            now += 0.001;
+            table.Begin(0, now);
+            if (ApproachLine.Marks(Mark(flags: live & ~missing))) table.Mark(0, 77);
+            AssertFalse(table.Contains(0, 77, now), "a unit without " + missing + " is not marked");
+        }
+    }
+
+    // The opportunity override turns a committed Main, SupportMain or Fix to FallBackToLine (TacticalOpportunityTaskOverride 41-57) after the ledger's task is
+    // captured, and the withdrawal producer is not the only mover of a falling back group. The approval covers an advance or a hold: a group falling back, by
+    // its ledger task or by its effective one, is withdrawing whoever sent it.
+    private static void ApproachFallBackOverrideIsWithdrawing()
+    {
+        UnitRecord[] own = Chain(3);
+        bool Withdrawing(CommandTaskType ledger, CommandTaskType effective)
+        {
+            WalkHost host = Walker(3);
+            host.Has[1] = true;
+            host.Task[1] = ledger;
+            host.Effective = new CommandTaskType[3];
+            host.Effective[1] = effective;
+            ApproachLine.Walk(own, own.Length, 0, ref host, out _, out bool withdrawing);
+            return withdrawing;
+        }
+        AssertTrue(Withdrawing(CommandTaskType.FixEnemy, CommandTaskType.FallBackToLine), "committed Fix, turned to FallBackToLine by the opportunity override");
+        AssertTrue(Withdrawing(CommandTaskType.AttackObjective, CommandTaskType.Delay), "committed attack, effective Delay");
+        AssertTrue(Withdrawing(CommandTaskType.FallBackToLine, CommandTaskType.AttackObjective), "committed fall back, effective attack");
+        AssertTrue(Withdrawing(CommandTaskType.Delay, CommandTaskType.Delay), "both");
+        AssertFalse(Withdrawing(CommandTaskType.FixEnemy, CommandTaskType.Screen), "a rewrite to Screen is no withdrawal");
+        AssertFalse(Withdrawing(CommandTaskType.FixEnemy, CommandTaskType.FixEnemy), "neither");
+
+        // The leaf row: the committed task is the leaf map's, taken before the override; the effective one is the rewritten.
+        GroupPosture leaf = LeafPosture.Record(DirectChildRole.Fix, CommandTaskType.FallBackToLine, CommandTaskType.FixEnemy, 927726, false, false, BattleStance.Attacker);
+        AssertEqual(CommandTaskType.FixEnemy, leaf.LedgerTask, "the leaf's ledger task is the committed one");
+        AssertEqual(CommandTaskType.FallBackToLine, leaf.State.Task, "the effective one is what the override made of it");
+        WalkHost fromRow = Walker(3);
+        fromRow.Has[1] = true;
+        fromRow.Task[1] = leaf.LedgerTask;
+        fromRow.Effective = new CommandTaskType[3];
+        fromRow.Effective[1] = leaf.State.Task;
+        ApproachLine.Walk(own, own.Length, 0, ref fromRow, out _, out bool leafWithdrawing);
+        AssertTrue(leafWithdrawing, "so a leaf brigade the override sent back is withdrawing");
+        AssertFalse(ApproachLine.Marks(Mark(task: leaf.LedgerTask, withdrawing: leafWithdrawing)), "and its regiments are not marked");
+    }
+
+    private static void ApproachWithdrawalMoveWhateverTheSource()
+    {
+        const double window = 0.25;
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        BattleOrderIntent Move(int id, CommandTaskType task, IntentSource source) => new BattleOrderIntent
+        {
+            GroupId = id, Channel = OrderChannel.Move, Task = task, Source = source, TargetX = 100f, TargetZ = 100f, Heading = -1f, Priority = IntentPriority.Executor, Reason = "t",
+        };
+        executor.RecordIssued(Move(1, CommandTaskType.FallBackToLine, IntentSource.PostureExecutor), 10.0, null, 0, null, 0, 0, 0);
+        executor.RecordIssued(Move(2, CommandTaskType.Delay, IntentSource.PostureExecutor), 10.0, null, 0, null, 0, 0, 0);
+        executor.RecordIssued(Move(3, CommandTaskType.AttackObjective, IntentSource.PostureExecutor), 10.0, null, 0, null, 0, 0, 0);
+        executor.RecordIssued(Move(4, CommandTaskType.None, IntentSource.Withdrawal), 10.0, null, 0, null, 0, 0, 0);
+        AssertTrue(executor.WithdrewRecently(1, 10.1, window), "a FallBackToLine move from the posture executor");
+        AssertTrue(executor.WithdrewRecently(2, 10.1, window), "a Delay move");
+        AssertFalse(executor.WithdrewRecently(3, 10.1, window), "an attack move");
+        AssertTrue(executor.WithdrewRecently(4, 10.1, window), "the withdrawal producer's move, as before");
+        AssertFalse(executor.WithdrewRecently(1, 10.0 + window, window), "past the window");
+        AssertFalse(executor.WithdrewRecently(1, 9.0, window), "a stamp from the future (a reload)");
+        AssertFalse(executor.WithdrewRecently(99, 10.1, window), "a unit that was never moved");
+        AssertFalse(new OrderExecutor().WithdrewRecently(1, 10.1, window), "a fresh executor");
+    }
+
+    private static void ApproachWalkHeadingMinimum()
+    {
+        AssertEqual(20f, ColumnDeployment.WalkHeadingMinMeters, "a block's length");
+        AssertEqual(-1f, ColumnDeployment.WalkHeadingTo(100f, 100f, 100f, 119f), "a path end 19 m away is no walking direction");
+        AssertEqual(PostureSense.HeadingTo(100f, 100f, 100f, 121f), ColumnDeployment.WalkHeadingTo(100f, 100f, 100f, 121f), "21 m is");
+        AssertEqual(PostureSense.HeadingTo(100f, 100f, 100f, 120f), ColumnDeployment.WalkHeadingTo(100f, 100f, 100f, 120f), "exactly 20 m is");
+        AssertEqual(-1f, ColumnDeployment.WalkHeadingTo(100f, 100f, 112f, 115f), "the distance is the straight line, not an axis (19.2 m)");
+        AssertEqual(PostureSense.HeadingTo(0f, 0f, -300f, -700f), ColumnDeployment.WalkHeadingTo(0f, 0f, -300f, -700f), "a long path end gives its bearing");
+        AssertEqual(-1f, ColumnDeployment.WalkHeadingTo(5f, 5f, 5f, 5f), "no distance, no direction");
+    }
+
     // The nearest group above a regiment is found up to MaxGroupHops ancestors away, and a withdrawal anywhere in that reach holds the approach back.
     private struct WalkHost : IGroupWalkHost
     {
         public bool[] Has;
         public CommandTaskType[] Task;
         public bool[] Recent;
+        public CommandTaskType[] Effective;
         public bool HasPosture(int index) => Has[index];
         public CommandTaskType TaskOf(int index) => Task[index];
+        public CommandTaskType EffectiveTaskOf(int index) => Effective != null ? Effective[index] : Task[index];
         public bool WithdrawalRecent(int index) => Recent[index];
     }
 
@@ -433,8 +604,8 @@ internal static class UnitChurnTests
         string deploy = Code(FlankResponseTests.Between(runtime, "private static bool IssueDeploy(", "// The deploy's calls on vanilla, for ColumnDeployment.Apply."));
         FlankResponseTests.AssertPinned(deploy, "if (unit.unittyp != TacticalUnitType.Infantry || unit.isrouted || unit.markedforrout || unit.mounted != 0) return false;", "infantry only, never a routed or mounted regiment");
         FlankResponseTests.AssertPinned(deploy, "if (unit.formation != ColumnDeployment.RegimentMarchColumn) return false;", "the live column test comes first");
-        FlankResponseTests.AssertPinned(deploy, "ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading, (w.Flags & IntentFlags.DeployInMarch) != 0);", "the one pure sequence: the bridge guard, the stop, then the heading");
-        FlankResponseTests.AssertPinned(deploy, "EmitColumnDeploy(view, targetIndex, w, applied);", "the row reports what was applied");
+        FlankResponseTests.AssertPinned(deploy, "ColumnDeployApplied applied = ColumnDeployment.Apply(ref host, w.Heading, (w.Flags & IntentFlags.DeployInMarch) != 0, out float facing);", "the one pure sequence: the bridge guard, the stop, then the heading");
+        FlankResponseTests.AssertPinned(deploy, "EmitColumnDeploy(view, targetIndex, w, applied, facing);", "the row reports what was applied");
         FlankResponseTests.AssertPinned(deploy, "return applied != ColumnDeployApplied.HeldOnBridge;", "and a regiment held on a bridge counts as no write");
         AssertFalse(deploy.Contains("ChangeRegimentFormation"), "no forced re-form outside the host: the stop restores the line");
         string host = Code(FlankResponseTests.Between(runtime, "private readonly struct DeployHost", "private static readonly Dictionary<string, float> _lastColumnDeployRowAt"));
@@ -443,10 +614,17 @@ internal static class UnitChurnTests
         FlankResponseTests.AssertPinned(host, "_bunits.PerformActionForGroupForAllUnitsOnLevel(_go, -1, \"StopRegiment\", ManualStop,", "vanilla's manual stop");
         FlankResponseTests.AssertPinned(host, "_unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));", "the re-form for a restored column");
         FlankResponseTests.AssertPinned(host, "public bool Rotate(float heading) => RotateInPlace(_unit, heading);", "the heading goes through the executor's facing path");
+        FlankResponseTests.AssertPinned(host, "if (_unit.regimentpaths <= 0) return -1f;", "no path, no walking direction");
+        FlankResponseTests.AssertPinned(host, "Vector3 end = _unit.GetLastTransmittedPathPos(ignoreorderdelay: true);", "the end of the regiment's own path");
+        FlankResponseTests.AssertPinned(host, "return ColumnDeployment.WalkHeadingTo(here.x, here.z, end.x, end.z);", "the bearing to it, through the one pure function");
+        FlankResponseTests.AssertPinned(host, "return rotation != null && rotation.Length > 0 && rotation[0] >= 0f ? rotation[0] : -1f;", "vanilla's final rotation (127679)");
         FlankResponseTests.AssertPinned(host, "Regiment lastOrderUnit = _unit.unitwhogavelastmovingorder;", "vanilla's deploy in march keeps the unit that gave the last moving order (127678)");
         FlankResponseTests.AssertPinned(host, "_unit.ChangeRegimentFormation(GameVars.SetFormationParam(ColumnDeployment.RegimentLine, manualset: true, -1, heading));\n                _unit.distancemarchcolumn = false;\n                _unit.unitwhogavelastmovingorder = lastOrderUnit;", "and ends the distance march column (127679-127681)");
         string row = Code(FlankResponseTests.Between(runtime, "private static void EmitColumnDeploy(", "private static bool IssueFormation("));
         FlankResponseTests.AssertPinned(row, ".WithField(\"applied\", appliedName)", "the row carries what was applied");
+        FlankResponseTests.AssertPinned(row, ".WithField(\"facing\", facing)", "and the facing it was given");
+        FlankResponseTests.AssertPinned(row, "bool marked = ApproachLineTable.Shared.Contains(view.Alliance, rec.InstanceId, view.DoctrineHours);", "whether the table held the regiment as it ran");
+        FlankResponseTests.AssertPinned(row, ".WithField(\"marked\", marked)", "so an in-march deploy that vanilla will undo shows");
         FlankResponseTests.AssertPinned(row, "string appliedName = applied.ToString();", "named from the applied value");
         FlankResponseTests.AssertPinned(runtime, "BattleScope.Register(\"order-executor-column-deploy-rows\", () => _lastColumnDeployRowAt.Clear());", "the row throttle is battle-scoped");
 
@@ -456,8 +634,8 @@ internal static class UnitChurnTests
         FlankResponseTests.AssertPinned(produce, "ColumnDeployment.Decide(", "the pure decision");
         FlankResponseTests.AssertPinned(produce, "ColumnDeployment.Intent(rec.InstanceId, heading, reason)", "builds the one intent, with its reason");
         FlankResponseTests.AssertPinned(produce, "ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);", "and asks the ancestor walk whether the regiment is withdrawing");
-        PinStatement(Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs")), "if (ColumnDeployment.WithdrawalTask(host.TaskOf(a))) withdrawing = true;", "and leaves a withdrawing ancestor's regiments alone");
-        FlankResponseTests.AssertPinned(produce, "IntentSource.Withdrawal", "as well as the withdrawal producer's");
+        PinStatement(Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs")), "if (ColumnDeployment.WithdrawalTask(host.TaskOf(a)) || ColumnDeployment.WithdrawalTask(host.EffectiveTaskOf(a))) withdrawing = true;", "and leaves a withdrawing ancestor's regiments alone, by the ledger's task or the effective one");
+        FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutor.cs"), "last.Source == IntentSource.Withdrawal", "as well as the withdrawal producer's (the executor's WithdrewRecently)");
         string plugin = FlankResponseTests.SourceText("Plugin.cs");
         FlankResponseTests.AssertPinned(plugin, "\"Enable Column Deployment\"", "the flag is declared");
     }
@@ -577,17 +755,126 @@ internal static class UnitChurnTests
         AssertTrue(table.Contains(0, 77, 10.0), "marked");
         AssertFalse(table.Contains(1, 77, 10.0), "the other alliance has no mark");
         AssertFalse(table.Contains(0, 78, 10.0), "nor another regiment");
-        AssertTrue(table.Contains(0, 77, 10.0 + ApproachLineTable.ValidHours * 0.9), "valid inside the window");
-        AssertFalse(table.Contains(0, 77, 10.0 + ApproachLineTable.ValidHours + 0.001), "expired past the window (the arbiter stopped)");
+        AssertEqual(0.1, ApproachLineTable.FreshHours, "six real seconds at the smoke's speed, a minute at 1x: long enough for the arbiter's cadence, short of a stopped producer");
+        AssertTrue(table.Contains(0, 77, 10.05), "fresh half a window after the pass");
+        AssertTrue(table.Contains(0, 77, 10.099), "and just inside it");
+        AssertFalse(table.Contains(0, 77, 10.2), "a table whose last pass is older than that was not maintained (the producer stopped)");
+        AssertFalse(table.Contains(0, 77, 20.0), "and stays so");
         AssertFalse(table.Contains(0, 77, 9.0), "a stamp from the future (a reload) is no mark");
         table.Begin(0, 10.1);
-        AssertFalse(table.Contains(0, 77, 10.1), "every pass rebuilds the alliance's table");
+        AssertFalse(table.Contains(0, 77, 10.1), "every pass rebuilds the alliance's table: a regiment the pass did not mark is not in it");
+        table.Mark(0, 77);
+        table.Begin(1, 10.1);
+        table.Mark(1, 5);
+        AssertTrue(table.Contains(0, 77, 10.1) && table.Contains(1, 5, 10.1), "each alliance keeps its own");
         table.Mark(5, 1);
         AssertFalse(table.Contains(5, 1, 10.1), "an alliance out of range is never marked");
         table.Begin(-1, 10.1);
         AssertFalse(table.Contains(-1, 1, 10.1), "nor read");
         table.Clear();
         AssertFalse(table.Contains(0, 77, 10.1), "Clear (battle end)");
+    }
+
+    // The 2026-10-18 smoke: the 4th Brigade's task row went FixEnemy, Screen, FixEnemy, Screen, Probe in seven seconds because the reconnaissance rule read one
+    // tick of sight, and the mark, rebuilt from that task and from sight alone, dropped with each flicker: vanilla columned the regiments a second after their
+    // approach deploy (9 of 38). No hold fixes that. The mark reads the ledger's committed task (GroupPosture.LedgerTask) and the perceived enemy (seen or
+    // remembered), which change when something really changes.
+    private static void ApproachMarkHoldsStill()
+    {
+        var table = new ApproachLineTable();
+        double now = 100.0;
+        // The posture row as the pipeline records it: LedgerTask the ledger's, State.Task what the per-tick rewrites made of it.
+        GroupPosture Row(CommandTaskType ledger, CommandTaskType rewritten)
+        {
+            GroupPosture row = LeafPosture.Record(DirectChildRole.Fix, ledger, ledger, 927726, false, false, BattleStance.Attacker);
+            row.State = row.State.WithRoleAndTask(row.State.Role, rewritten);
+            return row;
+        }
+        bool pass(GroupPosture row, bool hasEnemy = true, float distance = 300f, bool withdrawing = false, bool routeColumn = false)
+        {
+            now += 0.005;
+            table.Begin(0, now);
+            if (ApproachLine.Marks(Mark(task: row.LedgerTask, hasEnemy: hasEnemy, distance: distance, withdrawing: withdrawing, routeColumn: routeColumn))) table.Mark(0, 77);
+            return table.Contains(0, 77, now);
+        }
+
+        AssertTrue(pass(Row(CommandTaskType.FixEnemy, CommandTaskType.FixEnemy)), "marked on the committed FixEnemy");
+        foreach (CommandTaskType rewritten in new[] { CommandTaskType.Screen, CommandTaskType.FixEnemy, CommandTaskType.Screen, CommandTaskType.Probe, CommandTaskType.FormUp })
+            AssertTrue(pass(Row(CommandTaskType.FixEnemy, rewritten)), "the rewritten task " + rewritten + " is not the ledger's: the mark stands");
+        // Sight: the enemy the side perceives does not vanish with a tick of lost sight.
+        AssertTrue(pass(Row(CommandTaskType.FixEnemy, CommandTaskType.FixEnemy), hasEnemy: true, distance: 300f), "perceived (remembered) at 300 m while out of sight");
+
+        // A real change ends it at the next pass.
+        AssertFalse(pass(Row(CommandTaskType.FormUp, CommandTaskType.FormUp)), "the ledger committed the group to FormUp");
+        AssertTrue(pass(Row(CommandTaskType.AttackObjective, CommandTaskType.AttackObjective)), "and an attack marks it again");
+        AssertFalse(pass(Row(CommandTaskType.AttackObjective, CommandTaskType.AttackObjective), hasEnemy: false), "no enemy perceived at all");
+        AssertFalse(pass(Row(CommandTaskType.AttackObjective, CommandTaskType.AttackObjective), distance: ApproachLine.AssaultRangeMeters + 1f), "the perceived enemy beyond the assault range");
+        AssertTrue(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective)), "a hold marks it");
+        AssertFalse(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective), withdrawing: true), "withdrawing");
+        AssertTrue(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective)), "marked again");
+        AssertFalse(pass(Row(CommandTaskType.HoldObjective, CommandTaskType.HoldObjective), routeColumn: true), "a road route or a column wait");
+        AssertEqual(CommandTaskType.FixEnemy, Row(CommandTaskType.FixEnemy, CommandTaskType.Probe).LedgerTask, "(the row keeps the ledger's task apart from the rewritten one)");
+        AssertEqual(CommandTaskType.Probe, Row(CommandTaskType.FixEnemy, CommandTaskType.Probe).State.Task, "(and the rewritten one as it was)");
+    }
+
+    private static BattleSnapshot PerceivedSnapshot(ObservationState state, float enemyX, float enemyZ, bool withEnemy = true)
+    {
+        var s = new BattleSnapshot();
+        s.BeginBuild(1, 0, 0, 1, 1.0);
+        s.SetSliceCount(20);
+        s.AddOwn(new UnitRecord { InstanceId = 20, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+        if (withEnemy)
+            s.AddObservation(new EnemyObservation { InstanceId = 900, UnitTyp = TacticalUnitType.Infantry, X = enemyX, Z = enemyZ, Strength = 400, State = state, Confidence01 = 0.9f, LastSeenHours = 0.9 });
+        s.IndexCommandTree(null);
+        return s;
+    }
+
+    private static void ApproachPerceivedEnemy()
+    {
+        BattleSnapshot visible = PerceivedSnapshot(ObservationState.Visible, 300f, 400f);
+        int k = ApproachLine.ClosestPerceivedEnemy(visible, 0, out float d);
+        AssertTrue(k >= 0, "a visible enemy");
+        AssertNear(500f, d, 0.01f, "at 500 m (3-4-5)");
+        BattleSnapshot remembered = PerceivedSnapshot(ObservationState.Remembered, 300f, 400f);
+        int r = ApproachLine.ClosestPerceivedEnemy(remembered, 0, out float dr);
+        AssertTrue(r >= 0, "the same enemy after it dropped out of sight is still perceived");
+        AssertNear(500f, dr, 0.01f, "at the place it was seen");
+        AssertEqual(-1, remembered.ClosestVisibleEnemy(0, out _), "while sight alone has lost it: the input the smoke's mark read");
+        AssertTrue(ApproachLine.Marks(Mark(distance: dr)) , "so the mark stands through the tick");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(PerceivedSnapshot(ObservationState.Visible, 0f, 0f, withEnemy: false), 0, out _), "no observation, no enemy");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(visible, 5, out _), "an index outside the roster");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(null, 0, out _), "no snapshot");
+
+        // The repo's one fog rule (EnemySamples.Accepts): a memory below 0.5 confidence is not something the side believes in; nor is a reinforcement column
+        // or a non-combat arm. Confidence is not a timer: it decays with time unseen (BattlePerception, half-life 20 minutes), 0.5 is about 20 minutes.
+        BattleSnapshot Faint(float confidence, bool reinforcement = false, int unitTyp = TacticalUnitType.Infantry)
+        {
+            var f = new BattleSnapshot();
+            f.BeginBuild(1, 0, 0, 1, 1.0);
+            f.SetSliceCount(20);
+            f.AddOwn(new UnitRecord { InstanceId = 20, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+            f.AddObservation(new EnemyObservation { InstanceId = 903, UnitTyp = unitTyp, X = 300f, Z = 0f, State = ObservationState.Remembered, Confidence01 = confidence, IsReinforcement = reinforcement });
+            f.IndexCommandTree(null);
+            return f;
+        }
+        AssertTrue(ApproachLine.ClosestPerceivedEnemy(Faint(0.5f), 0, out _) >= 0, "remembered at exactly the threshold is perceived");
+        AssertTrue(ApproachLine.ClosestPerceivedEnemy(Faint(0.9f), 0, out _) >= 0, "and above it");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.49f), 0, out _), "a memory just under it is not");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.05f), 0, out _), "nor one at the floor perception keeps for 90 minutes");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.9f, reinforcement: true), 0, out _), "nor a reinforcement column still off the field");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.9f, unitTyp: TacticalUnitType.Skirmisher), 0, out _), "nor a skirmisher (the fog rule counts infantry, cavalry and artillery)");
+        AssertEqual(EnemySamples.RememberedMinConfidence, 0.5f, "the threshold is the repo's, not this branch's");
+
+        var two = new BattleSnapshot();
+        two.BeginBuild(1, 0, 0, 1, 1.0);
+        two.SetSliceCount(20);
+        two.AddOwn(new UnitRecord { InstanceId = 20, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+        two.AddObservation(new EnemyObservation { InstanceId = 901, UnitTyp = TacticalUnitType.Infantry, X = 900f, Z = 0f, State = ObservationState.Visible, Confidence01 = 1f });
+        two.AddObservation(new EnemyObservation { InstanceId = 902, UnitTyp = TacticalUnitType.Infantry, X = 0f, Z = -200f, State = ObservationState.Remembered, Confidence01 = 0.5f });
+        two.IndexCommandTree(null);
+        int near = ApproachLine.ClosestPerceivedEnemy(two, 0, out float dn);
+        AssertEqual(902, two.Observations[near].InstanceId, "the nearer one wins, remembered or not");
+        AssertNear(200f, dn, 0.01f, "at 200 m");
     }
 
     private static void ApproachDeploysColumn()
@@ -654,26 +941,39 @@ internal static class UnitChurnTests
             pulse.IndexOf("if (!pulseOn) return;", StringComparison.Ordinal), "the table is rebuilt before the pulse's early return");
 
         string pass = Code(FlankResponseTests.Between(producerFile, "private static void SubmitColumnDeployments(", "// ApproachLine.Walk over the posture table and the executor's outcomes"));
-        PinStatement(pass, "if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);", "the table is rebuilt every pass while the flag is on");
+        PinStatement(pass, "if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);", "the pass is stamped while the flag is on");
         AssertFalse(pass.Contains("if (!deployOn && !approachOn) continue;"), "no dead check: the caller runs the pass only for one of them");
+        PinStatement(pass, "if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;", "a unit the pass does not look at: not infantry, or a group");
+        PinStatement(pass, "if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;", "dead or inactive");
+        PinStatement(pass, "if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;", "the player's, detached, feuding or mounted: never marked, and the table was cleared at the top of the pass");
+        PinStatement(pass, "if (!ColumnDeployment.MayDeploy(reason, heading, approachOn && ApproachLineTable.Shared.Contains(s.Alliance, rec.InstanceId, s.DoctrineHours))) continue;", "an in-march deploy only for a marked regiment");
         PinStatement(pass, "var walk = new GroupWalkHost(t.Groups, own, executor, s.DoctrineHours);", "the walk over the posture table and the executor's outcomes");
         PinStatement(pass, "ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);", "the one ancestor walk");
         PinStatement(pass, "bool withdrawing = (f & UnitFlags.OnRetreat) != 0 || walkWithdrawing;", "a retreating regiment is withdrawing, as is one the walk found withdrawing");
         PinStatement(pass, "bool recorded = group >= 0;", "a group was found");
-        PinStatement(pass, "groupTask = t.Groups[group].State.Task;", "the group's recorded task");
         PinStatement(pass, "groupFormation = own[group].Formation;", "the group's formation (4 is the route's column)");
         PinStatement(pass, "routeColumn = t.Groups[group].RouteColumn;", "the group's route column is the pipeline's record");
         string walkHost = Code(FlankResponseTests.Between(producerFile, "internal readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
         PinStatement(walkHost, "public bool HasPosture(int index) => _groups[index].Has;", "the posture row exists");
-        PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].State.Task;", "its task");
+        PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].LedgerTask;", "its committed task");
+        PinStatement(walkHost, "public CommandTaskType EffectiveTaskOf(int index) => _groups[index].State.Task;", "and the one it carries out after the rewrites");
+        PinStatement(Code(FlankResponseTests.Between(producerFile, "internal static bool WithdrawalRecent(", "private static bool")), "return executor != null && executor.WithdrewRecently(unitId, nowHours, WithdrawalWindowHours);", "a recent withdrawal, whoever issued it");
         PinStatement(walkHost, "public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);", "the executor's last move for that unit");
         string approachFile = Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs"));
         PinStatement(approachFile, "public const int MaxGroupHops = 4;", "the reach of the walk");
         PinStatement(approachFile, "for (int hops = 0; a >= 0 && a < ownCount && hops < MaxGroupHops; hops++, a = own[a].ParentIndex)", "the one hop cap");
-        PinStatement(pass, "if (approachOn && recorded)", "marks only behind the flag and a recorded group");
-        PinStatement(pass, "approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, true));", "the pure marking rule, over the live facts");
+        PinStatement(pass, "if (approachOn) { float enemyDistance = 0f;", "marked only behind the flag");
+        PinStatement(pass, "int enemy = recorded ? ApproachLine.ClosestPerceivedEnemy(s, group, out enemyDistance) : -1;", "the enemy the side perceives, seen or remembered: not sight alone");
+        PinStatement(pass, "approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, recorded));", "the pure marking rule, over the live facts");
         PinStatement(pass, "if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);", "and the table filled from it");
+        PinStatement(pass, "groupTask = t.Groups[group].LedgerTask;", "the task the ledger committed, not the pipeline's per-tick rewrite");
+        AssertFalse(pass.Contains("State.Task"), "the pass never reads the rewritten task");
+        AssertFalse(pass.Contains("ClosestVisibleEnemy(group"), "nor sight alone for the group");
         PinStatement(producer, "if (recordTick) t.Groups[i].RouteColumn = roadRoute.Use || columnWait;", "recorded where the pipeline decides the route");
+        FlankResponseTests.AssertPinned(producer, "state = state.WithRoleAndTask(order.Role, order.Task);\n            CommandTaskType ledgerTask = state.Task;", "the ledger's task is taken before every rewrite");
+        PinStatement(producer, "g.LedgerTask = ledgerTask;", "and recorded on the row");
+        PinStatement(producer, "followed.LedgerTask = ledgerTask;", "also for a follower");
+        PinStatement(producer, "contestedGroup.LedgerTask = ledgerTask;", "and for a contested group");
         PinStatement(producer, "g.RouteColumn = false;", "cleared with the rest of the row each tick");
         string posture = FlankResponseTests.SourceText("Tactical", "Battle", "PostureRecords.cs");
         FlankResponseTests.AssertPinned(posture, "public bool RouteColumn;", "a field of the posture row");

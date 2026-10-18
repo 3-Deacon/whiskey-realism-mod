@@ -357,7 +357,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
             // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
-            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk, army.CurrentBattleStance);
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, leaf.LeafTask, id, closeEngaged, flankRisk, army.CurrentBattleStance);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
 
@@ -615,6 +615,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             if (hasOrder && order.Task != state.Task)
                 state = state.WithRoleAndTask(order.Role, order.Task);
+            // The ledger's committed task, before any rewrite below (GroupPosture.LedgerTask).
+            CommandTaskType ledgerTask = state.Task;
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, descendants);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
@@ -629,6 +631,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     ref GroupPosture followed = ref t.Groups[i];
                     followed.Has = true;
                     followed.State = state;
+                    followed.LedgerTask = ledgerTask;
                     followed.CloseEngaged = closeEngaged;
                     followed.FlankRisk = flankRisk;
                 }
@@ -763,6 +766,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     ref GroupPosture contestedGroup = ref t.Groups[i];
                     contestedGroup.Has = true;
                     contestedGroup.State = state;
+                    contestedGroup.LedgerTask = ledgerTask;
                     contestedGroup.CloseEngaged = closeEngaged;
                     contestedGroup.FlankRisk = flankRisk;
                     PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, PostureIntentPlan.ContestReason),
@@ -805,6 +809,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ref GroupPosture g = ref t.Groups[i];
                 g.Has = true;
                 g.State = state;
+                g.LedgerTask = ledgerTask;
                 g.CloseEngaged = closeEngaged;
                 g.FlankRisk = flankRisk;
                 g.RouteColumn = false;
@@ -2082,13 +2087,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             UnitRecord[] own = s.Own;
             int submitted = 0;
             // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass while its flag is on. With the
-            // flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
+            // flag off nothing marks, the table goes stale, and the Prefix reads the flag itself.
             if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
             for (int u = 0; u < s.OwnCount; u++)
             {
                 ref UnitRecord rec = ref own[u];
                 UnitFlags f = rec.Flags;
-                // The cheap rejects first: this loop visits every own unit every tick.
+                // The cheap rejects first: this loop visits every own unit every tick. A unit the pass does not look at is not marked: the table was
+                // cleared at the top of the pass.
                 if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;
                 if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
                 if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
@@ -2104,18 +2110,21 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 int groupFormation = -1;
                 if (recorded)
                 {
-                    groupTask = t.Groups[group].State.Task;
+                    groupTask = t.Groups[group].LedgerTask;
                     groupFormation = own[group].Formation;
                     routeColumn = t.Groups[group].RouteColumn;
                     closeEngaged = t.Groups[group].CloseEngaged;
                     flankRisk = t.Groups[group].FlankRisk;
                 }
 
+                // The mark: the ledger's committed task is a line task, the side perceives an enemy (seen or remembered) within the assault range of the
+                // group, and the group is not marching on purpose or withdrawing. Every input holds still until something really changes.
                 bool approaching = false;
-                if (approachOn && recorded)
+                if (approachOn)
                 {
-                    int enemy = s.ClosestVisibleEnemy(group, out float enemyDistance);
-                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, true));
+                    float enemyDistance = 0f;
+                    int enemy = recorded ? ApproachLine.ClosestPerceivedEnemy(s, group, out enemyDistance) : -1;
+                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, recorded));
                     if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);
                 }
                 if (!deployOn || !inColumn || submitted >= MaxDeploymentsPerTick) continue;
@@ -2135,6 +2144,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if (k >= 0 && distance <= (reason == ColumnDeployReason.Approaching ? ApproachLine.AssaultRangeMeters : DeployBearingReachMeters))
                         heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
                 }
+                // A deploy that keeps marching holds only for a marked regiment; an unmarked one is left in vanilla's column, not stopped.
+                if (!ColumnDeployment.MayDeploy(reason, heading, approachOn && ApproachLineTable.Shared.Contains(s.Alliance, rec.InstanceId, s.DoctrineHours))) continue;
                 sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading, reason));
                 submitted++;
             }
@@ -2157,15 +2168,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             public bool HasPosture(int index) => _groups[index].Has;
-            public CommandTaskType TaskOf(int index) => _groups[index].State.Task;
+            public CommandTaskType TaskOf(int index) => _groups[index].LedgerTask;
+            public CommandTaskType EffectiveTaskOf(int index) => _groups[index].State.Task;
             public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);
         }
 
         internal static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
         {
-            return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
-                last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&
-                nowHours - last.AtHours < WithdrawalWindowHours;
+            return executor != null && executor.WithdrewRecently(unitId, nowHours, WithdrawalWindowHours);
         }
 
         // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).

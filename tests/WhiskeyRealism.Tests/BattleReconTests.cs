@@ -319,7 +319,7 @@ internal static class BattleReconTests
         var p = Picture(s);
         int a = s.IndexOfOwn(CavA);
         int brigade = s.IndexOfOwn(CavBrigade);
-        GroupPosture row = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CavBrigade, closeEngaged: false, flankRisk: false, BattleStance.Meeting);
+        GroupPosture row = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CommandTaskType.ReserveWait, CavBrigade, closeEngaged: false, flankRisk: false, BattleStance.Meeting);
         p.PostureMoved[brigade] = row.Has && row.Submitted;
         p.PostureTask[brigade] = row.Has ? row.State.Task : CommandTaskType.None;
         AssertTrue(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "a leaf brigade that stays (a reserve, a hold) leaves its cavalry free to scout");

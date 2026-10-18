@@ -11,6 +11,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     {
         public bool Has;
         public CommandNodeOperationalState State;
+        // The task the operations ledger committed to the group, before the pipeline's per-tick rewrites (probe nomination, reconnaissance rule, cavalry
+        // follow, local flank emergency, opportunity override, stance guard). State.Task is the rewritten one. The approach mark and the withdrawal test read
+        // this one: it changes when the ledger changes its mind, not when a rewrite's input flickers.
+        public CommandTaskType LedgerTask;
         public bool CloseEngaged;
         public bool FlankRisk;
         public bool Submitted;
@@ -44,15 +48,17 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         /// <summary>
-        /// The brigade's posture row. The node role is the allocator's role as it reads on this side of the field (<see cref="CommandNodeOperationsRuntime.MapRole(DirectChildRole, BattleStance)"/>):
+        /// The brigade's posture row. <paramref name="task"/> is the effective one (the opportunity override, the flank hold, the arrival hold and the stance guard
+        /// have rewritten it); <paramref name="ledgerTask"/> is the one the operations ledger committed, before them. The node role is the allocator's role as it reads on this side of the field (<see cref="CommandNodeOperationsRuntime.MapRole(DirectChildRole, BattleStance)"/>):
         /// a refused flank is a Defender on the defending side and a flank guard (FlankMarch) on every other, so the stance is the side's real one, never a default.
         /// </summary>
-        public static GroupPosture Record(DirectChildRole role, CommandTaskType task, int groupId, bool closeEngaged, bool flankRisk, BattleStance stance)
+        public static GroupPosture Record(DirectChildRole role, CommandTaskType task, CommandTaskType ledgerTask, int groupId, bool closeEngaged, bool flankRisk, BattleStance stance)
         {
             return new GroupPosture
             {
                 Has = true,
                 State = new CommandNodeOperationalState(NodeId(groupId), CommandEchelonKind.BrigadeLike, CommandNodeOperationsRuntime.MapRole(role, stance), task, CommandTaskState.Committed),
+                LedgerTask = ledgerTask,
                 CloseEngaged = closeEngaged,
                 FlankRisk = flankRisk,
             };
