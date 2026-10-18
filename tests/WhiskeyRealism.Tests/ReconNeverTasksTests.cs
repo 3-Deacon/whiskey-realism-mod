@@ -311,6 +311,14 @@ internal static class ReconNeverTasksTests
         AssertEqual(last.Reason, Of(alloc, 30).Reason, "the last main task");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "the East reserve was refused for the first");
         AssertTrue(alloc.ReconUnfilledReason == null, "and the push has its eyes: no reason is told");
+        // A free formation that fills a task that does not see the main objective (the capital approach) leaves the push without eyes: the
+        // reason stands.
+        var other = new List<GaveUpMove>();
+        foreach (var task in tasks) if (ReconPlanner.ScoutsMainObjective(task))
+            other.Add(new GaveUpMove { InstanceId = 30, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
+        var approach = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), other);
+        AssertEqual(ReconPlanner.ReasonCapitalApproach, Of(approach, 30).Reason, "30 watches the capital approach");
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, approach.ReconUnfilledReason, "and the push still has no eyes: the reason stands");
         // Control: with the free formation gone the refusal stands.
         var bare = SmokeUnion();
         bare.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
@@ -1086,14 +1094,14 @@ internal static class ReconNeverTasksTests
         away.CapitalX = 560f;
         away.CapitalZ = 0f;
         away.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
-        away.Own.Add(Corps(9, 200f, 4000f, 1));
-        away.Own.Add(Corps(10, 220f, 4000f, 1));
         away.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
         away.Own.Add(Corps(31, 760f, 6000f));
         away.Own.Add(Corps(3, 790f, 5000f));
         away.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, 12000f));          // near the capital, so it keeps a floor and a guard
         var other = Review(away);
         AssertTrue(other.Allocation.Shortfalls.Contains(3), "control: a guard bound for another sector covers nothing here, the East is short: " + string.Join(",", other.Allocation.Shortfalls));
+        // ... and it is not yet in the capital's sector either: the West (the busy 5000 against 6000) is short until the guard arrives.
+        AssertTrue(other.Allocation.Shortfalls.Contains(15), "nor does it cover the capital's sector from where it stands: " + string.Join(",", other.Allocation.Shortfalls));
     }
 
     // A stale belief (confidence 0.3) leaves a presumption: the East need is 20000, set by the remembered army, not by the believed term
