@@ -22,6 +22,7 @@ internal static class ReconNeverTasksTests
             ("EveryUnfilledTaskCarriesAReason", EveryUnfilledTaskCarriesAReason),
             ("NoneAbleNamesTheFormationsThatAreTooWeak", NoneAbleNamesTheFormationsThatAreTooWeak),
             ("ClaimedNamesTheRoleThatHoldsTheAbleFormations", ClaimedNamesTheRoleThatHoldsTheAbleFormations),
+            ("ARefusedTaskIsToldAsTheRefusalAlone", ARefusedTaskIsToldAsTheRefusalAlone),
             ("GaveUpNamesTheTaskItsFormationGaveUpOn", GaveUpNamesTheTaskItsFormationGaveUpOn),
             ("FreeIsThePoolLessWhatARoleHadClaimed", FreeIsThePoolLessWhatARoleHadClaimed),
             ("AMissedMoveNamesItsFormationAndTarget", AMissedMoveNamesItsFormationAndTarget),
@@ -120,6 +121,22 @@ internal static class ReconNeverTasksTests
         var day = EastWithArmy(12000f);
         AssertContains(day.Allocation.ReconUnfilledWhy, ForceAllocator.ReasonUnfilledClaimedPrefix + ForceAllocator.ReasonHoldReserve,
             "the one formation that could go is the East's hold reserve, which only the main objective's tasks may draw: " + day.Allocation.ReconUnfilledWhy);
+    }
+
+    // A task refused its draw is told as the refusal alone, not also as a claim: the main objective's tasks only, every one refused.
+    private static void ARefusedTaskIsToldAsTheRefusalAlone()
+    {
+        var s = SmokeUnion();
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        var all = new List<ReconTask>();
+        ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), all);
+        var main = new List<ReconTask>();
+        foreach (var task in all) if (ReconPlanner.ScoutsMainObjective(task)) main.Add(task);
+        AssertTrue(main.Count >= 1, "a task sees the main objective");
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, main, new ReconMissionLedger());
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, alloc.ReconUnfilledWhy, "the refusal alone");
     }
 
     private static void GaveUpNamesTheTaskItsFormationGaveUpOn()

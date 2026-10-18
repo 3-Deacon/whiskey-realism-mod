@@ -709,7 +709,6 @@ namespace WhiskeyRealism.Strategic.Planner
                         for (int k = 0; k < skippedTaken.Count; k++) taken.Remove(skippedTaken[k]);
                         for (int k = 0; k < skippedMass.Count; k++) takenAndMass.Remove(skippedMass[k]);
                     }
-                    if (pick >= 0 && _done[pick] && !fromReserve) _unfilledWhy.Add(ReasonUnfilledClaimedPrefix + RoleTag(pick));   // the mission's formation holds another role
                     if (pick < 0 || (_done[pick] && !fromReserve)) continue;
                     int pickedId = _s.Own[pick].InstanceId;
                     Assign(pick, FormationRole.Recon, task.SectorId, task.HoldX, task.HoldZ, task.Reason, true);
