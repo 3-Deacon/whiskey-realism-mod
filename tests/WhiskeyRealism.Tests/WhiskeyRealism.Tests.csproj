@@ -92,6 +92,8 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ReserveRules.cs" Link="Planner\ReserveRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ForceAllocator.cs" Link="Planner\ForceAllocator.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\GarrisonPlanner.cs" Link="Planner\GarrisonPlanner.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\GarrisonLedger.cs" Link="Planner\GarrisonLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\PlannerChapterRules.cs" Link="Planner\PlannerChapterRules.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CampaignTempoGate.cs" Link="Planner\CampaignTempoGate.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\MoveTracker.cs" Link="Planner\MoveTracker.cs" />
@@ -185,6 +187,10 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\DepotTaskLedger.cs" Link="Planner\DepotTaskLedger.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RailLineScorer.cs" Link="Planner\RailLineScorer.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RailLineSteering.cs" Link="Planner\RailLineSteering.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\SteeringGate.cs" Link="Planner\SteeringGate.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\RearmPriority.cs" Link="Planner\RearmPriority.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\OrdnancePicker.cs" Link="Planner\OrdnancePicker.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\EnemyWeaponQuality.cs" Link="Planner\EnemyWeaponQuality.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphIntent.cs" Link="TelegraphIntent.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Construction\TelegraphWishCharge.cs" Link="TelegraphWishCharge.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Fiscal\FinancialAiLogGate.cs" Link="FinancialAiLogGate.cs" />

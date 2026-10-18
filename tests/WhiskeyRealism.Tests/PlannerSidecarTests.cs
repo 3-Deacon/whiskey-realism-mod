@@ -95,7 +95,7 @@ internal static class PlannerSidecarTests
         {
             InstanceId = -1, UnitKey = "Army of Northern Virginia:12", UnitTyp = 16, X = 120.5f, Z = -40.25f, Strength = 18000f,
             LastSeenDay = 805, Confidence01 = 0.75f, UncertaintyRadius = 33f, LastSource = DetectionSource.ObjectiveGarrison,
-            Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, LastEmbarkedDay = 790
+            Traits = EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, LastEmbarkedDay = 790, RifleQuality = 1.25f, GunQuality = 0.75f
         });
         p.Appointments.Add(new KeyValuePair<int, int>(17, 840));
         p.DepotTasks.Add(new DepotTaskRecord
@@ -248,6 +248,8 @@ internal static class PlannerSidecarTests
         AssertEqual(DetectionSource.ObjectiveGarrison, b.LastSource, "source");
         AssertEqual(EnemyTraits.CavalryMajority | EnemyTraits.OnOwnSoil, b.Traits, "traits");
         AssertEqual(790, b.LastEmbarkedDay, "last embarked day");
+        AssertNear(1.25f, b.RifleQuality, 1e-4f, "G9 rifle quality (the last sighting that showed rifles)");
+        AssertNear(0.75f, b.GunQuality, 1e-4f, "G9 gun quality");
         AssertEqual(1, back.Appointments.Count, "one appointment protection");
         AssertEqual(17, back.Appointments[0].Key, "commander id");
         AssertEqual(840, back.Appointments[0].Value, "protected until");

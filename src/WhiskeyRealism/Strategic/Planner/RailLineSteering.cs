@@ -38,10 +38,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // 81741, so its own roll runs), with the steering flags off, and without fresh scores (no plan, a stale plan, pre-war).
         public static bool ShouldSteer(bool enabled, int alliance, int playerAlliance, bool aiVsAi, bool wlCicPlayerAlliance, bool jobMachinePaused, bool freshScores)
         {
-            if (!enabled || alliance < 0 || alliance >= 2) return false;
-            if (alliance == playerAlliance && !aiVsAi) return false;
-            if (wlCicPlayerAlliance || jobMachinePaused) return false;
-            return freshScores;
+            return SteeringGate.ShouldSteer(enabled, alliance, playerAlliance, aiVsAi, wlCicPlayerAlliance, jobMachinePaused, freshScores);
         }
 
         // The line vanilla could start now: roll tested before progress (16069), then StartConstruction(alliance, checkonly: true).

@@ -149,6 +149,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 int b = _assigned[d];
                 int lastEmbarked = b >= 0 ? _beliefs[b].LastEmbarkedDay : -1;
                 if ((detection.Traits & EnemyTraits.Embarked) != 0) lastEmbarked = daySerial;
+                // A sighting that shows a lane's arms replaces the old reading; one that shows none leaves it (0 means "not shown").
+                float rifleQuality = detection.RifleQuality > 0f ? detection.RifleQuality : (b >= 0 ? _beliefs[b].RifleQuality : 0f);
+                float gunQuality = detection.GunQuality > 0f ? detection.GunQuality : (b >= 0 ? _beliefs[b].GunQuality : 0f);
                 _next.Add(new EnemyBelief
                 {
                     InstanceId = detection.InstanceId,
@@ -162,7 +165,9 @@ namespace WhiskeyRealism.Strategic.Planner
                     UncertaintyRadius = SeenRadius,
                     LastSource = detection.Source,
                     Traits = detection.Traits,
-                    LastEmbarkedDay = lastEmbarked
+                    LastEmbarkedDay = lastEmbarked,
+                    RifleQuality = rifleQuality,
+                    GunQuality = gunQuality
                 });
             }
 

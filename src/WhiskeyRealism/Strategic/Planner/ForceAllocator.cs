@@ -33,7 +33,9 @@ namespace WhiskeyRealism.Strategic.Planner
     //   DepotBuilder  the smallest fighting formation in a depot task's sector; withheld.
     //   Recon         ReconPlanner.PickFormation per recon task, highest priority first; the Recon
     //                 assignment copies the task's SectorId and hold point so ReconMissionLedger.Sync
-    //                 can pair them back (G1b contract); withheld.
+    //                 can pair them back (G1b contract); withheld. A staged main effort with no free scout draws one from a sector's hold
+    //                 reserve (never a secession pledge; never one that would leave a sector holding against a believed army short: see
+    //                 SectorMayGiveScout), once per main effort across reviews.
     //   MainEffort    exactly TheaterPlan.MassInstanceIds (G3 judged the odds on that set), less any
     //                 formation a Recon or DepotBuilder task took from it because no formation outside
     //                 the mass qualified, and less the Reserve below. Target = the main sector's target.
@@ -44,6 +46,13 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 at the first formation the main effort cannot spare; withheld. None when no
     //                 enemy is believed at the objective.
     //   Support       the remainder in a Support (or the main) sector: toward the main target.
+    //   Garrison      both sorts of garrison post, under the one role and the one withhold (plan G8 on top of D8). D8's secession members are
+    //                 seated early (AssignGarrisons: TheaterPlanner pre-picked them after the mass); an ordinary post's incumbent is claimed
+    //                 right after them (ClaimPostIncumbents), ahead of the depot and recon steps; the rest of each ordinary post's need
+    //                 (TheaterPlan.Garrisons, Kind other than Secession) is seated once the reserve split is known (AssignGarrisonPosts), from
+    //                 the formations that would otherwise just hold and the Reserve surplus, never the mass, at most two formations a post.
+    //                 A member marches as Garrison, withheld; at its post it holds in place, withheld (steering centres its theater box on a
+    //                 Hold formation). Allocation.Seats says who holds which.
     //   Hold (rest)   the remainder anywhere else, Hold in place (EconomyOfForce garrison).
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
     //                 believed land enemy (centroid when none), with a HomeDepartmentDiscount for
@@ -80,6 +89,12 @@ namespace WhiskeyRealism.Strategic.Planner
         // (0.05 when the home was only a historical hint; the department is now the planner's own stable assignment).
         public const float HomeDepartmentDiscount = 0.25f;
         public const float ReserveSurplusMargin = 1.3f;
+        // Smoke 2026-10-17: the most scouts a staged main effort draws from the sectors' hold reserves in one review. One pair of eyes
+        // answers its question (the picture of the objective); more would turn the presumption's hold into a screen.
+        internal const int MaxReserveScouts = 1;
+        // Allocation.ReconUnfilledReason: the hold reserve could have given a scout, and every candidate was refused because its sector
+        // holds against a believed enemy force that the draw would leave uncovered.
+        internal const string ReasonScoutAgainstThreat = "believed-threat";
 
         internal const string ReasonBusy = "busy";
         internal const string ReasonPlayerCommand = "player-command";
@@ -93,6 +108,7 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonReinforcement = "reinforcement";
         internal const string ReasonGarrison = "garrison";
         internal const string ReasonSecession = "secession-garrison";
+        internal const string ReasonGarrisonPost = "garrison-post";
         internal const string ReasonPlayerMapGroup = "player-map-group";
         internal const string ReasonGaveUp = "gave-up";
 
@@ -187,21 +203,23 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // D8: the secession garrisons, "<unit>@<State>:<in|moving>[+n]" joined by ';', or "none" while no live secession state of ours has one.
+        // The ordinary posts (G8) have their own rows ([Garrison], [GarrisonPost]) and are not in this field.
         internal static string GarrisonText(TheaterPlan plan)
         {
-            if (plan == null || plan.Garrisons.Count == 0) return "none";
+            if (plan == null) return "none";
             var sb = new System.Text.StringBuilder();
             for (int k = 0; k < plan.Garrisons.Count; k++)
             {
                 var g = plan.Garrisons[k];
-                if (k > 0) sb.Append(';');
+                if (g.Kind != GarrisonPostKind.Secession) continue;
+                if (sb.Length > 0) sb.Append(';');
                 sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.MassPresence ? "mass-presence" : g.PlayerPresence ? "player-presence" : g.InState ? "town-garrison" : "nobody")
                   .Append('@').Append(g.StateName)
                   .Append(g.Marching ? (g.InState ? ":in+moving/" : ":moving/") : ":in/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
                 if (g.Shortfall > 0f) sb.Append("!short").Append(g.Shortfall.ToString("0", CultureInfo.InvariantCulture));
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
             }
-            return sb.ToString();
+            return sb.Length == 0 ? "none" : sb.ToString();
         }
 
         private static bool IsImmobileReason(string reason)
@@ -233,8 +251,14 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _tx, _tz;
             private readonly string[] _reason;
             private readonly bool[] _withheld;
+            private readonly List<GarrisonSeat> _seats = new List<GarrisonSeat>();   // who holds which garrison post (either sort)
+            private float[] _seatedStrength = new float[0];   // per post of the plan: the strength seated at it so far
+            private int[] _seatedCount = new int[0];
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
+            private readonly float[] _believed;              // per sector: the believed term of the hold need (SectorPlan.BelievedHold)
+            private readonly ReserveRules.HoldTally _held;   // what ReserveRules.Hold sized each sector's reserve on (unready, busy, capital guard, reserve)
+            private bool _scoutRefusedForThreat;
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
                           Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp,
@@ -262,6 +286,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 _need = new float[_sectorCount];
                 _nearX = new float[_sectorCount];
                 _nearZ = new float[_sectorCount];
+                _believed = new float[_sectorCount];
+                _held = new ReserveRules.HoldTally(_sectorCount, _n);
 
                 for (int i = 0; i < _n; i++)
                 {
@@ -279,15 +305,19 @@ namespace WhiskeyRealism.Strategic.Planner
                 _pinnedMask = pinnedBuilder;
                 AssignImmobile();
                 ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);
-                ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved);
+                ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved, _held);
                 MarkMass();
                 AssignCapitalGuards(capitalReserved);
                 AssignHoldReserve(holdReserved);
                 AssignRecover();
                 AssignGarrisons();
+                _seatedStrength = new float[_plan.Garrisons.Count];
+                _seatedCount = new int[_plan.Garrisons.Count];
+                ClaimPostIncumbents();
                 AssignDepotBuilders();
                 AssignRecon();
                 SplitReserve(out float mainRequired, out float mainStrength);
+                AssignGarrisonPosts();
                 AssignMainEffort();
                 AssignRemainder();
                 WithholdHoldPrefixes();
@@ -305,8 +335,10 @@ namespace WhiskeyRealism.Strategic.Planner
                         Withheld = _withheld[i]
                     });
                 }
+                allocation.Seats.AddRange(_seats);
                 ListShortfalls(allocation, mainRequired, mainStrength);
                 ListSurpluses(allocation);
+                allocation.ReconUnfilledReason = _scoutRefusedForThreat ? ReasonScoutAgainstThreat : null;
             }
 
             // ---- inputs ----
@@ -316,7 +348,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int k = 0; k < _plan.Sectors.Count; k++)
                 {
                     var sp = _plan.Sectors[k];
-                    if (sp != null && sp.SectorId >= 0 && sp.SectorId < _sectorCount) _need[sp.SectorId] = sp.HoldNeed;
+                    if (sp == null || sp.SectorId < 0 || sp.SectorId >= _sectorCount) continue;
+                    _need[sp.SectorId] = sp.HoldNeed;
+                    _believed[sp.SectorId] = sp.BelievedHold;
                 }
                 for (int k = 0; k < _sectorCount; k++)
                 {
@@ -434,18 +468,95 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int g = 0; g < _plan.Garrisons.Count; g++)
                 {
                     var post = _plan.Garrisons[g];
+                    if (post.Kind != GarrisonPostKind.Secession) continue;   // the ordinary posts are seated later, once the reserve split is known
                     int postSector = _sectors.SectorAt(post.X, post.Z);
                     for (int k = 0; k < post.InstanceIds.Count; k++)
                     {
                         int i = _s.IndexOfOwn(post.InstanceIds[k]);
                         if (i < 0 || _done[i] || !WlChainRules.MayMove(_s.Own[i].Chain) || !TheaterPlanner.Movable(_s.Own[i])) continue;
                         var f = _s.Own[i];
-                        if (f.StateId == post.StateId)
+                        bool inState = f.StateId == post.StateId;
+                        if (inState)
                             Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, ReasonSecession, true);
                         else
                             Assign(i, FormationRole.Garrison, postSector, post.X, post.Z, ReasonSecession, true);
+                        if (ReferenceEquals(_reason[i], ReasonSecession)) _seats.Add(new GarrisonSeat { PostIndex = g, InstanceId = f.InstanceId, AtPost = inState });
                     }
                 }
+            }
+
+            // G8: an ordinary post's incumbents (every member the ledger remembers) keep it. Claimed right after D8's members, ahead of the depot builder and the recon pick, which
+            // would otherwise take a seated garrison (SmallestIn favours the smallest formation of the sector, which is often the garrison) and
+            // leave the post to be refilled from elsewhere. Only an incumbent that is still fit and free (PostCandidate: outside the mass,
+            // not claimed by a role of its own, not given up on) is claimed; the rest of a post's need is met after the reserve split.
+            private void ClaimPostIncumbents()
+            {
+                var members = new List<int>();
+                for (int g = 0; g < _plan.Garrisons.Count; g++)
+                {
+                    var post = _plan.Garrisons[g];
+                    if (post.Kind == GarrisonPostKind.Secession) continue;
+                    members.Clear();
+                    GarrisonPlanner.Incumbents(_s, post, PostPool(post), members);
+                    for (int k = 0; k < members.Count; k++) SeatAtPost(g, post, members[k]);
+                }
+            }
+
+            // G8: the rest of the ordinary posts' needs (TheaterPlan.Garrisons, Kind other than Secession; D8's were seated by AssignGarrisons).
+            // Run after the reserve split, so the pool is known: a formation nothing else has claimed (it would otherwise just hold) or a
+            // Reserve surplus formation, never a member of the mass (_inMass is set by MarkMass before any garrison step) and never one
+            // already in a role of its own (capital guard, hold reserve, recover, depot builder, recon, immobile, a secession member or another
+            // post's). A formation the tracker gave up on at the post is not asked. GarrisonPlanner.PickFormations names at most
+            // MaxFormationsPerPost formations per post, the incumbent counted; Assign marks a seated formation done, so no formation holds two
+            // posts. A post nobody can reach stays unmanned and one the pool cannot meet stays short; the ledger counts both.
+            private void AssignGarrisonPosts()
+            {
+                var picks = new List<int>();
+                for (int g = 0; g < _plan.Garrisons.Count; g++)
+                {
+                    var post = _plan.Garrisons[g];
+                    if (post.Kind == GarrisonPostKind.Secession) continue;
+                    picks.Clear();
+                    GarrisonPlanner.PickFormations(_s, post, PostPool(post), _seatedStrength[g], GarrisonPlanner.MaxFormationsPerPost - _seatedCount[g], picks);
+                    for (int k = 0; k < picks.Count; k++) SeatAtPost(g, post, picks[k]);
+                }
+            }
+
+            private bool[] PostPool(GarrisonPost post)
+            {
+                var pool = new bool[_n];
+                for (int i = 0; i < _n; i++) pool[i] = PostCandidate(i, post);
+                return pool;
+            }
+
+            // Marches to the post as Garrison, or holds in place as Hold once there; either way withheld.
+            private void SeatAtPost(int g, GarrisonPost post, int i)
+            {
+                var f = _s.Own[i];
+                bool atPost = GarrisonPlanner.AtPost(f, post.X, post.Z);
+                if (atPost)
+                    Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, ReasonGarrisonPost, true);
+                else
+                    Assign(i, FormationRole.Garrison, _sectors.SectorAt(post.X, post.Z), post.X, post.Z, ReasonGarrisonPost, true);
+                _seats.Add(new GarrisonSeat { PostIndex = g, InstanceId = f.InstanceId, AtPost = atPost });   // never a give-up: PostCandidate left those out
+                _seatedStrength[g] += Math.Max(0f, f.Strength);
+                _seatedCount[g]++;
+            }
+
+            // The formations the post may ask for (GarrisonPlanner.PickFormation's pool): not one the tracker gave up on at the post; a
+            // formation nothing else has claimed; a Reserve surplus formation; and the post's own incumbent when the sector's hold reserve
+            // has already claimed it in the post's own sector. That last case keeps the post from changing hands every day: the hold reserve
+            // takes the formations nearest the believed army, which is where a post's garrison stands. Taking it back is free for the sector
+            // (it stays a Hold formation of the same sector, still counted in its hold), so the sector's hold is unchanged.
+            private bool PostCandidate(int i, GarrisonPost post)
+            {
+                if (GaveUpAt(i, post.X, post.Z)) return false;
+                if (Free(i) && !_inMass[i]) return true;
+                var f = _s.Own[i];
+                if (!_done[i] || !WlChainRules.MayMove(f.Chain) || !TheaterPlanner.Movable(f)) return false;
+                if (_role[i] == FormationRole.Reserve) return true;
+                return _role[i] == FormationRole.Hold && ReferenceEquals(_reason[i], ReasonHoldReserve)
+                    && post.InstanceIds.Contains(f.InstanceId) && _sector[i] == _sectors.SectorAt(post.X, post.Z);
             }
 
             // Spec C21: the supply threshold is the raw metric.
@@ -526,6 +637,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (_done[i] || _inMass[i]) takenAndMass.Add(_s.Own[i].InstanceId);
                 }
                 bool mainHasScreen = false;
+                int drawn = StandingMainScouts();
+                bool mainFilled = false;
                 for (int t = 0; t < _recon.Count; t++)
                 {
                     var task = _recon[t];
@@ -554,18 +667,136 @@ namespace WhiskeyRealism.Strategic.Planner
                         int outsideIndex = outside >= 0 ? _s.IndexOfOwn(outside) : -1;
                         if (outsideIndex >= 0 && ReconTier(outsideIndex) <= ReconTier(pick)) pick = outsideIndex;
                     }
+                    // Smoke 2026-10-17: the main effort keeps its last body. The pick could only return the mass's own last free formation,
+                    // and a push with no formation left is not a push (the mover reports it undispatchable and the plan keeps naming it).
+                    // A cavalry group is the exception D7 made on purpose: it screens although the plan massed it (ReconTier 0).
+                    if (pick >= 0 && _inMass[pick] && ReconTier(pick) != 0 && FreeMassBodies() <= 1) pick = -1;
+                    // Smoke 2026-10-17: the formations nothing else claimed are the only ones the pick sees, and the hold reserve claims every
+                    // ready formation before it (ReserveRules.Hold takes the massable ones nearest the army a sector faces until its need is
+                    // met, and an unscouted sector needs the presumption), so a staged push had nobody to scout with and stayed staged for
+                    // good. It draws one scout from the hold reserve, and only for the tasks that see its own objective.
+                    bool fromReserve = false;
+                    if (pick < 0 && _plan.MainStaged && ReconPlanner.ScoutsMainObjective(task))
+                    {
+                        // One standing scout per main effort, across reviews: with one out, only that formation (the incumbent of its
+                        // mission) may be drawn again; a second is never opened beside it.
+                        pick = DrawFromHoldReserve(task, taken, mainHasScreen, incumbentsOnly: drawn >= MaxReserveScouts);
+                        fromReserve = pick >= 0;
+                    }
                     if (skippedTaken != null)
                     {
                         for (int k = 0; k < skippedTaken.Count; k++) taken.Remove(skippedTaken[k]);
                         for (int k = 0; k < skippedMass.Count; k++) takenAndMass.Remove(skippedMass[k]);
                     }
-                    if (pick < 0 || _done[pick]) continue;
+                    if (pick < 0 || (_done[pick] && !fromReserve)) continue;
                     int pickedId = _s.Own[pick].InstanceId;
                     Assign(pick, FormationRole.Recon, task.SectorId, task.HoldX, task.HoldZ, task.Reason, true);
+                    if (fromReserve && drawn < MaxReserveScouts) drawn++;
                     taken.Add(pickedId);
                     takenAndMass.Add(pickedId);
                     if (task.Kind == ReconKind.Screen && task.SectorId == _plan.MainSectorId) mainHasScreen = true;
+                    if (ReconPlanner.ScoutsMainObjective(task)) mainFilled = true;
                 }
+                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) or a main task filled by any pick
+                // there is nothing to explain.
+                if (drawn >= MaxReserveScouts || mainFilled) _scoutRefusedForThreat = false;
+            }
+
+            // The mass's members no role has claimed yet: the bodies a scout pick could still take from the main effort.
+            private int FreeMassBodies()
+            {
+                int n = 0;
+                for (int i = 0; i < _n; i++)
+                    if (_inMass[i] && !_done[i]) n++;
+                return n;
+            }
+
+            // The active reconnaissance missions that see the main objective (the probe, the advance guard, the main-axis screen) whose
+            // formation is still ours: the scouts already out. The draw counts them, so the cap is per main effort, not per review.
+            private int StandingMainScouts()
+            {
+                if (_missions == null) return 0;
+                int n = 0;
+                var list = _missions.Missions;
+                for (int m = 0; m < list.Count; m++)
+                    if (ReconMissionLedger.IsActive(list[m].State) && ReconPlanner.ScoutsMainObjective(list[m].Kind, list[m].Reason)
+                        && _s.IndexOfOwn(list[m].InstanceId) >= 0) n++;
+                return n;
+            }
+
+            // A ready formation the hold reserve kept for its sector (not a capital guard or a recover): the cheapest thing a scout can be
+            // drawn from, since the sector's hold is a standing need and the scout is a detachment. Never a formation the plan pledged to a
+            // secession garrison: the hold reserve claims before AssignGarrisons, so a Kentucky formation can carry both, and the pledge wins
+            // (the plan's own list is read, the seats are written later).
+            private bool IsHoldReserve(int i)
+            {
+                return _done[i] && _role[i] == FormationRole.Hold && ReferenceEquals(_reason[i], ReasonHoldReserve) && WlChainRules.MayMove(_s.Own[i].Chain)
+                    && !IsSecessionPledge(_s.Own[i].InstanceId);
+            }
+
+            private bool IsSecessionPledge(int instanceId)
+            {
+                for (int g = 0; g < _plan.Garrisons.Count; g++)
+                {
+                    var post = _plan.Garrisons[g];
+                    if (post.Kind != GarrisonPostKind.Secession) continue;
+                    for (int k = 0; k < post.InstanceIds.Count; k++)
+                        if (post.InstanceIds[k] == instanceId) return true;
+                }
+                return false;
+            }
+
+            // The draw never opens a shortfall against a believed enemy force. A sector gives a scout when (a) its hold need is set by the
+            // floor or by the presumption of an unscouted front (no believed army drives it), or (b) its hold, less this formation, still
+            // meets its target. The hold is the sum ReserveRules.Hold sized the reserve on (what holds there anyway, the unready, the busy and
+            // the capital guard of the capital's own sector included, plus the reserved formations), less every formation of it that has
+            // since been given a role that does not hold the sector (HoldLeaves): a depot builder, a secession garrison on the march, an
+            // earlier scout. The remainder that stands in the sector is assigned after this pick. The ordinary garrison posts that come
+            // later take no counted formation out of its sector: GarrisonPlanner seats only a massable formation (Seatable), and the
+            // hold reserve's own incumbents it takes back stay in their sector. Otherwise the formation stays and the refusal is recorded
+            // (Allocation.ReconUnfilledReason).
+            private bool SectorMayGiveScout(int i)
+            {
+                int k = _roleSector[i];
+                if (k < 0 || k >= _sectorCount) return true;
+                bool beliefDriven = _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
+                return !beliefDriven || _held.Sector[k] - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
+            }
+
+            // The share of the sector's counted hold that no longer holds it: a counted formation already given a role other than holding
+            // the sector (Hold or CapitalGuard; each is assigned in the sector the formation was counted in). A formation not yet placed stays:
+            // AssignRemainder holds it.
+            private float HoldLeaving(int sector)
+            {
+                float leaving = 0f;
+                for (int j = 0; j < _n; j++)
+                {
+                    if (_held.ShareSector[j] != sector || !_done[j]) continue;
+                    bool holds = _role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard;   // both keep the formation's own sector, the one it was counted in
+                    if (!holds) leaving += _held.Share[j];
+                }
+                return leaving;
+            }
+
+            // ReconPlanner.PickFormation over the hold reserve alone (everything else stays taken), so its own ranking (cavalry, then the
+            // smallest group, nearest) and every minimum of the pick apply. -1 when no reserve formation qualifies. With incumbentsOnly
+            // (a scout is already out) only the formation already on a mission may be drawn. The sector it came from shows the loss as a
+            // shortfall (ListShortfalls) like any hold formation that leaves.
+            private int DrawFromHoldReserve(in ReconTask task, HashSet<int> taken, bool mainHasScreen, bool incumbentsOnly)
+            {
+                var open = new HashSet<int>(taken);
+                bool refused = false;
+                for (int i = 0; i < _n; i++)
+                {
+                    if (!IsHoldReserve(i) || GaveUpAt(i, task.HoldX, task.HoldZ)) continue;
+                    if (incumbentsOnly && !(_missions != null && _missions.IsRecon(_s.Own[i].InstanceId))) continue;
+                    if (!SectorMayGiveScout(i)) { refused = true; continue; }
+                    open.Remove(_s.Own[i].InstanceId);
+                }
+                int id = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, open, mainHasScreen);
+                int pick = id >= 0 && IsHoldReserve(_s.IndexOfOwn(id)) ? _s.IndexOfOwn(id) : -1;
+                if (pick < 0 && refused) _scoutRefusedForThreat = true;
+                return pick;
             }
 
             // ReconPlanner.PickFormation's own ranking: cavalry-majority, then other combat groups.
@@ -663,11 +894,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 return Math.Max(_need[sector], MinGarrisonStrength);
             }
 
+            // The hold a sector has by the roles assigned: its Hold formations, and the capital guards that stand in the capital's own sector
+            // (a guard elsewhere is on the march and holds nothing where it stands), the way ReserveRules.Hold counts them.
             private float Counted(int sector)
             {
                 float sum = 0f;
                 for (int i = 0; i < _n; i++)
-                    if (_role[i] == FormationRole.Hold && _sector[i] == sector && _roleSector[i] == sector)
+                    if ((_role[i] == FormationRole.Hold || _role[i] == FormationRole.CapitalGuard) && _sector[i] == sector && _roleSector[i] == sector)
                         sum += Counts(i);
                 return sum;
             }
@@ -766,6 +999,9 @@ namespace WhiskeyRealism.Strategic.Planner
                         // (counted, but short of the target) marks the position; G5b never routes a
                         // reinforcement to a player formation.
                         int marker = _need[k] > 0f ? PlayerMarkerIn(k) : -1;
+                        // Failing that, the nearest immobile holder (a formation in battle holds where it stands and counts): the short sector
+                        // still names a carrier, so G5b sees it when its one mobile hold was drawn away as a scout.
+                        if (marker < 0 && _need[k] > 0f) marker = ImmobileHolderIn(k);
                         if (marker >= 0) carriers.Add(new KeyValuePair<int, float>(_s.Own[marker].InstanceId, (target - counted) / target));
                         continue;
                     }
@@ -779,6 +1015,19 @@ namespace WhiskeyRealism.Strategic.Planner
                 });
                 for (int c = 0; c < carriers.Count; c++)
                     if (!allocation.Shortfalls.Contains(carriers[c].Key)) allocation.Shortfalls.Add(carriers[c].Key);
+            }
+
+            // The immobile Hold formation of the sector nearest the army it faces that counts toward its hold and that the planner may order,
+            // -1 when none.
+            private int ImmobileHolderIn(int sector)
+            {
+                var holders = new List<int>();
+                for (int i = 0; i < _n; i++)
+                    if (_role[i] == FormationRole.Hold && _sector[i] == sector && _roleSector[i] == sector && IsImmobileReason(_reason[i])
+                        && WlChainRules.CountsTowardCoverage(_s.Own[i].Chain) && WlChainRules.MayMove(_s.Own[i].Chain)) holders.Add(i);
+                if (holders.Count == 0) return -1;
+                SortByHoldKey(holders, sector);
+                return holders[0];
             }
 
             private int PlayerMarkerIn(int sector)

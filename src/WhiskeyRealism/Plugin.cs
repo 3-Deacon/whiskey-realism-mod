@@ -255,6 +255,9 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableSupplyDepotSteering;
         internal static ConfigEntry<bool> EnableFortSteering;
         internal static ConfigEntry<bool> EnableRailroadSteering;
+        internal static ConfigEntry<bool> EnableGarrisonManning;
+        internal static ConfigEntry<bool> EnableRearmPriority;
+        internal static ConfigEntry<bool> EnableOrdnancePurchaseSteering;
         internal static ConfigEntry<bool> FixAiPerkPickRange;
         internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
         internal static ConfigEntry<bool> FixEngineerBranchBonus;
@@ -1349,6 +1352,35 @@ namespace WhiskeyRealism
                 "startable line begins: the one that connects own supply to the main axis or a threatened sector. Not used for the player's " +
                 "alliance, the W&L commander-in-chief's side, Europe, or while vanilla's job machine is paused (vanilla's own roll runs then). " +
                 "Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = vanilla's roll.");
+            EnableGarrisonManning = Config.Bind(
+                "Campaign Planner", "Enable Garrison Manning", true,
+                "Default ON. Vanilla defends only the capital ahead of an attack; key towns, rail hubs, ports, depots and forts away from it are " +
+                "held by whatever happens to stand there. With this on, an own objective town, rail hub, port, built depot or fort that a " +
+                "believed enemy army threatens (vanilla's own capital threat weighting, on what the side has seen) gets a garrison: the " +
+                "smallest fighting formation that covers the need (else the nearest two together), from those that would otherwise just hold or sit in reserve, never the main " +
+                "effort, the capital guard, a scout or the W&L player's own command. It marches to the post and holds it, out of vanilla's " +
+                "offensive and defensive pools, until no army has been near for a fortnight; at most six posts at a time. The secession " +
+                "garrison for Kentucky and Missouri is separate and not behind this. Needs Enable Campaign Planner; the march also needs " +
+                "Enable Campaign Planner Executors; OFF = no ordinary post.");
+            EnableRearmPriority = Config.Bind(
+                "Campaign Planner", "Enable Rearm Priority", true,
+                "Default ON. Vanilla re-arms its units in the order they stand in the scene, twice a game day, so the units that happen to come " +
+                "first take the scarce new models. With this on the AI alliances' units are re-armed in the order of the planner's roles: the " +
+                "main effort first, then support, reserve, hold, capital guard, depot builders, scouts and garrisons, then units the plan does " +
+                "not name, and units recovering or in transit last. Vanilla's own rule for which model a unit takes, its stock checks and its " +
+                "skip of the W&L player's units are unchanged; only the order changes, and vanilla's list order is restored afterward. Not used " +
+                "for the new-campaign equipping pass, the player's alliance outside W&L, the W&L commander-in-chief's side, Europe, or while " +
+                "vanilla's job machine is paused. Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = vanilla's order.");
+            EnableOrdnancePurchaseSteering = Config.Bind(
+                "Campaign Planner", "Enable Ordnance Purchase Steering", true,
+                "Default ON. When vanilla's AI orders rifles or guns it picks at random among the researched or imported models that beat its " +
+                "own average, ignoring price, delivery time and rate of fire, and can order models the order screen refuses (Gatling, Coffee " +
+                "Mill, Williams gun). With this on the model is the best of those same candidates that the order screen allows, by value per " +
+                "cost, delivery time, battle value (rate of fire counted in full), standardization and an edge over the enemy arms the side has " +
+                "actually seen. Vanilla still decides when to buy, how much, whether the credit and the capital allow it, and charges the " +
+                "order; with no allowed candidate vanilla's pick stands. Never used for the W&L commander-in-chief's side, the player's " +
+                "alliance outside W&L, Europe, or while vanilla's job machine is paused. Needs Enable Campaign Planner and Enable Campaign " +
+                "Planner Executors; OFF = vanilla's random pick.");
             FixAiPerkPickRange = Config.Bind(
                 "Campaign", "Fix AI Perk Pick Range", true,
                 "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +

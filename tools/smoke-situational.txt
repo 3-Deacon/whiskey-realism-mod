@@ -58,6 +58,7 @@ campaign.patch.subordinate-strength-grab.postfix  # BattleUnits.GrabSubordinateB
 campaign.patch.offensive-weapon-trim.hook         # CheckOffensiveMovements trim loop: only when an offensive gathered more units than it needs
 campaign.patch.random-candidate-pick.hook         # AICampaign random picks: only when a fleet, ship, raid force or recruit group is raised
 campaign.patch.orphan-camp-cleanup.postfix        # Regiment.OnDestroy: only when a unit is merged, disbanded or destroyed, or a scene is left
+campaign.patch.ordnance-purchase.pick            # WeaponList.PlaceWeaponOrder: only when an AI purchase pass places an order (vanilla's trigger, 16325/16335: too few equippable units; the scope patches fire on every alliance tick, 81757)
 tactical.patch.perk-ids.hq.engineers-choose       # Regiment.ChoosePerk: only when a unit picks a perk (an open slot with full perk experience)
 campaign.patch.pontoon-creek.speed                 # Regiment.GetTerrainSpeedAdjustment: only while a campaign group stands on a creek cell
 campaign.patch.fogged-embarkation.hidden-flag.prefix  # Ship.InitializeFlag: only when a fleet or transport model with a Flag child is created on the campaign map outside the player's fog
