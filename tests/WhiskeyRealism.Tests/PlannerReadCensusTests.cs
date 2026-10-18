@@ -828,6 +828,7 @@ internal static class CensusRows
         "ExecutorContext.ExecutorsAllowed | P/CampaignWithholdView.cs | G5a CampaignWithholdView (deferred Support, pre-war gate)",
         "Flag:EnableCampaignPlanner | P/CampaignPlannerRuntime.cs, P/EnemyDetectionRuntime.cs | G0 CampaignPlannerRuntime.ReviewPlan; G1 EnemyDetectionRuntime.BeliefsFor (fallback)",
         "Flag:EnableCampaignPlannerExecutors | P/CampaignPlannerRuntime.cs | G0 CampaignPlannerRuntime.ExecutorsEnabled / ReviewExecute; the G5 planner patches",
+        "Flag:EnableVanillaDefensiveInterception | X/CheckForDefensiveOperationsCandidateFilterPatch.cs | Foresight F2 #25 telemetry-only while the planner runs (DefenseInterceptionGate.ModeFor)",
         "Flag:EnableCampaignReconnaissance | P/CampaignPlannerRuntime.cs | G1b recon step; G5d executor",
         "Flag:EnableCampaignFogHonestBeliefs | P/EnemyDetectionRuntime.cs | G1 EnemyDetectionRuntime.Detect / BeliefsFor",
         "Flag:EnableCommanderAppointmentPlanner | P/CommanderAppointmentRuntime.cs | G2 appointment step and the #6 guard (CommanderAppointmentRuntime.Enabled)",

@@ -282,6 +282,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> FixPerkEffectScope;
         internal static ConfigEntry<bool> EnableCampaignPlanner;
         internal static ConfigEntry<bool> EnableCampaignPlannerExecutors;
+        internal static ConfigEntry<bool> EnableVanillaDefensiveInterception;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1399,6 +1400,14 @@ namespace WhiskeyRealism
                 "Campaign Planner", "Enable Campaign Planner Executors", true,
                 "Default ON. Lets the planner steer vanilla: offensive target pointers, campaign objective, theater boxes, availability, capital pledges, " +
                 "transfers, MoveUnitTo, depots, forts, railroads. Never moves or orders the W&L player's own command. OFF = plan and telemetry only.");
+            EnableVanillaDefensiveInterception = Config.Bind(
+                "Campaign Planner", "Enable Vanilla Defensive Interception", true,
+                "Default ON. While the campaign planner runs for an AI alliance (a fresh published plan, executors on), vanilla's own defensive operations " +
+                "(CheckForDefensiveOperations, the side's only reaction to an advance onto its soil) choose from the side's whole formation list again: " +
+                "the defense intent ledger's candidate filter (patch #25) removes nothing and reverts nothing, and only logs what it would have removed " +
+                "(DefenseIntent filter-observed). The planner's withheld formations (reserve, capital guard, depot builder, scout, recovering) stay out " +
+                "of vanilla's defence through the availability patch. OFF = #25 removes the ledger's forbidden formations from vanilla's candidates and " +
+                "reverts a forbidden commit, as before. Needs Enable Campaign Planner and Enable Campaign Planner Executors; without them #25 always filters.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

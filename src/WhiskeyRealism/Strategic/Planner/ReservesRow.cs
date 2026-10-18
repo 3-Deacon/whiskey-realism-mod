@@ -14,13 +14,16 @@ namespace WhiskeyRealism.Strategic.Planner
     //   hold=<sector:held/need>  at most MaxHoldSectors sectors, largest need first (the lower id on a tie): the hold each has by the roles
     //                            assigned against max(HoldNeed, the garrison minimum), the allocator's own sums
     //   dept=<theater:have,...>  each department's HoldStrength over its formations that count toward coverage; "none" when none do
+    //   enemyOnOwnSoil           live land beliefs (EnemyTraits.OnOwnSoil, not afloat) the side holds today
+    //   vanillaDefActive         own formations in a vanilla defensive operation today
     //   vanillaDefWithheld       formations now in a vanilla defensive operation that yesterday's allocation withheld as Reserve, CapitalGuard,
     //                            DepotBuilder, Recon or Recover (a violation of the hold the planner keeps)
     //   vanillaDefHoldOrCovering the same for a withheld Hold (vanilla's defence may take it: the same-sector exception) and, from foresight
     //                            F6b, a covering-force member
     //   massInVanillaDef         members of yesterday's mass now in a vanilla defensive operation
     // The last three read YESTERDAY's allocation and plan, which the runtime captures before today's Publish overwrites the working copy
-    // (as AgeRecon reads it); on the first review they read 0. Foresight F2 adds enemyOnOwnSoil= and vanillaDefActive=.
+    // (as AgeRecon reads it); on the first review they read 0. enemyOnOwnSoil= and vanillaDefActive= (foresight F2) are today's picture:
+    // criterion-interception-restored counts the review days on which both are above 0.
     internal static class ReservesRow
     {
         internal const int MaxHoldSectors = 6;
@@ -33,7 +36,9 @@ namespace WhiskeyRealism.Strategic.Planner
               .Append(" capital=").Append(ForceAllocator.RoleStrength(s, a, FormationRole.CapitalGuard).ToString("0", inv))
               .Append('/').Append(plan.CapitalFloorStrength.ToString("0", inv))
               .Append(" hold=").Append(HoldShares(s, sectors, plan, a, inv))
-              .Append(" dept=").Append(DepartmentStrengths(s, sectors, state, inv));
+              .Append(" dept=").Append(DepartmentStrengths(s, sectors, state, inv))
+              .Append(" enemyOnOwnSoil=").Append(EnemiesOnOwnSoil(s))
+              .Append(" vanillaDefActive=").Append(InVanillaDefence(s));
             CountVanillaDefence(s, previous, previousPlan, out int withheld, out int holdOrCovering, out int mass);
             sb.Append(" vanillaDefWithheld=").Append(withheld)
               .Append(" vanillaDefHoldOrCovering=").Append(holdOrCovering)
@@ -91,6 +96,26 @@ namespace WhiskeyRealism.Strategic.Planner
                 sb.Append((Theater)d).Append(':').Append(have[d].ToString("0", inv));
             }
             return sb.Length == 0 ? "none" : sb.ToString();
+        }
+
+        // Live land beliefs standing on the side's own soil (the test 13601-13603 uses for an enemy vanilla's defence may answer).
+        private static int EnemiesOnOwnSoil(CampaignSnapshot s)
+        {
+            int count = 0;
+            for (int i = 0; i < s.Beliefs.Count; i++)
+            {
+                var b = s.Beliefs[i];
+                if (ReserveRules.Live(b) > 0f && !ReserveRules.Afloat(b) && (b.Traits & EnemyTraits.OnOwnSoil) != 0) count++;
+            }
+            return count;
+        }
+
+        private static int InVanillaDefence(CampaignSnapshot s)
+        {
+            int count = 0;
+            for (int i = 0; i < s.Own.Count; i++)
+                if ((s.Own[i].Flags & FormationFlags.InDefensiveOps) != 0) count++;
+            return count;
         }
 
         // Today's formations in a vanilla defensive operation, judged by what yesterday's allocation made of them.
