@@ -9,3 +9,11 @@ User, verbatim: "okay, fix it all correctly". This approved the integrator's rec
 6. The minimum garrison strength comes from the scenario's live value (s.MinStrengthForMovement), not the hardcoded 5000, and it lands after the presumption.
 Also approved: depot builders are never taken from a hold or covering formation, nor from an unready one; formations dispatched to the main effort stay in it through readiness dips; stranded formations return to their home sector when the main effort ends; mover telemetry names the formation and target.
 Industry guidance the user accepted: an honest planner plus a reactive reflex that is never switched off (vanilla interception restored). Defensive omniscience in the planner is a later option behind a flag, and only if smoke shows holes.
+
+## Integrator refinement, 2026-10-18 (strategic foresight phase 2)
+
+Refines the approved item "stranded formations return to their home sector when the main effort ends". The integrator added this item from root cause 4; the user's ask is foresight, troops where the threat is.
+
+Refinement, as given by the integrator: "a formation whose decision ended is unclaimed and is placed by the holds, the capital reserve and department reinforcement. There is no separate return lifecycle. The user may override this."
+
+Kept: a dispatched member stays in the mass through readiness dips while its objective is the main effort. Removed: origins, the Returning claimant, the donor transfer back and the sidecar origin fields. Department "have" has one definition: formations that stand in the department and are not in the mass or committed. Spec: D11 requirement-decision-end.
