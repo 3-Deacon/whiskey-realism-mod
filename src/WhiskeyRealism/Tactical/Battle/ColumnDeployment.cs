@@ -135,6 +135,28 @@ namespace WhiskeyRealism.Tactical.Battle
             return reason == ColumnDeployReason.Approaching || reason == ColumnDeployReason.FlankRisk || heading < 0f;
         }
 
+        /// <summary>
+        /// A deploy that keeps marching needs the approach mark. Vanilla looks again at a line regiment with a path over 60 m and no enemy inside 100 m and
+        /// columns it (CheckFormationChange 127665-127667), and only the Prefix, which skips that look for a marked regiment, keeps it in line; an unmarked
+        /// one is columned within a second and the 20 s cooldown then deploys it again (smoke 2026-10-18: 9 of 38 in-march deploys re-columned within 3 s).
+        /// So an unmarked regiment gets no in-march deploy (nothing is submitted and it is not stopped); a deploy that stops the regiment needs no mark.
+        /// </summary>
+        public static bool MayDeploy(ColumnDeployReason reason, float heading, bool marked)
+        {
+            return marked || !KeepsMarching(reason, heading);
+        }
+
+        /// <summary>A path end nearer than this is no walking direction (a block's length).</summary>
+        public const float WalkHeadingMinMeters = 20f;
+
+        /// <summary>The bearing from the regiment to the end of its path, or -1 when the end is within <see cref="WalkHeadingMinMeters"/>.</summary>
+        public static float WalkHeadingTo(float fromX, float fromZ, float toX, float toZ)
+        {
+            float dx = toX - fromX, dz = toZ - fromZ;
+            if (dx * dx + dz * dz < WalkHeadingMinMeters * WalkHeadingMinMeters) return -1f;
+            return PostureSense.HeadingTo(fromX, fromZ, toX, toZ);
+        }
+
         /// <summary>How far off its walking direction a deployed line may face before it faces the way it walks instead.</summary>
         public const float MaxOffWalkDegrees = 60f;
 

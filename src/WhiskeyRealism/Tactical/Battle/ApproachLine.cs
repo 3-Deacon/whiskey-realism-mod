@@ -126,6 +126,18 @@ namespace WhiskeyRealism.Tactical.Battle
             return Judge(in i) == ApproachVerdict.Mark;
         }
 
+        /// <summary>
+        /// The deploy pass looks at a unit only if it is a live, active infantry regiment that is not a group, not the player's, not detached, not feuding
+        /// and not mounted. Any other unit is released from the table before the pass moves on: Judge never sees it, and a mark left on a regiment that was
+        /// detached or taken over would outlast it by the latch (the Prefix's write guard does not test detachment).
+        /// </summary>
+        public static bool PassEligible(UnitFlags f)
+        {
+            const UnitFlags barred = UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted;
+            return (f & UnitFlags.IsInfantry) != 0 && (f & UnitFlags.IsGroup) == 0 &&
+                (f & (UnitFlags.Alive | UnitFlags.Active)) == (UnitFlags.Alive | UnitFlags.Active) && (f & barred) == 0;
+        }
+
         /// <summary>The Prefix's cheap tests, run first for every regiment on every regular cycle: its flag is on, and the regiment is infantry that is not already in column.</summary>
         public static bool Eligible(bool flagOn, int unitTyp, int formation)
         {

@@ -658,9 +658,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (_unit.regimentpaths <= 0) return -1f;
                     Vector3 here = ((Component)_unit).transform.position;
                     Vector3 end = _unit.GetLastTransmittedPathPos(ignoreorderdelay: true);
-                    float dx = end.x - here.x, dz = end.z - here.z;
-                    if (dx * dx + dz * dz < WalkHeadingMinMeters * WalkHeadingMinMeters) return -1f;
-                    return PostureSense.HeadingTo(here.x, here.z, end.x, end.z);
+                    return ColumnDeployment.WalkHeadingTo(here.x, here.z, end.x, end.z);
                 }
             }
 
@@ -673,9 +671,6 @@ namespace WhiskeyRealism.Tactical.Battle
                 }
             }
         }
-
-        // A path end nearer than this is no walking direction (a block's length).
-        private const float WalkHeadingMinMeters = 20f;
 
         private static readonly Dictionary<string, float> _lastColumnDeployRowAt = new Dictionary<string, float>();
 
@@ -691,6 +686,8 @@ namespace WhiskeyRealism.Tactical.Battle
                 string reason = w.Reason;
                 float heading = w.Heading;
                 string appliedName = applied.ToString();
+                // Whether the approach table holds the regiment as the deploy ran: a DeployedInMarch row with marked false would be undone by vanilla's next look.
+                bool marked = ApproachLineTable.Shared.Contains(view.Alliance, rec.InstanceId, view.DoctrineHours);
                 int side = view.Alliance;
                 string signature = side + "|" + rec.InstanceId + "|" + reason + "|" + appliedName;
                 if (!TacticalTelemetry.ShouldEmit(_lastColumnDeployRowAt, "tactical-column-deploy:" + side + ":" + rec.InstanceId, signature,
@@ -705,6 +702,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         .WithField("reason", reason)
                         .WithField("applied", appliedName)
                         .WithField("facing", facing)
+                        .WithField("marked", marked)
                         .WithField("targetFacing", heading)
                         .WithField("receivedFire", rec.ReceivedFire)
                         .WithField("fireFromFlank", rec.FireFromFlank)

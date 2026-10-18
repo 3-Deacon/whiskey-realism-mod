@@ -1117,7 +1117,8 @@ namespace WhiskeyRealism
                 "enemy within 100 m) and that is fired on, shot in the flank, outflanked or in close contact with its brigade stops its march (the game's " +
                 "own manual stop restores its line) and turns to face the pressure, instead of marching on in column until an enemy is within 100 m " +
                 "(vanilla deploys it there, facing the way it was walking). A regiment on a bridge or crossing, of a withdrawing group, routed or mounted " +
-                "is left alone. A regiment marked for the approach in line (Enable Approach Line Advance), one whose only cause is its brigade's perceived flank risk, and one with no bearing to turn to are deployed where they stand and keep marching, facing the way they walk. " +
+                "is left alone. A regiment marked for the approach in line (Enable Approach Line Advance), one whose only cause is its brigade's perceived flank risk, and one with no bearing to turn to are deployed where they stand and keep marching, facing the way they walk, but only while marked for the approach in line: an unmarked " +
+                "regiment would be columned again by the game within a second, so it is left in the game's column. " +
                 "Needs Enable Tactical Contact Facing Pulse. Disable for rollback without turning off Tactical Commander Mode.");
             EnableApproachLineAdvance = Config.Bind(
                 "Tactical",

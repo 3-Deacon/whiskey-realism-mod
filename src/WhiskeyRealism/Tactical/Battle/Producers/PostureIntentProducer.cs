@@ -2007,17 +2007,19 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         {
             UnitRecord[] own = s.Own;
             int submitted = 0;
-            // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass while its flag is on. With the
-            // flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
+            // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the pass is stamped while its flag is on and marks are kept
+            // current below (a latch). With the flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
             if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
             for (int u = 0; u < s.OwnCount; u++)
             {
                 ref UnitRecord rec = ref own[u];
                 UnitFlags f = rec.Flags;
-                // The cheap rejects first: this loop visits every own unit every tick.
-                if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;
-                if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
-                if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
+                // The cheap rejects first: this loop visits every own unit every tick. A unit the pass does not look at loses any mark it had at once.
+                if (!ApproachLine.PassEligible(f))
+                {
+                    if (approachOn) ApproachLineTable.Shared.Release(s.Alliance, rec.InstanceId);
+                    continue;
+                }
                 bool inColumn = rec.Formation == ColumnDeployment.RegimentMarchColumn;
 
                 // The group whose intent the regiment follows: the nearest group above it with a recorded posture (ApproachLine.Walk, the one ancestor walk).
@@ -2066,6 +2068,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if (k >= 0 && distance <= (reason == ColumnDeployReason.Approaching ? ApproachLine.AssaultRangeMeters : DeployBearingReachMeters))
                         heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
                 }
+                // A deploy that keeps marching holds only for a marked regiment; an unmarked one is left in vanilla's column, not stopped.
+                if (!ColumnDeployment.MayDeploy(reason, heading, approachOn && ApproachLineTable.Shared.Contains(s.Alliance, rec.InstanceId, s.DoctrineHours))) continue;
                 sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading, reason));
                 submitted++;
             }
