@@ -583,6 +583,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         internal const string ProbeReason = "probe-nomination";
         internal const string ManeuverFacingReason = "envelopment-turn";
 
+        // When each group last had an enemy in sight (per battle; reset with the posture producer).
+        private static readonly GroupContactMemory _contact = new GroupContactMemory();
+
+        static PosturePipeline()
+        {
+            BattleScope.Register("posture-contact", _contact.Clear);
+        }
+
         internal static bool Run(
             BattleSnapshot s,
             PostureTick.State t,
@@ -638,7 +646,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // follow rewrite and the army opportunity override do not apply to it. The local flank emergency stays.
             bool exploit = exploitKind == ExploitOverrideKind.Exploit;
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
-            bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
+            // The reconnaissance rule below sends a group that has the enemy neither in sight nor on it to screen or probe. A group that lost him behind
+            // a rise for one count has not lost him (GroupContactMemory); its own sight is the sighting.
+            bool visibleEnemy = _contact.InContact(rec.InstanceId, s.ClosestVisibleEnemy(i, out _) >= 0, s.DoctrineHours);
             BattleStance stance = army != null ? army.CurrentBattleStance : BattleStance.Meeting;
             bool defender = stance == BattleStance.Defender;
 

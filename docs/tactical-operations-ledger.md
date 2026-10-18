@@ -38,6 +38,22 @@ The doctrine rule: screen contact is not a target for a formed assault. `Tactica
 - `fix-and-flank` -> committed attack only after formed-line exposure, odds and reserve gates pass
 - `contact-downgraded` -> `Scouting`
 - `contact-lost` -> `SoftAbort`
+- `odds-collapse` -> `SoftAbort`, only once the committed force (the nodes tasked to attack or support) has stood below the abort line for `OddsCollapseDwellSeconds` (600 doctrine seconds; `TacticalOperationsLedgerRuntime` keeps the time)
+- `soft-abort-rest` -> a soft abort holds for `SoftAbortRestSeconds` before the side may commit again
+- `commit-window` / `commit-hysteresis` -> a chosen operation (Forming, Committed, parallel, fix-and-flank) holds for `CommitWindowSeconds`, the plan's commitment (3600 doctrine seconds)
+
+### Task churn (2026-10-18)
+
+Smoke 2026-10-18 (Union Attacker, main `a6b49fc`): every Union node changed task together, every 30 to 60 s of real time (FixEnemy, ReserveWait, AttackObjective, FallBackToLine, FormUp), in lockstep with the operation's phase; a brigade carried a path 1.1 km to the vanilla objective with no enemy in sight. A battle is played at 20x to 120x, so every constant in doctrine seconds is a fraction of that in real time: the old 900 s commit window was 8 to 45 s. Proven causes and the fixes (branch `fix/battle-task-churn`):
+
+- **The enemy line counted an enemy once per own unit that saw it** (`TryVisibleEnemyLineFromAggregate` summed each own unit's closest visible enemy), so the more of the army was in sight, the stronger the enemy; the operation's odds fell as it made contact. Each enemy is counted once.
+- **Commit and abort were judged on different forces, and an abort lasted one tick.** The operation commits on the whole army (nothing is assigned yet) and is judged on the nodes tasked to attack (T14); the next count had no committed force, weighed the army again and committed again: Committed, SoftAbort on every tick (reproduced in `TaskChurnTests`). Now: an abort needs the collapse to last `OddsCollapseDwellSeconds`, and rests `SoftAbortRestSeconds`.
+- **The enemy line is a one-tick sample of what is visible**, so a count without a glimpse of it dropped it from the picture; the operation kept working on `enemy-line-0` while the doctrine planned from the first objective left (an empty map objective): every node went FormUp, Probe, then back. `EnemyLineMemory` keeps the last line, unchanged, for an hour out of sight (`HorizonSeconds`, the plan's commitment).
+- **The reconnaissance rule of the posture pipeline read this tick's sight** (FixEnemy, Screen, Probe in seven seconds): a group keeps the contact it had for the same hour (`GroupContactMemory`).
+- **A held Main was displaced by its own escalation** (`DirectChildRoleHold`): the allocator gives Fix and the refused flanks only to a child that is not the main effort, so a Main allocated Fix has been replaced by the flicker of the pick, which passed as an escalation, left the army without a Main and let the fresh pick take it the same tick.
+- Telemetry: `TacticalOperationChange` (one row per change of phase, shape or primary objective with the director's reason, the army, the assigned part, the enemy at the objective and the collapse time).
+
+Not fixed (a vanilla seam, reported): vanilla's `FollowObjectives` (decompile 6880-7010, runs while `macroai` is not -1 or 3, and the ledger maps Committed, SoftAbort and a defensive shape to a vanilla macro) re-sends a chain's centre unit to its objective with `SetWaypoint` whenever the group has no path; Whiskey's hold, form-up and screen tasks submit no move and `CommandPostureExecutor` yields to any active move (`movement-in-progress`, `already-correct`), so the march continues. The BC14O chain contest (`MoveContest.DecideChain`) is a re-issue of a Whiskey move and never runs for a hold task or a recon group.
 
 ### Terrain picture in planning (BC12)
 
