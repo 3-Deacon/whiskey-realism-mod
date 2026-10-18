@@ -70,6 +70,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public int IssuedDay;
             public int Retries;
             public int ObjectiveId = -1;
+            public string Role;          // the role the move was sent for, for the miss row (not persisted)
             public MoveBudget Budget;
             public State State;
         }
@@ -97,7 +98,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         public void RecordIssued(int instanceId, float fromX, float fromZ, float tx, float tz, int daySerial, bool queued, string unitKey = null, int objectiveId = -1,
-                                 MoveBudget budget = MoveBudget.Planner)
+                                 MoveBudget budget = MoveBudget.Planner, string role = null)
         {
             _entries.TryGetValue(instanceId, out var previous);
             bool same = previous != null && SameTarget(previous, tx, tz);
@@ -108,7 +109,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
                 FromX = fromX, FromZ = fromZ, TargetX = tx, TargetZ = tz,
-                IssuedDay = daySerial, Retries = retries, ObjectiveId = objectiveId, Budget = budget, State = queued ? State.Queued : State.Issued
+                IssuedDay = daySerial, Retries = retries, ObjectiveId = objectiveId, Role = role, Budget = budget, State = queued ? State.Queued : State.Issued
             };
             if (!queued) Spend(budget, daySerial);
         }
@@ -124,7 +125,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Vanilla refused the move (MoveUnitTo returned false with no order running: a state neither own, allied nor at war,
         // 14493) or the target is restricted ground. A first refusal allows one retry, the second ends it for this target.
-        public void RecordRefused(int instanceId, float tx, float tz, int daySerial, string unitKey = null, int objectiveId = -1, MoveBudget budget = MoveBudget.Planner)
+        public void RecordRefused(int instanceId, float tx, float tz, int daySerial, string unitKey = null, int objectiveId = -1, MoveBudget budget = MoveBudget.Planner,
+                                  string role = null)
         {
             _entries.TryGetValue(instanceId, out var previous);
             bool again = previous != null && SameTarget(previous, tx, tz) && previous.State == State.Failed;
@@ -132,21 +134,23 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
                 FromX = tx, FromZ = tz, TargetX = tx, TargetZ = tz,
-                IssuedDay = daySerial, Retries = again ? previous.Retries + 1 : 0, ObjectiveId = objectiveId, Budget = budget,
+                IssuedDay = daySerial, Retries = again ? previous.Retries + 1 : 0, ObjectiveId = objectiveId, Role = role, Budget = budget,
                 State = again ? State.GaveUp : State.Failed
             };
         }
 
         // The move the tracker holds for the formation, for the miss row (a failed or given-up move names its target, start and tries).
-        public bool TryGetMove(int instanceId, out float fromX, out float fromZ, out float targetX, out float targetZ, out int issuedDay, out int retries, out int objectiveId)
+        public bool TryGetMove(int instanceId, out float fromX, out float fromZ, out float targetX, out float targetZ, out int issuedDay, out int retries, out int objectiveId, out string role)
         {
             if (!_entries.TryGetValue(instanceId, out var e))
             {
                 fromX = fromZ = targetX = targetZ = 0f;
                 issuedDay = retries = 0;
                 objectiveId = -1;
+                role = null;
                 return false;
             }
+            role = e.Role;
             fromX = e.FromX;
             fromZ = e.FromZ;
             targetX = e.TargetX;

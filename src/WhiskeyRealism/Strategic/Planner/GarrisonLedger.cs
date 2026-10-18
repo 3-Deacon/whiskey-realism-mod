@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Telemetry;
 using System.Collections.Generic;
 using System.Globalization;
 using WhiskeyRealism.Util;
@@ -190,7 +191,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public static string Transition(int alliance, GarrisonTransition t)
         {
-            return "[GarrisonPost] alliance=" + alliance + " post=" + t.Name + " kind=" + t.Kind + " unit=" + t.Unit + " state=" + t.State
+            return "[GarrisonPost] alliance=" + alliance + " post=" + TelemetryLegacyParser.Quote(t.Name) + " kind=" + t.Kind + " unit=" + TelemetryLegacyParser.Quote(t.Unit) + " state=" + t.State
                 + " need=" + t.Need.ToString("0", CultureInfo.InvariantCulture) + " existing=" + t.Existing.ToString("0", CultureInfo.InvariantCulture)
                 + " short=" + t.Short.ToString("0", CultureInfo.InvariantCulture);
         }

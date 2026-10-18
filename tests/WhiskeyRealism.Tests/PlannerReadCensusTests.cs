@@ -641,6 +641,7 @@ internal static class CensusRows
         "SectorPlan.BelievedHold | P/ForceAllocator.cs | smoke 2026-10-17 ForceAllocator.SectorMayGiveScout (is the sector's hold need driven by a believed army)",
         "Allocation.ReconUnfilledWhy | P/ReconStep.cs | smoke 2026-10-18 [Recon] why= (the reason each task has no scout)",
         "Allocation.ReconFree | P/ReconStep.cs | smoke 2026-10-18 [Recon] free= (the scouts no role had claimed)",
+        "Allocation.ReconMass | P/ReconStep.cs | smoke 2026-10-18 [Recon] mass= (the main effort's bodies a pick could still take)",
         "PlannerState.ScoutedTargetX | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.Plan (the latch speaks for the scouted record only)",
         "PlannerState.ScoutedTargetZ | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.Plan (the latch speaks for the scouted record only)",
         "PlannerState.CurrentTargetX | P/TheaterPlanner.cs | smoke 2026-10-17 TheaterPlanner.HeldRecord (the target record the main effort keeps)",

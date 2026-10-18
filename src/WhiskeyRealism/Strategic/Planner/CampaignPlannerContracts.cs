@@ -493,6 +493,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // The formations a detachment-standard scout pick could still take when the recon step began: ready, unbusy and claimed by no role
         // before it. The [Recon] row's free= (pool= is the snapshot's count before any role).
         public int ReconFree;
+        // The main effort's own bodies a scout pick could still take at that point (ready, unclaimed, in the mass). The row's mass=; not in free=.
+        public int ReconMass;
 
         public bool TryGet(int instanceId, out Assignment assignment)
         {

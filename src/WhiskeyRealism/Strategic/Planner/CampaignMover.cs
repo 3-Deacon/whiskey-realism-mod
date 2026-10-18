@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Telemetry;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -181,9 +182,8 @@ namespace WhiskeyRealism.Strategic.Planner
         private static string MissRow(CampaignSnapshot s, Allocation allocation, MoveTracker tracker, in FormationRecord f, string outcome)
         {
             var inv = CultureInfo.InvariantCulture;
-            tracker.TryGetMove(f.InstanceId, out float fromX, out float fromZ, out float tx, out float tz, out int issued, out int retries, out int objective);
-            allocation.TryGet(f.InstanceId, out var a);
-            return "[CampaignMoverMiss] alliance=" + s.Alliance + " unit=" + (f.UnitKey ?? f.InstanceId.ToString(inv)) + " role=" + a.Role + " outcome=" + outcome
+            tracker.TryGetMove(f.InstanceId, out float fromX, out float fromZ, out float tx, out float tz, out int issued, out int retries, out int objective, out string role);
+            return "[CampaignMoverMiss] alliance=" + s.Alliance + " unit=" + TelemetryLegacyParser.Quote(f.UnitKey ?? f.InstanceId.ToString(inv)) + " role=" + (role ?? "-") + " outcome=" + outcome
                 + " target=" + tx.ToString("0", inv) + "," + tz.ToString("0", inv) + " objective=" + objective + " retries=" + retries
                 + " from=" + fromX.ToString("0", inv) + "," + fromZ.ToString("0", inv) + " at=" + f.X.ToString("0", inv) + "," + f.Z.ToString("0", inv)
                 + " waypoint=" + f.WaypointX.ToString("0", inv) + "," + f.WaypointZ.ToString("0", inv) + " days=" + (s.DaySerial - issued)
@@ -345,7 +345,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;
 
-            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, ObjectiveOf(inputs.Plan, a), s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, out var outcome);
+            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, ObjectiveOf(inputs.Plan, a), s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, a.Role.ToString(), out var outcome);
             Count(tally, outcome);
             if (moved && (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support)) host.ListOffensive(f.InstanceId, true);
         }

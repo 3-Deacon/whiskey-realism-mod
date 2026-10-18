@@ -96,16 +96,20 @@ namespace WhiskeyRealism.Strategic.Planner
         // holds against a believed enemy force that the draw would leave uncovered.
         internal const string ReasonScoutAgainstThreat = "believed-threat";
         // Allocation.ReconUnfilledWhy: why a recon task has no scout (smoke 2026-10-18: tasks=6 unfilled=6 why=- for twelve days). The first that applies:
-        //   believed-threat   the draw from the hold reserve was refused (above).
+        //   believed-threat   the draw from the hold reserve was refused for this task (above).
+        //   main-covered      the draw was refused for this task, but the main objective has its eyes by another task (a scout out, drawn or
+        //                     picked), so nothing is missing that the refusal explains.
         //   mass-kept         the only formation the pick found was the main effort's last body, which it keeps.
         //   unsuited          a formation could go and nothing claimed it, but the kind's own rules turned it down (an advance guard or a probe
         //                     bigger than a quarter of the main body, a picket whose sector would be left short, a cavalry group the main body keeps).
         //   claimed-<what>    every formation that could go already has a role (what: the hold reserve's reason, or the role) before the recon step.
         //   gave-up           the able formations all gave up on this hold point.
+        //   recalling         the only able formations are on their way back to the main body (a recalled mission), which the pick skips.
         //   none-able         no formation meets the kind's movement standard at all (too weak for a screen, unready, short of morale, busy, in a
         //                     vanilla operations list, or not the planner's to order).
         internal const string ReasonUnfilledMassKept = "mass-kept", ReasonUnfilledUnsuited = "unsuited", ReasonUnfilledGaveUp = "gave-up",
-                              ReasonUnfilledNoneAble = "none-able", ReasonUnfilledClaimedPrefix = "claimed-";
+                              ReasonUnfilledNoneAble = "none-able", ReasonUnfilledRecalling = "recalling", ReasonUnfilledMainCovered = "main-covered",
+                              ReasonUnfilledClaimedPrefix = "claimed-";
 
         internal const string ReasonBusy = "busy";
         internal const string ReasonPlayerCommand = "player-command";
@@ -225,7 +229,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (g.Kind != GarrisonPostKind.Secession) continue;
                 if (sb.Length > 0) sb.Append(';');
                 sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.MassPresence ? "mass-presence" : g.PlayerPresence ? "player-presence" : g.InState ? "town-garrison" : "nobody")
-                  .Append('@').Append(g.StateName)
+                  .Append('@').Append((g.StateName ?? "?").Replace(' ', '_'))
                   .Append(g.Marching ? (g.InState ? ":in+moving/" : ":moving/") : ":in/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
                 if (g.Shortfall > 0f) sb.Append("!short").Append(g.Shortfall.ToString("0", CultureInfo.InvariantCulture));
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
@@ -269,9 +273,8 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
             private readonly float[] _believed;              // per sector: the believed term of the hold need (SectorPlan.BelievedHold)
             private readonly ReserveRules.HoldTally _held;   // what ReserveRules.Hold sized each sector's reserve on (unready, busy, capital guard, reserve)
-            private bool _scoutRefusedForThreat;
-            private int _reconFree;
-            private readonly List<string> _unfilledWhy = new List<string>();   // one entry per recon task with no scout and no refusal, in task order
+            private int _reconFree, _reconMass;
+            private readonly List<string> _unfilledWhy = new List<string>();   // one entry per recon task with no scout, in task order
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
                           Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp,
@@ -353,6 +356,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ListSurpluses(allocation);
                 allocation.ReconUnfilledWhy = UnfilledWhy();
                 allocation.ReconFree = _reconFree;
+                allocation.ReconMass = _reconMass;
             }
 
             // ---- inputs ----
@@ -642,7 +646,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private void AssignRecon()
             {
-                _reconFree = FreeScouts();
+                CountFreeScouts(out _reconFree, out _reconMass);
                 if (_recon == null || _recon.Count == 0) return;
                 var taken = new HashSet<int>();
                 var takenAndMass = new HashSet<int>();
@@ -703,7 +707,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         pick = DrawFromHoldReserve(task, taken, mainHasScreen, incumbentsOnly: drawn >= MaxReserveScouts, out refusedHere);
                         fromReserve = pick >= 0;
                     }
-                    if (pick < 0 && !refusedHere) _unfilledWhy.Add(WhyUnfilled(task, massKept));
+                    if (pick < 0) _unfilledWhy.Add(refusedHere ? ReasonScoutAgainstThreat : WhyUnfilled(task, massKept));
                     if (skippedTaken != null)
                     {
                         for (int k = 0; k < skippedTaken.Count; k++) taken.Remove(skippedTaken[k]);
@@ -718,9 +722,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (task.Kind == ReconKind.Screen && task.SectorId == _plan.MainSectorId) mainHasScreen = true;
                     if (ReconPlanner.ScoutsMainObjective(task)) mainFilled = true;
                 }
-                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) or a main task filled by any pick
-                // there is nothing to explain.
-                if (drawn >= MaxReserveScouts || mainFilled) _scoutRefusedForThreat = false;
+                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) or a main task filled by any pick the
+                // main objective has its eyes, and a task that was refused its draw is told as covered (it still has a reason of its own).
+                if (drawn >= MaxReserveScouts || mainFilled)
+                    for (int k = 0; k < _unfilledWhy.Count; k++)
+                        if (_unfilledWhy[k] == ReasonScoutAgainstThreat) _unfilledWhy[k] = ReasonUnfilledMainCovered;
             }
 
             // The mass's members no role has claimed yet: the bodies a scout pick could still take from the main effort.
@@ -817,17 +823,26 @@ namespace WhiskeyRealism.Strategic.Planner
                 int id = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, open, mainHasScreen);
                 int pick = id >= 0 && IsHoldReserve(_s.IndexOfOwn(id)) ? _s.IndexOfOwn(id) : -1;
                 refusedForThreat = pick < 0 && refused;
-                if (refusedForThreat) _scoutRefusedForThreat = true;
                 return pick;
             }
 
-            // The formations a detachment-standard scout pick could still take as the recon step begins (the [Recon] row's free=).
-            private int FreeScouts()
+            // The formations a detachment-standard scout pick could still take as the recon step begins, apart from the ones on their way
+            // back (the pick skips them): the free= of the [Recon] row are the ones outside the main effort's mass, the mass= the main
+            // effort's own bodies (the pick takes one only when nothing else will go, and never its last).
+            private void CountFreeScouts(out int free, out int mass)
             {
-                int n = 0;
+                free = mass = 0;
                 for (int i = 0; i < _n; i++)
-                    if (!_done[i] && ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard)) n++;
-                return n;
+                {
+                    if (_done[i] || !ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard) || IsRecalling(i)) continue;
+                    if (_inMass[i]) mass++;
+                    else free++;
+                }
+            }
+
+            private bool IsRecalling(int i)
+            {
+                return _missions != null && _missions.IsRecalling(_s.Own[i].InstanceId);
             }
 
             // Why the task has no scout, the first that applies (ReasonUnfilled*). Read before the gave-up formations are put back, from the
@@ -836,11 +851,12 @@ namespace WhiskeyRealism.Strategic.Planner
             private string WhyUnfilled(in ReconTask task, bool massKept)
             {
                 if (massKept) return ReasonUnfilledMassKept;
-                int claimedBy = -1, claimed = 0, gaveUp = 0, free = 0;
+                int claimedBy = -1, claimed = 0, gaveUp = 0, free = 0, recalling = 0;
                 for (int i = 0; i < _n; i++)
                 {
                     if (!ReconPlanner.CouldScout(_s, _s.Own[i], task.Kind)) continue;
-                    if (GaveUpAt(i, task.HoldX, task.HoldZ)) gaveUp++;
+                    if (IsRecalling(i)) recalling++;
+                    else if (GaveUpAt(i, task.HoldX, task.HoldZ)) gaveUp++;
                     else if (_done[i])
                     {
                         if (claimedBy < 0) claimedBy = i;
@@ -851,6 +867,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (free > 0) return ReasonUnfilledUnsuited;
                 if (claimed > 0) return ReasonUnfilledClaimedPrefix + RoleTag(claimedBy);
                 if (gaveUp > 0) return ReasonUnfilledGaveUp;
+                if (recalling > 0) return ReasonUnfilledRecalling;
                 return ReasonUnfilledNoneAble;
             }
 
@@ -872,7 +889,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private string UnfilledWhy()
             {
                 var reasons = new List<string>();
-                if (_scoutRefusedForThreat) reasons.Add(ReasonScoutAgainstThreat);
+                if (_unfilledWhy.Contains(ReasonScoutAgainstThreat)) reasons.Add(ReasonScoutAgainstThreat);
                 for (int k = 0; k < _unfilledWhy.Count; k++)
                     if (!reasons.Contains(_unfilledWhy[k])) reasons.Add(_unfilledWhy[k]);
                 return reasons.Count == 0 ? null : string.Join(",", reasons);

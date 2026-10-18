@@ -248,7 +248,7 @@ namespace WhiskeyRealism.Strategic
 
         private static string SafeName(Regiment unit)
         {
-            try { return (UnityEngine.Object)unit != null ? unit.name : "-"; }
+            try { return (UnityEngine.Object)unit != null ? TelemetryLegacyParser.Quote(unit.name) : "-"; }   // a row value: quoted when the name has a space
             catch { return "-"; }
         }
 

@@ -547,7 +547,7 @@ internal static class ScoutFirstTests
         AssertEqual(0, day.Tasks.Count, "nobody could take a reconnaissance task, so none is planned");
         AssertEqual(0, day.Ledger.Missions.Count, "no mission");
         AssertEqual(0, ReconPlanner.ScoutPool(s), "the pool is empty");
-        AssertTrue(ReconStep.CountsOf(s, day.Ledger, day.Tasks).Row(0).EndsWith("pool=0 free=0"), "and the [Recon] row says so");
+        AssertTrue(ReconStep.CountsOf(s, day.Ledger, day.Tasks).Row(0).EndsWith("pool=0 free=0 mass=0"), "and the [Recon] row says so");
     }
 
     // 1861: no cavalry-majority group. The staged main effort still gets scouts: an infantry advance guard and a probe drawn from its
