@@ -56,3 +56,7 @@ The user directed (2026-10-18): "AI should be intelligent enough to look at the 
 5. Phase 1 has no user gate after F4. The order is F4 -> F4b -> F5 -> F9 -> F10a.
 
 Spec: D11 requirement-commitment-mover, requirement-picture-partition, requirement-marks-*, requirement-covering-force.
+
+## Integrator decision, 2026-10-18 (phase 1 build gap 20, the mark-day decode)
+
+D11's `MarkDay` decode contradicts its own pins (gap 20 in gaps-build-phase1.md). The builder shipped the inverse the pins need: the earliest calendar date whose day window holds the stored year fraction, with a float32 slack. Kept. The encoding cannot tell 31 January after 10:30 from 1 February before 12:27, so no decode is exact, and a mark one day early in that overlap changes no belief that fades over days. If vanilla has its own inverse of the encoding, the planner uses that instead. The user may override this.
