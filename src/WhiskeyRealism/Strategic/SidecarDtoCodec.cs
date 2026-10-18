@@ -445,6 +445,13 @@ namespace WhiskeyRealism.Strategic
                 ReinforcementKey = s.ReinforcementKey,
                 ReinforcementDecision = s.ReinforcementDecision,
                 ScoutedDecision = s.ScoutedDecision,
+                ScoutedTargetX = float.IsNaN(s.ScoutedTargetX) ? (float?)null : s.ScoutedTargetX,
+                ScoutedTargetZ = float.IsNaN(s.ScoutedTargetZ) ? (float?)null : s.ScoutedTargetZ,
+                CurrentTargetX = float.IsNaN(s.CurrentTargetX) ? (float?)null : s.CurrentTargetX,
+                CurrentTargetZ = float.IsNaN(s.CurrentTargetZ) ? (float?)null : s.CurrentTargetZ,
+                RecordChallengerX = float.IsNaN(s.RecordChallengerX) ? (float?)null : s.RecordChallengerX,
+                RecordChallengerZ = float.IsNaN(s.RecordChallengerZ) ? (float?)null : s.RecordChallengerZ,
+                RecordChallengerDays = s.RecordChallengerDays,
                 UnreliableDays = p.UnreliableDays,
                 UnreliableLastDay = p.UnreliableLastDay
             };
@@ -498,7 +505,10 @@ namespace WhiskeyRealism.Strategic
             if (dto == null) return null;
             var p = new PlannerSnapshot { UnreliableDays = dto.UnreliableDays, UnreliableLastDay = dto.UnreliableLastDay };
             p.State.Restore(dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
-                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision, dto.ScoutedDecision);
+                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision, dto.ScoutedDecision,
+                dto.ScoutedTargetX ?? float.NaN, dto.ScoutedTargetZ ?? float.NaN,
+                dto.CurrentTargetX ?? float.NaN, dto.CurrentTargetZ ?? float.NaN,
+                dto.RecordChallengerX ?? float.NaN, dto.RecordChallengerZ ?? float.NaN, dto.RecordChallengerDays);
             if (dto.Departments != null)
             {
                 var departments = new List<KeyValuePair<string, Theater>>();

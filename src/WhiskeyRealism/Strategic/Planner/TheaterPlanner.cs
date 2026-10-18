@@ -86,6 +86,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public const float MainBodyShare = 0.5f;
         public const float AttackBiasBalanceScale = 0.5f;
         public const float OddsDeadband = 0.10f;          // ratio units below RequiredRatio (F1)
+        public const float SameTargetRadius = 1f;          // two target records closer than this are one target (the latch's identity)
         public const float CapitalThreatRelease = 0.4f;   // the latch re-arms below this (F2)
         public const int MaxTraceCandidates = 12;
         // Vanilla refuses to march a formation of readiness step 0 or 1 onto enemy ground: SetWaypoint returns without a waypoint and
@@ -234,8 +235,15 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainEnemyStrength = m.Enemy;
                 // F1 (verify round 1): once a decision's target has been scouted it stays scouted for that decision, so a march released on
                 // a fresh picture is not pulled back to a start line when the belief decays; a new decision starts unscouted.
-                plan.MainScoutLatched = !m.Scouted && state.ScoutedDecision == state.DecisionSerial;
-                if (m.Scouted) state.ScoutedDecision = state.DecisionSerial;
+                // Smoke 2026-10-17: the latch is for the scouted record. A retarget to another record of the same objective (same decision, switch=hold)
+                // starts unscouted.
+                plan.MainScoutLatched = !m.Scouted && state.ScoutedDecision == state.DecisionSerial && IsScoutedTarget(state, m.X, m.Z);
+                if (m.Scouted)
+                {
+                    state.ScoutedDecision = state.DecisionSerial;
+                    state.ScoutedTargetX = m.X;
+                    state.ScoutedTargetZ = m.Z;
+                }
                 plan.MainScouted = m.Scouted || plan.MainScoutLatched;
                 plan.MainStaged = !plan.MainScouted;
                 // D3: the capacity the odds were judged on, then the part of it the objective needs.
@@ -265,6 +273,14 @@ namespace WhiskeyRealism.Strategic.Planner
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
             return plan;
+        }
+
+        // Whether (x, z) is the objective record the latch was recorded for, or none was recorded (a file written before the field: the
+        // latch then speaks for the decision's target as it did).
+        private static bool IsScoutedTarget(PlannerState state, float x, float z)
+        {
+            if (float.IsNaN(state.ScoutedTargetX) || float.IsNaN(state.ScoutedTargetZ)) return true;
+            return Math.Abs(state.ScoutedTargetX - x) <= SameTargetRadius && Math.Abs(state.ScoutedTargetZ - z) <= SameTargetRadius;
         }
 
         // D1: an unscouted main effort assembles where an own formation already stands: the forward-most member of the selected mass
@@ -383,13 +399,18 @@ namespace WhiskeyRealism.Strategic.Planner
             int current = state.CurrentMainObjective;
             Retain(cands, current, state);
             int best = Best(cands);
-            int held = BestOf(cands, current);
+            // The record the main effort is on (hysteresis between records), and the best record of the current objective: the objective's
+            // own value, which a challenger objective is compared against (the kept record may trail it by up to the record window).
+            int held = HeldRecord(cands, current, state);
+            int heldBest = BestOf(cands, current);
 
             if (best < 0)
             {
                 state.CurrentMainObjective = -1;
                 state.BelowOddsDays = 0;
                 ResetChallenger(state);
+                ResetRecordChallenger(state);
+                state.CurrentTargetX = state.CurrentTargetZ = float.NaN;
                 reason = current >= 0 ? "no-candidate" : "none";
                 return -1;
             }
@@ -404,11 +425,11 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 // A standing trigger (a capital threat lasts for days) never re-draws among near
                 // equals: the current main effort stays while it is within Epsilon of the best.
-                bool currentStillBest = held >= 0 && cands[held].Score >= cands[best].Score - Epsilon;
+                bool currentStillBest = heldBest >= 0 && cands[heldBest].Score >= cands[best].Score - Epsilon;
                 chosen = currentStillBest ? held : Draw(c, cands, best, state);
                 reason = cands[chosen].ObjectiveId != current ? trigger : "hold";
             }
-            else if (cands[best].ObjectiveId != current && cands[best].Score - cands[held].Score > SwitchMargin)
+            else if (cands[best].ObjectiveId != current && cands[best].Score - cands[heldBest].Score > SwitchMargin)
             {
                 if (state.ChallengerObjective == cands[best].ObjectiveId) state.ChallengerDays++;
                 else
@@ -440,7 +461,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 state.DecisionSerial++;
                 state.BelowOddsDays = 0;
                 ResetChallenger(state);
+                ResetRecordChallenger(state);
             }
+            state.CurrentTargetX = cands[chosen].X;
+            state.CurrentTargetZ = cands[chosen].Z;
             return chosen;
         }
 
@@ -448,9 +472,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // within OddsDeadband below its RequiredRatio, for fewer than SwitchDays consecutive reviews.
         private static void Retain(List<Candidate> cands, int current, PlannerState state)
         {
-            int index = -1;
-            for (int i = 0; i < cands.Count; i++)
-                if (cands[i].ObjectiveId == current && cands[i].Force >= 0 && (index < 0 || cands[i].Score > cands[index].Score)) index = i;
+            // The record the main effort is on has the deadband, not whichever record of the objective scores best today.
+            int index = KeptRecord(cands, current, state, anyEligibility: true);
+            if (index < 0)
+                for (int i = 0; i < cands.Count; i++)
+                    if (cands[i].ObjectiveId == current && cands[i].Force >= 0 && (index < 0 || cands[i].Score > cands[index].Score)) index = i;
             if (index < 0) return;
             var cand = cands[index];
             if (cand.Eligible)
@@ -532,6 +558,61 @@ namespace WhiskeyRealism.Strategic.Planner
                     best = i;
             }
             return best;
+        }
+
+        // The record of the current objective the main effort is on (PlannerState.CurrentTarget), -1 when none stands: no record kept, or it is no
+        // longer offered. anyEligibility false asks for an eligible record only (one that is still valid: not accomplished, reachable, within odds).
+        private static int KeptRecord(List<Candidate> cands, int objectiveId, PlannerState state, bool anyEligibility)
+        {
+            if (objectiveId < 0 || float.IsNaN(state.CurrentTargetX) || float.IsNaN(state.CurrentTargetZ)) return -1;
+            for (int i = 0; i < cands.Count; i++)
+            {
+                if (cands[i].ObjectiveId != objectiveId || (!anyEligibility && !cands[i].Eligible) || cands[i].Force < 0) continue;
+                if (SamePoint(cands[i].X, cands[i].Z, state.CurrentTargetX, state.CurrentTargetZ)) return i;
+            }
+            return -1;
+        }
+
+        private static bool SamePoint(float ax, float az, float bx, float bz)
+        {
+            return Math.Abs(ax - bx) <= SameTargetRadius && Math.Abs(az - bz) <= SameTargetRadius;
+        }
+
+        // The target record the current objective's main effort uses today. An objective has several records, and the best of them changing
+        // must not move the main effort (smoke 2026-10-17: 29@3 -> 29@2 -> 29@6 in two reviews, switch=hold): the record kept stays until
+        // another record of the objective beats it by SwitchMargin on SwitchDays consecutive reviews (the objective switch's own rule), or the
+        // kept record is invalid at once (no longer offered, accomplished, unreachable, below its odds): then the best record is taken.
+        private static int HeldRecord(List<Candidate> cands, int objectiveId, PlannerState state)
+        {
+            int best = BestOf(cands, objectiveId);
+            if (best < 0) return -1;
+            int kept = KeptRecord(cands, objectiveId, state, anyEligibility: false);
+            if (kept < 0 || kept == best)
+            {
+                ResetRecordChallenger(state);
+                return kept < 0 ? best : kept;
+            }
+            if (cands[best].Score - cands[kept].Score <= SwitchMargin)
+            {
+                ResetRecordChallenger(state);
+                return kept;
+            }
+            if (state.RecordChallengerDays > 0 && SamePoint(cands[best].X, cands[best].Z, state.RecordChallengerX, state.RecordChallengerZ)) state.RecordChallengerDays++;
+            else
+            {
+                state.RecordChallengerX = cands[best].X;
+                state.RecordChallengerZ = cands[best].Z;
+                state.RecordChallengerDays = 1;
+            }
+            if (state.RecordChallengerDays < SwitchDays) return kept;
+            ResetRecordChallenger(state);
+            return best;
+        }
+
+        private static void ResetRecordChallenger(PlannerState state)
+        {
+            state.RecordChallengerX = state.RecordChallengerZ = float.NaN;
+            state.RecordChallengerDays = 0;
         }
 
         private static int BestOf(List<Candidate> cands, int objectiveId)
@@ -640,7 +721,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     TargetZ = followsMain ? mainZ : cz,
                     RequiredRatio = posture == TheaterPosture.MainEffort ? plan.MainRequiredRatio
                         : Math.Max(0f, s.OffensiveDominance * (1f + mass) + ProfileOf(c, strongest[sector]).RequiredOddsShift),
-                    HoldNeed = x.Need[sector]
+                    HoldNeed = x.Need[sector],
+                    BelievedHold = HoldRatioNow(s) * x.Threat[sector]
                 });
             }
         }

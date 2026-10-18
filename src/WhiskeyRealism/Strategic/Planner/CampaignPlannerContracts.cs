@@ -340,6 +340,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // (HoldRatio + Tempo.MinimumHoldRatioModifier) x the sector's river-weighted believed land
         // threat (TheaterPlanner.SectorThreat): G4's hold need is this value, never recomputed (F9).
         public float HoldNeed;
+        // The believed term of that need alone: (HoldRatio + modifier) x the believed land threat. The need is belief-driven when this is the
+        // larger term (above the garrison floor and not below HoldNeed); otherwise the floor or the presumption of an unscouted front sets it.
+        // ForceAllocator reads it to decide whether a scout may be drawn from the sector's hold reserve.
+        public float BelievedHold;
     }
 
     public sealed class DepotTask
@@ -482,6 +486,9 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<GarrisonSeat> Seats = new List<GarrisonSeat>();
         public List<int> Shortfalls = new List<int>(); // instance ids, worst first
         public List<int> Surpluses = new List<int>();
+        // Why a staged main effort's scout could not be drawn from the hold reserve (ForceAllocator.ReasonScoutAgainstThreat), null when
+        // nothing was refused. The [Recon] row's why=.
+        public string ReconUnfilledReason;
 
         public bool TryGet(int instanceId, out Assignment assignment)
         {

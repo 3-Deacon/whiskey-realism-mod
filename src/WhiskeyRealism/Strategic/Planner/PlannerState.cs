@@ -44,6 +44,22 @@ namespace WhiskeyRealism.Strategic.Planner
         // for that decision (a march released on a fresh picture is not re-staged when the belief decays); a new decision starts unscouted.
         // -1 none. Persisted (PlannerStateDto.scoutedDecision).
         public int ScoutedDecision = -1;
+        // Smoke 2026-10-17 (Q3): the ground that was scouted, the position of the objective record whose picture ScoutedDecision latches.
+        // One objective id has several target records (29@3, 29@2, 29@6), and the decision follows the id, so a retarget to another record
+        // of the same objective is the same decision; the latch speaks for the scouted record only, never for ground nobody has seen.
+        // NaN: not recorded (a file written before the field), the latch then speaks for the decision's target as it did. Persisted
+        // (PlannerStateDto.scoutedTargetX / scoutedTargetZ).
+        public float ScoutedTargetX = float.NaN;
+        public float ScoutedTargetZ = float.NaN;
+        // Smoke 2026-10-17 (Q3), hysteresis between the target records of one objective: the record the main effort is on (CurrentTarget), and
+        // the record that has beaten it by SwitchMargin on RecordChallengerDays consecutive reviews (RecordChallenger). The same margin and
+        // the same SwitchDays as the objective switch (TheaterPlanner.HeldRecord). NaN: none (a new decision, or a file written before the
+        // fields: the best record is taken at once). Persisted (PlannerStateDto.currentTargetX/Z, recordChallengerX/Z/Days).
+        public float CurrentTargetX = float.NaN;
+        public float CurrentTargetZ = float.NaN;
+        public float RecordChallengerX = float.NaN;
+        public float RecordChallengerZ = float.NaN;
+        public int RecordChallengerDays;
 
         // D6 detail (smoke amendments 2026-10-16): each top formation's home department, a Theater, by unit key. A formation is given the
         // theater of the sector it stands in the first time a review sees it and keeps it until a deliberate cross-department transfer
@@ -162,9 +178,19 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public void Restore(int mainObjective, int challengerObjective, int challengerDays, int decisionSerial, long campaignSeed,
                             int belowOddsDays = 0, bool capitalThreatLatched = false, int tempoReleasedDecision = -1, int lastFullReviewDay = -1,
-                            string reinforcementKey = null, int reinforcementDecision = -1, int scoutedDecision = -1)
+                            string reinforcementKey = null, int reinforcementDecision = -1, int scoutedDecision = -1,
+                            float scoutedTargetX = float.NaN, float scoutedTargetZ = float.NaN,
+                            float currentTargetX = float.NaN, float currentTargetZ = float.NaN,
+                            float recordChallengerX = float.NaN, float recordChallengerZ = float.NaN, int recordChallengerDays = 0)
         {
+            CurrentTargetX = currentTargetX;
+            CurrentTargetZ = currentTargetZ;
+            RecordChallengerX = recordChallengerX;
+            RecordChallengerZ = recordChallengerZ;
+            RecordChallengerDays = recordChallengerDays;
             ScoutedDecision = scoutedDecision;
+            ScoutedTargetX = scoutedTargetX;
+            ScoutedTargetZ = scoutedTargetZ;
             ReinforcementKey = reinforcementKey;
             ReinforcementDecision = reinforcementDecision;
             BelowOddsDays = belowOddsDays;
