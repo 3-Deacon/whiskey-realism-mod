@@ -487,7 +487,7 @@ internal static class DefenderGroundTests
         FlankResponseTests.AssertPinned(ground, "Operations.HomeBank.Settle(_alliance, Crossings, OwnDeploymentZoneRuntime.For(BattleCoreTick.ResolveBattleUnits(), _alliance), placedNodes);",
             "the home bank comes from the own deployment zone");
         string ledger = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
-        FlankResponseTests.AssertPinned(ledger, "Ground?.Crossings, Ground != null ? Ground.HomeBank(commandStates) : -1);", "the ledger hands the doctrine build the side's home bank");
+        FlankResponseTests.AssertPinned(ledger, "Ground?.Crossings, Ground != null ? Ground.HomeBank(commandStates) : -1, _targetHold);", "the ledger hands the doctrine build the side's home bank");
     }
 
     // ---- a node already across, a node with no position, and the copies ---------------------------------------------------------------

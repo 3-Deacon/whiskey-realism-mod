@@ -278,7 +278,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) return;
             if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) return;
             if (leaf.LeafTask == CommandTaskType.None) return;
-            ProduceLeaf(s, t, i, leaf, side, army, sink, exploits);
+            ProduceLeaf(s, t, i, leaf, side, army, sink, exploits, leafMap);
         }
 
         // AI-controlled command groups: Active, not player-owned (spec §3).
@@ -290,7 +290,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         // #61 TryApplyLeafBrigade + ApplyLeafBrigadePosture (B-leaf, BR-M1).
         private static void ProduceLeaf(BattleSnapshot s, PostureTick.State t, int i, TacticalLeafBrigadeMap.LeafAssignment leaf,
-            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits)
+            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap)
         {
             UnitRecord[] own = s.Own;
             ref UnitRecord rec = ref own[i];
@@ -316,21 +316,31 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             catch { /* NoOpportunity keeps the ledger task */ }
             CommandTaskType task = TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, leaf.WorksHeld, out string overrideReason);
 
-            // Arrival synchronization: a Main brigade on AttackObjective waits as
-            // Screen for its SupportMain siblings (TacticalMainArrivalSynchronizer).
+            // A Main brigade on AttackObjective advances only with its flanks covered (MainFlankGuard): while one is exposed and no guard is assigned to it
+            // nor does it rest on impassable terrain, the brigade holds where it stands. Then arrival synchronization: it waits as Screen for its SupportMain
+            // siblings (TacticalMainArrivalSynchronizer).
             if (task == CommandTaskType.AttackObjective && leaf.LeafRole == DirectChildRole.Main)
             {
-                float aggression01 = Mathf.Clamp01((army.CommanderPersonality.Aggression + 1f) * 0.5f);
-                CommandTaskType held = ResolveMainArrivalHold(s, t, i, aggression01, task, out bool holding, out string arrivalReason);
-                if (holding)
+                if (army.CurrentBattleStance != BattleStance.Defender && FlankHolding(s, i, leafMap, out string flankReason))
                 {
-                    task = held;
-                    if (overrideReason == null) overrideReason = arrivalReason;
+                    task = CommandTaskType.HoldObjective;
+                    if (overrideReason == null) overrideReason = flankReason;
+                }
+                else
+                {
+                    float aggression01 = Mathf.Clamp01((army.CommanderPersonality.Aggression + 1f) * 0.5f);
+                    CommandTaskType held = ResolveMainArrivalHold(s, t, i, aggression01, task, out bool holding, out string arrivalReason);
+                    if (holding)
+                    {
+                        task = held;
+                        if (overrideReason == null) overrideReason = arrivalReason;
+                    }
                 }
             }
             else
             {
                 _mainArrivalHold.Remove(id);
+                _flankHold.Remove(id);
             }
 
             // BC9 stance guard: a Defender's leaf brigade gets no Probe or attack task.
@@ -347,9 +357,26 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
             // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
-            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk);
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk, army.CurrentBattleStance);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
+
+            // A flank guard (the leaf map's overlay, MainFlankGuard) is sent to the post at its main's flank: GuardFlank is no movement task for the slot
+            // path, so the move is its own, through the same leaf Move intent.
+            if (leaf.HasFlankPost)
+            {
+                bool withdrawing = FormationWithdraws(s, t, i, task, side);
+                FlankGuardLeaf.GuardOutcome guardOutcome = FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, withdrawing, out BattleOrderIntent guardMove, out string guardWhy);
+                if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)
+                {
+                    // The Move to the post, or the standing claim that keeps the division's own move from re-pathing the guard back; nothing while
+                    // its formation withdraws.
+                    if (guardOutcome != FlankGuardLeaf.GuardOutcome.Withdrawing) sink.Submit(guardMove);
+                    if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) t.Groups[i].Submitted = true;
+                    PostureTelemetry.Leaf(s, i, leaf, task, guardWhy, guardOutcome == FlankGuardLeaf.GuardOutcome.Move);
+                    return;
+                }
+            }
             int slotParent = rec.ParentIndex;
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
             RefuseFlank parentRefuse = executor != null && slotParent >= 0 && slotParent < s.OwnCount
@@ -371,6 +398,20 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));
             t.Groups[i].Submitted = true;
             PostureTelemetry.Leaf(s, i, leaf, task, "submitted", true);
+        }
+
+        // The guard's group or its formation withdraws: a withdrawal task on it, on a group above it (the ledger's state, or the posture row of this tick), or a
+        // recent withdrawal move for any of them (the ancestor walk unit churn's column deployment uses).
+        private static bool FormationWithdraws(BattleSnapshot s, PostureTick.State t, int index, CommandTaskType task, TacticalBattleOrchestrator side)
+        {
+            if (ColumnDeployment.WithdrawalTask(task)) return true;
+            var host = new FacingPulseIntentProducer.GroupWalkHost(t.Groups, s.Own, OrderExecutor.ForAlliance(s.Alliance), s.DoctrineHours);
+            ApproachLine.Walk(s.Own, s.OwnCount, index, ref host, out _, out bool walked);
+            if (walked) return true;
+            int a = s.Own[index].ParentIndex;
+            for (int hops = 0; a >= 0 && a < s.OwnCount && hops < ApproachLine.MaxGroupHops; hops++, a = s.Own[a].ParentIndex)
+                if (PostureLedger.TryResolveState(s.Own[a].InstanceId, side, out CommandNodeOperationalState state) && ColumnDeployment.WithdrawalTask(state.Task)) return true;
+            return false;
         }
 
         // BR-M1: holds a Main-effort brigade on AttackObjective as Screen until its
@@ -405,6 +446,39 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return resolved;
         }
 
+        // The Main brigade's flank hold (MainFlankGuard, FlankGuardLeaf.MainHolds) has hysteresis on the doctrine clock; a change of the hold is one
+        // TacticalFlankGuardHold row.
+        private static readonly Dictionary<int, MainFlankGuard.HoldState> _flankHold = new Dictionary<int, MainFlankGuard.HoldState>();
+        private static readonly List<MainFlankGuard.Neighbour> _flankNeighbours = new List<MainFlankGuard.Neighbour>(16);
+
+        private static bool FlankHolding(BattleSnapshot s, int mainIndex, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap, out string reason)
+        {
+            bool holds = FlankGuardLeaf.MainHolds(s, mainIndex, leafMap, _flankHold, TerrainPicture.CurrentForPlanning(), _flankNeighbours,
+                out MainFlankGuard.Cover cover, out string change, out reason);
+            if (change != null) EmitFlankHold(s, s.Own[mainIndex].InstanceId, holds, change, cover);
+            return holds;
+        }
+
+        private static void EmitFlankHold(BattleSnapshot s, int id, bool holding, string reason, MainFlankGuard.Cover cover)
+        {
+            try
+            {
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalFlankGuardHold", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalFlankGuardHold", holding ? "hold" : "release", reason)
+                        .WithField("open", cover.Reason)
+                        .WithField("side", s.Alliance)
+                        .WithField("group", id)
+                        .WithField("holding", holding)
+                        .WithField("leftOpen", cover.LeftOpen)
+                        .WithField("rightOpen", cover.RightOpen)
+                        .WithField("leftAnchored", cover.LeftAnchored)
+                        .WithField("rightAnchored", cover.RightAnchored)
+                        .WithField("hours", s.DoctrineHours));
+            }
+            catch { /* telemetry never changes an order */ }
+        }
+
         // SupportMain leaf positions, once per tick per side (BR-M6).
         private static void BuildSupportMain(BattleSnapshot s, PostureTick.State t)
         {
@@ -428,13 +502,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         /// <summary>BC13: the Main-effort brigade is held as Screen until its SupportMain siblings arrive (an exploit never picks it).</summary>
         internal static bool UnderArrivalHold(int groupId)
         {
-            return _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
+            return _flankHold.TryGetValue(groupId, out MainFlankGuard.HoldState hold) && hold.Holding
+                || _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
         }
 
         private static void Reset()
         {
             _mainArrivalHold.Clear();
             _arrivalSupportScratch.Clear();
+            _flankHold.Clear();
+            _flankNeighbours.Clear();
         }
     }
 
@@ -1990,7 +2067,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         }
 
         // ApproachLine.Walk over the posture table and the executor's outcomes; a struct, so the walk allocates nothing.
-        private readonly struct GroupWalkHost : IGroupWalkHost
+        internal readonly struct GroupWalkHost : IGroupWalkHost
         {
             private readonly GroupPosture[] _groups;
             private readonly UnitRecord[] _own;

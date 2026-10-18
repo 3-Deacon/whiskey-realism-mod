@@ -60,8 +60,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float reinforcementShareAtLastReplan = 0f,
             InferredIntent? currentEnemyIntent = null,
             InferredIntent enemyIntentAtLastReplan = InferredIntent.Unknown,
-            string assumptionReason = null)
+            string assumptionReason = null,
+            bool flankCrisis = false)
         {
+            FlankCrisis = flankCrisis;
             AssumptionReason = assumptionReason;
             PlanAgeSeconds = planAgeSeconds;
             CurrentPhase = currentPhase;
@@ -137,6 +139,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>BC14: the assumption the maneuver monitor found broken (a static literal), or null.</summary>
         public string AssumptionReason { get; }
 
+        /// <summary>
+        /// An own group is outflanked severely (vanilla's mean outflanked weight at or past <see cref="TacticalFrontAxis.FlankThreatSevere"/>: both
+        /// flanks, or the rear): the enemy is on the flank or rear, which makes any trigger that fires a crisis (<see cref="ArmyReplanTriggers.IsCrisis"/>).
+        /// </summary>
+        public bool FlankCrisis { get; }
+
         /// <summary>Own arriving reinforcements as a share of own strength.</summary>
         public float ReinforcementShare =>
             OwnReinforcementsArriving / (OwnStrength > 1f ? OwnStrength : 1f);
@@ -152,6 +160,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// wall-clock minutes regardless of time compression.
         /// </summary>
         public const float PlanDeadlineBattleSeconds = 3f * 3600f;
+
+        /// <summary>
+        /// A side holds the plan it adopted for this long (BATTLE seconds on the doctrine clock: one game hour) before a trigger that is not a crisis
+        /// may re-pick it. Smoke 2026-10-17: 20 replans in 4.6 doctrine hours, one per "Min Replan Seconds" (600 s), because the cooldown was the only
+        /// brake. A written constant, not a config default: the deployed cfg already holds the cooldown and overrides a bumped default.
+        /// </summary>
+        public const float PlanCommitmentBattleSeconds = 3600f;
         public const float MainEffortLossFraction = 0.5f;
         public const float OddsLowHysteresis = 0.7f;
         public const float OddsHighHysteresis = 1.4f;
@@ -204,13 +219,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 i.MainEffortOwnStrength / i.MainEffortHistoryOwnStrength <= MainEffortLossFraction)
                 return ReplanTrigger.MainEffortSectorLoss;
 
+            // The crises come first (IsCrisis): the fall of the odds and the break of morale. A rising-odds shift is no crisis, and a trigger that fires every
+            // tick while its condition holds must not shadow a morale collapse behind it inside the plan commitment hold.
             if (i.GlobalOddsCurrent <= OddsLowHysteresis && i.GlobalOddsHistory > OddsLowHysteresis)
-                return ReplanTrigger.ForceImbalanceShift;
-            if (i.GlobalOddsCurrent >= OddsHighHysteresis && i.GlobalOddsHistory < OddsHighHysteresis)
                 return ReplanTrigger.ForceImbalanceShift;
 
             if (i.ArmyMoraleCurrent < i.ArmyMoraleFloor && i.ArmyMoraleAtLastReplan >= i.ArmyMoraleFloor)
                 return ReplanTrigger.CasualtyThreshold;
+
+            if (i.GlobalOddsCurrent >= OddsHighHysteresis && i.GlobalOddsHistory < OddsHighHysteresis)
+                return ReplanTrigger.ForceImbalanceShift;
+
             if (IsReserveCommitFractionKnown(i.ReservesCommittedFraction) &&
                 i.ReservesCommittedFraction >= ReservesAlmostSpent &&
                 !(IsReserveCommitFractionKnown(i.ReservesCommittedAtLastReplan) && i.ReservesCommittedAtLastReplan >= ReservesAlmostSpent))
@@ -272,6 +291,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (i.AssumptionReason != null) return ReplanTrigger.ManeuverAssumptionBroken;
 
             return ReplanTrigger.None;
+        }
+
+        /// <summary>
+        /// Whether <paramref name="trigger"/> is a crisis, which may re-pick the plan inside <see cref="PlanCommitmentBattleSeconds"/>: the army has
+        /// lost its main effort (<see cref="ReplanTrigger.MainEffortSectorLoss"/>, which the tick cycle raises on men lost, not men moved), its morale has
+        /// broken, its odds have fallen below the low line, a maneuver assumption is broken (that trigger has its own hysteresis) or the plan's
+        /// deadline has passed. Everything else (a reinforcement, an intent shift, a rising opportunity or odds, spent reserves) is a change in the
+        /// situation a commander digests at the next review, unless an own group is outflanked severely (<see cref="ReplanTriggerInput.FlankCrisis"/>).
+        /// </summary>
+        public static bool IsCrisis(ReplanTrigger trigger, in ReplanTriggerInput input)
+        {
+            switch (trigger)
+            {
+                case ReplanTrigger.None:
+                    return false;
+                case ReplanTrigger.PhaseDeadline:
+                case ReplanTrigger.MainEffortSectorLoss:
+                case ReplanTrigger.CasualtyThreshold:
+                case ReplanTrigger.ManeuverAssumptionBroken:
+                    return true;
+                case ReplanTrigger.ForceImbalanceShift:
+                    return input.FlankCrisis || input.GlobalOddsCurrent <= OddsLowHysteresis;
+                default:
+                    return input.FlankCrisis;
+            }
         }
 
         private static bool IsReserveCommitFractionKnown(float fraction)

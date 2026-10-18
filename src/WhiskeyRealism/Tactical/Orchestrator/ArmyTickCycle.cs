@@ -11,7 +11,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     /// </summary>
     public readonly struct ReplanOutcome
     {
-        public const string SuppressedByCooldown = "cooldown", SuppressedByMargin = "margin", SuppressedByPreemption = "preempted", SuppressedByCommitment = "committed";
+        public const string SuppressedByCooldown = "cooldown", SuppressedByMargin = "margin", SuppressedByPreemption = "preempted", SuppressedByCommitment = "committed",
+            SuppressedByPlanHold = "plan-hold";
+        // plan-hold: the trigger fired inside ArmyReplanTriggers.PlanCommitmentBattleSeconds and is no crisis. (committed is the maneuver monitor's
+        // committed wings, a different thing.)
 
         public ReplanOutcome(ReplanTrigger trigger, bool replanned, bool kept, string suppression)
         {
@@ -80,14 +83,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float deltaSeconds,
             ArmyEvidence ownEvidence,
             EnemyVisibleState enemyVisible,
-            float ownMainEffortStrength,
+            float ownActiveForce,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
             float ownReinforcementsArriving,
             int minReplanSeconds) =>
             MaybeReplan(
                 orchestrator, deltaSeconds, ownEvidence, enemyVisible,
-                ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
+                ownActiveForce, ownArmyMorale, ownReservesCommittedFraction,
                 ownReinforcementsArriving, minReplanSeconds,
                 ownAvgFatigue01: 0.2f,
                 ownAvgAmmo01: 0.9f,
@@ -99,7 +102,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float deltaSeconds,
             ArmyEvidence ownEvidence,
             EnemyVisibleState enemyVisible,
-            float ownMainEffortStrength,
+            float ownActiveForce,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
             float ownReinforcementsArriving,
@@ -112,10 +115,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             double doctrineNowSeconds = double.NaN)
         {
             ReplanOutcome outcome = MaybeReplan(
-                orchestrator, deltaSeconds, ownEvidence, enemyVisible, ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
+                orchestrator, deltaSeconds, ownEvidence, enemyVisible, ownActiveForce, ownArmyMorale, ownReservesCommittedFraction,
                 ownReinforcementsArriving, minReplanSeconds, ownAvgFatigue01, ownAvgAmmo01, nearestReinforcementHours,
                 nearestReinforcementStrength, battleDeltaSeconds, doctrineNowSeconds, assumptionReason: null);
-            return outcome.Replanned ? outcome.Trigger : ReplanTrigger.None;
+            return outcome.Replanned || outcome.Kept ? outcome.Trigger : ReplanTrigger.None;
         }
 
         /// <summary>
@@ -129,7 +132,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float deltaSeconds,
             ArmyEvidence ownEvidence,
             EnemyVisibleState enemyVisible,
-            float ownMainEffortStrength,
+            float ownActiveForce,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
             float ownReinforcementsArriving,
@@ -196,11 +199,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float aggression01 = (orchestrator.CommanderPersonality.Aggression + 1f) * 0.5f;
             if (aggression01 < 0f) aggression01 = 0f;
             if (aggression01 > 1f) aggression01 = 1f;
-            float enemyStrengthForReadiness = ownMainEffortStrength > 0f && ownEvidence.CurrentOdds > 0.01f
-                ? ownMainEffortStrength / ownEvidence.CurrentOdds
-                : ownMainEffortStrength;
+            // Odds are the blend from "unknown" (1.0) toward the observed ratio by the intel confidence, and own / 1.0 is an enemy as strong as the
+            // army. Priced against that phantom the army's effective strength (fatigue x ammo x morale, below 1) never reaches the required ratio,
+            // so a cautious commander "held fatigued" at the end of the probe budget and consolidated a fresh army that had not yet met the enemy
+            // (smoke 2026-10-17, the Union at 12.6 h). An enemy not yet found has no strength to price against: readiness then reads the army's own
+            // health alone (the doctrine's "enemy gone, push freely" sentinel is enemy strength 0).
+            bool enemyKnown = enemyVisible.IntelConfidence01 >= TacticalPhaseProgressionDoctrine.ProbeCommitMinIntelConfidence;
+            float enemyStrengthForReadiness = !enemyKnown
+                ? 0f
+                : ownActiveForce > 0f && ownEvidence.CurrentOdds > 0.01f
+                    ? ownActiveForce / ownEvidence.CurrentOdds
+                    : ownActiveForce;
             var readinessInput = new TacticalSectorReadinessDoctrine.Input(
-                ownRawStrength: ownMainEffortStrength,
+                ownRawStrength: ownActiveForce,
                 avgFatigue01: ownAvgFatigue01,
                 avgAmmo01: ownAvgAmmo01,
                 avgMorale01: ownArmyMorale,
@@ -319,22 +330,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var baseline = orchestrator.LastReplanBaseline;
             if (mainBandSeen && mainBandOwn > 0f && !baseline.HasMainEffortSnapshot(currentMainEffortSector))
             {
-                baseline = baseline.WithMainEffort(currentMainEffortSector, mainBandOwn, mainBandOdds);
+                baseline = baseline.WithMainEffort(currentMainEffortSector, mainBandOwn, mainBandOdds, ownActiveForce);
                 orchestrator.RecordReplanBaseline(baseline);
             }
             else if (baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds <= 0f && mainBandOdds > 0f)
             {
-                baseline = baseline.WithMainEffort(currentMainEffortSector, baseline.MainEffortOwnStrength, mainBandOdds);
+                baseline = baseline.WithMainEffortOdds(mainBandOdds);
                 orchestrator.RecordReplanBaseline(baseline);
             }
-            float mainOwnCurrent = mainBandSeen && mainBandOwn > 0f ? mainBandOwn : ownMainEffortStrength;
+            float mainOwnCurrent = mainBandSeen && mainBandOwn > 0f ? mainBandOwn : ownActiveForce;
             float mainOwnHistory = baseline.HasMainEffortSnapshot(currentMainEffortSector)
                 ? baseline.MainEffortOwnStrength
                 : mainOwnCurrent;
+            // MainEffortSectorLoss is men lost. The band is a lateral band of an axis refitted every tick, so its strength also falls when a wing
+            // marches into the next band, and the old reading called that a collapse (smoke 2026-10-17: 7 of 20 replans, casualtyPressure flat). Losses
+            // cannot exceed the army's own decline since the band was taken, so the band's fall counts only up to it.
+            float mainOwnForLoss = MainBandStrengthLost(mainOwnCurrent, mainOwnHistory, baseline.OwnArmyStrength, ownActiveForce);
             float mainOddsHistory = baseline.MainEffortSector == currentMainEffortSector && baseline.MainEffortOdds > 0f
                 ? baseline.MainEffortOdds
                 : currentMainEffortOdds;
-            float reinforcementShare = ownReinforcementsArriving / Math.Max(1f, ownMainEffortStrength);
+            float reinforcementShare = ownReinforcementsArriving / Math.Max(1f, ownActiveForce);
 
             // ---- Phase progression evaluator ----
             //
@@ -356,7 +371,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var input = new ReplanTriggerInput(
                 planAgeSeconds: orchestrator.PlanAgeSeconds,
                 currentPhase: orchestrator.CurrentPlan.Phase,
-                mainEffortOwnStrength: mainOwnCurrent,
+                mainEffortOwnStrength: mainOwnForLoss,
                 mainEffortHistoryOwnStrength: mainOwnHistory,
                 globalOddsCurrent: ownEvidence.CurrentOdds,
                 globalOddsHistory: orchestrator.HistoryGlobalOdds,
@@ -377,14 +392,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 lastReplanOpportunity: orchestrator.LastReplanOpportunity,
                 armyMoraleAtLastReplan: baseline.Morale,
                 reservesCommittedAtLastReplan: baseline.ReservesCommitted,
-                ownStrength: ownMainEffortStrength,
+                ownStrength: ownActiveForce,
                 reinforcementShareAtLastReplan: baseline.ReinforcementShare,
                 currentEnemyIntent: intent.PrimaryIntent,
                 enemyIntentAtLastReplan: baseline.EnemyIntent,
-                assumptionReason: assumptionReason);
+                assumptionReason: assumptionReason,
+                flankCrisis: enemyVisible.MaxFlankThreat >= TacticalFrontAxis.FlankThreatSevere);
 
             var trigger = orchestrator.CheckReplanTriggers(input);
             if (trigger == ReplanTrigger.None) return ReplanOutcome.None;
+
+            // A side holds the plan it adopted for ArmyReplanTriggers.PlanCommitmentBattleSeconds: inside it only a crisis re-picks. The held trigger
+            // is level-like (an opportunity category that has not reverted fires every tick) and sits ahead of the broken-assumption trigger in
+            // Evaluate's order, so while it is held the assumption, itself a crisis, is raised in its place rather than shadowed for the hour.
+            bool crisis = ArmyReplanTriggers.IsCrisis(trigger, input);
+            if (!crisis && orchestrator.PlanAgeSeconds < ArmyReplanTriggers.PlanCommitmentBattleSeconds)
+            {
+                if (assumptionReason == null) return new ReplanOutcome(trigger, false, false, ReplanOutcome.SuppressedByPlanHold);
+                trigger = ReplanTrigger.ManeuverAssumptionBroken;
+            }
 
             float now;
             _clockByAlliance.TryGetValue(allianceId, out now);
@@ -400,19 +426,36 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             bool brokenAssumption = trigger == ReplanTrigger.ManeuverAssumptionBroken;
-            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption, trigger.ToString());
+            // The challenger must beat the plan held by the score margin unless this is a crisis (a broken assumption has its own margin).
+            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption || !crisis, trigger.ToString(), restartAgeIfKept: !brokenAssumption);
+            // The band's baseline is the band's own strength: an empty main band records none (the next sighting seeds it), never the army total.
             orchestrator.RecordReplanBaseline(new ReplanBaseline(
                 ownArmyMorale,
                 ownReservesCommittedFraction,
                 reinforcementShare,
                 intent.PrimaryIntent,
                 orchestrator.CurrentPlan.MainEffortSector,
-                mainOwnCurrent,
-                mainBandOdds));
+                mainBandSeen && mainBandOwn > 0f ? mainBandOwn : 0f,
+                mainBandOdds,
+                ownActiveForce));
             _lastReplanByAlliance[allianceId] = now;
             string suppression = null;
-            if (assumptionReason != null) suppression = kept ? ReplanOutcome.SuppressedByMargin : (brokenAssumption ? null : ReplanOutcome.SuppressedByPreemption);
+            if (assumptionReason != null) suppression = brokenAssumption ? (kept ? ReplanOutcome.SuppressedByMargin : null) : ReplanOutcome.SuppressedByPreemption;
             return new ReplanOutcome(trigger, !kept, kept, suppression);
+        }
+
+        /// <summary>
+        /// The main band's strength with its positional fall removed: the band fell from <paramref name="history"/> to <paramref name="current"/>, but the
+        /// men it lost cannot exceed what the whole army lost since the band was taken (<paramref name="armyThen"/> to <paramref name="armyNow"/>).
+        /// With no army baseline, or an army that has not shrunk, nothing was lost and the band reads as it stood. Reinforcements arriving hide losses
+        /// (the safe side: fewer replans).
+        /// </summary>
+        internal static float MainBandStrengthLost(float current, float history, float armyThen, float armyNow)
+        {
+            if (history <= 0f || current >= history) return current;
+            float armyDrop = Math.Max(0f, armyThen - armyNow);
+            float bandDrop = history - current;
+            return history - Math.Min(bandDrop, armyDrop);
         }
 
         private static float ConfidenceWeightedShift(TacticalIntentModel intent)

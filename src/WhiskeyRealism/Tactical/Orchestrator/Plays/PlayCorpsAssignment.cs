@@ -112,11 +112,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             IReadOnlyList<WorldPlayRect> rects,
             IReadOnlyList<CorpsPosition> corps,
             IReadOnlyList<ObjectivePosition> objectives)
+            => Assign(rects, corps, objectives, null);
+
+        /// <summary>The assignment with the executor's memory of the last one for the same plan and side (see <see cref="AssignInto(IReadOnlyList{WorldPlayRect}, IReadOnlyList{CorpsPosition}, IReadOnlyList{ObjectivePosition}, IReadOnlyList{CorpsAssignment}, Span{CorpsAssignment})"/>).</summary>
+        public static IReadOnlyList<CorpsAssignment> Assign(
+            IReadOnlyList<WorldPlayRect> rects,
+            IReadOnlyList<CorpsPosition> corps,
+            IReadOnlyList<ObjectivePosition> objectives,
+            IReadOnlyList<CorpsAssignment> previous)
         {
             if (rects == null || rects.Count == 0) return Array.Empty<CorpsAssignment>();
             if (corps == null || corps.Count == 0) return Array.Empty<CorpsAssignment>();
             var into = new CorpsAssignment[rects.Count];
-            int n = AssignInto(rects, corps, objectives, into);
+            int n = AssignInto(rects, corps, objectives, previous, into);
             var result = new List<CorpsAssignment>(n);
             for (int i = 0; i < n; i++) result.Add(into[i]);
             return result;
@@ -130,6 +138,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             IReadOnlyList<WorldPlayRect> rects,
             IReadOnlyList<CorpsPosition> corps,
             IReadOnlyList<ObjectivePosition> objectives,
+            Span<CorpsAssignment> into)
+            => AssignInto(rects, corps, objectives, null, into);
+
+        /// <summary>
+        /// The same assignment with the executor's memory: a corps that held a rect of this template (<paramref name="previous"/>: the last result for
+        /// the same plan and side, the same rect index and kind) keeps it while it is still offered, whoever is closer now; only the vacated rects, and
+        /// the corps without one, are paired by the closest-free rule. The old pairing re-ran the closest rule every few seconds, so a corps marching to
+        /// its flank rect became the Center the moment it passed the Center's holder, and the Center was sent to the flank (smoke 2026-10-17). A child that
+        /// holds player-owned strength is never kept in the focal assault's column or support. BC14's hypothetical layouts call the overload without
+        /// <paramref name="previous"/>: they price the layout the pick would make, not the one the executor holds.
+        /// </summary>
+        public static int AssignInto(
+            IReadOnlyList<WorldPlayRect> rects,
+            IReadOnlyList<CorpsPosition> corps,
+            IReadOnlyList<ObjectivePosition> objectives,
+            IReadOnlyList<CorpsAssignment> previous,
             Span<CorpsAssignment> into)
         {
             if (rects == null || rects.Count == 0) return 0;
@@ -150,18 +174,37 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Span<bool> assigned = stackalloc bool[corps.Count];       // indices into corps
             int result = 0;
 
+            // Incumbents first, so no rect's closest-corps pick can take another rect's holder.
+            Span<int> incumbent = stackalloc int[rects.Count];
+            for (int i = 0; i < incumbent.Length; i++) incumbent[i] = -1;
+            for (int p = 0; previous != null && p < previous.Count; p++)
+            {
+                CorpsAssignment held = previous[p];
+                int ri = held.RectIndex;
+                if (ri < 0 || ri >= rects.Count || incumbent[ri] >= 0 || rects[ri].Kind != held.RectKind) continue;
+                bool column = rects[ri].Kind == PlayRectKind.AssaultColumn || rects[ri].Kind == PlayRectKind.AssaultSupport;
+                for (int c = 0; c < corps.Count; c++)
+                {
+                    if (assigned[c] || !string.Equals(corps[c].ChildId, held.ChildId, StringComparison.Ordinal)) continue;
+                    if (column && corps[c].ContainsPlayerOwned) break;
+                    incumbent[ri] = c;
+                    assigned[c] = true;
+                    break;
+                }
+            }
+
             for (int ri = 0; ri < rectOrder.Length && result < into.Length; ri++)
             {
                 int rectIdx = rectOrder[ri];
                 var rect = rects[rectIdx];
 
-                int pickedCorps = -1;
+                int pickedCorps = incumbent[rectIdx];
                 // BC14W: a child that holds a player-owned unit is never given the focal assault's column or support (the player decides nothing in it).
                 bool skipPlayerOwned = rect.Kind == PlayRectKind.AssaultColumn || rect.Kind == PlayRectKind.AssaultSupport;
 
                 // VP override: any major VP inside this rect, and any unassigned
                 // corps near it?
-                if (objectives != null && objectives.Count > 0)
+                if (pickedCorps < 0 && objectives != null && objectives.Count > 0)
                 {
                     float rectDiagonal = Diagonal(rect);
                     float vpRadius = rectDiagonal * 1.5f;

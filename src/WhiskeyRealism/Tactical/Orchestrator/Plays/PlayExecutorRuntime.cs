@@ -162,7 +162,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // Stage 2.1 follow-up: thread BattlefieldObjectiveEstimate +
                 // ObjectivePosition for VP-override behavior.
                 var objectives = Array.Empty<ObjectivePosition>();
-                var assignments = PlayCorpsAssignment.Assign(worldRects, corpsPositions, objectives);
+                // A corps keeps the rect it held while the plan and its side stand: the closest-corps rule alone re-paired them every few seconds.
+                // A new plan (or side) is a new layout and pairs by distance alone.
+                IReadOnlyList<CorpsAssignment> held = _lastComputePlan[allianceId] == planId && _lastComputeMirrored[allianceId] == mirrored ? cached : null;
+                var assignments = PlayCorpsAssignment.Assign(worldRects, corpsPositions, objectives, held);
 
                 _lastSignature[allianceId] = sig;
                 _lastResult[allianceId] = assignments;

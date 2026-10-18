@@ -41,7 +41,7 @@ namespace WhiskeyRealism.Tactical.Battle
     internal static class BattleCoreTick
     {
         private const float TelemetryIntervalRealSeconds = 30f;
-        private const int SkipReasonCount = (int)SkipReason.CrossingPending + 1;
+        private const int SkipReasonCount = (int)SkipReason.StandingClaim + 1;
 
         private static readonly BattleProducerRegistry Producers = new BattleProducerRegistry(CreateProducer);
 
@@ -381,7 +381,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
             public void Skip(SkipReason reason)
             {
-                if (reason == SkipReason.Duplicate) Deduped++;
+                if (reason == SkipReason.Duplicate || reason == SkipReason.StandingClaim) Deduped++;
                 else Skipped++;
                 int r = (int)reason;
                 if (r >= 0 && r < _skips.Length) _skips[r]++;

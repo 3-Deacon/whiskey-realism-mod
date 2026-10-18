@@ -276,6 +276,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             FrontAxis = frontAxis;
             InstanceSectors = CopyMap(instanceSectors);
             InstanceFlankThreat = CopyThreat(instanceFlankThreat);
+            float max = 0f;
+            foreach (var kv in InstanceFlankThreat) if (kv.Value > max) max = kv.Value;
+            MaxFlankThreat = max;
         }
 
         public EnemyVisibleSector[] Sectors { get; }
@@ -301,6 +304,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>Own command group instance id → mean outflanked weight of its regiments (0-4).</summary>
         public IReadOnlyDictionary<int, float> InstanceFlankThreat { get; }
+
+        /// <summary>The largest <see cref="InstanceFlankThreat"/> over the own groups, computed once at construction (the replan reads it every tick).</summary>
+        public float MaxFlankThreat { get; }
 
         public float FlankThreatForInstance(int instanceId)
         {

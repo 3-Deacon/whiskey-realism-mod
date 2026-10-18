@@ -195,7 +195,12 @@ namespace WhiskeyRealism.Tactical.Battle
         Support = 2,
         Play = 3,
         Executor = 4,
-        Safety = 5,
+        /// <summary>
+        /// A posted flank guard's claim (MainFlankGuard): above the posture executor, so its parent's posture move fans out around the guard instead of
+        /// re-pathing it (SetWaypoint with groupmoveonly false re-paths every attached unit), and below Safety, so a withdrawal still moves it.
+        /// </summary>
+        Post = 5,
+        Safety = 6,
     }
 
     public enum IntentSource
@@ -273,6 +278,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // Unit churn, Formation + Deploy: deploy the column regiment in march, as vanilla's own deploy near an enemy does (CheckFormationChange 127676-127682:
         // ChangeRegimentFormation with a manual line, no stop), so its path survives and it keeps advancing in line. Without it the deploy stops the regiment.
         DeployInMarch = 131072,
+        // Move only: a standing claim and nothing more. It raises the unit's Move claim for the tick, so a lower-priority move of an ancestor fans out around
+        // the unit (OrderExecutor.BeginTickClaims), and the executor writes nothing for it (SkipReason.StandingClaim). A posted flank guard holds one for as
+        // long as it is posted.
+        StandingClaim = 262144,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -361,6 +370,8 @@ namespace WhiskeyRealism.Tactical.Battle
         NoKnownCrossing,
         /// <summary>A move the river map has not been built for yet: it waits (CrossingPictureWait) rather than passing unchecked.</summary>
         CrossingPending,
+        /// <summary>A standing claim (IntentFlags.StandingClaim): raised for the tick, nothing to write.</summary>
+        StandingClaim,
     }
 
     public struct OrderOutcome
