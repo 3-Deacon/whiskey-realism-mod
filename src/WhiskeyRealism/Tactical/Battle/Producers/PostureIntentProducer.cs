@@ -357,7 +357,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
             // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
-            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk, army.CurrentBattleStance);
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, leaf.LeafTask, id, closeEngaged, flankRisk, army.CurrentBattleStance);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
 
@@ -2105,14 +2105,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             public bool HasPosture(int index) => _groups[index].Has;
             public CommandTaskType TaskOf(int index) => _groups[index].LedgerTask;
+            public CommandTaskType EffectiveTaskOf(int index) => _groups[index].State.Task;
             public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);
         }
 
         internal static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
         {
-            return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
-                last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&
-                nowHours - last.AtHours < WithdrawalWindowHours;
+            return executor != null && executor.WithdrewRecently(unitId, nowHours, WithdrawalWindowHours);
         }
 
         // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).

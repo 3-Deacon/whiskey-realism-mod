@@ -1011,6 +1011,24 @@ namespace WhiskeyRealism.Tactical.Battle
             return _refuseByGroup.TryGetValue(groupId, out RefuseFlank refuse) ? refuse : RefuseFlank.None;
         }
 
+        /// <summary>
+        /// The unit's last move was a withdrawal inside <paramref name="windowHours"/>, whatever issued it: the withdrawal producer's, or any move whose task is a
+        /// fall back or a delay (the posture executor sends a group the opportunity override turned to FallBackToLine). A stamp from the future (a reload) is none.
+        /// </summary>
+        public bool WithdrewRecently(int groupId, double nowHours, double windowHours)
+        {
+            if (TryGetLastOutcome(groupId, OrderChannel.Move, out OrderOutcome last) && last.Source == IntentSource.Withdrawal &&
+                last.Kind != OrderOutcomeKind.Skipped && InWindow(nowHours, last.AtHours, windowHours))
+                return true;
+            return _taskHold.TryGetValue(groupId, out TaskStamp stamp) && ColumnDeployment.WithdrawalTask(stamp.Task) && InWindow(nowHours, stamp.AtHours, windowHours);
+        }
+
+        private static bool InWindow(double nowHours, double atHours, double windowHours)
+        {
+            double age = nowHours - atHours;
+            return age >= 0.0 && age < windowHours;
+        }
+
         public bool TryGetLastOutcome(int groupId, OrderChannel channel, out OrderOutcome outcome)
         {
             return _lastOutcome.TryGetValue(Key(groupId, channel), out outcome);

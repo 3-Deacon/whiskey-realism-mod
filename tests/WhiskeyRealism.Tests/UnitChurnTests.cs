@@ -26,6 +26,8 @@ internal static class UnitChurnTests
             ("unit-churn APPROACH-FACING an in-march deploy faces the way the regiment walks unless the threat is within 60 degrees of it, so a line never walks backwards", ApproachDeployFacesTheWay),
             ("unit-churn APPROACH-NEEDS-MARK an in-march deploy is submitted only for a marked regiment; an unmarked one is left in vanilla's column, not stopped", ApproachDeployNeedsTheMark),
             ("unit-churn APPROACH-PASS the pass rebuilds the table: a unit it does not look at, or that fails an arm, is unmarked at once", ApproachPassMarksOnlyWhatItSees),
+            ("unit-churn APPROACH-FALLBACK a group whose ledger task or effective task is a fall back or a delay is withdrawing, and so is a leaf brigade the override sent back", ApproachFallBackOverrideIsWithdrawing),
+            ("unit-churn APPROACH-WITHDREW-MOVE a recent move of a fall back or a delay is a withdrawal whoever issued it", ApproachWithdrawalMoveWhateverTheSource),
             ("unit-churn APPROACH-WALK-MIN a path end within a block's length is no walking direction", ApproachWalkHeadingMinimum),
             ("unit-churn APPROACH-WALK the group a regiment follows is found up to four ancestors away, and a withdrawal in that reach holds it back", ApproachWalkReachesTheGroup),
             ("unit-churn COLUMN-DEPLOY-PLAN the deploy intent is planned for a column regiment and is a duplicate for one already in line", ColumnDeployPlan),
@@ -48,7 +50,7 @@ internal static class UnitChurnTests
     // the brigade's GroupPosture row, and FacingPulseIntentProducer and FireControlIntentProducer read only groups with Has set.
     private static void LeafBrigadeRecordsItsPosture()
     {
-        GroupPosture reserve = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, closeEngaged: false, flankRisk: true, BattleStance.Defender);
+        GroupPosture reserve = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CommandTaskType.ReserveWait, 708956, closeEngaged: false, flankRisk: true, BattleStance.Defender);
         AssertTrue(reserve.Has, "the row exists");
         AssertEqual(CommandEchelonKind.BrigadeLike, reserve.State.Echelon, "a brigade: the pulse's Brigade scope");
         AssertEqual(CommandNodeRole.Reserve, reserve.State.Role, "the leaf role as the ledger names it");
@@ -56,15 +58,15 @@ internal static class UnitChurnTests
         AssertTrue(reserve.FlankRisk && !reserve.CloseEngaged, "the contact flags the pulse reads");
         AssertFalse(reserve.Submitted, "no move yet");
         AssertFalse(reserve.FacingSubmitted, "nor a pulse");
-        AssertEqual(CommandNodeRole.Defender, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Defender).State.Role, "a refused flank defends on the defending side");
+        AssertEqual(CommandNodeRole.Defender, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Defender).State.Role, "a refused flank defends on the defending side");
         foreach (BattleStance attacking in new[] { BattleStance.Attacker, BattleStance.Meeting })
-            AssertEqual(CommandNodeRole.FlankMarch, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, 1, false, false, attacking).State.Role,
+            AssertEqual(CommandNodeRole.FlankMarch, LeafPosture.Record(DirectChildRole.RefuseRight, CommandTaskType.GuardFlank, CommandTaskType.GuardFlank, 1, false, false, attacking).State.Role,
                 "and is a flank guard, never a Defender, on a side that is " + attacking);
-        AssertEqual(CommandNodeRole.Unknown, LeafPosture.Record(DirectChildRole.Unknown, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Attacker).State.Role, "an unknown role stays unknown");
+        AssertEqual(CommandNodeRole.Unknown, LeafPosture.Record(DirectChildRole.Unknown, CommandTaskType.GuardFlank, CommandTaskType.GuardFlank, 1, false, false, BattleStance.Attacker).State.Role, "an unknown role stays unknown");
         // Record runs for every leaf brigade on every posture tick: the node id is built once per brigade, not concatenated per call.
         AssertEqual("leaf-708956", reserve.State.NodeId, "the node id names the brigade");
         AssertTrue(ReferenceEquals(LeafPosture.NodeId(708956), LeafPosture.NodeId(708956)), "and is the same string on every call");
-        AssertTrue(ReferenceEquals(LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, 708956, false, false, BattleStance.Attacker).State.NodeId, LeafPosture.NodeId(708956)),
+        AssertTrue(ReferenceEquals(LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CommandTaskType.ReserveWait, 708956, false, false, BattleStance.Attacker).State.NodeId, LeafPosture.NodeId(708956)),
             "Record takes it from the cache");
 
         // What the record buys: the pulse's brigade decision for a reserve brigade with a flank under pressure (a held task faces the threat).
@@ -80,7 +82,7 @@ internal static class UnitChurnTests
         string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         string leaf = FlankResponseTests.Between(producer, "private static void ProduceLeaf(", "// BR-M1: holds a Main-effort brigade");
         FlankResponseTests.AssertPinned(leaf, "t.Groups[i] = LeafPosture.Record(", "the leaf path fills the brigade's posture row");
-        FlankResponseTests.AssertPinned(leaf, "closeEngaged, flankRisk, army.CurrentBattleStance);", "with the side's real battle stance, so an attacking side's refused flank is a flank guard");
+        FlankResponseTests.AssertPinned(leaf, "LeafPosture.Record(leaf.LeafRole, task, leaf.LeafTask, id, closeEngaged, flankRisk, army.CurrentBattleStance);", "the effective task and the committed one (the leaf map's, before every rewrite), with the side's real battle stance, so an attacking side's refused flank is a flank guard");
         int record = leaf.IndexOf("t.Groups[i] = LeafPosture.Record(", StringComparison.Ordinal);
         int decide = leaf.IndexOf("LeafBrigadeMovePolicy.Decide(", StringComparison.Ordinal);
         int exit = leaf.IndexOf("if (!move.Move)", StringComparison.Ordinal);
@@ -392,6 +394,66 @@ internal static class UnitChurnTests
         }
     }
 
+    // The opportunity override turns a committed Main, SupportMain or Fix to FallBackToLine (TacticalOpportunityTaskOverride 41-57) after the ledger's task is
+    // captured, and the withdrawal producer is not the only mover of a falling back group. The approval covers an advance or a hold: a group falling back, by
+    // its ledger task or by its effective one, is withdrawing whoever sent it.
+    private static void ApproachFallBackOverrideIsWithdrawing()
+    {
+        UnitRecord[] own = Chain(3);
+        bool Withdrawing(CommandTaskType ledger, CommandTaskType effective)
+        {
+            WalkHost host = Walker(3);
+            host.Has[1] = true;
+            host.Task[1] = ledger;
+            host.Effective = new CommandTaskType[3];
+            host.Effective[1] = effective;
+            ApproachLine.Walk(own, own.Length, 0, ref host, out _, out bool withdrawing);
+            return withdrawing;
+        }
+        AssertTrue(Withdrawing(CommandTaskType.FixEnemy, CommandTaskType.FallBackToLine), "committed Fix, turned to FallBackToLine by the opportunity override");
+        AssertTrue(Withdrawing(CommandTaskType.AttackObjective, CommandTaskType.Delay), "committed attack, effective Delay");
+        AssertTrue(Withdrawing(CommandTaskType.FallBackToLine, CommandTaskType.AttackObjective), "committed fall back, effective attack");
+        AssertTrue(Withdrawing(CommandTaskType.Delay, CommandTaskType.Delay), "both");
+        AssertFalse(Withdrawing(CommandTaskType.FixEnemy, CommandTaskType.Screen), "a rewrite to Screen is no withdrawal");
+        AssertFalse(Withdrawing(CommandTaskType.FixEnemy, CommandTaskType.FixEnemy), "neither");
+
+        // The leaf row: the committed task is the leaf map's, taken before the override; the effective one is the rewritten.
+        GroupPosture leaf = LeafPosture.Record(DirectChildRole.Fix, CommandTaskType.FallBackToLine, CommandTaskType.FixEnemy, 927726, false, false, BattleStance.Attacker);
+        AssertEqual(CommandTaskType.FixEnemy, leaf.LedgerTask, "the leaf's ledger task is the committed one");
+        AssertEqual(CommandTaskType.FallBackToLine, leaf.State.Task, "the effective one is what the override made of it");
+        WalkHost fromRow = Walker(3);
+        fromRow.Has[1] = true;
+        fromRow.Task[1] = leaf.LedgerTask;
+        fromRow.Effective = new CommandTaskType[3];
+        fromRow.Effective[1] = leaf.State.Task;
+        ApproachLine.Walk(own, own.Length, 0, ref fromRow, out _, out bool leafWithdrawing);
+        AssertTrue(leafWithdrawing, "so a leaf brigade the override sent back is withdrawing");
+        AssertFalse(ApproachLine.Marks(Mark(task: leaf.LedgerTask, withdrawing: leafWithdrawing)), "and its regiments are not marked");
+    }
+
+    private static void ApproachWithdrawalMoveWhateverTheSource()
+    {
+        const double window = 0.25;
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        BattleOrderIntent Move(int id, CommandTaskType task, IntentSource source) => new BattleOrderIntent
+        {
+            GroupId = id, Channel = OrderChannel.Move, Task = task, Source = source, TargetX = 100f, TargetZ = 100f, Heading = -1f, Priority = IntentPriority.Executor, Reason = "t",
+        };
+        executor.RecordIssued(Move(1, CommandTaskType.FallBackToLine, IntentSource.PostureExecutor), 10.0, null, 0, null, 0, 0, 0);
+        executor.RecordIssued(Move(2, CommandTaskType.Delay, IntentSource.PostureExecutor), 10.0, null, 0, null, 0, 0, 0);
+        executor.RecordIssued(Move(3, CommandTaskType.AttackObjective, IntentSource.PostureExecutor), 10.0, null, 0, null, 0, 0, 0);
+        executor.RecordIssued(Move(4, CommandTaskType.None, IntentSource.Withdrawal), 10.0, null, 0, null, 0, 0, 0);
+        AssertTrue(executor.WithdrewRecently(1, 10.1, window), "a FallBackToLine move from the posture executor");
+        AssertTrue(executor.WithdrewRecently(2, 10.1, window), "a Delay move");
+        AssertFalse(executor.WithdrewRecently(3, 10.1, window), "an attack move");
+        AssertTrue(executor.WithdrewRecently(4, 10.1, window), "the withdrawal producer's move, as before");
+        AssertFalse(executor.WithdrewRecently(1, 10.0 + window, window), "past the window");
+        AssertFalse(executor.WithdrewRecently(1, 9.0, window), "a stamp from the future (a reload)");
+        AssertFalse(executor.WithdrewRecently(99, 10.1, window), "a unit that was never moved");
+        AssertFalse(new OrderExecutor().WithdrewRecently(1, 10.1, window), "a fresh executor");
+    }
+
     private static void ApproachWalkHeadingMinimum()
     {
         AssertEqual(20f, ColumnDeployment.WalkHeadingMinMeters, "a block's length");
@@ -409,8 +471,10 @@ internal static class UnitChurnTests
         public bool[] Has;
         public CommandTaskType[] Task;
         public bool[] Recent;
+        public CommandTaskType[] Effective;
         public bool HasPosture(int index) => Has[index];
         public CommandTaskType TaskOf(int index) => Task[index];
+        public CommandTaskType EffectiveTaskOf(int index) => Effective != null ? Effective[index] : Task[index];
         public bool WithdrawalRecent(int index) => Recent[index];
     }
 
@@ -570,8 +634,8 @@ internal static class UnitChurnTests
         FlankResponseTests.AssertPinned(produce, "ColumnDeployment.Decide(", "the pure decision");
         FlankResponseTests.AssertPinned(produce, "ColumnDeployment.Intent(rec.InstanceId, heading, reason)", "builds the one intent, with its reason");
         FlankResponseTests.AssertPinned(produce, "ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);", "and asks the ancestor walk whether the regiment is withdrawing");
-        PinStatement(Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs")), "if (ColumnDeployment.WithdrawalTask(host.TaskOf(a))) withdrawing = true;", "and leaves a withdrawing ancestor's regiments alone");
-        FlankResponseTests.AssertPinned(produce, "IntentSource.Withdrawal", "as well as the withdrawal producer's");
+        PinStatement(Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs")), "if (ColumnDeployment.WithdrawalTask(host.TaskOf(a)) || ColumnDeployment.WithdrawalTask(host.EffectiveTaskOf(a))) withdrawing = true;", "and leaves a withdrawing ancestor's regiments alone, by the ledger's task or the effective one");
+        FlankResponseTests.AssertPinned(FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutor.cs"), "last.Source == IntentSource.Withdrawal", "as well as the withdrawal producer's (the executor's WithdrewRecently)");
         string plugin = FlankResponseTests.SourceText("Plugin.cs");
         FlankResponseTests.AssertPinned(plugin, "\"Enable Column Deployment\"", "the flag is declared");
     }
@@ -691,8 +755,11 @@ internal static class UnitChurnTests
         AssertTrue(table.Contains(0, 77, 10.0), "marked");
         AssertFalse(table.Contains(1, 77, 10.0), "the other alliance has no mark");
         AssertFalse(table.Contains(0, 78, 10.0), "nor another regiment");
-        AssertTrue(table.Contains(0, 77, 10.0 + ApproachLineTable.FreshHours * 0.9), "fresh inside the window");
-        AssertFalse(table.Contains(0, 77, 10.0 + ApproachLineTable.FreshHours + 0.001), "a table whose last pass is older than that was not maintained (the producer stopped)");
+        AssertEqual(0.1, ApproachLineTable.FreshHours, "six real seconds at the smoke's speed, a minute at 1x: long enough for the arbiter's cadence, short of a stopped producer");
+        AssertTrue(table.Contains(0, 77, 10.05), "fresh half a window after the pass");
+        AssertTrue(table.Contains(0, 77, 10.099), "and just inside it");
+        AssertFalse(table.Contains(0, 77, 10.2), "a table whose last pass is older than that was not maintained (the producer stopped)");
+        AssertFalse(table.Contains(0, 77, 20.0), "and stays so");
         AssertFalse(table.Contains(0, 77, 9.0), "a stamp from the future (a reload) is no mark");
         table.Begin(0, 10.1);
         AssertFalse(table.Contains(0, 77, 10.1), "every pass rebuilds the alliance's table: a regiment the pass did not mark is not in it");
@@ -719,7 +786,7 @@ internal static class UnitChurnTests
         // The posture row as the pipeline records it: LedgerTask the ledger's, State.Task what the per-tick rewrites made of it.
         GroupPosture Row(CommandTaskType ledger, CommandTaskType rewritten)
         {
-            GroupPosture row = LeafPosture.Record(DirectChildRole.Fix, ledger, 927726, false, false, BattleStance.Attacker);
+            GroupPosture row = LeafPosture.Record(DirectChildRole.Fix, ledger, ledger, 927726, false, false, BattleStance.Attacker);
             row.State = row.State.WithRoleAndTask(row.State.Role, rewritten);
             return row;
         }
@@ -777,6 +844,26 @@ internal static class UnitChurnTests
         AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(PerceivedSnapshot(ObservationState.Visible, 0f, 0f, withEnemy: false), 0, out _), "no observation, no enemy");
         AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(visible, 5, out _), "an index outside the roster");
         AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(null, 0, out _), "no snapshot");
+
+        // The repo's one fog rule (EnemySamples.Accepts): a memory below 0.5 confidence is not something the side believes in; nor is a reinforcement column
+        // or a non-combat arm. Confidence is not a timer: it decays with time unseen (BattlePerception, half-life 20 minutes), 0.5 is about 20 minutes.
+        BattleSnapshot Faint(float confidence, bool reinforcement = false, int unitTyp = TacticalUnitType.Infantry)
+        {
+            var f = new BattleSnapshot();
+            f.BeginBuild(1, 0, 0, 1, 1.0);
+            f.SetSliceCount(20);
+            f.AddOwn(new UnitRecord { InstanceId = 20, UnitTyp = TacticalUnitType.BattleGroupBrigade, X = 0f, Z = 0f, ParentIndex = -1, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup });
+            f.AddObservation(new EnemyObservation { InstanceId = 903, UnitTyp = unitTyp, X = 300f, Z = 0f, State = ObservationState.Remembered, Confidence01 = confidence, IsReinforcement = reinforcement });
+            f.IndexCommandTree(null);
+            return f;
+        }
+        AssertTrue(ApproachLine.ClosestPerceivedEnemy(Faint(0.5f), 0, out _) >= 0, "remembered at exactly the threshold is perceived");
+        AssertTrue(ApproachLine.ClosestPerceivedEnemy(Faint(0.9f), 0, out _) >= 0, "and above it");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.49f), 0, out _), "a memory just under it is not");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.05f), 0, out _), "nor one at the floor perception keeps for 90 minutes");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.9f, reinforcement: true), 0, out _), "nor a reinforcement column still off the field");
+        AssertEqual(-1, ApproachLine.ClosestPerceivedEnemy(Faint(0.9f, unitTyp: TacticalUnitType.Skirmisher), 0, out _), "nor a skirmisher (the fog rule counts infantry, cavalry and artillery)");
+        AssertEqual(EnemySamples.RememberedMinConfidence, 0.5f, "the threshold is the repo's, not this branch's");
 
         var two = new BattleSnapshot();
         two.BeginBuild(1, 0, 0, 1, 1.0);
@@ -869,6 +956,8 @@ internal static class UnitChurnTests
         string walkHost = Code(FlankResponseTests.Between(producerFile, "internal readonly struct GroupWalkHost", "internal static bool WithdrawalRecent("));
         PinStatement(walkHost, "public bool HasPosture(int index) => _groups[index].Has;", "the posture row exists");
         PinStatement(walkHost, "public CommandTaskType TaskOf(int index) => _groups[index].LedgerTask;", "its committed task");
+        PinStatement(walkHost, "public CommandTaskType EffectiveTaskOf(int index) => _groups[index].State.Task;", "and the one it carries out after the rewrites");
+        PinStatement(Code(FlankResponseTests.Between(producerFile, "internal static bool WithdrawalRecent(", "private static bool")), "return executor != null && executor.WithdrewRecently(unitId, nowHours, WithdrawalWindowHours);", "a recent withdrawal, whoever issued it");
         PinStatement(walkHost, "public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);", "the executor's last move for that unit");
         string approachFile = Code(FlankResponseTests.SourceText("Tactical", "Battle", "ApproachLine.cs"));
         PinStatement(approachFile, "public const int MaxGroupHops = 4;", "the reach of the walk");

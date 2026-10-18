@@ -37,8 +37,10 @@ namespace WhiskeyRealism.Tactical.Battle
     {
         /// <summary>The group at <paramref name="index"/> has a recorded posture row this tick.</summary>
         bool HasPosture(int index);
-        /// <summary>The task of the posture row at <paramref name="index"/>.</summary>
+        /// <summary>The task the operations ledger committed to the group at <paramref name="index"/>.</summary>
         CommandTaskType TaskOf(int index);
+        /// <summary>The task the group is carrying out after the pipeline's rewrites (the opportunity override turns a committed role to FallBackToLine).</summary>
+        CommandTaskType EffectiveTaskOf(int index);
         /// <summary>A withdrawal move was issued for the unit at <paramref name="index"/> inside the withdrawal window.</summary>
         bool WithdrawalRecent(int index);
     }
@@ -76,7 +78,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 if (host.HasPosture(a))
                 {
                     if (group < 0) group = a;
-                    if (ColumnDeployment.WithdrawalTask(host.TaskOf(a))) withdrawing = true;
+                    if (ColumnDeployment.WithdrawalTask(host.TaskOf(a)) || ColumnDeployment.WithdrawalTask(host.EffectiveTaskOf(a))) withdrawing = true;
                 }
                 if (host.WithdrawalRecent(a)) withdrawing = true;
             }
@@ -121,7 +123,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         /// <summary>
         /// The closest enemy the side perceives to the unit at <paramref name="ownIndex"/>, seen now or remembered (the snapshot's observations are
-        /// BattlePerception's fog-honest memory: an enemy that dropped out of sight stays a Remembered observation at the place it was seen). Index of the
+        /// BattlePerception's fog-honest memory: an enemy that dropped out of sight stays a Remembered observation at the place it was seen). Only what
+        /// <see cref="EnemySamples.Accepts"/> counts, the repo's one fog rule: Visible, or Remembered at <see cref="EnemySamples.RememberedMinConfidence"/> (0.5,
+        /// about 20 minutes of decay) or more, a combat arm, not a reinforcement column. A fainter memory is not something the side believes in. Index of the
         /// observation, or -1. <see cref="BattleSnapshot.ClosestVisibleEnemy"/> reads sight alone and loses the enemy for a tick behind a rise.
         /// </summary>
         public static int ClosestPerceivedEnemy(BattleSnapshot s, int ownIndex, out float distance)
@@ -134,6 +138,7 @@ namespace WhiskeyRealism.Tactical.Battle
             EnemyObservation[] observations = s.Observations;
             for (int k = 0; k < s.ObservationCount; k++)
             {
+                if (!EnemySamples.Accepts(in observations[k])) continue;
                 float dx = observations[k].X - x, dz = observations[k].Z - z;
                 float sq = dx * dx + dz * dz;
                 if (sq < bestSq)
