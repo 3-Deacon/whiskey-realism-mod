@@ -62,6 +62,30 @@ namespace WhiskeyRealism.Telemetry
             }
         }
 
+        // A name for a key=value row. The parser ends an unquoted value at whitespace, so "10th Indiana:5" would read as "10th"
+        // (smoke 2026-10-18: the Appointment rows' unit read "1st"). A value with whitespace, a quote or a backslash is written
+        // quoted, with those escaped the way ParseKeyValues reads them back; any other value is left as it is. Null or empty is "-".
+        internal static string Quote(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "-";
+            bool plain = true;
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (char.IsWhiteSpace(c) || c == '"' || c == '\\') { plain = false; break; }
+            }
+            if (plain) return value;
+            var builder = new StringBuilder(value.Length + 2);
+            builder.Append('"');
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (c == '"' || c == '\\') builder.Append('\\');
+                builder.Append(c);
+            }
+            return builder.Append('"').ToString();
+        }
+
         private static Dictionary<string, string> ParseKeyValues(string line)
         {
             var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

@@ -486,9 +486,15 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<GarrisonSeat> Seats = new List<GarrisonSeat>();
         public List<int> Shortfalls = new List<int>(); // instance ids, worst first
         public List<int> Surpluses = new List<int>();
-        // Why a staged main effort's scout could not be drawn from the hold reserve (ForceAllocator.ReasonScoutAgainstThreat), null when
-        // nothing was refused. The [Recon] row's why=.
-        public string ReconUnfilledReason;
+        // Why each recon task with no scout has none (smoke 2026-10-18: tasks=6 unfilled=6 why=- on every review): the distinct reasons in the
+        // order of the tasks (ForceAllocator.ReasonUnfilled*), "believed-threat" first when it applies, null when every task has a scout.
+        // The [Recon] row's why=.
+        public string ReconUnfilledWhy;
+        // The formations a detachment-standard scout pick could still take when the recon step began: ready, unbusy and claimed by no role
+        // before it. The [Recon] row's free= (pool= is the snapshot's count before any role).
+        public int ReconFree;
+        // The main effort's own bodies a scout pick could still take at that point (ready, unclaimed, in the mass). The row's mass=; not in free=.
+        public int ReconMass;
 
         public bool TryGet(int instanceId, out Assignment assignment)
         {

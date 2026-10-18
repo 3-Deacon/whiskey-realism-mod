@@ -18,7 +18,8 @@ namespace WhiskeyRealism.Tactical.Operations
             float operationAssignedStrength = 0f,
             BattleStance stance = BattleStance.Meeting,
             IFeasibilityLookup feasibility = null,
-            string latchedObjectiveId = null)
+            string latchedObjectiveId = null,
+            float oddsCollapseSeconds = 0f)
         {
             Current = current;
             CurrentTimeSeconds = SanitizeFloorZero(currentTimeSeconds);
@@ -31,6 +32,7 @@ namespace WhiskeyRealism.Tactical.Operations
             Stance = stance;
             Feasibility = feasibility;
             LatchedObjectiveId = latchedObjectiveId;
+            OddsCollapseSeconds = SanitizeFloorZero(oddsCollapseSeconds);
         }
 
         public OperationRecord Current { get; }
@@ -44,6 +46,9 @@ namespace WhiskeyRealism.Tactical.Operations
         // attack/support (summed by the coordinator from vanilla regiments). 0 = no
         // assignment yet (e.g. the first tick after commitment) -> army strength.
         public float OperationAssignedStrength { get; }
+        // How long the committed force has stood below the abort line (doctrine seconds, kept by the ledger runtime from tick to tick): an abort needs
+        // the collapse to last, one count of an enemy line that fog moves is no collapse (TacticalOperationDirector.OddsCollapseDwellSeconds).
+        public float OddsCollapseSeconds { get; }
         // The side's battle stance (vanilla GetBattleType via
         // ArmyEvidenceBuilder.ReadBattleStance). A Defender is never sent probing.
         public BattleStance Stance { get; }
@@ -88,7 +93,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 assignedStrength,
                 Stance,
                 Feasibility,
-                LatchedObjectiveId);
+                LatchedObjectiveId,
+                OddsCollapseSeconds);
         }
 
         public TacticalOperationDirectorInput WithStance(BattleStance stance)
@@ -104,7 +110,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 OperationAssignedStrength,
                 stance,
                 Feasibility,
-                LatchedObjectiveId);
+                LatchedObjectiveId,
+                OddsCollapseSeconds);
         }
 
         /// <summary>BC14O: the side's ledger and the objective latched at the last pick (null: none).</summary>
@@ -121,7 +128,26 @@ namespace WhiskeyRealism.Tactical.Operations
                 OperationAssignedStrength,
                 Stance,
                 feasibility,
-                latchedObjectiveId);
+                latchedObjectiveId,
+                OddsCollapseSeconds);
+        }
+
+        /// <summary>How long the committed force has stood below the abort line (see <see cref="OddsCollapseSeconds"/>).</summary>
+        public TacticalOperationDirectorInput WithOddsCollapseSeconds(float seconds)
+        {
+            return new TacticalOperationDirectorInput(
+                Current,
+                CurrentTimeSeconds,
+                OwnStrength,
+                ReserveFraction,
+                Aggression01,
+                Caution01,
+                Objectives,
+                OperationAssignedStrength,
+                Stance,
+                Feasibility,
+                LatchedObjectiveId,
+                seconds);
         }
 
         private static float SanitizeFloorZero(float value)
@@ -207,6 +233,33 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public const float CommittedExitConfidenceFloor = 0.50f;
 
+        /// <summary>
+        /// How long a chosen operation (Forming, Committed, parallel or fix-and-flank) is held before it is reselected, and how long a soft abort rests
+        /// before the side may commit again: the plan's own commitment, an hour of the doctrine clock. It was 900 s, a quarter hour, which at the
+        /// 20x to 120x a battle is played at is 8 to 45 seconds of real time (smoke 2026-10-18: the Union's divisions changed task every 30 to 60 s).
+        /// </summary>
+        public const float CommitWindowSeconds = ArmyReplanTriggers.PlanCommitmentBattleSeconds;
+
+        /// <summary>The rest after a soft abort (see <see cref="CommitWindowSeconds"/>): the side that fell back does not commit again on the next count.</summary>
+        public const float SoftAbortRestSeconds = ArmyReplanTriggers.PlanCommitmentBattleSeconds;
+
+        /// <summary>
+        /// The committed force must stand below the abort line this long before the operation is aborted for it. The force is a count of the nodes tasked
+        /// to attack against an enemy line fog moves; one count is not a collapse.
+        /// </summary>
+        public const float OddsCollapseDwellSeconds = 600f;
+
+        /// <summary>
+        /// Whether the committed operation's force (<see cref="OperationStrength"/>) is below the abort line against its objective this tick. The ledger
+        /// runtime keeps how long this has held (<see cref="TacticalOperationDirectorInput.OddsCollapseSeconds"/>).
+        /// </summary>
+        internal static bool OddsCollapsed(TacticalOperationDirectorInput input)
+        {
+            if (input.Current.Phase != TacticalOperationPhase.Committed) return false;
+            if (!TryFindObjective(input.Objectives, input.Current.PrimaryObjectiveId, out BattlefieldObjectiveEstimate primary)) return false;
+            return TacticalDecisionDoctrine.ShouldSoftAbortCommitted(primary, OperationStrength(input), input.ReserveFraction);
+        }
+
         public static TacticalOperationDirectorDecision Decide(TacticalOperationDirectorInput input)
         {
             ObjectivePick pick = PickMainEffortObjective(input);
@@ -259,6 +312,13 @@ namespace WhiskeyRealism.Tactical.Operations
                 return new TacticalOperationDirectorDecision(input.Current, "commit-window");
             }
 
+            // A side that fell back rests before it commits again. Without it the abort lasted one ledger tick: the next count had no committed
+            // force to judge, weighed the whole army against the enemy, and committed (smoke 2026-10-18: Committed, SoftAbort, Committed ...).
+            if (input.Current.Phase == TacticalOperationPhase.SoftAbort && input.CurrentTimeSeconds < input.Current.MinimumCommitSeconds)
+            {
+                return new TacticalOperationDirectorDecision(input.Current, "soft-abort-rest");
+            }
+
             TacticalOperationDirectorDecision selected = SelectOperation(input, activeOperation, in pick);
             if (committed && IsDemotionOfSameObjective(input.Current, selected.Operation) && HoldsCommittedExitEvidence(input))
             {
@@ -301,7 +361,7 @@ namespace WhiskeyRealism.Tactical.Operations
                             TacticalOperationShape.DefensiveNetwork,
                             TacticalOperationPhase.Forming,
                             primary.ObjectiveId,
-                            input.CurrentTimeSeconds + 900f),
+                            input.CurrentTimeSeconds + CommitWindowSeconds),
                         "contact-elsewhere-hold");
                 }
 
@@ -350,7 +410,7 @@ namespace WhiskeyRealism.Tactical.Operations
                         TacticalOperationShape.ParallelObjectives,
                         TacticalOperationPhase.Committed,
                         primary.ObjectiveId,
-                        input.CurrentTimeSeconds + 1200f),
+                        input.CurrentTimeSeconds + CommitWindowSeconds),
                     "parallel-advantage");
             }
 
@@ -361,7 +421,7 @@ namespace WhiskeyRealism.Tactical.Operations
                         TacticalOperationShape.FixAndFlank,
                         TacticalOperationPhase.Committed,
                         primary.ObjectiveId,
-                        input.CurrentTimeSeconds + 900f),
+                        input.CurrentTimeSeconds + CommitWindowSeconds),
                     "fix-and-flank");
             }
 
@@ -374,7 +434,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 : TacticalOperationPhase.Forming;
 
             return new TacticalOperationDirectorDecision(
-                new OperationRecord(shape, phase, primary.ObjectiveId, input.CurrentTimeSeconds + 900f),
+                new OperationRecord(shape, phase, primary.ObjectiveId, input.CurrentTimeSeconds + CommitWindowSeconds),
                 "selected");
         }
 
@@ -409,7 +469,8 @@ namespace WhiskeyRealism.Tactical.Operations
             if (TacticalDecisionDoctrine.ShouldSoftAbortCommitted(
                     primary,
                     OperationStrength(input),
-                    input.ReserveFraction))
+                    input.ReserveFraction) &&
+                input.OddsCollapseSeconds >= OddsCollapseDwellSeconds)
             {
                 decision = SoftAbort(input, "odds-collapse");
                 return true;
@@ -473,7 +534,7 @@ namespace WhiskeyRealism.Tactical.Operations
                     input.Current.Shape,
                     TacticalOperationPhase.SoftAbort,
                     input.Current.PrimaryObjectiveId,
-                    input.Current.MinimumCommitSeconds),
+                    input.CurrentTimeSeconds + SoftAbortRestSeconds),
                 reason);
         }
 

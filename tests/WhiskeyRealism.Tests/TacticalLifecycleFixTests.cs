@@ -338,7 +338,8 @@ internal static class TacticalLifecycleFixTests
             current, 600f, 5000f, 0.30f, 0.5f, 0.5f, new[] { Line("line", 900f, 0.9f) });
         var army = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input);
         TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.Committed, army.Operation.Phase, "army odds would hide the collapse");
-        var d = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input.WithOperationAssignedStrength(600f));
+        var d = WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.Decide(input.WithOperationAssignedStrength(600f)
+            .WithOddsCollapseSeconds(WhiskeyRealism.Tactical.Operations.TacticalOperationDirector.OddsCollapseDwellSeconds));
         TestHarness.AssertEqual(WhiskeyRealism.Tactical.Operations.TacticalOperationPhase.SoftAbort, d.Operation.Phase, "phase");
         TestHarness.AssertEqual("odds-collapse", d.Reason, "reason");
     }

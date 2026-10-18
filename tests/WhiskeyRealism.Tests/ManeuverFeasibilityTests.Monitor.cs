@@ -31,6 +31,7 @@ internal static partial class ManeuverFeasibilityTests
         ("bc14 REPLAN-HYSTERESIS the new best within 0.1 of the current leaves it in place; an impossible current plan switches", ReplanHysteresis),
         ("bc14 REPLAN-COOLDOWN two broken assumptions within Min Replan Seconds make one replan", ReplanCooldown),
         ("bc14 REPLAN-KEPT a kept plan keeps its side, phase and age and refreshes the selection snapshot", ReplanKept),
+        ("task churn role hold: a plan re-picked or a phase that moved on releases no roles, a plan adopted in a crisis does", RoleHoldKeyIsCrisisOnly),
         ("bc14 REPLAN-TRIGGER the broken-assumption trigger comes last and needs a reason", ReplanTriggerOrder),
         ("bc14 MON-WIRED the pick, the replan and BC11's abandons reach the monitor", MonWired),
     };
@@ -621,6 +622,44 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(4, lookup.Captured.Count, "capturing the new selection");
     }
 
+    // Smoke 2026-10-18: HesitatedCommit and ContinuousAttrition were re-picked a minute or two apart under flickering opportunity triggers, and each re-pick
+    // changed the key the role hold is allocated under, so every role was released each time.
+    static void RoleHoldKeyIsCrisisOnly()
+    {
+        var evidence = new ArmyEvidence(1.0f, TerrainKind.Open, 0);
+        var intent = new TacticalIntentModel(InferredIntent.Unknown, -1, 0f, 0f, null);
+        var lookup = new CaptureLookup();
+        ArmyOrchestrator army = Army(lookup, evidence);
+        BattlePlanId plan = army.CurrentPlan.PlanId;
+        int key = army.RoleHoldKey;
+        army.AdvancePhase(BattlePhase.MainEffort);
+        AssertEqual(key, army.RoleHoldKey, "a phase that moved on is no new organisation of the line");
+        army.AdvancePhase(BattlePhase.Exploit);
+        AssertEqual(key, army.RoleHoldKey, "nor the next one");
+
+        // The plan held is impossible: a re-pick that is no crisis (the hysteresis, no crisis flag) adopts another plan and keeps the roles.
+        lookup.Results[plan] = new CandidateResult { Plan = plan, Verdict = FeasibilityVerdict.Impossible, Penalty = 1f, Reason = "no-crossing" };
+        army.Replan(evidence, intent, hysteresis: true);
+        AssertTrue(army.CurrentPlan.PlanId != plan, "another plan was adopted");
+        AssertEqual(key, army.RoleHoldKey, "a plan adopted without a crisis releases no roles");
+
+        BattlePlanId second = army.CurrentPlan.PlanId;
+        lookup.Results[second] = new CandidateResult { Plan = second, Verdict = FeasibilityVerdict.Impossible, Penalty = 1f, Reason = "no-crossing" };
+        army.Replan(evidence, intent, hysteresis: true, crisis: true);
+        AssertTrue(army.CurrentPlan.PlanId != second, "and another again");
+        int afterCrisis = army.RoleHoldKey;
+        AssertTrue(afterCrisis != key, "a plan adopted in a crisis releases them");
+
+        BattlePlanId third = army.CurrentPlan.PlanId;
+        lookup.Results[third] = new CandidateResult { Plan = third, Verdict = FeasibilityVerdict.Impossible, Penalty = 1f, Reason = "no-crossing" };
+        army.Replan(evidence, intent, hysteresis: false);
+        AssertTrue(army.CurrentPlan.PlanId != third, "a re-pick without the hysteresis adopts another plan");
+        AssertTrue(army.RoleHoldKey != afterCrisis, "which only a crisis makes: it releases them too");
+
+        string cycle = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyTickCycle.cs");
+        FlankResponseTests.AssertPinned(cycle, "restartAgeIfKept: !brokenAssumption, crisis: crisis);", "the tick cycle tells the orchestrator whether the replan is a crisis");
+    }
+
     static void ReplanTriggerOrder()
     {
         ReplanTriggerInput Input(float morale, string reason) => new ReplanTriggerInput(
@@ -639,7 +678,7 @@ internal static partial class ManeuverFeasibilityTests
         AssertEqual(3, CountOf(army, "_feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);"), "the first pick, a kept plan and a replan each capture the selection");
         FlankResponseTests.AssertPinned(army, "hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,", "the hysteresis names the plan being kept");
         string cycle = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyTickCycle.cs");
-        FlankResponseTests.AssertPinned(cycle, "bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption || !crisis, trigger.ToString(), restartAgeIfKept: !brokenAssumption);", "only a crisis (and not the broken assumption) re-picks without the margin");
+        FlankResponseTests.AssertPinned(cycle, "bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption || !crisis, trigger.ToString(), restartAgeIfKept: !brokenAssumption, crisis: crisis);", "only a crisis (and not the broken assumption) re-picks without the margin");
         FlankResponseTests.AssertPinned(cycle, "assumptionReason: assumptionReason,", "the reason reaches the trigger input");
         string coordinator = FlankResponseTests.SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
         FlankResponseTests.AssertPinned(coordinator, "assumptionReason: side.Army.Feasibility?.BrokenAssumption);", "the coordinator feeds the ledger's finding to the tick");

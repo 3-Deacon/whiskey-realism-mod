@@ -92,9 +92,24 @@ namespace WhiskeyRealism.Strategic.Planner
         // Smoke 2026-10-17: the most scouts a staged main effort draws from the sectors' hold reserves in one review. One pair of eyes
         // answers its question (the picture of the objective); more would turn the presumption's hold into a screen.
         internal const int MaxReserveScouts = 1;
-        // Allocation.ReconUnfilledReason: the hold reserve could have given a scout, and every candidate was refused because its sector
+        // Allocation.ReconUnfilledWhy: the hold reserve could have given a scout, and every candidate was refused because its sector
         // holds against a believed enemy force that the draw would leave uncovered.
         internal const string ReasonScoutAgainstThreat = "believed-threat";
+        // Allocation.ReconUnfilledWhy: why a recon task has no scout (smoke 2026-10-18: tasks=6 unfilled=6 why=- for twelve days). The first that applies:
+        //   believed-threat   the draw from the hold reserve was refused for this task (above).
+        //   main-covered      the draw was refused for this task, but the main objective has its eyes by another task (a scout out, drawn or
+        //                     picked), so nothing is missing that the refusal explains.
+        //   mass-kept         the only formation the pick found was the main effort's last body, which it keeps.
+        //   unsuited          a formation could go and nothing claimed it, but the kind's own rules turned it down (an advance guard or a probe
+        //                     bigger than a quarter of the main body, a picket whose sector would be left short, a cavalry group the main body keeps).
+        //   claimed-<what>    every formation that could go already has a role (what: the hold reserve's reason, or the role) before the recon step.
+        //   gave-up           the able formations all gave up on this hold point.
+        //   recalling         the only able formations are on their way back to the main body (a recalled mission), which the pick skips.
+        //   none-able         no formation meets the kind's movement standard at all (too weak for a screen, unready, short of morale, busy, in a
+        //                     vanilla operations list, or not the planner's to order).
+        internal const string ReasonUnfilledMassKept = "mass-kept", ReasonUnfilledUnsuited = "unsuited", ReasonUnfilledGaveUp = "gave-up",
+                              ReasonUnfilledNoneAble = "none-able", ReasonUnfilledRecalling = "recalling", ReasonUnfilledMainCovered = "main-covered",
+                              ReasonUnfilledClaimedPrefix = "claimed-";
 
         internal const string ReasonBusy = "busy";
         internal const string ReasonPlayerCommand = "player-command";
@@ -214,7 +229,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (g.Kind != GarrisonPostKind.Secession) continue;
                 if (sb.Length > 0) sb.Append(';');
                 sb.Append(g.InstanceIds.Count > 0 ? (g.Name ?? "?").Replace(' ', '_') : g.MassPresence ? "mass-presence" : g.PlayerPresence ? "player-presence" : g.InState ? "town-garrison" : "nobody")
-                  .Append('@').Append(g.StateName)
+                  .Append('@').Append((g.StateName ?? "?").Replace(' ', '_'))
                   .Append(g.Marching ? (g.InState ? ":in+moving/" : ":moving/") : ":in/").Append(g.Need.ToString("0", CultureInfo.InvariantCulture));
                 if (g.Shortfall > 0f) sb.Append("!short").Append(g.Shortfall.ToString("0", CultureInfo.InvariantCulture));
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
@@ -258,7 +273,8 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
             private readonly float[] _believed;              // per sector: the believed term of the hold need (SectorPlan.BelievedHold)
             private readonly ReserveRules.HoldTally _held;   // what ReserveRules.Hold sized each sector's reserve on (unready, busy, capital guard, reserve)
-            private bool _scoutRefusedForThreat;
+            private int _reconFree, _reconMass;
+            private readonly List<string> _unfilledWhy = new List<string>();   // one entry per recon task with no scout, in task order
 
             internal Pass(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors,
                           Func<string, Theater> home, IReadOnlyList<ReconTask> recon, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp,
@@ -338,7 +354,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 allocation.Seats.AddRange(_seats);
                 ListShortfalls(allocation, mainRequired, mainStrength);
                 ListSurpluses(allocation);
-                allocation.ReconUnfilledReason = _scoutRefusedForThreat ? ReasonScoutAgainstThreat : null;
+                allocation.ReconUnfilledWhy = UnfilledWhy();
+                allocation.ReconFree = _reconFree;
+                allocation.ReconMass = _reconMass;
             }
 
             // ---- inputs ----
@@ -628,6 +646,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private void AssignRecon()
             {
+                CountFreeScouts(out _reconFree, out _reconMass);
                 if (_recon == null || _recon.Count == 0) return;
                 var taken = new HashSet<int>();
                 var takenAndMass = new HashSet<int>();
@@ -658,6 +677,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     }
                     int id = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, taken, mainHasScreen);
                     int pick = id >= 0 ? _s.IndexOfOwn(id) : -1;
+                    bool massKept = false;
                     // G3 obligation: take the formation from outside the mass while one qualifies; the
                     // incumbent of an active mission keeps its post, and a formation of a worse tier
                     // (cavalry screens first) does not replace a better one just to spare the mass.
@@ -670,19 +690,24 @@ namespace WhiskeyRealism.Strategic.Planner
                     // Smoke 2026-10-17: the main effort keeps its last body. The pick could only return the mass's own last free formation,
                     // and a push with no formation left is not a push (the mover reports it undispatchable and the plan keeps naming it).
                     // A cavalry group is the exception D7 made on purpose: it screens although the plan massed it (ReconTier 0).
-                    if (pick >= 0 && _inMass[pick] && ReconTier(pick) != 0 && FreeMassBodies() <= 1) pick = -1;
+                    if (pick >= 0 && _inMass[pick] && ReconTier(pick) != 0 && FreeMassBodies() <= 1)
+                    {
+                        pick = -1;
+                        massKept = true;
+                    }
                     // Smoke 2026-10-17: the formations nothing else claimed are the only ones the pick sees, and the hold reserve claims every
                     // ready formation before it (ReserveRules.Hold takes the massable ones nearest the army a sector faces until its need is
                     // met, and an unscouted sector needs the presumption), so a staged push had nobody to scout with and stayed staged for
                     // good. It draws one scout from the hold reserve, and only for the tasks that see its own objective.
-                    bool fromReserve = false;
+                    bool fromReserve = false, refusedHere = false;
                     if (pick < 0 && _plan.MainStaged && ReconPlanner.ScoutsMainObjective(task))
                     {
                         // One standing scout per main effort, across reviews: with one out, only that formation (the incumbent of its
                         // mission) may be drawn again; a second is never opened beside it.
-                        pick = DrawFromHoldReserve(task, taken, mainHasScreen, incumbentsOnly: drawn >= MaxReserveScouts);
+                        pick = DrawFromHoldReserve(task, taken, mainHasScreen, incumbentsOnly: drawn >= MaxReserveScouts, out refusedHere);
                         fromReserve = pick >= 0;
                     }
+                    if (pick < 0) _unfilledWhy.Add(refusedHere ? ReasonScoutAgainstThreat : WhyUnfilled(task, massKept));
                     if (skippedTaken != null)
                     {
                         for (int k = 0; k < skippedTaken.Count; k++) taken.Remove(skippedTaken[k]);
@@ -697,9 +722,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (task.Kind == ReconKind.Screen && task.SectorId == _plan.MainSectorId) mainHasScreen = true;
                     if (ReconPlanner.ScoutsMainObjective(task)) mainFilled = true;
                 }
-                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) or a main task filled by any pick
-                // there is nothing to explain.
-                if (drawn >= MaxReserveScouts || mainFilled) _scoutRefusedForThreat = false;
+                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) or a main task filled by any pick the
+                // main objective has its eyes, and a task that was refused its draw is told as covered (it still has a reason of its own).
+                if (drawn >= MaxReserveScouts || mainFilled)
+                    for (int k = 0; k < _unfilledWhy.Count; k++)
+                        if (_unfilledWhy[k] == ReasonScoutAgainstThreat) _unfilledWhy[k] = ReasonUnfilledMainCovered;
             }
 
             // The mass's members no role has claimed yet: the bodies a scout pick could still take from the main effort.
@@ -754,7 +781,7 @@ namespace WhiskeyRealism.Strategic.Planner
             // earlier scout. The remainder that stands in the sector is assigned after this pick. The ordinary garrison posts that come
             // later take no counted formation out of its sector: GarrisonPlanner seats only a massable formation (Seatable), and the
             // hold reserve's own incumbents it takes back stay in their sector. Otherwise the formation stays and the refusal is recorded
-            // (Allocation.ReconUnfilledReason).
+            // (Allocation.ReconUnfilledWhy).
             private bool SectorMayGiveScout(int i)
             {
                 int k = _roleSector[i];
@@ -782,7 +809,7 @@ namespace WhiskeyRealism.Strategic.Planner
             // smallest group, nearest) and every minimum of the pick apply. -1 when no reserve formation qualifies. With incumbentsOnly
             // (a scout is already out) only the formation already on a mission may be drawn. The sector it came from shows the loss as a
             // shortfall (ListShortfalls) like any hold formation that leaves.
-            private int DrawFromHoldReserve(in ReconTask task, HashSet<int> taken, bool mainHasScreen, bool incumbentsOnly)
+            private int DrawFromHoldReserve(in ReconTask task, HashSet<int> taken, bool mainHasScreen, bool incumbentsOnly, out bool refusedForThreat)
             {
                 var open = new HashSet<int>(taken);
                 bool refused = false;
@@ -795,8 +822,77 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 int id = ReconPlanner.PickFormation(_s, _sectors, _plan, _missions, task, open, mainHasScreen);
                 int pick = id >= 0 && IsHoldReserve(_s.IndexOfOwn(id)) ? _s.IndexOfOwn(id) : -1;
-                if (pick < 0 && refused) _scoutRefusedForThreat = true;
+                refusedForThreat = pick < 0 && refused;
                 return pick;
+            }
+
+            // The formations a detachment-standard scout pick could still take as the recon step begins, apart from the ones on their way
+            // back (the pick skips them): the free= of the [Recon] row are the ones outside the main effort's mass, the mass= the main
+            // effort's own bodies (the pick takes one only when nothing else will go, and never its last).
+            private void CountFreeScouts(out int free, out int mass)
+            {
+                free = mass = 0;
+                for (int i = 0; i < _n; i++)
+                {
+                    if (_done[i] || !ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard) || IsRecalling(i)) continue;
+                    if (_inMass[i]) mass++;
+                    else free++;
+                }
+            }
+
+            private bool IsRecalling(int i)
+            {
+                return _missions != null && _missions.IsRecalling(_s.Own[i].InstanceId);
+            }
+
+            // Why the task has no scout, the first that applies (ReasonUnfilled*). Read before the gave-up formations are put back, from the
+            // roles given so far: a formation that could go and is held by a role is claimed by it, one that nothing holds was turned down by
+            // the kind's own rules (unsuited).
+            private string WhyUnfilled(in ReconTask task, bool massKept)
+            {
+                if (massKept) return ReasonUnfilledMassKept;
+                int claimedBy = -1, claimed = 0, gaveUp = 0, free = 0, recalling = 0;
+                for (int i = 0; i < _n; i++)
+                {
+                    if (!ReconPlanner.CouldScout(_s, _s.Own[i], task.Kind)) continue;
+                    if (IsRecalling(i)) recalling++;
+                    else if (GaveUpAt(i, task.HoldX, task.HoldZ)) gaveUp++;
+                    else if (_done[i])
+                    {
+                        if (claimedBy < 0) claimedBy = i;
+                        claimed++;
+                    }
+                    else free++;
+                }
+                if (free > 0) return ReasonUnfilledUnsuited;
+                if (claimed > 0) return ReasonUnfilledClaimedPrefix + RoleTag(claimedBy);
+                if (gaveUp > 0) return ReasonUnfilledGaveUp;
+                if (recalling > 0) return ReasonUnfilledRecalling;
+                return ReasonUnfilledNoneAble;
+            }
+
+            // What holds a formation: the hold reserve's own reason for a Hold role, the role's name otherwise.
+            private string RoleTag(int i)
+            {
+                if (_role[i] == FormationRole.Hold && _reason[i] != null) return _reason[i];
+                string name = _role[i].ToString();
+                var sb = new System.Text.StringBuilder(name.Length + 2);
+                for (int k = 0; k < name.Length; k++)
+                {
+                    if (char.IsUpper(name[k]) && k > 0) sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(name[k]));
+                }
+                return sb.ToString();
+            }
+
+            // The row's why=: the distinct reasons, the refusal first, then the tasks' in their order.
+            private string UnfilledWhy()
+            {
+                var reasons = new List<string>();
+                if (_unfilledWhy.Contains(ReasonScoutAgainstThreat)) reasons.Add(ReasonScoutAgainstThreat);
+                for (int k = 0; k < _unfilledWhy.Count; k++)
+                    if (!reasons.Contains(_unfilledWhy[k])) reasons.Add(_unfilledWhy[k]);
+                return reasons.Count == 0 ? null : string.Join(",", reasons);
             }
 
             // ReconPlanner.PickFormation's own ranking: cavalry-majority, then other combat groups.

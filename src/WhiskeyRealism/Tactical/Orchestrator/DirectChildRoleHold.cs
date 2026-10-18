@@ -4,15 +4,16 @@ using System.Collections.Generic;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// A direct child keeps its role until the plan changes, <see cref="HoldHours"/> of the doctrine clock have passed, or a crisis forces a change. The
+    /// A direct child keeps its role until the plan changes in a crisis, <see cref="HoldHours"/> of the doctrine clock have passed, or a crisis forces a change. The
     /// allocator is a pure function of bucketed evidence (contact flag, flank exposure, the positional band) that flickers from tick to tick, and only Main
     /// had a hysteresis, so one child went Screen, Main, RefuseRight, Reserve, Screen in seven allocations under one plan (smoke 2026-10-17). A division
     /// that is given a new role is sent somewhere else, often behind it: "walking backwards toward the enemy".
     ///
     /// What passes at once, held or not: a fallback (either way: the evidence that sent a child back also ends it), a guard point or a screen target
     /// (a crossing guard, a station, a secondary objective's screen: each has a binding and hysteresis of its own), the escalations Fix, RefuseLeft and
-    /// RefuseRight (contact, an outflanked wing: an enemy on the flank is a crisis), and the release of a Reserve child to SupportMain (the release
-    /// hysteresis is the army's own). What waits: every de-escalation and every reshuffle among Main, SupportMain, Screen and Reserve.
+    /// RefuseRight of every child but the Main (contact, an outflanked wing: an enemy on the flank is a crisis; a Main that is allocated one has been
+    /// replaced as the main effort, which the Main hysteresis judges), and the release of a Reserve child to SupportMain (the release hysteresis is the
+    /// army's own). What waits: every de-escalation and every reshuffle among Main, SupportMain, Screen and Reserve.
     ///
     /// One instance per army orchestrator; the committed intents are the memory. Pure: the caller supplies the doctrine hours.
     /// </summary>
@@ -41,7 +42,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// The intents the army acts on this allocation: <paramref name="fresh"/> with every role the hold keeps replaced by the committed intent.
-        /// <paramref name="planKey"/> names the plan the allocation was made for (its id, side and main effort band): a different key accepts all of
+        /// <paramref name="planKey"/> names the organisation the allocation was made for (the side, the main effort band and the plans adopted in a crisis): a different key accepts all of
         /// <paramref name="fresh"/>.
         /// </summary>
         public IReadOnlyList<DirectChildIntent> Apply(IReadOnlyList<DirectChildIntent> fresh, int planKey, double nowHours)
@@ -127,6 +128,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         {
             if (fresh.Role == DirectChildRole.Fallback || held.Role == DirectChildRole.Fallback) return true;
             if (fresh.HasGuardPoint || held.HasGuardPoint || fresh.HasScreenTarget || held.HasScreenTarget) return true;
+            // The allocator gives Fix and the refused flanks only to a child that is not the main effort, so a Main allocated one has been replaced as the
+            // main effort by the pick of this allocation: that is the Main hysteresis' to judge (StabilizeMain), not an escalation. Passed at once, the
+            // old Main became Fix, the army was left without a Main and the fresh one took it the same tick (smoke 2026-10-18: Main, Fix, Main a minute apart).
+            if (held.Role == DirectChildRole.Main) return false;
             if (fresh.Role == DirectChildRole.Fix || fresh.Role == DirectChildRole.RefuseLeft || fresh.Role == DirectChildRole.RefuseRight) return true;
             return held.Role == DirectChildRole.Reserve && fresh.Role == DirectChildRole.SupportMain;
         }

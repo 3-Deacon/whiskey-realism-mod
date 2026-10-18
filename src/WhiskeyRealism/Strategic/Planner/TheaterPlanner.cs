@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Telemetry;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -1455,7 +1456,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " scouted=" + (plan.MainObjectiveId < 0 ? "none" : plan.MainScoutLatched ? "latched" : plan.MainScouted ? "yes" : "no")
                 + " staged=" + (plan.MainStaged ? "yes" : "no")
                 + " depts=" + (plan.DepartmentCounts.Length == 0 ? "none" : plan.DepartmentCounts)
-                + " xdept=" + (plan.ReinforcementInstanceId < 0 ? "none" : plan.ReinforcementName + (plan.ReinforcementFrom != Theater.Unknown ? ":" + plan.ReinforcementFrom + ">" + plan.ReinforcementTo : ":" + plan.ReinforcementTo));
+                + " xdept=" + (plan.ReinforcementInstanceId < 0 ? "none" : TelemetryLegacyParser.Quote(plan.ReinforcementName + (plan.ReinforcementFrom != Theater.Unknown ? ":" + plan.ReinforcementFrom + ">" + plan.ReinforcementTo : ":" + plan.ReinforcementTo)));
         }
 
         private static string Trace(Inputs c, List<Candidate> cands, TheaterPlan plan)

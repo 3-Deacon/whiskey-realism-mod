@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Telemetry;
 using System.Collections.Generic;
 
 namespace WhiskeyRealism.Strategic.Planner
@@ -103,7 +104,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 _logged[m.MissionId] = new Seen { State = m.State, Reason = m.Reason };
                 int own = s.IndexOfOwn(m.InstanceId);
                 string unit = own >= 0 ? s.Own[own].Name : m.UnitKey;
-                tally.Rows.Add("[ReconMission] alliance=" + s.Alliance + " unit=" + unit + " kind=" + m.Kind + " state=" + m.State + " reason=" + (m.Reason ?? "-"));
+                tally.Rows.Add("[ReconMission] alliance=" + s.Alliance + " unit=" + TelemetryLegacyParser.Quote(unit) + " kind=" + m.Kind + " state=" + m.State + " reason=" + (m.Reason ?? "-"));
             }
             _gone.Clear();
             foreach (var id in _logged.Keys)
@@ -191,7 +192,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (Distance(f.WaypointX, f.WaypointZ, m.HoldX, m.HoldZ) <= CampaignMover.ArrivalRadius) return;
             if (!tracker.ShouldIssue(f.InstanceId, m.HoldX, m.HoldZ, s.DaySerial, MoveBudget.Recon)) return;
-            MoveIssue.Issue(host, tracker, in f, m.HoldX, m.HoldZ, -1, s.DaySerial, wlPlayerAlliance, MoveBudget.Recon, out var outcome);
+            MoveIssue.Issue(host, tracker, in f, m.HoldX, m.HoldZ, -1, s.DaySerial, wlPlayerAlliance, MoveBudget.Recon, "Recon", out var outcome);
             switch (outcome)
             {
                 case MoveOutcome.Issued: tally.Issued++; break;

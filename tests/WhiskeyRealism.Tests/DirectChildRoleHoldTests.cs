@@ -25,6 +25,7 @@ internal static class DirectChildRoleHoldTests
             ("role hold a hold that runs out on a child while the Main stands is not a second Main", AnExpiredHoldIsNotASecondMain),
             ("role hold a minute of five-second allocations over the same enemy keeps every division in one role", AMinuteKeepsOneRolePerDivision),
             ("role hold the army keeps its roles through flickering evidence under one plan and reorganises when the plan changes", TheArmyKeepsItsRolesUnderOnePlan),
+            ("role hold a Main is not displaced by an escalation of its own: the escalation is how the allocator says another child is Main", AMainIsNotDisplacedByAnEscalation),
         });
     }
 
@@ -254,5 +255,29 @@ internal static class DirectChildRoleHoldTests
         var later = hold.Apply(Set(DI("a", DirectChildRole.SupportMain), DI("b", DirectChildRole.Main)), 1, 6.25);
         AssertEqual(DirectChildRole.Main, RoleOf(later, "b"), "once a's hour has run out the allocator's Main takes it");
         AssertEqual(1, Mains(later), "still one");
+    }
+
+    // Smoke 2026-10-18: the Union's 1st Division went Main, Fix, Main, Fix ... about every minute of real time and took its brigades' tasks with it
+    // (AttackObjective, FixEnemy). The allocator gives Fix only to a child that is not the main effort: when the pick of the main effort flickers to
+    // another child, the old Main is allocated Fix, Fix passed at once as an escalation, the army was left without a Main and the fresh one took it:
+    // the main effort changed hands on a flicker, around the Main hysteresis and around the hold.
+    private static void AMainIsNotDisplacedByAnEscalation()
+    {
+        var hold = new DirectChildRoleHold();
+        hold.Apply(Set(DI("a", DirectChildRole.Main), DI("b", DirectChildRole.SupportMain)), 1, 5.0);
+        var next = hold.Apply(Set(DI("a", DirectChildRole.Fix), DI("b", DirectChildRole.Main)), 1, 5.01);
+        AssertEqual(DirectChildRole.Main, RoleOf(next, "a"), "the Main is still the Main when the allocator says another child is");
+        AssertEqual(DirectChildRole.SupportMain, RoleOf(next, "b"), "and the challenger supports it");
+        var flank = hold.Apply(Set(DI("a", DirectChildRole.RefuseLeft), DI("b", DirectChildRole.Main)), 1, 5.02);
+        AssertEqual(DirectChildRole.Main, RoleOf(flank, "a"), "nor does a refused flank displace it");
+        var fallback = hold.Apply(Set(DI("a", DirectChildRole.Fallback), DI("b", DirectChildRole.Main)), 1, 5.03);
+        AssertEqual(DirectChildRole.Fallback, RoleOf(fallback, "a"), "a fallback still does (the evidence that sent it back is a crisis)");
+        AssertEqual(DirectChildRole.Main, RoleOf(fallback, "b"), "and the army is not left without a Main");
+
+        var late = new DirectChildRoleHold();
+        late.Apply(Set(DI("a", DirectChildRole.Main), DI("b", DirectChildRole.SupportMain)), 1, 5.0);
+        var hour = late.Apply(Set(DI("a", DirectChildRole.Fix), DI("b", DirectChildRole.Main)), 1, 6.01);
+        AssertEqual(DirectChildRole.Fix, RoleOf(hour, "a"), "past the hour the fresh allocation is accepted");
+        AssertEqual(DirectChildRole.Main, RoleOf(hour, "b"), "all of it");
     }
 }
