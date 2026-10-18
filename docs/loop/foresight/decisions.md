@@ -56,3 +56,13 @@ The user directed (2026-10-18): "AI should be intelligent enough to look at the 
 5. Phase 1 has no user gate after F4. The order is F4 -> F4b -> F5 -> F9 -> F10a.
 
 Spec: D11 requirement-commitment-mover, requirement-picture-partition, requirement-marks-*, requirement-covering-force.
+
+## Integrator decisions, 2026-10-18 (strategic foresight phase 2, fourth round)
+
+Taken by the integrator on crit round 3's findings (verdict revise, covered commit `64289a51`), the last document round; folded with no further crit and no dry-run pass.
+
+1. Commitment covers only the dispatched members (crit R3-9). The approved item reads "formations dispatched to the main effort stay in it through readiness dips", and this keeps its text: a member of the last mass is committed only when the mover dispatched it toward the last mass's objective, read from the move record the tracker already keeps (`ObjectiveId`, persisted with the record), collected for the plan as the give-ups are. A member the tempo gate deferred, or that the mover has not yet sent, is an ordinary member under D5's readiness rule. This narrows the second round's item 1: commitment still has no sortie record of its own, but it now reads the tracker's existing per-formation move record beside the last mass.
+2. F6b is split in two slices (crit R3-10). F6b-1 is the covering corridor: the towns in the snapshot, the points, the posts, the axis shares and the `[CoveringCorridor]` row, taking no formation. F6b-2 is the covering force: the need, the verdict, the members, the hold, the defence clause and the lifecycle. The need and the verdict go to F6b-2 instead of F6b-1, as the crit named them, because each has its only `src` reader in the published `CoveringPlan` that F6b-2 adds, and the census and the orphan sweep fail a member or function with no `src` reader in the slice that adds it.
+3. `endedListed` is a reported count with no hard 0 (crit R3-7). Vanilla's job 4 may list an ended corps again before the next review, which is a legitimate vanilla act, so the smoke reads the count against vanilla's relisting. `endedMarching` keeps its 0, over the formations the stop was for.
+
+The user may override each of these. Spec: D11 requirement-commitment, requirement-commitment-mover and the `[Reserves]` row of requirement-telemetry; plan F6b-1, F6b-2 and F7.
