@@ -1321,7 +1321,7 @@ internal static class ConstructionSteeringTests
         }
         var ledger = new DepotTaskLedger();
         var w1 = W(0, false, out _, out var p1, out var a1);
-        AssertEqual(ForceAllocator.MinGarrisonStrength, p1.CapitalFloorStrength, "fixture: the first review's capital reserve is the baseline minimum, met by its own guard");
+        AssertEqual(p1.MinGarrisonStrength, p1.CapitalFloorStrength, "fixture: the first review's capital reserve is the plan's baseline minimum (the fixture world's own, 1000), met by its own guard");
         AssertTrue(a1.TryGet(1, out var first) && first.Role == FormationRole.DepotBuilder, "fixture: the formation alone in its sector is the depot builder");
         ledger.Sync(p1, a1, w1, null);
         AssertTrue(ledger.Tasks.Count == 1 && ledger.Tasks[0].State == DepotTaskState.Marching && ledger.HoldsBuilder(1), "the task starts Marching and holds it");

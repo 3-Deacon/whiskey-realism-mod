@@ -467,16 +467,21 @@ internal static class ReconNeverTasksTests
     // Body 1: ready, 9563 strong, in vanilla's capital-defence list (CanMove refuses it as a scout; the mass takes it). Unready 9, 10 and
     // the busy 15 cover the West's need (6000); the busy 13, 14 cover two thirds of the East's (9000) and the ready 3000-man
     // formation 2 is the East hold reserve that completes it.
-    private static CampaignSnapshot SmokeUnion(FormationFlags bodyFlags = FormationFlags.CapitalDefense, bool withReserve = true, bool secondEastBusy = true)
+    // eastBusy is each busy East holder's strength. The smoke's East need was the unscouted floor 5000 x (1 + 0.8) = 9000, which two busy 3000s
+    // and the ready 3000 completed. The floor is now the scenario's minimum (foresight F5: 2000 here, so 3600), and two busy 3000s would
+    // cover it alone: the presumption-backed shapes use 1200 each (two thirds of 3600, the same share as before), and the shapes that set
+    // the East need by a believed army, whose need does not depend on the floor, pass 3000 (two tests do).
+    private static CampaignSnapshot SmokeUnion(FormationFlags bodyFlags = FormationFlags.CapitalDefense, bool withReserve = true, bool secondEastBusy = true,
+                                               float eastBusy = 1200f)
     {
         var s = Base();
         s.Own.Add(CapitalGuard());
         s.Own.Add(Corps(1, 100f, 9563f, 3, bodyFlags));
         if (withReserve) s.Own.Add(Corps(2, 760f, 3000f));
         s.Own.Add(Corps(9, 200f, 4000f, 1));
-        s.Own.Add(Corps(10, 220f, 4000f, 1));
-        s.Own.Add(Corps(13, 790f, 3000f, 3, FormationFlags.InBattle));
-        if (secondEastBusy) s.Own.Add(Corps(14, 800f, 3000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(10, 200f + 20f, 4000f, 1));
+        s.Own.Add(Corps(13, 790f, eastBusy, 3, FormationFlags.InBattle));
+        if (secondEastBusy) s.Own.Add(Corps(14, 800f, eastBusy, 3, FormationFlags.InBattle));
         s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
         return s;
     }
@@ -527,6 +532,14 @@ internal static class ReconNeverTasksTests
         return n;
     }
 
+    // The allocation as "id=Role/reason", for an assertion's label.
+    private static string Describe(Allocation a)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var x in a.Assignments) sb.Append(x.InstanceId).Append('=').Append(x.Role).Append('/').Append(x.Reason).Append(' ');
+        return sb.ToString();
+    }
+
     private static Assignment Of(Allocation a, int id)
     {
         a.TryGet(id, out var x);
@@ -552,7 +565,7 @@ internal static class ReconNeverTasksTests
         bool mainAxis = false;
         foreach (var t in tasks) if (t.Reason == ReconPlanner.ReasonMainAxis) mainAxis = true;
         AssertTrue(mainAxis, "the main axis is unwatched");
-        AssertEqual(1, ReconPlanner.ScoutPool(s), "the pool counts the one ready formation that is not in a vanilla list");
+        AssertEqual(1, ReconPlanner.ScoutPool(s, null), "the pool counts the one ready formation that is not in a vanilla list");
         var held = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 2).Reason, "and the East hold reserve has it");
         AssertEqual(FormationRole.MainEffort, Of(held, 1).Role, "the body is the main effort");
@@ -576,9 +589,9 @@ internal static class ReconNeverTasksTests
     private static void TheHoldReserveIsDrawnOnceNotPerTask()
     {
         // One busy formation covers a third of the East's 9000: the ready 2, 3 and 4 (3000 each) are all hold reserve.
-        var s = SmokeUnion(secondEastBusy: false);
-        s.Own.Add(Corps(3, 770f, 2000f));
-        s.Own.Add(Corps(4, 780f, 2000f));
+        var s = SmokeUnion(secondEastBusy: false, eastBusy: 100f);
+        s.Own.Add(Corps(3, 770f, 400f));
+        s.Own.Add(Corps(4, 780f, 400f));
         var held = ForceAllocator.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
         int reserveBefore = 0;
         foreach (var a in held.Assignments) if (a.Reason == ForceAllocator.ReasonHoldReserve) reserveBefore++;
@@ -666,7 +679,7 @@ internal static class ReconNeverTasksTests
     private static void TheRefusalIsClearedWhenAFreeFormationFillsALaterMainTask()
     {
         var s = SmokeUnion();
-        s.Own.Add(Corps(30, 365f, 3000f));
+        s.Own.Add(Corps(30, 40f, 3000f));   // behind the body: the nearest formation with the scenario's minimum is the mass (foresight F5)
         s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
         var sectors = ExecutorFixtures.Sectors(s);
         var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
@@ -691,7 +704,10 @@ internal static class ReconNeverTasksTests
         foreach (var task in tasks) if (ReconPlanner.ScoutsMainObjective(task))
             other.Add(new GaveUpMove { InstanceId = 30, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
         var approach = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), other);
-        AssertEqual(ReconPlanner.ReasonCapitalApproach, Of(approach, 30).Reason, "30 watches the capital approach");
+        // The nearest formation with the scenario's minimum is now the mass, so the scout stands behind the body and its first free task is the
+        // sector's screen posture (it was the capital approach): either way a task that does not see the main objective.
+        AssertEqual(FormationRole.Recon, Of(approach, 30).Role, "30 watches a task");
+        AssertFalse(ReconPlanner.ScoutsMainObjective(ReconKind.Screen, Of(approach, 30).Reason), "that does not see the main objective: " + Of(approach, 30).Reason);
         AssertTrue(Refused(approach), "and the push still has no eyes: the reason stands");
         // Control: with the free formation gone the refusal stands.
         var bare = SmokeUnion();
@@ -740,7 +756,7 @@ internal static class ReconNeverTasksTests
         AssertTrue(day.Plan.Garrisons[0].InstanceIds.Contains(20), "the plan pledged the formation");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(ForceAllocator.Allocate(day.Plan, s, ExecutorFixtures.Sectors(s), null, null, null), 20).Reason, "though the hold reserve claimed it first");
         AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "and it is not the push's scout");
-        AssertTrue(ReconPlanner.ScoutPool(s) >= 1, "though the pool counts it");
+        AssertTrue(ReconPlanner.ScoutPool(s, null) >= 1, "though the pool counts it");
     }
 
     private static void ScoutsMainObjectiveNamesTheMainTasksOnly()
@@ -1023,7 +1039,7 @@ internal static class ReconNeverTasksTests
             AssertTrue(day.Plan.MainStaged, army + ": the West push is staged");
             float need = 0f, believed = 0f;
             foreach (var sp in day.Plan.Sectors) if (sp.HoldNeed > need) { need = sp.HoldNeed; believed = sp.BelievedHold; }
-            AssertTrue(believed > ForceAllocator.MinGarrisonStrength && believed >= need - 0.01f, army + ": the East need is the army's: " + need + " / " + believed);
+            AssertTrue(believed > TheaterPlanner.MinStrengthFallback && believed >= need - 0.01f, army + ": the East need is the army's: " + need + " / " + believed);
             AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), army + ": nothing is drawn from the East reserve");
             AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, army + ": it keeps holding");
             AssertTrue(Refused(day.Allocation), army + ": and the refusal is named");
@@ -1036,7 +1052,7 @@ internal static class ReconNeverTasksTests
     // busy 3000 holds, the reserve is the 1000-man 5 (nearest the army) and the 3000-man 2: drawing the smallest leaves 6000 >= 5400.
     private static void ABelievedSectorThatStillCoversItsNeedGivesAScout()
     {
-        var s = SmokeUnion(secondEastBusy: false);
+        var s = SmokeUnion(secondEastBusy: false, eastBusy: 3000f);
         s.Own.Add(Corps(5, 800f, 1000f));
         s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 9000f));
         var held = ForceAllocator.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
@@ -1052,7 +1068,7 @@ internal static class ReconNeverTasksTests
     // hold 7000, and 6000 remain). Equal meets the target, so the draw goes.
     private static void ADrawThatLeavesExactlyTheNeedIsAllowed()
     {
-        var s = SmokeUnion(secondEastBusy: false);
+        var s = SmokeUnion(secondEastBusy: false, eastBusy: 3000f);
         s.Own.Add(Corps(5, 800f, 1000f));
         s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 10000f));
         var day = Review(s);
@@ -1076,10 +1092,10 @@ internal static class ReconNeverTasksTests
         // A sector with no immobile holder either has no one to name.
         var s = SmokeUnion(secondEastBusy: false);
         s.Own.RemoveAt(s.IndexOfOwn(13));
-        s.Own.Add(Corps(3, 770f, 3000f));
-        s.Own.Add(Corps(4, 780f, 3000f));
+        s.Own.Add(Corps(3, 770f, 600f));
+        s.Own.Add(Corps(4, 780f, 600f));
         var bare = Review(s);
-        AssertEqual(1, Roles(bare.Allocation, FormationRole.Recon), "one drawn from a sector held by reserve alone");
+        AssertEqual(1, Roles(bare.Allocation, FormationRole.Recon), "one drawn from a sector held by reserve alone: " + Describe(bare.Allocation));
         foreach (int id in bare.Allocation.Shortfalls) AssertTrue(id != 13 && id != 14, "no immobile formation exists to carry it");
     }
 
@@ -1089,8 +1105,8 @@ internal static class ReconNeverTasksTests
         Func<CampaignSnapshot> world = () =>
         {
             var w = SmokeUnion(secondEastBusy: false);
-            w.Own.Add(Corps(3, 770f, 2000f));
-            w.Own.Add(Corps(4, 780f, 2000f));
+            w.Own.Add(Corps(3, 770f, 600f));
+            w.Own.Add(Corps(4, 780f, 600f));
             return w;
         };
         var state = new PlannerState();
@@ -1118,7 +1134,9 @@ internal static class ReconNeverTasksTests
     private static void AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw()
     {
         var s = SmokeUnion();
-        var free = Corps(30, 365f, 3000f);
+        // Farther from the West objective than the body: the push is sized by the scenario's minimum now (2000), so the nearest formation that
+        // has it is the mass, and a free scout stands behind the body.
+        var free = Corps(30, 40f, 3000f);
         s.Own.Add(free);
         var ledger = new ReconMissionLedger();
         ledger.Restore(new[]
@@ -1132,7 +1150,7 @@ internal static class ReconNeverTasksTests
         var day = Review(s, new PlannerState(), ledger);
         AssertTrue(day.Plan.MainStaged, "staged");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "the East reserve is not drawn on");
-        AssertEqual(1, MainScouts(day.Allocation), "one scout for the main objective: the one already out");
+        AssertEqual(1, MainScouts(day.Allocation), "one scout for the main objective: the one already out: " + Describe(day.Allocation) + " mass=" + string.Join(",", day.Plan.MassInstanceIds) + " need=" + day.Plan.MainNeedStrength + " enemy=" + day.Plan.MainEnemyStrength + " main=" + day.Plan.MainObjectiveId);
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 30).Role, "that one");
     }
 
@@ -1515,7 +1533,7 @@ internal static class ReconNeverTasksTests
         float need2 = 0f, believed2 = 0f;
         foreach (var sp in fresher.Plan.Sectors) if (sp.SectorId == east) { need2 = sp.HoldNeed; believed2 = sp.BelievedHold; }
         AssertNear(12000f, need2, 1f, "the live and the faded men still sum to the same need");
-        AssertTrue(believed2 > ForceAllocator.MinGarrisonStrength && believed2 < need2 - 0.01f, "a believed term above the floor but under the need: " + believed2);
+        AssertTrue(believed2 > TheaterPlanner.MinStrengthFallback && believed2 < need2 - 0.01f, "a believed term above the floor but under the need: " + believed2);
         AssertEqual(FormationRole.Recon, Of(fresher.Allocation, 2).Role, "and the East still gives its scout");
         AssertFalse(Refused(fresher.Allocation), "nothing refused");
     }

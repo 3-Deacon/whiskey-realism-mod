@@ -376,6 +376,11 @@ namespace WhiskeyRealism.Strategic.Planner
         public float MainRequiredRatio;
         public List<SectorPlan> Sectors = new List<SectorPlan>();
         public float CapitalFloorStrength;
+        // Foresight F5 (D11 requirement-live-min-strength): the smallest strength the AI moves a formation at, the scenario's
+        // aiminimumstrengthformovement (002/A 2000, Config 5000) read by TheaterPlanner.Plan, the 5000 fallback when that read is not positive
+        // or not finite and, with Enable Strategic Foresight Picture off, always. Every floor and hold target derives from it; a plan a test
+        // builds by hand keeps the fallback.
+        public float MinGarrisonStrength = TheaterPlanner.MinStrengthFallback;
         // Foresight F3 (D11 requirement-capital-window and -floor): the numbers behind the capital floor, for the [CapitalThreat] row and
         // the [CapitalFloor] row. CapitalReach is the race, max(RelocationRange, CapitalReliefDays x CapitalCorpsPerDay); CapitalWeighted
         // vanilla's weight (11727) over the picture's elements inside it; CapitalThreat01 the 0.6 trigger's input (baseline excluded).

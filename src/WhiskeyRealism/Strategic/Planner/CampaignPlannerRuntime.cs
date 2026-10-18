@@ -141,6 +141,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     // a Wished one: one published set, read once.
                     var heldBuilders = new List<HeldBuilder>();
                     DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);
+                    // The planner's minimum strength is the scenario's aiminimumstrengthformovement; a read that is not positive or not finite
+                    // falls back to 5000 (TheaterPlanner.PlanMinimum), and the pure planner has no logger, so the review says so, once, whatever the
+                    // picture flag is.
+                    if (!TheaterPlanner.ReadIsUsable(snapshot.MinStrengthForMovement))
+                        OnceLog.Warning("campaign-planner:min-strength-fallback", "[CampaignPlanner] aiminimumstrengthformovement reads " + snapshot.MinStrengthForMovement.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", not a minimum; the planner uses " + TheaterPlanner.MinStrengthFallback.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
                     TheaterPlan plan;
                     string trace;
                     EnemyPicture picture;
@@ -162,7 +167,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         NonCompliance[alliance].Observe(snapshot.DaySerial, HasMapGroupFormation(snapshot), reliability);
                         allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);
                     }
-                    SyncRecon(snapshot, allocation);
+                    SyncRecon(snapshot, plan, allocation);
                     GarrisonRuntime.Sync(snapshot, plan, allocation);
                     // Yesterday's allocation and plan are still the working copy; Publish overwrites them, and the defence counts of [Reserves]
                     // judge today's snapshot against them (as AgeRecon reads the allocation).
@@ -170,7 +175,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     CampaignPlanStore.TryGetPlan(alliance, out var yesterdaysPlan);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
-                    LogFirstReview(snapshot, sectors);
+                    LogFirstReview(snapshot, sectors, plan);
                     EmitPlan(plan, trace, day, month, year);
                     EmitPicture(snapshot, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
@@ -360,14 +365,14 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // G1b: binds the allocation's Recon assignments to missions before the allocation is published, then the
         // [Recon] row.
-        private static void SyncRecon(CampaignSnapshot snapshot, Allocation allocation)
+        private static void SyncRecon(CampaignSnapshot snapshot, TheaterPlan plan, Allocation allocation)
         {
             using (TelemetryPerf.Scope("campaign.planner.recon", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
             {
                 if (FlagOn(Plugin.EnableCampaignReconnaissance))
                 {
                     Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);
-                    EmitRecon(snapshot, allocation);
+                    EmitRecon(snapshot, plan, allocation);
                 }
                 else
                 {
@@ -379,10 +384,10 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // [Recon] on change of its counts (one row per alliance per change; no string otherwise).
-        private static void EmitRecon(CampaignSnapshot snapshot, Allocation allocation)
+        private static void EmitRecon(CampaignSnapshot snapshot, TheaterPlan plan, Allocation allocation)
         {
             int a = snapshot.Alliance;
-            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation);
+            var counts = ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation, plan);
             if (ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])) return;
             ReconRowEmitted[a] = true;
             LastReconCounts[a] = counts;
@@ -492,7 +497,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The transport-mode counts are the smoke proof of G0's W&L-side finding: vanilla gives
         // rails and rivers to non-player alliances only (112862-112867).
-        private static void LogFirstReview(CampaignSnapshot s, SectorModel sectors)
+        private static void LogFirstReview(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan)
         {
             int rails = 0, rivers = 0;
             for (int i = 0; i < s.Own.Count; i++)
@@ -512,6 +517,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 " commanders=" + s.Commanders.Count +
                 " crossings=" + s.Crossings.Count +
                 " useRails=" + rails + " useRivers=" + rivers +
+                " minStrength=" + plan.MinGarrisonStrength.ToString("0", System.Globalization.CultureInfo.InvariantCulture) +
                 " player=" + s.Player);
         }
 

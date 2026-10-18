@@ -366,7 +366,7 @@ internal static class ForesightTelemetryTests
         AssertTrue(row.StartsWith("[Reserves] alliance=0 date=1861-06-15 capital=9000/12000 hold=", StringComparison.Ordinal), "the capital's held and floor, after the alliance and date: " + row);
         var parts = Field(row, "hold").Split(',');
         AssertEqual(d.East + ":7000/9000", parts[0], "the sector with the largest need first: its held against max(HoldNeed, the garrison minimum)");
-        string capital = d.Capital + ":9000/" + ((int)ForceAllocator.MinGarrisonStrength);
+        string capital = d.Capital + ":9000/" + ((int)TheaterPlanner.MinStrengthFallback);
         AssertTrue(Array.IndexOf(parts, capital) > 0, "the capital's sector holds its guard: " + capital + " in " + row);
         AssertTrue(TelemetryLegacyParser.TryParse(row, TelemetryProfile.CampaignTuning, "s", out var ev), "the row parses");
         AssertEqual("1861-06-15", ev.CampaignDate, "date= is lifted into the campaign date");
@@ -393,7 +393,7 @@ internal static class ForesightTelemetryTests
         AssertEqual(6, parts.Length, "six sectors and no more: " + row);
         AssertTrue(parts[0].StartsWith((sectors.Count - 1) + ":", StringComparison.Ordinal), "the largest need first: " + row);
         AssertTrue(parts[1].StartsWith("1:", StringComparison.Ordinal) && parts[2].StartsWith("2:", StringComparison.Ordinal), "equal needs by the lower sector id: " + row);
-        AssertTrue(parts[3].EndsWith("/" + (int)ForceAllocator.MinGarrisonStrength, StringComparison.Ordinal), "the rest at the garrison minimum: " + row);
+        AssertTrue(parts[3].EndsWith("/" + (int)TheaterPlanner.MinStrengthFallback, StringComparison.Ordinal), "the rest at the garrison minimum: " + row);
     }
 
     private static void ReservesRowNamesEachDepartmentsStrength()

@@ -51,7 +51,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private static string HoldShares(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, Allocation a, CultureInfo inv)
         {
             var need = new float[sectors.Count];
-            for (int k = 0; k < need.Length; k++) need[k] = ForceAllocator.MinGarrisonStrength;
+            for (int k = 0; k < need.Length; k++) need[k] = plan.MinGarrisonStrength;
             for (int k = 0; k < plan.Sectors.Count; k++)
             {
                 var sp = plan.Sectors[k];

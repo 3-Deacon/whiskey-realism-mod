@@ -57,7 +57,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   Withheld      a sector's Hold formations are ordered by distance to the sector's nearest
     //                 believed land enemy (centroid when none), with a HomeDepartmentDiscount for
     //                 a formation whose home department (PlannerState, D6 detail) is the sector's theater; the shortest prefix whose
-    //                 strength reaches max(HoldNeed, MinGarrisonStrength) is withheld from vanilla's
+    //                 strength reaches max(HoldNeed, TheaterPlan.MinGarrisonStrength) is withheld from vanilla's
     //                 offensive gather (CheckOffensiveMovements 14257-14275), the rest is not.
     //   Gave up       a formation the move tracker gave up on at the target its role would send it to (P8: two misses,
     //                 MoveTracker.GaveUp) loses that role: the depot and recon picks take the next candidate, any other
@@ -83,7 +83,6 @@ namespace WhiskeyRealism.Strategic.Planner
     // garrison, largest first. G5b routes recruits and brigade transfers from one to the other.
     public static class ForceAllocator
     {
-        public const float MinGarrisonStrength = 5000f;
         public const float UnreliableBelow = 0.5f; // telemetry: the [Allocation] row's run of unreliable days
         // D6 detail (c): a formation whose home department is the sector's theater is treated as this much closer to the sector's army
         // (0.05 when the home was only a historical hint; the department is now the planner's own stable assignment).
@@ -842,8 +841,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 // presumed men it holds against at the same ratio): foresight's need is the sum of the two, so the believed part is at least
                 // the presumed part. Picture off: the earlier test, the need being the larger of the two.
                 bool beliefDriven = PlannerSettings.ForesightPicture
-                    ? _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - _believed[k]
-                    : _believed[k] > MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
+                    ? _believed[k] > _plan.MinGarrisonStrength && _believed[k] >= _need[k] - _believed[k]
+                    : _believed[k] > _plan.MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
                 return !beliefDriven || _held.Sector[k] - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
             }
 
@@ -891,7 +890,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 free = mass = 0;
                 for (int i = 0; i < _n; i++)
                 {
-                    if (_done[i] || !ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard) || IsRecalling(i)) continue;
+                    if (_done[i] || !ReconPlanner.CouldScout(_s, _s.Own[i], ReconKind.AdvanceGuard, _plan.MinGarrisonStrength) || IsRecalling(i)) continue;
                     if (_inMass[i]) mass++;
                     else free++;
                 }
@@ -911,7 +910,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 int claimedBy = -1, claimed = 0, gaveUp = 0, free = 0, recalling = 0;
                 for (int i = 0; i < _n; i++)
                 {
-                    if (!ReconPlanner.CouldScout(_s, _s.Own[i], task.Kind)) continue;
+                    if (!ReconPlanner.CouldScout(_s, _s.Own[i], task.Kind, _plan.MinGarrisonStrength)) continue;
                     if (IsRecalling(i)) recalling++;
                     else if (GaveUpAt(i, task.HoldX, task.HoldZ)) gaveUp++;
                     else if (_done[i])
@@ -1044,7 +1043,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private float Target(int sector)
             {
-                return Math.Max(_need[sector], MinGarrisonStrength);
+                return Math.Max(_need[sector], _plan.MinGarrisonStrength);
             }
 
             // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardCoverage (the player's own

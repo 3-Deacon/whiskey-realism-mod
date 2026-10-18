@@ -175,7 +175,7 @@ internal static class SecessionGarrisonTests
         quiet.Own.Add(Corps(2, 310f, 7000f, KentuckyState));
         quiet.Own.Add(Corps(3, 330f, 8000f, KentuckyState));
         var small = Plan(quiet);
-        AssertNear(ForceAllocator.MinGarrisonStrength, small.Garrisons[0].Need, 0.5f, "no enemy believed: the floor");
+        AssertNear(TheaterPlanner.MinStrengthFallback, small.Garrisons[0].Need, 0.5f, "no enemy believed: the floor");
         AssertEqual(1, small.Garrisons[0].InstanceIds.Count, "one formation is a small garrison");
 
         // A fresh sighting of 30000 at the town: HoldRatio x 30000 = 18000, nearest first until it is met.

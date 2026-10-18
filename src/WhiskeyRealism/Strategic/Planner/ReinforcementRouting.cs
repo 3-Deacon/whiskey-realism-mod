@@ -148,7 +148,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // The strength a Shortfall carrier is short of, by the need the allocator reported it for
         // (ForceAllocator.ListShortfalls): the main effort's required force less what the MainEffort
         // formations hold, the capital floor less the CapitalGuards, a sector's hold target
-        // (max(HoldNeed, MinGarrisonStrength)) less what counts there. 0 for any other role.
+        // (max(HoldNeed, the plan's MinGarrisonStrength)) less what counts there. 0 for any other role.
         internal static float ShortfallStrength(TheaterPlan plan, Allocation allocation, IReadOnlyList<FormationRecord> own, int instanceId)
         {
             if (plan == null || allocation == null || own == null || !allocation.TryGet(instanceId, out var carrier)) return 0f;
@@ -159,7 +159,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 case FormationRole.CapitalGuard:
                     return Math.Max(0f, plan.CapitalFloorStrength - RoleStrength(allocation, own, FormationRole.CapitalGuard, -1));
                 case FormationRole.Hold:
-                    float target = Math.Max(HoldNeedOf(plan, carrier.SectorId), ForceAllocator.MinGarrisonStrength);
+                    float target = Math.Max(HoldNeedOf(plan, carrier.SectorId), plan.MinGarrisonStrength);
                     return Math.Max(0f, target - RoleStrength(allocation, own, FormationRole.Hold, carrier.SectorId));
                 default:
                     return 0f;

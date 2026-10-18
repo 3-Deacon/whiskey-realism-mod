@@ -99,10 +99,13 @@ namespace WhiskeyRealism.Strategic.Planner
         // Scout first (smoke amendments 2026-10-16, D1/D2). A belief at or above this confidence is a fresh picture: ContactEvidenceLedger's
         // own bar for acting on a belief (a probe never escalates on less, ReconPlanner.ProbeStaleConfidence).
         public const float ScoutFreshConfidence = ContactEvidenceLedger.MinEscalationConfidence;
-        // The presumed enemy at an unscouted place is the smallest force vanilla's AI moves at all (aiminimumstrengthformovement 5000,
-        // campaignprefs 1396-1397; ForceAllocator.MinGarrisonStrength), scaled up by the importance of the enemy-held ground nearby: a
+        // The presumed enemy at an unscouted place is the smallest force vanilla's AI moves at all (aiminimumstrengthformovement,
+        // campaignprefs 1396-1397; TheaterPlan.MinGarrisonStrength), scaled up by the importance of the enemy-held ground nearby: a
         // more valuable objective is presumed better held, up to twice the floor.
         public const float PresumedImportanceGain = 1f;
+        // The minimum strength when the scenario's read is not positive or not finite (Config/campaignprefs.txt 1397): the one place the
+        // number 5000 stands for it. TheaterPlan.MinGarrisonStrength is the definition site everything else derives from.
+        internal const float MinStrengthFallback = 5000f;
         // D3: the mass is the force the objective needs: the estimated enemy x the required ratio x (1 + margin). The margin is
         // MassMarginBase, shrunk by a bold commander (AttackBias, as the balance term scales by it) and grown for a cautious one.
         public const float MassMarginBase = 0.25f, MassMarginBiasScale = 0.5f;
@@ -146,10 +149,10 @@ namespace WhiskeyRealism.Strategic.Planner
             public MarchSpeedInputs Speed;
             public float CapitalFloor, CapitalThreat01;
             // Foresight F3: the enemy picture, built once a review before the first Evaluate (Evaluate builds it when null); the numbers the
-            // capital threat leaves for the plan's [CapitalThreat] row; and the minimum strength every F3 floor derives from (the 5000 const
-            // until foresight F5 reads the scenario's live minimum into it; MinStrength(Inputs) is the one reader).
+            // capital threat leaves for the plan's [CapitalThreat] row; and the minimum strength every floor derives from (the scenario's live
+            // minimum, set by Plan from PlanMinimum; the fallback for a hand-built input; MinStrength(Inputs) is the one reader).
             internal EnemyPicture Picture;
-            internal float MinStrength = ForceAllocator.MinGarrisonStrength;
+            internal float MinStrength = MinStrengthFallback;
             internal float CapitalWeighted, CapitalReach, CapitalReliefDays, CapitalCorpsPerDay;
             internal ReviewTerrain Terrain;   // marks the questions' order; null once scoring runs without rivers
             internal SectorFacts Facts;
@@ -220,6 +223,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             var review = new ReviewTerrain(terrain, s.Areas);
             var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders, State = state };
+            plan.MinGarrisonStrength = inputs.MinStrength = PlanMinimum(s);
             AssignDepartments(inputs, state);
             // The picture is built once, before the first Evaluate: displacement is judged on straight distances and needs no terrain probe, so
             // both passes of a terrain-filling review plan on one picture.
@@ -389,7 +393,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 float own = cand.Mass;
                 cand.Enemy = enemy;
                 cand.Ratio = enemy > 0f ? own / enemy : (cand.Force >= 0 ? float.MaxValue : 0f);
-                cand.Need = NeedFor(enemy, cand.Required, profile.AttackBias);
+                cand.Need = NeedFor(enemy, cand.Required, profile.AttackBias, MinStrength(c));
                 // The balance term ranks targets by what is known (the believed enemy); the presumption gates the odds above and
                 // sizes the push (Need), and being the same floor everywhere it would only blur the ranking.
                 float balance = own + believed > 0f ? own / (own + believed) : 0f;
@@ -820,7 +824,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private static float LegacyHoldNeedAt(Inputs c, float x, float z, float reach, float threat, float holdRatio, out float presumed)
         {
             presumed = FreshLandBeliefWithin(c.S, x, z, reach) ? 0f : PresumedAt(c, x, z, reach);
-            return Math.Max(Math.Max(holdRatio * threat, ForceAllocator.MinGarrisonStrength), presumed);
+            return Math.Max(Math.Max(holdRatio * threat, MinStrength(c)), presumed);
         }
 
         // The Faded and Anchor elements within `reach` of a point that no facing sector was assigned, weighted as the picture weights them.
@@ -840,6 +844,21 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static float MinStrength(Inputs c)
         {
             return c.MinStrength;
+        }
+
+        // The plan's minimum strength (D11 requirement-live-min-strength): the scenario's read when it is positive and finite, else the 5000
+        // fallback; with the picture flag off always the fallback, so rolling the picture back alone never leaves the live floor under D2's
+        // old presumption.
+        internal static float PlanMinimum(CampaignSnapshot s)
+        {
+            if (!PlannerSettings.ForesightPicture) return MinStrengthFallback;
+            return ReadIsUsable(s.MinStrengthForMovement) ? s.MinStrengthForMovement : MinStrengthFallback;
+        }
+
+        // Whether the scenario's raw read can be a minimum; the review warns when it cannot, whatever the flag says.
+        internal static bool ReadIsUsable(float raw)
+        {
+            return raw > 0f && !float.IsNaN(raw) && !float.IsInfinity(raw);
         }
 
         private static void EnsurePicture(Inputs c)
@@ -1163,11 +1182,11 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // D3: the force an objective needs against `enemy` at `required` odds: enemy x required x (1 + margin), the margin
         // MassMarginBase x (1 - MassMarginBiasScale x AttackBias) (bold: leaner, cautious: heavier), never below the smallest force
-        // the AI moves at all (MinGarrisonStrength).
-        internal static float NeedFor(float enemy, float required, float attackBias)
+        // the AI moves at all (the plan's minimum strength).
+        internal static float NeedFor(float enemy, float required, float attackBias, float minimum)
         {
             float margin = MassMarginBase * (1f - MassMarginBiasScale * Math.Max(-1f, Math.Min(1f, attackBias)));
-            return Math.Max(ForceAllocator.MinGarrisonStrength, enemy * required * (1f + margin));
+            return Math.Max(minimum, enemy * required * (1f + margin));
         }
 
         // D3: the part of the capacity the objective needs, nearest the target first (the lower instance id on a tie), the
@@ -1490,7 +1509,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (b.Confidence01 <= 0f || b.Confidence01 >= ScoutFreshConfidence || Afloat(b)) continue;
                 if (RiverLines.Distance(b.X, b.Z, x, z) <= radius) remembered = Math.Max(remembered, Math.Max(0f, b.Strength));
             }
-            return Math.Max(ForceAllocator.MinGarrisonStrength * (1f + PresumedImportanceGain * importance), remembered);
+            return Math.Max(MinStrength(c) * (1f + PresumedImportanceGain * importance), remembered);
         }
 
         // Believed land enemy within radius (straight), each weighted min(1, radius / river distance).

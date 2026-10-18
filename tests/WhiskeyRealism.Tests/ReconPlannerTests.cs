@@ -321,7 +321,7 @@ internal static class ReconPlannerTests
         s.Own.Add(player);
         s.Own.Add(Unit(1, 500f, 0f, 30000f, 0f, 15));
         var sectors = SectorModel.Build(s);
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
 
         AssertEqual(1, Pick(s, sectors, plan, ScreenTask(600f, 0f, 600f, 200f, 1)), "the map-group player is never a screen; the AI corps is");
@@ -368,8 +368,8 @@ internal static class ReconPlannerTests
         var ledger = new ReconMissionLedger();
         AddMission(ledger, s, ReconKind.Screen, 2, 260f, 0f, -1);
         var task = ScreenTask(0f, 0f, 265f, 0f, -1);
-        AssertEqual(2, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), "the formation already on that post keeps it");
-        AssertEqual(1, ReconPlanner.PickFormation(s, null, null, null, task, new List<int>(), true), "without the ledger the nearest to the axis start");
+        AssertEqual(2, ReconPlanner.PickFormation(s, null, FixturePlan(s), ledger, task, new List<int>(), true), "the formation already on that post keeps it");
+        AssertEqual(1, ReconPlanner.PickFormation(s, null, FixturePlan(s), null, task, new List<int>(), true), "without the ledger the nearest to the axis start");
     }
 
     // A mission outlives the day it was issued: if the player takes command of the group on it (stage F's chain
@@ -384,14 +384,14 @@ internal static class ReconPlannerTests
             var ledger = new ReconMissionLedger();
             AddMission(ledger, s, ReconKind.Screen, 2, 260f, 0f, -1);
             var task = ScreenTask(0f, 0f, 265f, 0f, -1);
-            AssertEqual(2, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), "fixture: while the AI holds it the incumbent keeps the post");
+            AssertEqual(2, ReconPlanner.PickFormation(s, null, FixturePlan(s), ledger, task, new List<int>(), true), "fixture: while the AI holds it the incumbent keeps the post");
 
             var taken = s.Own[1];
             taken.Chain = chain;                                                     // the player takes command of group 2
             s.Own[1] = taken;
-            AssertEqual(1, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), chain + ": the incumbent is refused and another formation is picked");
+            AssertEqual(1, ReconPlanner.PickFormation(s, null, FixturePlan(s), ledger, task, new List<int>(), true), chain + ": the incumbent is refused and another formation is picked");
             s.Own.RemoveAt(0);
-            AssertEqual(-1, ReconPlanner.PickFormation(s, null, null, ledger, task, new List<int>(), true), chain + ": with no other formation, none");
+            AssertEqual(-1, ReconPlanner.PickFormation(s, null, FixturePlan(s), ledger, task, new List<int>(), true), chain + ": with no other formation, none");
         }
     }
 
@@ -406,7 +406,7 @@ internal static class ReconPlannerTests
         s.Own[0] = cut;
         ledger.OnReview(s, new Allocation { Alliance = 0 });
         AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "recalled on low supply");
-        AssertEqual(-1, ReconPlanner.PickFormation(s, null, null, ledger, ScreenTask(0f, 0f, 200f, 0f, -1), new List<int>(), true), "a recalling group is not re-tasked");
+        AssertEqual(-1, ReconPlanner.PickFormation(s, null, FixturePlan(s), ledger, ScreenTask(0f, 0f, 200f, 0f, -1), new List<int>(), true), "a recalling group is not re-tasked");
     }
 
     // ---- pickets, advance guard, screen posture, probe ----
@@ -416,7 +416,7 @@ internal static class ReconPlannerTests
         var s = LineWorld();
         s.Own.Add(Unit(1, 600f, 0f, 20000f, 0f, 15));
         var sectors = SectorModel.Build(s);
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
 
         var tasks = Plan(s, sectors, plan);
@@ -436,7 +436,7 @@ internal static class ReconPlannerTests
         s.Own.Add(Unit(1, 600f, 0f, 20000f, 0f, 15));
         s.Beliefs.Add(Belief("threat", 550f, 60f, 30000f, Today, 1f, 5f)); // hold need 0.6 x 30000 = 18000
         var sectors = SectorModel.Build(s);
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
         var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
 
@@ -502,7 +502,7 @@ internal static class ReconPlannerTests
         for (int k = 0; k < 4; k++)
             s.Beliefs.Add(Belief("west" + k, 100f + 60f * k, 300f, 30000f, Today - 25, 0.05f, 300f));
         var sectors = SectorModel.Build(s);
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Screen });
 
         var tasks = Plan(s, sectors, plan);
@@ -917,7 +917,7 @@ internal static class ReconPlannerTests
         s.Own.Add(player);
         s.Beliefs.Add(Belief("threat", 550f, 60f, 30000f, Today, 1f, 5f)); // hold need 0.6 x 30000 = 18000
         var sectors = SectorModel.Build(s);
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
         var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
         AssertEqual(-1, Pick(s, sectors, plan, picket), "the AI corps is the final reserve and the player is never a picket: nobody");
@@ -934,7 +934,7 @@ internal static class ReconPlannerTests
         other.Chain = otherChain;
         s.Own.Add(other);
         s.Beliefs.Add(Belief("threat", 550f, 60f, 30000f, Today, 1f, 5f)); // hold need 18000
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
         var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
         return (s, SectorModel.Build(s), plan, picket);
@@ -945,7 +945,7 @@ internal static class ReconPlannerTests
         var s = LineWorld();
         s.Own.Add(Unit(1, 200f, 0f, 20000f, 0.9f, 15)); // sector 0, nearest the town
         var sectors = SectorModel.Build(s);
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum };
         plan.Sectors.Add(new SectorPlan { SectorId = 1, Posture = TheaterPosture.Hold });
         var picket = new ReconTask { Kind = ReconKind.Picket, SectorId = 1, FromX = 400f, HoldX = 400f, Reason = "picket" };
         AssertEqual(-1, Pick(s, sectors, plan, picket), "a group outside the picket's sector is never taken");
@@ -1392,7 +1392,7 @@ internal static class ReconPlannerTests
         int plan = review.IndexOf("TheaterPlanner.Plan(", StringComparison.Ordinal);
         int tasks = review.IndexOf("PlanRecon(snapshot, sectors, plan, year, month, day);", StringComparison.Ordinal);
         int allocate = review.IndexOf("ForceAllocator.Allocate(", StringComparison.Ordinal);
-        int sync = review.IndexOf("SyncRecon(snapshot, allocation);", StringComparison.Ordinal);
+        int sync = review.IndexOf("SyncRecon(snapshot, plan, allocation);", StringComparison.Ordinal);
         int publish = review.IndexOf("CampaignPlanStore.Publish(alliance, plan, allocation, sectors);", StringComparison.Ordinal);
         AssertTrue(age > 0 && bookkeeping > age && plan > bookkeeping && tasks > plan && allocate > tasks && sync > allocate && publish > sync,
             "mission aging (also a paused day), then the plan, the recon tasks, the allocation that picks their formations, the mission sync, the publish that carries the ids");
@@ -1415,10 +1415,10 @@ internal static class ReconPlannerTests
         string syncRecon = BodyOf(src, "private static void SyncRecon(");
         AssertContains(syncRecon, "TelemetryPerf.Scope(\"campaign.planner.recon\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "scope campaign.planner.recon");
         AssertContains(syncRecon, "Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);", "binds the allocation's Recon assignments to missions");
-        AssertTrue(syncRecon.IndexOf("if (FlagOn(Plugin.EnableCampaignReconnaissance))", StringComparison.Ordinal) < syncRecon.IndexOf("EmitRecon(snapshot, allocation);", StringComparison.Ordinal) && syncRecon.IndexOf("EmitRecon(snapshot, allocation);", StringComparison.Ordinal) < syncRecon.IndexOf("else", StringComparison.Ordinal), "the row only while the flag is on (G5d: the else ends every mission)");
+        AssertTrue(syncRecon.IndexOf("if (FlagOn(Plugin.EnableCampaignReconnaissance))", StringComparison.Ordinal) < syncRecon.IndexOf("EmitRecon(snapshot, plan, allocation);", StringComparison.Ordinal) && syncRecon.IndexOf("EmitRecon(snapshot, plan, allocation);", StringComparison.Ordinal) < syncRecon.IndexOf("else", StringComparison.Ordinal), "the row only while the flag is on (G5d: the else ends every mission)");
 
         string emit = BodyOf(src, "private static void EmitRecon(");
-        AssertContains(emit, "ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation)", "the row's counts");
+        AssertContains(emit, "ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation, plan)", "the row's counts");
         AssertContains(emit, "TelemetryRouter.LegacyInfo(counts.Row(a), TelemetryLayer.Campaign);", "the [Recon] row, on change");
         AssertContains(emit, "ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])", "rows on change, no string built otherwise");
 
@@ -1701,6 +1701,16 @@ internal static class ReconPlannerTests
         };
     }
 
+    // The fixtures' aiminimumstrengthformovement (World sets MinStrengthForMovement to 1000). A hand-built plan keeps the 5000 fallback, so
+    // each plan here carries the fixture's own minimum, as TheaterPlanner.Plan would publish it (foresight F5).
+    private const float FixtureMinimum = 1000f;
+
+    // The plan a pick judges when a test holds none: empty, with the fixture's own minimum.
+    private static TheaterPlan FixturePlan(CampaignSnapshot s)
+    {
+        return new TheaterPlan { Alliance = s.Alliance, DaySerial = s.DaySerial, MinGarrisonStrength = FixtureMinimum };
+    }
+
     private static EnemyBelief Belief(string key, float x, float z, float strength, int lastSeen, float confidence, float radius)
     {
         return new EnemyBelief
@@ -1712,7 +1722,7 @@ internal static class ReconPlannerTests
 
     private static TheaterPlan MainPlan(int sector, float targetX)
     {
-        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MainSectorId = sector, MainObjectiveId = 3, MainRequiredRatio = 1.1f };
+        var plan = new TheaterPlan { Alliance = 0, DaySerial = Today, MinGarrisonStrength = FixtureMinimum, MainSectorId = sector, MainObjectiveId = 3, MainRequiredRatio = 1.1f };
         plan.Sectors.Add(new SectorPlan { SectorId = sector, Posture = TheaterPosture.MainEffort, TargetObjectiveId = 3, TargetX = targetX, TargetZ = 0f, RequiredRatio = 1.1f });
         return plan;
     }
@@ -1799,6 +1809,7 @@ internal static class ReconPlannerTests
 
     private static int Pick(CampaignSnapshot s, SectorModel sectors, TheaterPlan plan, in ReconTask task, bool mainEffortHasScreen = true)
     {
+        plan = plan ?? FixturePlan(s);
         return ReconPlanner.PickFormation(s, sectors, plan, null, task, new List<int>(), mainEffortHasScreen);
     }
 

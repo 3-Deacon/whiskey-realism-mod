@@ -96,8 +96,8 @@ internal static class ForceAllocatorTests
     // ---- the main effort and the mass ----
 
     // D3 (smoke amendments 2026-10-16): the mass is the force the objective needs, not everything movable. Three corps and a main target
-    // nobody has scouted: the presumed enemy is 5000 x (1 + 1.0, the objective's importance) = 10000, the need 10000 x 1.1 x 1.25 = 13750, and
-    // corps 1 (20000, nearest the target) is all of it. The other two keep their own front's role: they are not "the remainder to the main
+    // nobody has scouted: the presumed enemy is the live minimum (the fixture's aiminimumstrengthformovement, 1000) x (1 + 1.0, the objective's
+    // importance) = 2000, the need 2000 x 1.1 x 1.25 = 2750, and corps 1 (20000, nearest the target) is all of it. The other two keep their own front's role: they are not "the remainder to the main
     // effort". The staged main effort gathers at its start line, the position of its forward-most member.
     private static void OnlyTheNeededMassGoesToTheMainEffort()
     {
@@ -107,7 +107,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(3, 550f, 10000f));
         var plan = PlanOf(s);
         AssertEqual(98, plan.MainObjectiveId, "main effort at x 100");
-        AssertNear(13750f, plan.MainNeedStrength, 1f, "the need: presumed 10000 x required 1.1 x (1 + 0.25)");
+        AssertNear(2750f, plan.MainNeedStrength, 1f, "the need: floor 1000 x 2 = 2000 x required 1.1 x (1 + 0.25)");
         AssertEqual("1", string.Join(",", plan.MassInstanceIds), "the mass is the nearest corps, which is enough");
         var a = Alloc(plan, s);
         var sectors = Sectors(s);
@@ -228,7 +228,7 @@ internal static class ForceAllocatorTests
 
     // ---- capital ----
 
-    // A believed army at x 20 against a capital at x 0: floor = the 5000 minimum + 40000 / 20^0.3 x 0.5 = 5000 + 8142 (D11). The nearest
+    // A believed army at x 20 against a capital at x 0: floor = the plan's minimum (the fixture's 1000) + 40000 / 20^0.3 x 0.5 = 1000 + 8142 (D11). The nearest
     // massable formations fill it: corps 3 (3000) then corps 2 (15000); corps 1 stays the main effort.
     private static void CapitalGuardFilledFirstUpToFloor()
     {
@@ -239,7 +239,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(3, 50f, 3000f));
         s.Beliefs.Add(Belief(20f, 0f, 40000f));
         var plan = PlanOf(s);
-        AssertNear(ForceAllocator.MinGarrisonStrength + 8142f, plan.CapitalFloorStrength, 5f, "capital floor on beliefs: the minimum plus the weight");
+        AssertNear(plan.MinGarrisonStrength + 8142f, plan.CapitalFloorStrength, 5f, "capital floor on beliefs: the plan's minimum plus the weight");
         var a = Alloc(plan, s);
         foreach (int id in new[] { 3, 2 })
         {
@@ -345,7 +345,9 @@ internal static class ForceAllocatorTests
             s.Reset(0, 0, Day, PlayerCommandClass.NotCareer, -1, tempo);
             s.RelocationRange = 150f;
             s.OffensiveDominance = 1.1f;
-            s.MinStrengthForMovement = 1000f;
+            // The test is about the hold modifier, so the scenario's minimum is the 5000 the corps below were sized for (it was 1000 for the
+            // movement tests only, with the floors a constant 5000 independent of it; foresight F5 makes them one number).
+            s.MinStrengthForMovement = 5000f;
             s.MinMoraleForMovement = 0.3f;
             s.HasCapital = true;
             for (int i = 0; i < 7; i++)
@@ -468,6 +470,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(8, 120f, 9000f));  // main body
         s.Beliefs.Add(Belief(110f, 0f, 10000f));
         var plan = ManualPlan(s);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         plan.CapitalFloorStrength = 1000f;
         int mainSector = Sectors(s).SectorAt(100f, 0f);
         plan.MainSectorId = mainSector;
@@ -1473,6 +1476,7 @@ internal static class ForceAllocatorTests
         horse.CavalryShare = 0.9f;
         s.Own.Add(horse);
         var plan = MainPlan(s, new[] { 1, 2 }, 100f);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         var task = ScreenTask(250f, 0f, 150f, 0f, plan.MainSectorId);
         var a = Alloc(plan, s, recon: new List<ReconTask> { task });
         var x = Of(a, 2);
@@ -1490,6 +1494,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(horse);
         s.Own.Add(Corps(3, 240f, 3000f)); // smaller infantry, outside the mass
         var plan = MainPlan(s, new[] { 2 }, 100f);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         var a = Alloc(plan, s, recon: new List<ReconTask> { ScreenTask(250f, 0f, 150f, 0f, plan.MainSectorId) });
         AssertEqual(FormationRole.Recon, Of(a, 2).Role, "cavalry first, even from the mass and with infantry outside it");
         AssertTrue(Of(a, 3).Role != FormationRole.Recon, "the infantry is not used");
@@ -1518,6 +1523,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(horse);
         s.Own.Add(Corps(3, 400f, 6000f));
         var plan = MainPlan(s, new[] { 1, 2 }, 100f);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         int other = Sectors(s).SectorAt(350f, 0f);
         var tasks = new List<ReconTask>
         {
@@ -1542,6 +1548,7 @@ internal static class ForceAllocatorTests
             t.Own.Add(h);
         }
         var plan2 = MainPlan(t, new[] { 1, 2, 4 }, 100f);
+        plan2.MinGarrisonStrength = t.MinStrengthForMovement;
         var b = Alloc(plan2, t, recon: new List<ReconTask>
         {
             ScreenTask(210f, 0f, 140f, 0f, plan2.MainSectorId),
@@ -1573,6 +1580,7 @@ internal static class ForceAllocatorTests
         horse.CavalryShare = 0.9f;
         s.Own.Add(horse);
         var plan = ManualPlan(s);
+        plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
         var task = ScreenTask(250f, 0f, 153.37f, 12.5f, 1);
         var tasks = new List<ReconTask> { task };
         var ledger = new ReconMissionLedger();

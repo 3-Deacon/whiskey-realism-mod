@@ -555,7 +555,7 @@ internal static partial class EnemyPictureTests
     private static void MinStrengthIsTheInputsField()
     {
         var c = InputsFor(Csa(float.NaN));
-        AssertEqual(ForceAllocator.MinGarrisonStrength, TheaterPlanner.MinStrength(c), "until foresight F5 it is the 5000 const");
+        AssertEqual(TheaterPlanner.MinStrengthFallback, TheaterPlanner.MinStrength(c), "until foresight F5 it is the 5000 const");
         c.MinStrength = 2345f;
         AssertEqual(2345f, TheaterPlanner.MinStrength(c), "MinStrength(inputs) is the Inputs field");
         AssertNear(2345f * 2f, TheaterPlanner.Floor(c, WashingtonX, WashingtonZ, 200f), 0.01f, "every floor derives from it");
@@ -806,8 +806,8 @@ internal static partial class EnemyPictureTests
         float believedHold = TheaterPlanner.HoldRatio * facts.Threat[sector];
         AssertTrue(believedHold > TheaterPlanner.MinStrength(c), "the believed army sets a hold above the minimum");
         AssertTrue(facts.Need[sector] >= believedHold - 0.01f, "the need includes it");
-        bool beliefDriven = believedHold > ForceAllocator.MinGarrisonStrength && believedHold >= facts.Need[sector] - believedHold;
-        AssertEqual(beliefDriven, believedHold >= facts.Assigned[sector] * TheaterPlanner.HoldRatio - 0.01f && believedHold > ForceAllocator.MinGarrisonStrength,
+        bool beliefDriven = believedHold > TheaterPlanner.MinStrengthFallback && believedHold >= facts.Need[sector] - believedHold;
+        AssertEqual(beliefDriven, believedHold >= facts.Assigned[sector] * TheaterPlanner.HoldRatio - 0.01f && believedHold > TheaterPlanner.MinStrengthFallback,
             "belief-driven exactly when the believed part is at least the presumed part of the sum");
     }
 

@@ -484,13 +484,13 @@ internal static class TheaterPlannerTests
         // mass / distance^0.3 x vanilla's 0.5 (11712-11741).
         float weighted = 10000f / (float)Math.Pow(100.0, 0.3) * 0.5f;
         AssertNear(weighted, plan.CapitalWeighted, 0.01f, "11712-11741 weighting over the live and the faded men");
-        AssertNear(ForceAllocator.MinGarrisonStrength + TheaterPlanner.CapitalFloorRatio * weighted, plan.CapitalFloorStrength, 0.01f, "D11: the floor is the minimum plus the ratio times that weight");
+        AssertNear(plan.MinGarrisonStrength + TheaterPlanner.CapitalFloorRatio * weighted, plan.CapitalFloorStrength, 0.01f, "D11: the floor is the plan's minimum plus the ratio times that weight");
 
         var far = TwoTargets(0.5f, 0.6f);
         far.Beliefs.Add(Belief(-1500f, 0f, 10000f, 1f));
         var farPlan = Plan(far, new PlannerState());
         AssertNear(0f, farPlan.CapitalWeighted, 0f, "beyond the capital reach: nothing weighed");
-        AssertNear(ForceAllocator.MinGarrisonStrength, farPlan.CapitalFloorStrength, 0.01f, "D11: and the floor is the minimum alone");
+        AssertNear(farPlan.MinGarrisonStrength, farPlan.CapitalFloorStrength, 0.01f, "D11: and the floor is the plan's minimum alone");
     }
 
     // ---- river lines (G0 landing B) ----
@@ -655,7 +655,7 @@ internal static class TheaterPlannerTests
         var plan = PlanOnce(s);
         int farSector = Sectors(s).SectorAt(550f, 0f);
         // The sector faces enemy-held ground (objective 97), so it holds its D2 floor: the 10000 afloat army adds nothing to the need.
-        AssertNear(ForceAllocator.MinGarrisonStrength, HoldNeedOf(plan, farSector), 0.5f, "an afloat army is no holdable contact: the hold need is the floor");
+        AssertNear(plan.MinGarrisonStrength, HoldNeedOf(plan, farSector), 0.5f, "an afloat army is no holdable contact: the hold need is the floor, the plan's minimum");
 
         var nearTarget = Line();
         nearTarget.Own.Add(Corps(1, 200f, 20000f));

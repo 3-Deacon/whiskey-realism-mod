@@ -1314,7 +1314,7 @@ internal static class CampaignExecutorTests
             "GarrisonRuntime.PlanPosts(snapshot, plan);",
             "PlanRecon(snapshot, sectors, plan, year, month, day);",
             "allocation = ForceAllocator.Allocate(plan, snapshot, sectors,",
-            "SyncRecon(snapshot, allocation);",
+            "SyncRecon(snapshot, plan, allocation);",
             "GarrisonRuntime.Sync(snapshot, plan, allocation);",
             "CampaignPlanStore.TryGetAllocation(alliance, out var yesterdaysAllocation);",
             "CampaignPlanStore.TryGetPlan(alliance, out var yesterdaysPlan);",

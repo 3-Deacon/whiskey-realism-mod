@@ -118,7 +118,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return own >= 0 && missions.IsRecon(s.Own[own].InstanceId);
         }
 
-        internal static ReconCounts CountsOf(CampaignSnapshot s, ReconMissionLedger missions, IReadOnlyList<ReconTask> tasks, Allocation allocation = null)
+        internal static ReconCounts CountsOf(CampaignSnapshot s, ReconMissionLedger missions, IReadOnlyList<ReconTask> tasks, Allocation allocation = null, TheaterPlan plan = null)
         {
             var counts = new ReconCounts();
             if (allocation != null)
@@ -157,7 +157,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (s != null)
             {
-                counts.Pool = ReconPlanner.ScoutPool(s);
+                counts.Pool = ReconPlanner.ScoutPool(s, plan);
                 counts.Listed = ReconPlanner.ListedCount(s);
                 for (int i = 0; i < s.Beliefs.Count; i++)
                 {

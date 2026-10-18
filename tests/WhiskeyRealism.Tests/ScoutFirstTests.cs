@@ -186,7 +186,7 @@ internal static class ScoutFirstTests
         var c = CandidateOf(s, 31);
         AssertTrue(c.Scouted, "a fresh land belief within the relocation range scouts the target");
         AssertEqual(0f, c.Presumed, "nothing presumed once scouted");
-        AssertNear(ForceAllocator.MinGarrisonStrength, c.Enemy, 0.5f, "the believed 3000, floored at the plain minimum (the anchor is displaced, so no importance on it, D11)");
+        AssertNear(TheaterPlanner.MinStrengthFallback, c.Enemy, 0.5f, "the believed 3000, floored at the plain minimum (the anchor is displaced, so no importance on it, D11)");
         AssertTrue(c.Eligible, "87000 against 5000");
 
         var far = Union();
@@ -216,7 +216,7 @@ internal static class ScoutFirstTests
         var c = CandidateOf(s, 31);
         AssertTrue(c.Scouted, "an own viewer's sight covers the target: what it sees, it sees");
         AssertEqual(0f, c.Presumed, "the empty target is a reading, not a presumption");
-        AssertNear(c.Mass / ForceAllocator.MinGarrisonStrength, c.Ratio, 0.01f, "seen empty: the odds are against the plain minimum (D11's floor), finite");
+        AssertNear(c.Mass / TheaterPlanner.MinStrengthFallback, c.Ratio, 0.01f, "seen empty: the odds are against the plain minimum (D11's floor), finite");
 
         var blind = Union();
         var shortSighted = Corps(99, 780f, 6700f);
@@ -557,7 +557,7 @@ internal static class ScoutFirstTests
         AssertEqual(0, day.Plan.MassInstanceIds.Count, "nobody to march");
         AssertEqual(0, day.Tasks.Count, "nobody could take a reconnaissance task, so none is planned");
         AssertEqual(0, day.Ledger.Missions.Count, "no mission");
-        AssertEqual(0, ReconPlanner.ScoutPool(s), "the pool is empty");
+        AssertEqual(0, ReconPlanner.ScoutPool(s, null), "the pool is empty");
         AssertTrue(ReconStep.CountsOf(s, day.Ledger, day.Tasks).Row(0).EndsWith("pool=0 free=0 mass=0"), "and the [Recon] row says so");
     }
 
@@ -656,7 +656,7 @@ internal static class ScoutFirstTests
     {
         var s = Union(12, readiness: 3);
         var day = Review(s, new PlannerState(), new ReconMissionLedger());
-        AssertEqual(12, ReconPlanner.ScoutPool(s), "every ready, unbusy, orderable formation");
+        AssertEqual(12, ReconPlanner.ScoutPool(s, null), "every ready, unbusy, orderable formation");
         AssertContains(ReconStep.CountsOf(s, day.Ledger, day.Tasks, day.Allocation).Row(0), " pool=12 free=", "the [Recon] row");
         var mixed = Union(12, readiness: 3);
         var busy = mixed.Own[0];
@@ -665,7 +665,7 @@ internal static class ScoutFirstTests
         var slow = mixed.Own[1];
         slow.ReadinessStep = 1;
         mixed.Own[1] = slow;
-        AssertEqual(10, ReconPlanner.ScoutPool(mixed), "a busy and an unready formation are not in it");
+        AssertEqual(10, ReconPlanner.ScoutPool(mixed, null), "a busy and an unready formation are not in it");
     }
 
     // ---- the smoke's shape, D2 and D3 ----
@@ -744,17 +744,17 @@ internal static class ScoutFirstTests
         small.Beliefs.Add(Seen(320f, 1000f));
         float floor = 0f;
         foreach (var sp in Plan(small).Sectors) if (sp.SectorId == ExecutorFixtures.Sectors(small).SectorAt(300f, 0f)) floor = sp.HoldNeed;
-        AssertNear(ForceAllocator.MinGarrisonStrength, floor, 0.5f, "0.6 x 1000 is under the 5000 floor: the floor, not the presumption (6000)");
+        AssertNear(TheaterPlanner.MinStrengthFallback, floor, 0.5f, "0.6 x 1000 is under the 5000 floor: the floor, not the presumption (6000)");
     }
 
     private static void TheMassMarginScalesWithTheCommandersAttackBias()
     {
-        AssertNear(10000f * 1.1f * 1.25f, TheaterPlanner.NeedFor(10000f, 1.1f, 0f), 1f, "a neutral commander: 25%");
-        AssertNear(10000f * 1.1f * 1.125f, TheaterPlanner.NeedFor(10000f, 1.1f, 1f), 1f, "a bold one: 12.5%");
-        AssertNear(10000f * 1.1f * 1.375f, TheaterPlanner.NeedFor(10000f, 1.1f, -1f), 1f, "a cautious one: 37.5%");
-        AssertNear(10000f * 1.1f * 1.125f, TheaterPlanner.NeedFor(10000f, 1.1f, 5f), 1f, "the bias is clamped to [-1, 1]");
-        AssertNear(ForceAllocator.MinGarrisonStrength, TheaterPlanner.NeedFor(0f, 1.1f, 0f), 0.01f, "never below the smallest force the AI moves");
-        AssertNear(ForceAllocator.MinGarrisonStrength, TheaterPlanner.NeedFor(1000f, 1.1f, 0f), 0.01f, "a small enemy still needs the floor");
+        AssertNear(10000f * 1.1f * 1.25f, TheaterPlanner.NeedFor(10000f, 1.1f, 0f, TheaterPlanner.MinStrengthFallback), 1f, "a neutral commander: 25%");
+        AssertNear(10000f * 1.1f * 1.125f, TheaterPlanner.NeedFor(10000f, 1.1f, 1f, TheaterPlanner.MinStrengthFallback), 1f, "a bold one: 12.5%");
+        AssertNear(10000f * 1.1f * 1.375f, TheaterPlanner.NeedFor(10000f, 1.1f, -1f, TheaterPlanner.MinStrengthFallback), 1f, "a cautious one: 37.5%");
+        AssertNear(10000f * 1.1f * 1.125f, TheaterPlanner.NeedFor(10000f, 1.1f, 5f, TheaterPlanner.MinStrengthFallback), 1f, "the bias is clamped to [-1, 1]");
+        AssertNear(TheaterPlanner.MinStrengthFallback, TheaterPlanner.NeedFor(0f, 1.1f, 0f, TheaterPlanner.MinStrengthFallback), 0.01f, "never below the smallest force the AI moves");
+        AssertNear(TheaterPlanner.MinStrengthFallback, TheaterPlanner.NeedFor(1000f, 1.1f, 0f, TheaterPlanner.MinStrengthFallback), 0.01f, "a small enemy still needs the floor");
     }
 
     private static void TheTraceNamesScoutingAndThePresumption()

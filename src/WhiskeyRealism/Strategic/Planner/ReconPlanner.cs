@@ -86,7 +86,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (into == null) return;
             into.Clear();
             if (s == null || !PlannedAlliance(s.Alliance)) return;
-            if (!TaskRanges(s, missions, out float sight, out float commandRange)) return;
+            if (!TaskRanges(s, missions, MinimumOf(plan), out float sight, out float commandRange)) return;
 
             var ctx = new Context(s, sectors, plan, missions, sight, commandRange);
             var candidates = new List<ReconTask>();
@@ -118,13 +118,14 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             if (s == null || !PlannedAlliance(s.Alliance)) return -1;
 
-            int incumbent = Incumbent(s, missions, task, taken);
+            float minimum = MinimumOf(plan);
+            int incumbent = Incumbent(s, missions, task, taken, minimum);
             if (incumbent >= 0) return incumbent;
 
             bool hasMain = TryMainEffort(s, sectors, plan, out var main);
             bool ownMainScreen = hasMain && task.Kind == ReconKind.Screen && task.SectorId == main.Sector;
             bool guardMainCavalry = hasMain && !mainEffortHasScreen && !ownMainScreen &&
-                                    MainBodyCavalryLeft(s, main, missions, taken) <= 1;
+                                    MainBodyCavalryLeft(s, main, missions, taken, minimum) <= 1;
 
             float sectorOwn = 0f, sectorEnemy = 0f;
             if (task.Kind == ReconKind.Picket)
@@ -140,7 +141,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var f = s.Own[i];
                 if (taken != null && taken.Contains(f.InstanceId)) continue;
-                if (!CanMove(s, f, IsDetachment(task.Kind)) || IsRecalling(missions, f.InstanceId)) continue;
+                if (!CanMove(s, f, minimum, IsDetachment(task.Kind)) || IsRecalling(missions, f.InstanceId)) continue;
                 if (!WlChainRules.MayMove(f.Chain)) continue;
                 bool cavalry = f.CavalryShare >= MinCavalryShare;
 
@@ -466,7 +467,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return true;
         }
 
-        private static int MainBodyCavalryLeft(CampaignSnapshot s, in MainEffort m, ReconMissionLedger missions, ICollection<int> taken)
+        private static int MainBodyCavalryLeft(CampaignSnapshot s, in MainEffort m, ReconMissionLedger missions, ICollection<int> taken, float minimum)
         {
             int n = 0;
             for (int i = 0; i < s.Own.Count; i++)
@@ -474,7 +475,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 if (f.CavalryShare < MinCavalryShare || !InMainBody(s, m, f)) continue;
                 if (taken != null && taken.Contains(f.InstanceId)) continue;
-                if (!CanMove(s, f) || !WlChainRules.MayMove(f.Chain) || IsRecalling(missions, f.InstanceId)) continue;
+                if (!CanMove(s, f, minimum) || !WlChainRules.MayMove(f.Chain) || IsRecalling(missions, f.InstanceId)) continue;
                 n++;
             }
             return n;
@@ -491,11 +492,12 @@ namespace WhiskeyRealism.Strategic.Planner
         // amendments 2026-10-16): an advance guard or a probe is a detachment of the main body, not an offensive operation, so it needs
         // readiness (SetWaypoint refuses a march onto enemy ground below step 2, 91336-91355) and morale but not the 5000-man minimum of
         // a whole operation (14099): a brigade or a division detached forward leads the advance, as many 1861 advances were led.
-        private static bool CanMove(CampaignSnapshot s, in FormationRecord f, bool detachment = false)
+        // minStrength is the plan's MinGarrisonStrength: the scenario's aiminimumstrengthformovement validated by the planner (foresight F5).
+        private static bool CanMove(CampaignSnapshot s, in FormationRecord f, float minStrength, bool detachment = false)
         {
             if ((f.Flags & Busy) != 0) return false;
             if (f.ReadinessStep < 2) return false;                  // 14091
-            if (detachment ? f.Strength <= 0f : f.Strength <= s.MinStrengthForMovement) return false; // 14099
+            if (detachment ? f.Strength <= 0f : f.Strength <= minStrength) return false; // 14099
             if (f.Morale <= s.MinMoraleForMovement) return false;     // 14103
             return f.CavalryShare >= MinCavalryShare || (f.Flags & FormationFlags.FightingForce) != 0;
         }
@@ -503,9 +505,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // Whether the formation meets a task kind's own movement standard (the pick's first test): AI-orderable, ready, unbusy, strong
         // enough (a detachment needs only a body, a screen or a picket the vanilla offensive minimum), with the morale to march. The
         // allocator tells a task nobody could take (none-able) from one every able formation was already given away from.
-        internal static bool CouldScout(CampaignSnapshot s, in FormationRecord f, ReconKind kind)
+        internal static bool CouldScout(CampaignSnapshot s, in FormationRecord f, ReconKind kind, float minStrength)
         {
-            return WlChainRules.MayMove(f.Chain) && CanMove(s, f, IsDetachment(kind));
+            return WlChainRules.MayMove(f.Chain) && CanMove(s, f, minStrength, IsDetachment(kind));
         }
 
         private static bool IsDetachment(ReconKind kind)
@@ -515,12 +517,20 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // How many formations the planner could send on a reconnaissance task at all (the [Recon] row's pool=): the AI-orderable, ready,
         // unbusy formations, a detachment's standard being the widest. 0 explains a day of unwatched approaches and no mission.
-        internal static int ScoutPool(CampaignSnapshot s)
+        internal static int ScoutPool(CampaignSnapshot s, TheaterPlan plan)
         {
+            float minimum = MinimumOf(plan);
             int n = 0;
             for (int i = 0; i < s.Own.Count; i++)
-                if (WlChainRules.MayMove(s.Own[i].Chain) && CanMove(s, s.Own[i], detachment: true)) n++;
+                if (WlChainRules.MayMove(s.Own[i].Chain) && CanMove(s, s.Own[i], minimum, detachment: true)) n++;
             return n;
+        }
+
+        // The minimum strength every check here applies: the plan's (the scenario's aiminimumstrengthformovement, validated by the planner),
+        // the fallback when no plan is at hand (foresight F5).
+        private static float MinimumOf(TheaterPlan plan)
+        {
+            return plan != null ? plan.MinGarrisonStrength : TheaterPlanner.MinStrengthFallback;
         }
 
         // The formations the mass rule accepts and the scout pick refuses for one reason alone: they stand in a vanilla list the planner does not
@@ -536,14 +546,14 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // Smallest sight radius and command range over the AI formations that could take a task.
-        private static bool TaskRanges(CampaignSnapshot s, ReconMissionLedger missions, out float sight, out float commandRange)
+        private static bool TaskRanges(CampaignSnapshot s, ReconMissionLedger missions, float minimum, out float sight, out float commandRange)
         {
             sight = float.MaxValue;
             commandRange = float.MaxValue;
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!CanMove(s, f, detachment: true) || !WlChainRules.MayMove(f.Chain) || IsRecalling(missions, f.InstanceId)) continue;
+                if (!CanMove(s, f, minimum, detachment: true) || !WlChainRules.MayMove(f.Chain) || IsRecalling(missions, f.InstanceId)) continue;
                 if (f.SightRadius <= 0f || f.CommandRange <= 0f) continue;
                 sight = Math.Min(sight, f.SightRadius);
                 commandRange = Math.Min(commandRange, f.CommandRange);
@@ -551,7 +561,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return sight < float.MaxValue;
         }
 
-        private static int Incumbent(CampaignSnapshot s, ReconMissionLedger missions, in ReconTask task, ICollection<int> taken)
+        private static int Incumbent(CampaignSnapshot s, ReconMissionLedger missions, in ReconTask task, ICollection<int> taken, float minimum)
         {
             if (missions == null) return -1;
             foreach (var m in missions.Missions)
@@ -562,7 +572,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 if (taken != null && taken.Contains(f.InstanceId)) continue;
                 if (Distance(m.HoldX, m.HoldZ, task.HoldX, task.HoldZ) > SameSpotFraction * f.SightRadius) continue;
-                if (!CanMove(s, f) || !WlChainRules.MayMove(f.Chain)) continue;
+                if (!CanMove(s, f, minimum) || !WlChainRules.MayMove(f.Chain)) continue;
                 return f.InstanceId;
             }
             return -1;
