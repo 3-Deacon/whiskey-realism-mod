@@ -505,6 +505,8 @@ internal static class TaskChurnTests
             "the executor's last outcome for the group is what the move is compared with");
         FlankResponseTests.AssertPinned(text, "if (MoveContest.FollowsParentMarch(hasPath, own, childMovedSince, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ), rec.LastWaypointX,",
             "a group the parent re-lays (no waypoint of its own, no move of its own since) or on the slot of a parent's own march is the parent's");
+        FlankResponseTests.AssertPinned(text, "bool own = !parentHasWaypoint || MoveContest.IsOwnMove(true, parent.LastWaypointX, parent.LastWaypointZ, issuedX, issuedZ);",
+            "a parent with a Whiskey move recorded and no waypoint of its own is on Whiskey's move, not a foreign one");
         FlankResponseTests.AssertPinned(text, "bool childMovedSince = childHasMove && childHours >= parentHours;", "a Whiskey move of the child's own since the parent's is the child's");
         FlankResponseTests.AssertPinned(text, "return resolution.Found && resolution.Intent.ReleasedFromReserve;", "the allocator's release mark is read from the command intent");
         FlankResponseTests.AssertPinned(text, "return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ),",
