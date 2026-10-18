@@ -12,7 +12,7 @@ Produced-by: claude-opus-5-5 (high)
 
 **Tech stack:** C# netstandard2.1, BepInEx 5.4 + HarmonyX, Unity 2021.3.16f1 Mono x64. Console harness `tests/WhiskeyRealism.Tests` (net8.0; `internal static class *Tests { public static void Run() }`).
 
-**Inputs (read before your slice):** D11 (all of it) and the campaign-planner spec's "Vanilla and W&L model"; `docs/superpowers/plans/2026-10-15-campaign-planner.md` § Global Constraints (binding here too) and the as-built sections of the slices you touch (G3, G4, G5a, G5c, G8, the smoke fixes); root `AGENTS.md`, `src/WhiskeyRealism/{Strategic,Patches}/AGENTS.md`, `tests/WhiskeyRealism.Tests/AGENTS.md`; the investigation `scratchpad/loop/foresight/investigation.md` and decisions `scratchpad/loop/foresight/decisions.md` (session scratchpad); the test plan `docs/loop/foresight/test-plan.md` (frozen at the gate). Decompile `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (build 14703111; regenerate per `docs/findings.md` if `/tmp` was wiped).
+**Inputs (read before your slice):** D11 (all of it) and the campaign-planner spec's "Vanilla and W&L model"; `docs/superpowers/plans/2026-10-15-campaign-planner.md` § Global Constraints (binding here too) and the as-built sections of the slices you touch (G3, G4, G5a, G5c, G8, the smoke fixes); root `AGENTS.md`, `src/WhiskeyRealism/{Strategic,Patches}/AGENTS.md`, `tests/WhiskeyRealism.Tests/AGENTS.md`; the investigation `docs/loop/foresight/investigation.md` and decisions `docs/loop/foresight/decisions.md` (session scratchpad); the test plan `docs/loop/foresight/test-plan.md` (frozen at the gate). Decompile `/tmp/gt_src/asm/Assembly-CSharp.decompiled.cs` (build 14703111; regenerate per `docs/findings.md` if `/tmp` was wiped).
 
 ## Outline
 
