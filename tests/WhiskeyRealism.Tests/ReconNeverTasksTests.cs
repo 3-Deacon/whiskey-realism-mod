@@ -29,6 +29,7 @@ internal static class ReconNeverTasksTests
             ("AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn", AGaveUpFormationIsNotDrawnForTheTaskItGaveUpOn),
             ("TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks", TheDrawServesTheMainObjectivesTasksNotThePostureOrBeliefTasks),
             ("ASecessionGarrisonIsNeverDrawnAsAScout", ASecessionGarrisonIsNeverDrawnAsAScout),
+            ("TheRefusalIsClearedWhenAFreeFormationFillsALaterMainTask", TheRefusalIsClearedWhenAFreeFormationFillsALaterMainTask),
             ("TheDrawNeverOpensAShortfallAgainstABelievedArmy", TheDrawNeverOpensAShortfallAgainstABelievedArmy),
             ("ABelievedSectorThatStillCoversItsNeedGivesAScout", ABelievedSectorThatStillCoversItsNeedGivesAScout),
             ("ADrawThatLeavesExactlyTheNeedIsAllowed", ADrawThatLeavesExactlyTheNeedIsAllowed),
@@ -46,6 +47,7 @@ internal static class ReconNeverTasksTests
             ("AnOrdinaryGarrisonPostTakesNoUnreadyHolder", AnOrdinaryGarrisonPostTakesNoUnreadyHolder),
             ("AReservedFormationPinnedAsABuilderIsNoLongerCounted", AReservedFormationPinnedAsABuilderIsNoLongerCounted),
             ("ACapitalGuardBoundForAnotherSectorCoversNothingWhereItStands", ACapitalGuardBoundForAnotherSectorCoversNothingWhereItStands),
+            ("ACapitalSectorHeldByItsGuardListsNoShortfall", ACapitalSectorHeldByItsGuardListsNoShortfall),
             ("ABelievedTermNearTheNeedButUnderItIsStillPresumptionBacked", ABelievedTermNearTheNeedButUnderItIsStillPresumptionBacked),
             ("TheCarrierIsTheNearestImmobileHolder", TheCarrierIsTheNearestImmobileHolder),
             ("ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked", ASectorWithAStaleBeliefAndAPresumptionIsPresumptionBacked),
@@ -283,6 +285,36 @@ internal static class ReconNeverTasksTests
         var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
         AssertEqual(0, Roles(alloc, FormationRole.Recon), "the formation that gave up on every post is not drawn for any of them");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "it keeps holding");
+    }
+
+    // The reason is told only while the push has no eyes. A draw refused for the first main task is no reason once a free formation fills
+    // a later one: the free 30 gave up on every other task, so the first main task is refused its draw and 30 takes the last.
+    private static void TheRefusalIsClearedWhenAFreeFormationFillsALaterMainTask()
+    {
+        var s = SmokeUnion();
+        s.Own.Add(Corps(30, 365f, 3000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        var tasks = new List<ReconTask>();
+        ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), tasks);
+        var main = new List<ReconTask>();
+        foreach (var task in tasks) if (ReconPlanner.ScoutsMainObjective(task)) main.Add(task);
+        AssertTrue(main.Count >= 2, "two tasks see the main objective: " + main.Count);
+        // 30 gave up on every task but the last main one, so the first main task is refused its draw and the last is filled by the pick.
+        ReconTask last = main[main.Count - 1];
+        var gaveUp = new List<GaveUpMove>();
+        foreach (var task in tasks) if (task.HoldX != last.HoldX || task.HoldZ != last.HoldZ)
+            gaveUp.Add(new GaveUpMove { InstanceId = 30, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
+        AssertEqual(FormationRole.Recon, Of(alloc, 30).Role, "the free formation scouts for a later main task");
+        AssertEqual(last.Reason, Of(alloc, 30).Reason, "the last main task");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "the East reserve was refused for the first");
+        AssertTrue(alloc.ReconUnfilledReason == null, "and the push has its eyes: no reason is told");
+        // Control: with the free formation gone the refusal stands.
+        var bare = SmokeUnion();
+        bare.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
+        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, Review(bare).Allocation.ReconUnfilledReason, "control: nobody scouts, the refusal is the reason");
     }
 
     // The draw is for the push's own eyes. A higher-priority task of another kind (a screen posture, a belief) comes first in the list and
@@ -1027,6 +1059,41 @@ internal static class ReconNeverTasksTests
         AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
         AssertTrue(HeldAtEnd(day, east, false) >= need, "the East holds " + HeldAtEnd(day, east, false) + " against " + need);
         AssertEqual(0, day.Allocation.Shortfalls.Count, "no shortfall against the believed army");
+    }
+
+    // The capital reserve guards its sector when the capital stands in it: the allocation lists the sector as short only if it is short with the
+    // guard counted, as ReserveRules.Hold counts it. The East holds 11000 (the guard's 6000, the hold 5000) against 7200 (verify r4 probe).
+    private static void ACapitalSectorHeldByItsGuardListsNoShortfall()
+    {
+        var s = Base();
+        s.CapitalX = 760f;
+        s.CapitalZ = 0f;
+        s.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
+        s.Own.Add(Corps(9, 200f, 4000f, 1));
+        s.Own.Add(Corps(10, 220f, 4000f, 1));
+        s.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        s.Own.Add(Corps(31, 755f, 6000f));
+        s.Own.Add(Corps(3, 790f, 5000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(900f, 0f, 12000f));
+        var day = Review(s);
+        int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
+        AssertEqual(FormationRole.CapitalGuard, Of(day.Allocation, 31).Role, "31 is the capital guard");
+        AssertEqual(FormationRole.Hold, Of(day.Allocation, 3).Role, "3 holds the East");
+        AssertTrue(HeldAtEnd(day, east, true) >= 11000f, "the East holds " + HeldAtEnd(day, east, true) + " with its guard");
+        AssertFalse(day.Allocation.Shortfalls.Contains(3), "so 3 is not listed as the carrier of a shortfall: " + string.Join(",", day.Allocation.Shortfalls));
+        // A guard that stands elsewhere (the capital in the West) counts nothing in the East, which is then short.
+        var away = Base();
+        away.CapitalX = 560f;
+        away.CapitalZ = 0f;
+        away.Own.Add(Corps(1, 100f, 9563f, 3, FormationFlags.CapitalDefense));
+        away.Own.Add(Corps(9, 200f, 4000f, 1));
+        away.Own.Add(Corps(10, 220f, 4000f, 1));
+        away.Own.Add(Corps(15, 150f, 5000f, 3, FormationFlags.InBattle));
+        away.Own.Add(Corps(31, 760f, 6000f));
+        away.Own.Add(Corps(3, 790f, 5000f));
+        away.Beliefs.Add(ExecutorFixtures.Belief(710f, 0f, 12000f));          // near the capital, so it keeps a floor and a guard
+        var other = Review(away);
+        AssertTrue(other.Allocation.Shortfalls.Contains(3), "control: a guard bound for another sector covers nothing here, the East is short: " + string.Join(",", other.Allocation.Shortfalls));
     }
 
     // A stale belief (confidence 0.3) leaves a presumption: the East need is 20000, set by the remembered army, not by the believed term

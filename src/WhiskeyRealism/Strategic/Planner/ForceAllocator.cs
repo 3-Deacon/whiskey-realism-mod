@@ -638,6 +638,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 bool mainHasScreen = false;
                 int drawn = StandingMainScouts();
+                bool mainFilled = false;
                 for (int t = 0; t < _recon.Count; t++)
                 {
                     var task = _recon[t];
@@ -694,9 +695,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     taken.Add(pickedId);
                     takenAndMass.Add(pickedId);
                     if (task.Kind == ReconKind.Screen && task.SectorId == _plan.MainSectorId) mainHasScreen = true;
+                    if (ReconPlanner.ScoutsMainObjective(task)) mainFilled = true;
                 }
-                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) there is nothing to explain.
-                if (drawn >= MaxReserveScouts) _scoutRefusedForThreat = false;
+                // A refusal is the reason a scout is missing; with one out (drawn now, or standing) or a main task filled by any pick
+                // there is nothing to explain.
+                if (drawn >= MaxReserveScouts || mainFilled) _scoutRefusedForThreat = false;
             }
 
             // The mass's members no role has claimed yet: the bodies a scout pick could still take from the main effort.
@@ -891,11 +894,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 return Math.Max(_need[sector], MinGarrisonStrength);
             }
 
+            // The hold a sector has by the roles assigned: its Hold formations, and the capital guards that stand in the capital's own sector
+            // (a guard elsewhere is on the march and holds nothing where it stands), the way ReserveRules.Hold counts them.
             private float Counted(int sector)
             {
                 float sum = 0f;
                 for (int i = 0; i < _n; i++)
-                    if (_role[i] == FormationRole.Hold && _sector[i] == sector && _roleSector[i] == sector)
+                    if ((_role[i] == FormationRole.Hold || _role[i] == FormationRole.CapitalGuard) && _sector[i] == sector && _roleSector[i] == sector)
                         sum += Counts(i);
                 return sum;
             }
