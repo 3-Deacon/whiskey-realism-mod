@@ -286,9 +286,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // builder of every active task. A Wished task's builder is listed at the wish position (the site for an Ahead wish, whose builder
         // may still be marching to it): the wish is paid at once and the depot rises only while the builder stays within its bugle range
         // (96626-96648), so from the wish until Built or wish-lost the allocator keeps it there, whatever the plan does with the task. A
-        // Marching task's builder is listed at the site (not Wished): the allocator still re-picks it, but G3 counts it in no mass. Only
-        // a bound builder is listed, and Sync binds none the planner may not move (BindBuilder abandons a task whose formation is the W&L
-        // player's), so the set never holds one.
+        // Marching task's builder is listed at the site (not Wished): the allocator keeps it as the task's incumbent
+        // (ForceAllocator.ClaimIncumbent) and G3 counts it in no mass. Only a bound builder is listed, and Sync binds none the planner may
+        // not move (BindBuilder abandons a task whose formation is the W&L player's), so the set never holds one.
         public void CollectHeldBuilders(List<HeldBuilder> into)
         {
             into.Clear();

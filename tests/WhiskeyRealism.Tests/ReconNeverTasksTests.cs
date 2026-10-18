@@ -90,7 +90,7 @@ internal static class ReconNeverTasksTests
 
     // A day built from the real planner, with the tasks narrowed, the gave-up moves or the ledger given, and the plan amended before the allocation.
     private static Day Allocated(CampaignSnapshot s, Func<List<ReconTask>, List<ReconTask>> narrow = null, List<GaveUpMove> gaveUp = null,
-                                 ReconMissionLedger ledger = null, Action<TheaterPlan> amend = null)
+                                 ReconMissionLedger ledger = null, Action<TheaterPlan> amend = null, IReadOnlyList<HeldBuilder> held = null)
     {
         ledger = ledger ?? new ReconMissionLedger();
         var sectors = ExecutorFixtures.Sectors(s);
@@ -101,7 +101,7 @@ internal static class ReconNeverTasksTests
         var all = new List<ReconTask>();
         ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, all);
         day.Tasks = narrow != null ? narrow(all) : all;
-        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, gaveUp);
+        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, gaveUp, held);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
     }
@@ -138,7 +138,7 @@ internal static class ReconNeverTasksTests
             ("a weak formation, every task", Allocated(EastWithAWeakFormation())),
             ("a weak formation, the main objective's tasks", Allocated(EastWithAWeakFormation(), MainTasks)),
             ("no weak formation, the main objective's tasks", Allocated(SmokeUnionWithAnArmy(), MainTasks)),
-            ("a depot task taking the ready formation", Allocated(OneReadyFormation(), all => OneScreen(300f), amend: plan => plan.DepotTasks.Add(new DepotTask { X = 340f, Z = 0f, SectorId = 0, Priority = 1f }))),
+            ("a depot task taking the ready formation", DepotTaskKeepingTheReadyFormation()),
         };
         foreach (var (name, day) in worlds)
         {
@@ -155,6 +155,17 @@ internal static class ReconNeverTasksTests
         var s = SmokeUnion();
         s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
         return s;
+    }
+
+    // F9: a depot builder is new only from a sector's surplus, and the one ready formation is no surplus; the task's own builder, kept as its
+    // incumbent (a Marching task, exempt from the surplus test), is what takes the ready formation.
+    private static Day DepotTaskKeepingTheReadyFormation()
+    {
+        var s = OneReadyFormation();
+        int sector = ExecutorFixtures.Sectors(s).SectorAt(330f, 0f);
+        var incumbent = new[] { new HeldBuilder { InstanceId = 1, SectorId = sector, Wished = false, SiteX = 340f, SiteZ = 0f, TargetX = 340f, TargetZ = 0f } };
+        return Allocated(s, all => OneScreen(300f), held: incumbent,
+                         amend: plan => plan.DepotTasks.Add(new DepotTask { X = 340f, Z = 0f, SectorId = sector, Priority = 1f }));
     }
 
     private static CampaignSnapshot OneReadyFormation()
@@ -184,10 +195,8 @@ internal static class ReconNeverTasksTests
     // The role a claimed formation holds is written in kebab case, as the hold reserve's own reason is: a two-word role is not run together.
     private static void ClaimedNamesAMultiWordRoleInKebabCase()
     {
-        var s = OneReadyFormation();
-        int sector = ExecutorFixtures.Sectors(s).SectorAt(330f, 0f);
-        var depot = Allocated(s, all => OneScreen(300f), amend: plan => plan.DepotTasks.Add(new DepotTask { X = 340f, Z = 0f, SectorId = sector, Priority = 1f }));
-        AssertEqual(FormationRole.DepotBuilder, Of(depot.Allocation, 1).Role, "the only ready formation builds the depot");
+        var depot = DepotTaskKeepingTheReadyFormation();
+        AssertEqual(FormationRole.DepotBuilder, Of(depot.Allocation, 1).Role, "the only ready formation is the depot task's builder (its kept incumbent)");
         AssertEqual(ForceAllocator.ReasonUnfilledClaimedPrefix + "depot-builder", depot.Allocation.ReconUnfilledWhy, "and the screen says so");
 
         var g = Base();
@@ -1326,14 +1335,16 @@ internal static class ReconNeverTasksTests
     }
 
     // What the held sum counts must still hold the sector when the draw is tested. The unready 30 is counted (ReserveRules.Hold), and it is
-    // also the smallest free formation of the East, so a depot task there makes it the builder before the recon pick: it leaves the hold.
+    // also the East's marching depot builder (F9: an unready formation is never a NEW pick, but the task's own builder keeps its pick through a
+    // readiness dip), so the depot task there keeps it as the builder before the recon pick: it leaves the hold.
     // Without it the East keeps 8000 against 7200 and the 3000 cannot go.
     private static void AnUnreadyHolderTakenAsDepotBuilderIsNoLongerCounted()
     {
         var s = EastWithAnUnreadyHolder();
         int east = ExecutorFixtures.Sectors(s).SectorAt(800f, 0f);
-        var day = Review(s, null, null, plan => plan.DepotTasks.Add(new DepotTask { X = 770f, Z = 0f, SectorId = east, Priority = 1f }));
-        AssertEqual(FormationRole.DepotBuilder, Of(day.Allocation, 30).Role, "the unready formation builds the depot");
+        var marching = new[] { new HeldBuilder { InstanceId = 30, SectorId = east, Wished = false, SiteX = 770f, SiteZ = 0f, TargetX = 770f, TargetZ = 0f } };
+        var day = Review(s, null, null, plan => plan.DepotTasks.Add(new DepotTask { X = 770f, Z = 0f, SectorId = east, Priority = 1f }), marching);
+        AssertEqual(FormationRole.DepotBuilder, Of(day.Allocation, 30).Role, "the unready formation is the depot task's kept builder");
         float need = 0f;
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
         AssertNear(7200f, need, 1f, "the East need (belief-driven)");

@@ -521,6 +521,7 @@ internal static class GarrisonPlannerTests
         s.Beliefs.Add(Seen(560f, 30000f));
         s.Own.Add(Corps(1, 503f, 3000f));                                // the incumbent, the smallest formation of its sector
         s.Own.Add(Corps(3, 450f, 9000f));
+        s.Own.Add(Corps(4, 480f, 9000f));                                // F9: a builder leaves its sector's hold met, which the garrison and one corps alone do not
         var sectors = ExecutorFixtures.Sectors(s);
         var plan = HandPlan(s);
         int sector = sectors.SectorAt(503f, 0f);

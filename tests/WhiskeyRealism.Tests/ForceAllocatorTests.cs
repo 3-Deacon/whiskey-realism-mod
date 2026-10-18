@@ -468,6 +468,7 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(5, 100f, 9000f));  // main body
         s.Own.Add(Corps(6, 250f, 4000f));  // recon
         s.Own.Add(Corps(8, 120f, 9000f));  // main body
+        s.Own.Add(Corps(7, 390f, 9000f));  // sector 1's other formation: F9, a builder leaves its sector's hold met, so corps 2 builds only with this one staying
         s.Beliefs.Add(Belief(110f, 0f, 10000f));
         var plan = ManualPlan(s);
         plan.MinGarrisonStrength = s.MinStrengthForMovement;  // the plan carries the fixture's scenario minimum, as TheaterPlanner.Plan would publish it (a hand-built plan keeps the 5000 fallback)
@@ -529,6 +530,7 @@ internal static class ForceAllocatorTests
         var s = Wide();
         s.Own.Add(Corps(301, 380f, 4000f));
         s.Own.Add(Corps(302, 350f, 6000f));
+        s.Own.Add(Corps(304, 390f, 9000f));   // F9: the sector holds 15000 outside the mass, so the smaller of its two leaves 9000 behind, over the minimum of 5000
         var plan = ManualPlan(s);
         int sector = Sectors(s).SectorAt(350f, 0f);
         int main = Sectors(s).SectorAt(100f, 0f);
@@ -542,7 +544,8 @@ internal static class ForceAllocatorTests
 
         plan.MassInstanceIds.Add(302);
         var b = Alloc(plan, s);
-        AssertEqual(FormationRole.DepotBuilder, Of(b, 301).Role, "with the whole sector in the mass, the smallest builds");
+        AssertEqual(FormationRole.Hold, Of(b, 304).Role, "304 alone outside the mass is no surplus (9000 held, none left)");
+        AssertEqual(FormationRole.DepotBuilder, Of(b, 301).Role, "with the sector's surplus gone, the smallest member of the mass builds");
         AssertEqual(FormationRole.MainEffort, Of(b, 302).Role, "the main effort loses only that formation");
     }
 

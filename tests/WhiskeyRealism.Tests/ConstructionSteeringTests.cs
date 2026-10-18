@@ -1308,7 +1308,10 @@ internal static class ConstructionSteeringTests
         CampaignSnapshot W(int dayOffset, bool threat, out SectorModel sectors, out TheaterPlan plan, out Allocation allocation)
         {
             var w = ExecutorFixtures.Wide(dayOffset);
-            w.Own.Add(ExecutorFixtures.Corps(1, 10f, 20000f));    // the builder: nearest the capital, alone in its sector
+            w.Own.Add(ExecutorFixtures.Corps(1, 10f, 20000f));    // the builder: nearest the capital, the sector's only free formation outside the mass
+            var body = ExecutorFixtures.Corps(5, 60f, 20000f);    // F9: the main effort's body, nearer the target; a lone mass member is never a builder, so the builder must be outside it
+            if (threat) body.ReadinessStep = 1;                   // and when the threat comes it is unready, so it is neither mass nor a builder (the mass would give 1 of 2 bodies)
+            w.Own.Add(body);
             w.Own.Add(ExecutorFixtures.Corps(2, 300f, 25000f));
             w.Own.Add(ExecutorFixtures.Corps(3, 320f, 25000f));
             w.Own.Add(ExecutorFixtures.Corps(4, 0f, 6000f));      // the baseline guard: D11's floor is never under the minimum strength
@@ -1355,6 +1358,7 @@ internal static class ConstructionSteeringTests
         s.Own.Add(small);
         s.Own.Add(ExecutorFixtures.Corps(2, 300f, 15000f));
         s.Own.Add(ExecutorFixtures.Corps(4, 520f, 3000f));
+        s.Own.Add(ExecutorFixtures.Corps(5, 540f, 9000f));   // F9: a builder leaves its sector's hold met, so the far sector holds more than the plan's minimum without it
         var sectors = ExecutorFixtures.Sectors(s);
         int near = sectors.SectorAt(230f, 70f), far = sectors.SectorAt(520f, 0f);
         AssertTrue(near >= 0 && far >= 0 && near != far, "fixture: two sectors");
