@@ -153,13 +153,16 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // the order still waits for a courier or for a move that has since been replaced), unless the order is
         // the same place again (within SamePointMeters of the new target, inclusive): that one keeps its place,
         // and the en-route test drops the repeat. Each is reported through the sink. Returns how many went.
-        public int DiscardSupersededIntents(int unitId, float newX, float newZ, string reason)
+        // `includeArmedVanilla`: a vanilla order armed with its called unit (Pursuit) goes too; used for descendants of a re-pathed group,
+        // whose last waypoint vanilla does not restamp (StaleDispatchVoid), so its pursuit reading cannot be trusted.
+        public int DiscardSupersededIntents(int unitId, float newX, float newZ, string reason, bool includeArmedVanilla = false)
         {
             int voided = 0;
             int i = 0;
             while (i < _count)
             {
-                if (_pending[i].Origin != OrderOrigin.Executor || _pending[i].UnitId != unitId || Near(_pending[i].X, _pending[i].Z, newX, newZ))
+                bool kind = _pending[i].Origin == OrderOrigin.Executor || (includeArmedVanilla && _pending[i].Pursuit);
+                if (!kind || _pending[i].UnitId != unitId || Near(_pending[i].X, _pending[i].Z, newX, newZ))
                 {
                     i++;
                     continue;

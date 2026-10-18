@@ -48,6 +48,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         private static readonly BattleHost Host = new BattleHost();
         internal static readonly WlOrderFlow Flow = new WlOrderFlow(Host);
+        private static readonly StaleDispatchVoid StaleVoid = new StaleDispatchVoid();
         private static readonly OrderAgeTracker Age = new OrderAgeTracker();
         private static readonly CourierLeg[] Legs = new CourierLeg[MaxChainLegs];
         private static readonly int[] Chain = new int[MaxChainLegs];
@@ -267,19 +268,22 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
         }
 
-        // The executor issued a newer move for `groupId` (instance id): that group's queued executor orders describe a
-        // move it replaced, so they are discarded (`superseded-intent`, one row each) before the new move's own
-        // order is queued. Reads and edits the courier queue only; it never touches a unit.
-        internal static void SupersedeExecutorOrders(int groupId, float x, float z)
+        // A written group Move makes queued orders to the player stale (StaleDispatchVoid): the ordered group's executor orders, those of
+        // every child it moved, and those of every non-detached descendant group whose new target differs by more than 110 m, with the
+        // vanilla orders armed with those descendants. One `discard superseded-intent` row each, before the new move's own order is
+        // queued. Reads and edits the courier queue only; it never touches a unit.
+        internal static bool HasQueuedOrders => Flow.Queue.Count > 0;
+
+        internal static void VoidStaleOrders(UnitRecord[] own, int count, int groupIndex, bool maintenance, float x, float z,
+            IssuedTarget[] issued, int issuedCount, float sizeX, float sizeZ)
         {
             try
             {
-                if (Flow.Queue.Count == 0) return;
-                Flow.Queue.DiscardSupersededIntents(groupId, x, z, WlCourierQueue.SupersededIntent);
+                StaleVoid.Apply(Flow.Queue, own, count, groupIndex, maintenance, x, z, issued, issuedCount, sizeX, sizeZ, WlCourierQueue.SupersededIntent);
             }
             catch (Exception ex)
             {
-                OnceLog.Warning("wl-order:supersede-intent", "[W&LOrder] voiding a superseded executor order failed: " + ex.GetType().Name + " " + ex.Message);
+                OnceLog.Warning("wl-order:supersede-intent", "[W&LOrder] voiding a superseded order failed: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 

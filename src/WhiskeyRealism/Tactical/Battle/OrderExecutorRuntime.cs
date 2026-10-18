@@ -240,18 +240,15 @@ namespace WhiskeyRealism.Tactical.Battle
                     "[OrderArbiter] first vanilla order issued channel=" + winner.Channel + " source=" + winner.Source);
             }
 
-            // A newer move of this group voids the group's queued executor orders to the player (they describe the
-            // move just replaced); the new move's own order is queued after. A Maintenance move (an interrupted-path
-            // recovery, whose target can be a fresh assembly point, or a formation slot) is no new order and voids none.
-            if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner) && (winner.Flags & IntentFlags.Maintenance) == 0)
+            // A written group Move makes queued orders to the player stale: the group's own (unless this is a Maintenance move, which is no
+            // new order and whose recovery target can be a fresh assembly point), every child it moved, and every non-detached descendant
+            // group re-pathed to a new place (vanilla restamps only the ordered group's last waypoint, 92067, so a sub-group's old order
+            // would still read as pursuit). The new move's own order is queued after (StaleDispatchVoid).
+            if (executed > 0 && winner.Channel == OrderChannel.Move && !OrderExecutor.IsImmediatePlacement(winner) && WlOrderFlowRuntime.HasQueuedOrders)
             {
-                WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);
-                // A fan-out sends the group's children (a brigade of a division) to their own offsets: a dispatch queued for such a
-                // child under an earlier move describes where it was bound, while its regiments now march elsewhere, and the child's
-                // own waypoint can still read the old place. Each child that was moved voids its queued executor orders too.
-                for (int k = 0; k < issued; k++)
-                    if (_issued[k].InstanceId != winner.GroupId)
-                        WlOrderFlowRuntime.SupersedeExecutorOrders(_issued[k].InstanceId, _issued[k].X, _issued[k].Z);
+                WaypointValidatorRuntime.TryMapSize(out float voidSizeX, out float voidSizeZ);
+                WlOrderFlowRuntime.VoidStaleOrders(own, view.OwnCount, groupIndex, (winner.Flags & IntentFlags.Maintenance) != 0, plan.X, plan.Z,
+                    _issued, issued, voidSizeX, voidSizeZ);
             }
             // The group's task, for the task-hold test of the dispatch queued below or earlier. Every channel carries the group's
             // real task (stance and formation intents take the posture decision's), except the works hold's stance, which names

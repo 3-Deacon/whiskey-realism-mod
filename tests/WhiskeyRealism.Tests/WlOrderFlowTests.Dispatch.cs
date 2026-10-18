@@ -313,23 +313,141 @@ internal static partial class WlOrderFlowTests
             "the runtime asks the rule with the distance from the unit's last waypoint to the order's point");
     }
 
-    // Verify round 2, minor 7: the division's fan-out sends a brigade's regiments to B while the brigade's own waypoint, and so its pursuit reading,
-    // still says A; its queued executor dispatch for A is voided when the fan-out moves it.
-    private static void AFanOutVoidsTheMovedChildrensStaleOrders()
+    // Verify round 3, major: vanilla restamps a group's last waypoint only for the group a Move is issued to (92067) and for regiments (131250). A brigade order to A
+    // still reads "path ends at A" after the division sends the brigade to B. On every written group Move, Maintenance included, the queued orders of the non-detached
+    // descendant groups whose new target differs by more than 110 m are voided, and the vanilla orders armed with them.
+    private static UnitRecord Rec(int id, int parent, UnitFlags flags, float x = 0f, float z = 0f)
+        => new UnitRecord { InstanceId = id, ParentIndex = parent, Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsGroup | flags, X = x, Z = z };
+
+    // 0 division(10); 1 brigade 11 (offset +400 x); 2 sub-group 12 of brigade 11; 3 brigade 13 (detached); 4 sub-group 14 under the detached brigade;
+    // 5 brigade 15 (player-owned); 6 routed brigade 16.
+    private static UnitRecord[] Division() => new[]
+    {
+        Rec(10, -1, UnitFlags.AncestorOfPlayerCommand, 0f, 0f),
+        Rec(11, 0, UnitFlags.None, 400f, 0f),
+        Rec(12, 1, UnitFlags.None, 400f, 100f),
+        Rec(13, 0, UnitFlags.PermanentlyDetached, -400f, 0f),
+        Rec(14, 3, UnitFlags.None, -400f, 100f),
+        Rec(15, 0, UnitFlags.PlayerOwned, 0f, 400f),
+        Rec(16, 0, UnitFlags.Routed, 0f, -400f),
+    };
+
+    private static WlCourierQueue QueueOfStaleOrders(RecordingSink sink)
+    {
+        var q = new WlCourierQueue(sink);
+        // every order points at A = (0, 0) in the old place; unit ids are the groups' instance ids; each has its own type so none is dropped as en-route
+        void Put(int unit, OrderOrigin origin, int type, bool pursuit = false, float x = 0f)
+        {
+            CourierEntry e = QEntry(issuer: unit, type: type, origin: origin, x: x, issuedAt: 1.0, dueAt: 9.0);
+            e.UnitId = unit;
+            e.Pursuit = pursuit;
+            AssertTrue(q.TryEnqueue(in e, 0.0, out _), "fixture: queued " + unit + "/" + type);
+        }
+        Put(10, OrderOrigin.Executor, 1);               // the ordered group's own
+        Put(11, OrderOrigin.Executor, 2);               // non-detached brigade
+        Put(11, OrderOrigin.Vanilla, 4, pursuit: true); // armed vanilla order of the same brigade
+        Put(11, OrderOrigin.Vanilla, 11);               // an unarmed vanilla order (reserve): not a pursuit
+        Put(12, OrderOrigin.Executor, 3);               // sub-group of the brigade
+        Put(13, OrderOrigin.Executor, 0);               // detached brigade
+        Put(14, OrderOrigin.Executor, 5);               // under the detached brigade
+        return q;
+    }
+
+    private static int VoidStale(WlCourierQueue q, UnitRecord[] own, bool maintenance, float x = 1000f, float z = 0f)
+    {
+        var issued = new[] { new IssuedTarget { InstanceId = 10, X = x, Z = z } };
+        return new StaleDispatchVoid().Apply(q, own, own.Length, 0, maintenance, x, z, issued, 1, 5000f, 5000f, WlCourierQueue.SupersededIntent);
+    }
+
+    private static void ADivisionMoveVoidsTheStaleOrdersOfNonDetachedBrigades()
     {
         var sink = new RecordingSink();
+        var q = QueueOfStaleOrders(sink);
+        int voided = VoidStale(q, Division(), maintenance: false);
+        AssertEqual(4, voided, "the division's own, the brigade's executor and armed vanilla order, and the sub-group's");
+        AssertEqual(4, sink.Count("superseded-intent"), "one row each");
+        AssertEqual(3, q.Count, "left: the detached brigade's order, the one under it, and the unarmed reserve order");
+    }
+
+    private static void ADetachedBrigadeAndItsSubtreeAreUntouched()
+    {
+        var sink = new RecordingSink();
+        var q = QueueOfStaleOrders(sink);
+        VoidStale(q, Division(), maintenance: false);
+        foreach (var d in sink.Discards)
+            AssertTrue(d.issuer != 13 && d.issuer != 14, "no order of unit " + d.issuer + " (the detached brigade or a group under it) was voided");
+        AssertTrue(q.HasPendingOrigin(OrderOrigin.Executor), "executor orders remain: the detached brigade's");
+        // The same fixture without the detached flag would void them: control.
+        var own = Division();
+        own[3].Flags &= ~UnitFlags.PermanentlyDetached;
+        var sink2 = new RecordingSink();
+        var q2 = QueueOfStaleOrders(sink2);
+        VoidStale(q2, own, maintenance: false);
+        AssertEqual(6, sink2.Count("superseded-intent"), "control: attached, the brigade 13 and the group 14 under it are voided too (the unarmed reserve order stays)");
+    }
+
+    private static void AMaintenanceDivisionMoveVoidsTheDescendantsButNotItsOwnOrder()
+    {
+        var sink = new RecordingSink();
+        var q = QueueOfStaleOrders(sink);
+        int voided = VoidStale(q, Division(), maintenance: true);
+        AssertEqual(3, voided, "the brigade's two and the sub-group's: the descendants' waypoints are stale whatever kind of move re-paths them");
+        foreach (var d in sink.Discards)
+            AssertTrue(d.issuer != 10, "the ordered group's own order stays: a recovery's target can be a fresh point and is no new order");
+    }
+
+    private static void AnOrderAlreadyAtTheNewOffsetTargetIsKept()
+    {
+        // brigade 11 keeps its +400 m offset from the division: a division move to (1000, 0) sends it to (1400, 0).
+        var own = Division();
+        var sink = new RecordingSink();
         var q = new WlCourierQueue(sink);
-        // the brigade (unit 101) was ordered to A = (0, 0); another brigade (102) to C; the division (103) has its own order.
-        Enq(q, QEntry(issuer: 1, type: 1, origin: OrderOrigin.Executor, x: 0, issuedAt: 1.0, dueAt: 9.0), out _);
-        Enq(q, QEntry(issuer: 2, type: 1, origin: OrderOrigin.Executor, x: 3000, issuedAt: 1.0, dueAt: 9.0), out _);
-        Enq(q, QEntry(issuer: 3, type: 12, origin: OrderOrigin.Executor, x: 6000, issuedAt: 1.0, dueAt: 9.0), out _);
-        // the executor fans the division's move (103) out to brigade 101 at B = (1500, 0), offset 380 m: the same calls the runtime makes
-        AssertEqual(1, q.DiscardSupersededIntents(101, 1500f, 0f, WlCourierQueue.SupersededIntent), "the brigade's order to A is voided by its own move to B");
-        AssertEqual(0, q.DiscardSupersededIntents(101, 1500f, 0f, WlCourierQueue.SupersededIntent), "once");
-        AssertEqual(2, q.Count, "the other brigade's and the division's orders stay");
+        CourierEntry atNew = QEntry(issuer: 11, type: 2, origin: OrderOrigin.Executor, x: 1450f, issuedAt: 1.0, dueAt: 9.0);   // 50 m from (1400, 0)
+        atNew.UnitId = 11;
+        AssertTrue(q.TryEnqueue(in atNew, 0.0, out _), "fixture");
+        AssertEqual(0, VoidStale(q, own, maintenance: false), "the brigade is already bound where the move sends it (within 110 m): the order is still true");
+        CourierEntry far = QEntry(issuer: 11, type: 3, origin: OrderOrigin.Executor, x: 1600f, issuedAt: 1.0, dueAt: 9.0);   // 200 m from (1400, 0)
+        far.UnitId = 11;
+        AssertTrue(q.TryEnqueue(in far, 0.0, out _), "fixture");
+        AssertEqual(1, VoidStale(q, own, maintenance: false), "past 110 m it is stale");
+    }
+
+    private static void AFanOutChildAndItsDescendantsAreVoided()
+    {
+        // the division's move fans out to brigade 11 (issued, offset target), which carries sub-group 12
+        var own = Division();
+        var sink = new RecordingSink();
+        var q = QueueOfStaleOrders(sink);
+        var issued = new[] { new IssuedTarget { InstanceId = 11, X = 1400f, Z = 0f } };
+        int voided = new StaleDispatchVoid().Apply(q, own, own.Length, 0, maintenance: false, 1000f, 0f, issued, 1, 5000f, 5000f, WlCourierQueue.SupersededIntent);
+        AssertEqual(4, voided, "the ordered group's own, the moved brigade's two, and the sub-group under it");
+    }
+
+    private static void TheVoidAllocatesNothingAfterWarmUp()
+    {
+        var own = Division();
+        var voider = new StaleDispatchVoid();
+        var issued = new[] { new IssuedTarget { InstanceId = 10, X = 1000f, Z = 0f } };
+        var q = new WlCourierQueue(null);
+        voider.Apply(q, own, own.Length, 0, false, 1000f, 0f, issued, 1, 5000f, 5000f, WlCourierQueue.SupersededIntent);
+        CourierEntry e = QEntry(issuer: 11, type: 2, origin: OrderOrigin.Executor, x: 0f, issuedAt: 1.0, dueAt: 9.0);
+        e.UnitId = 11;
+        long mark = TestFixtures.BeginAllocationWindow();
+        for (int i = 0; i < 500; i++)
+        {
+            q.TryEnqueue(in e, 0.0, out _);
+            voider.Apply(q, own, own.Length, 0, false, 1000f, 0f, issued, 1, 5000f, 5000f, WlCourierQueue.SupersededIntent);
+        }
+        AssertEqual(0L, TestFixtures.AllocatedSince(mark), "the walk uses its pooled buffers");
+    }
+
+    private static void TheExecutorGivesTheVoidItsOwnInputs()
+    {
         string exec = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs"), "internal static int Execute(");
-        AssertTrue(Regex.IsMatch(exec, @"for \(int k = 0; k < issued; k\+\+\)\s*if \(_issued\[k\]\.InstanceId != winner\.GroupId\)\s*WlOrderFlowRuntime\.SupersedeExecutorOrders\(_issued\[k\]\.InstanceId, _issued\[k\]\.X, _issued\[k\]\.Z\);"),
-            "every child the move reached, with its own target, voids its queued executor orders");
-        AssertTrue(exec.IndexOf("_issued[k].InstanceId, _issued[k].X", StringComparison.Ordinal) < exec.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal), "before the new order is queued");
+        AssertTrue(exec.Contains("WaypointValidatorRuntime.TryMapSize(out float voidSizeX, out float voidSizeZ);") && exec.Contains("_issued, issued, voidSizeX, voidSizeZ);"),
+            "the moved units, their count and the map size (the offsets are clamped like the executor's own)");
+        AssertTrue(Code("src/WhiskeyRealism/Tactical/Battle/StaleDispatchVoid.cs").Contains("PermanentlyDetached | UnitFlags.PlayerOwned | UnitFlags.PlayerCommand | UnitFlags.Routed"),
+            "detached, player-owned and routed units are not re-pathed by a group order");
+        AssertFalse(Code("src/WhiskeyRealism/Tactical/Battle/StaleDispatchVoid.cs").Contains("transform.parent"), "descendants come from the snapshot's parent map");
     }
 }

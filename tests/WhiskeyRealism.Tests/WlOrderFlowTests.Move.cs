@@ -276,19 +276,19 @@ internal static partial class WlOrderFlowTests
         AssertTrue(move >= 0 && dispatch > move, "Emit comes after IssueMove in Execute");
     }
 
-    // A newer move voids the queued orders of the old one BEFORE the new order is queued: voiding after Emit would discard the
+    // A written group Move voids the queued orders it makes stale BEFORE the new order is queued: voiding after Emit would discard the
     // order the new move just queued.
     private static void ExecutorVoidsTheGroupsOldOrdersBeforeQueueingTheNewOne()
     {
         string body = BodyOf(Code("src/WhiskeyRealism/Tactical/Battle/OrderExecutorRuntime.cs"), "internal static int Execute(");
-        int voidAt = body.IndexOf("WlOrderFlowRuntime.SupersedeExecutorOrders(winner.GroupId, plan.X, plan.Z);", StringComparison.Ordinal);
+        int voidAt = body.IndexOf("WlOrderFlowRuntime.VoidStaleOrders(own, view.OwnCount, groupIndex, (winner.Flags & IntentFlags.Maintenance) != 0, plan.X, plan.Z,", StringComparison.Ordinal);
         int emit = body.IndexOf("TacticalPlayerDispatchRuntime.Emit(", StringComparison.Ordinal);
-        AssertTrue(voidAt > 0 && emit > voidAt, "the group's old executor orders are voided before Emit queues the new one");
-        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\) && \(winner\.Flags & IntentFlags\.Maintenance\) == 0\)\s*\{\s*WlOrderFlowRuntime\.SupersedeExecutorOrders\(winner\.GroupId, plan\.X, plan\.Z\);"),
-            "only an executed Move that is not a deployment placement and not maintenance voids: a recovery's target can be a fresh assembly point (TryRecoveryPath), and it would void a real order the brigade is still carrying out");
+        AssertTrue(voidAt > 0 && emit > voidAt, "the stale orders are voided before Emit queues the new one");
+        AssertTrue(Regex.IsMatch(body, @"if \(executed > 0 && winner\.Channel == OrderChannel\.Move && !OrderExecutor\.IsImmediatePlacement\(winner\) && WlOrderFlowRuntime\.HasQueuedOrders\)"),
+            "every executed Move that is not a deployment placement voids, Maintenance included (the flag only spares the ordered group's own order: StaleDispatchVoid)");
         string flow = Code(FlowRuntime);
-        string supersede = BodyOf(flow, "internal static void SupersedeExecutorOrders(");
-        AssertTrue(supersede.Contains("catch (Exception ex)") && supersede.Contains("OnceLog.Warning(\"wl-order:supersede-intent\""), "never throws, one static warning key");
+        string voidBody = BodyOf(flow, "internal static void VoidStaleOrders(");
+        AssertTrue(voidBody.Contains("catch (Exception ex)") && voidBody.Contains("OnceLog.Warning(\"wl-order:supersede-intent\""), "never throws, one static warning key");
     }
 
     // A fan-out (the player's command is not detached from the brigade): the planner orders the brigade's
