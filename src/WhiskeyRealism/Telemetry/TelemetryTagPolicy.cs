@@ -47,6 +47,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCommandPosture", TelemetryCategory.Decision);
             AddTactical("TacticalPostureSummary", TelemetryCategory.State);
             AddTactical("TacticalOpsLedger", TelemetryCategory.State);
+            AddTactical("TacticalOperationChange", TelemetryCategory.Decision);
             AddTactical("TacticalCommandTree", TelemetryCategory.State);
             AddTactical("TacticalCommanderRoster", TelemetryCategory.State);
             AddTactical("TacticalCommanderUnknown", TelemetryCategory.Failure, TelemetrySeverity.Warning);
