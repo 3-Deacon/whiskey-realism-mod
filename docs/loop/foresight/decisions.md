@@ -17,3 +17,10 @@ Refines the approved item "stranded formations return to their home sector when 
 Refinement, as given by the integrator: "a formation whose decision ended is unclaimed and is placed by the holds, the capital reserve and department reinforcement. There is no separate return lifecycle. The user may override this."
 
 Kept: a dispatched member stays in the mass through readiness dips while its objective is the main effort. Removed: origins, the Returning claimant, the donor transfer back and the sidecar origin fields. Department "have" has one definition: formations that stand in the department and are not in the mass or committed. Spec: D11 requirement-decision-end.
+
+## Integrator refinements, 2026-10-18 (strategic foresight phase 2, second round)
+
+1. Commitment with no sortie record: the planner persists only the last non-empty mass (its objective and members). A member stays readiness-exempt in that objective's capacity while the objective is still a candidate, and stops being exempt when another objective is chosen or the objective falls. The user may override this.
+2. Department reinforcement reuses D6's ReinforcementPick for the shortest department when there is no push, under D6's own lock (one reinforcement per decision), with no in-flight record of its own. The user may override this.
+
+Spec: D11 requirement-commitment and requirement-department-reinforcement.
