@@ -105,7 +105,7 @@ namespace WhiskeyRealism.Strategic.Planner
             private void NoteQueuedOther(Regiment unit, int wantedMode)
             {
                 if (!Noted.Add(unit.GetInstanceID())) return;
-                TelemetryRouter.LegacyInfo("[ReconMission] alliance=" + Alliance + " unit=" + unit.name + " note=cavalry-order-queued wanted=" + wantedMode
+                TelemetryRouter.LegacyInfo("[ReconMission] alliance=" + Alliance + " unit=" + TelemetryLegacyParser.Quote(unit.name) + " note=cavalry-order-queued wanted=" + wantedMode
                     + " ordered=" + unit.cavalryordersordered + " (applies first; the next review sends the wanted mode)", TelemetryLayer.Campaign);
             }
 

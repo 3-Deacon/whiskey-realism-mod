@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Telemetry;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -48,6 +49,9 @@ namespace WhiskeyRealism.Strategic.Planner
         // only rolled once the objective is scouted (smoke 2026-10-17: 22 reviews of deferred=1 with no scout out), as against the
         // scouted march that waits for the chapter roll. The [CampaignMover] row tells them apart.
         public int DeferredStaged;
+        // One row per move judged a miss this review (failed or given up): the unit, its role, where it was sent from and to and where its
+        // waypoint stands. The tally row counts them; these say which (smoke 2026-10-18: gaveUp=2 with no name). At most MaxMovesPerDay a review.
+        public readonly List<string> MissRows = new List<string>();
         // The tempo roll of this review, when one was evaluated (a new decision's launch).
         public LaunchVerdict Tempo;
         public bool TempoFirstRow, TempoReleaseRow;
@@ -169,10 +173,21 @@ namespace WhiskeyRealism.Strategic.Planner
                 switch (tracker.Judge(f.InstanceId, f.X, f.Z, f.WaypointX, f.WaypointZ, s.DaySerial))
                 {
                     case MoveOutcome.Confirmed: tally.Confirmed++; break;
-                    case MoveOutcome.Failed: tally.Failed++; break;
-                    case MoveOutcome.GaveUp: tally.GaveUp++; break;
+                    case MoveOutcome.Failed: tally.Failed++; tally.MissRows.Add(MissRow(s, allocation, tracker, f, "failed")); break;
+                    case MoveOutcome.GaveUp: tally.GaveUp++; tally.MissRows.Add(MissRow(s, allocation, tracker, f, "gaveUp")); break;
                 }
             }
+        }
+
+        private static string MissRow(CampaignSnapshot s, Allocation allocation, MoveTracker tracker, in FormationRecord f, string outcome)
+        {
+            var inv = CultureInfo.InvariantCulture;
+            tracker.TryGetMove(f.InstanceId, out float fromX, out float fromZ, out float tx, out float tz, out int issued, out int retries, out int objective, out string role);
+            return "[CampaignMoverMiss] alliance=" + s.Alliance + " unit=" + TelemetryLegacyParser.Quote(f.UnitKey ?? f.InstanceId.ToString(inv)) + " role=" + (role ?? "-") + " outcome=" + outcome
+                + " target=" + tx.ToString("0", inv) + "," + tz.ToString("0", inv) + " objective=" + objective + " retries=" + retries
+                + " from=" + fromX.ToString("0", inv) + "," + fromZ.ToString("0", inv) + " at=" + f.X.ToString("0", inv) + "," + f.Z.ToString("0", inv)
+                + " waypoint=" + f.WaypointX.ToString("0", inv) + "," + f.WaypointZ.ToString("0", inv) + " days=" + (s.DaySerial - issued)
+                + " strength=" + f.Strength.ToString("0", inv) + " readiness=" + f.ReadinessStep;
         }
 
         private static bool RoleStillSends(Allocation allocation, int instanceId)
@@ -330,7 +345,7 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;
 
-            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, ObjectiveOf(inputs.Plan, a), s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, out var outcome);
+            bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, ObjectiveOf(inputs.Plan, a), s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, a.Role.ToString(), out var outcome);
             Count(tally, outcome);
             if (moved && (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support)) host.ListOffensive(f.InstanceId, true);
         }

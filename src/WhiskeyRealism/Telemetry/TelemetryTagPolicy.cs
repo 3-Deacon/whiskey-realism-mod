@@ -173,6 +173,7 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Appointment", TelemetryCategory.Write);
             AddCampaign("Allocation", TelemetryCategory.Decision);
             AddCampaign("CampaignMover", TelemetryCategory.Write);
+            AddCampaign("CampaignMoverMiss", TelemetryCategory.Write);
             AddCampaign("CampaignSteer", TelemetryCategory.Write);
             AddCampaign("CampaignTempo", TelemetryCategory.Decision);
             AddCampaign("DepotTask", TelemetryCategory.Write);

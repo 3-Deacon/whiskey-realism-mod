@@ -499,6 +499,14 @@ namespace WhiskeyRealism.Strategic.Planner
             return f.CavalryShare >= MinCavalryShare || (f.Flags & FormationFlags.FightingForce) != 0;
         }
 
+        // Whether the formation meets a task kind's own movement standard (the pick's first test): AI-orderable, ready, unbusy, strong
+        // enough (a detachment needs only a body, a screen or a picket the vanilla offensive minimum), with the morale to march. The
+        // allocator tells a task nobody could take (none-able) from one every able formation was already given away from.
+        internal static bool CouldScout(CampaignSnapshot s, in FormationRecord f, ReconKind kind)
+        {
+            return WlChainRules.MayMove(f.Chain) && CanMove(s, f, IsDetachment(kind));
+        }
+
         private static bool IsDetachment(ReconKind kind)
         {
             return kind == ReconKind.AdvanceGuard || kind == ReconKind.Probe;

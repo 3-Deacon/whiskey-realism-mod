@@ -440,8 +440,8 @@ internal static class PlannerSidecarTests
         var planner = ExecutorFixtures.Corps(1, 0f, 9000f);
         var recon = ExecutorFixtures.Corps(2, 0f, 9000f);
         var host = new FakeReconHost();
-        AssertTrue(MoveIssue.Issue(host, tracker, in planner, 300f, 0f, 29, 100, false, MoveBudget.Planner, out _), "a planner move");
-        AssertTrue(MoveIssue.Issue(host, tracker, in recon, 310f, 0f, -1, 100, false, MoveBudget.Recon, out _), "a recon move");
+        AssertTrue(MoveIssue.Issue(host, tracker, in planner, 300f, 0f, 29, 100, false, MoveBudget.Planner, "MainEffort", out _), "a planner move");
+        AssertTrue(MoveIssue.Issue(host, tracker, in recon, 310f, 0f, -1, 100, false, MoveBudget.Recon, "Recon", out _), "a recon move");
         var records = tracker.Records.ToList();
         AssertEqual(1, records.Count, "recon tracker records are not persisted: a load restarts the scouts' moves");
         AssertEqual("corps1:1", records[0].UnitKey, "the planner's");

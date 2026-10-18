@@ -449,17 +449,17 @@ internal static class ReconExecutorTests
     {
         var f = Unit(1, 0f, 0f, cavalry: 0.1f);
         var took = new FakeReconHost();
-        AssertTrue(MoveIssue.Issue(took, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var issued), "vanilla took it");
+        AssertTrue(MoveIssue.Issue(took, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, "MainEffort", out var issued), "vanilla took it");
         AssertEqual(MoveOutcome.Issued, issued, "an issue");
         var refused = new FakeReconHost { MoveResult = false };
-        AssertFalse(MoveIssue.Issue(refused, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var miss), "vanilla refused");
+        AssertFalse(MoveIssue.Issue(refused, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, "MainEffort", out var miss), "vanilla refused");
         AssertEqual(MoveOutcome.Failed, miss, "a miss");
         var restricted = new FakeReconHost { Restricted = (x, z) => true };
-        AssertFalse(MoveIssue.Issue(restricted, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var blocked), "restricted ground");
+        AssertFalse(MoveIssue.Issue(restricted, new MoveTracker(), in f, 300f, 0f, -1, Day, false, MoveBudget.Planner, "MainEffort", out var blocked), "restricted ground");
         AssertEqual(MoveOutcome.Failed, blocked, "a miss");
         AssertEqual(0, restricted.Moves.Count, "and no call");
         var queuedUnit = Unit(2, 0f, 0f, cavalry: 0.1f, extra: FormationFlags.MoveQueued);
-        AssertFalse(MoveIssue.Issue(took, new MoveTracker(), in queuedUnit, 300f, 0f, -1, Day, false, MoveBudget.Planner, out var queued), "queued behind a running order");
+        AssertFalse(MoveIssue.Issue(took, new MoveTracker(), in queuedUnit, 300f, 0f, -1, Day, false, MoveBudget.Planner, "MainEffort", out var queued), "queued behind a running order");
         AssertEqual(MoveOutcome.Queued, queued, "queued");
     }
 
