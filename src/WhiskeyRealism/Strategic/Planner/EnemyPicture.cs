@@ -27,10 +27,11 @@ namespace WhiskeyRealism.Strategic.Planner
     }
 
     // A place the unaccounted men are presumed to be: the enemy capital, or an objective record the major enemy holds (D11). Share is its
-    // mass under CapitalShare, ShareProp under the proportional alternative (question-capital-share). Displaced: scouted (D1's rule).
+    // mass: the unaccounted men spread over the undisplaced anchors by vanilla's importance (the capital at 1; decided 2026-10-18, a fixed
+    // share of the capital is a tuning constant). Displaced: scouted (D1's rule).
     internal sealed class PictureAnchor
     {
-        public float X, Z, Importance01, Share, ShareProp;
+        public float X, Z, Importance01, Share;
         public bool IsCapital, Displaced;
         public string Label;
         public int ObjectiveId = -1;
@@ -45,20 +46,16 @@ namespace WhiskeyRealism.Strategic.Planner
     // from the major enemy's total too.
     internal sealed class EnemyPicture
     {
-        // The share of the unaccounted men the enemy capital takes while it is not scouted (the investigation's suggestion, no vanilla basis;
-        // question-capital-share). The proportional alternative is computed beside it.
-        public const float CapitalShare = 0.4f;
-
         public float Total = float.NaN;                    // the enemy's troopsfielded, NaN when unknown
         public float Believed, Faded, Unaccounted, Unplaced;
-        public float CapitalShareUsed, CapitalShareProp;    // the fraction of the unaccounted men the capital anchor took, under each rule
+        public float CapitalShareProp;                      // the fraction of the unaccounted men the capital anchor took
         public int DisplacedCount;
         public int Seen, Marks;                             // the review's sightings and applied marks (the [EnemyBeliefs] counts, foresight F4)
         public string EnemyCapitalName;
         public bool HasEnemyCapital;
         public float EnemyCapitalX, EnemyCapitalZ;
-        // Estimate(enemy capital, RelocationRange) under each share, the number question-capital-share is decided on; set by TheaterPlanner.Plan.
-        public float EnemyCapitalEst, EnemyCapitalEstProp;
+        // Estimate(enemy capital, RelocationRange): the believed army near it plus the men presumed there; set by TheaterPlanner.Plan.
+        public float EnemyCapitalEstProp;
         public readonly List<PictureAnchor> Anchors = new List<PictureAnchor>();
         public readonly List<PictureElement> Elements = new List<PictureElement>();
         private IReadOnlyList<CrossingRecord> _crossings;
@@ -96,18 +93,12 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             p.Unaccounted = unaccounted;
             var shares = new float[p.Anchors.Count];
-            Distribute(p.Anchors, unaccounted, proportional: false, shares);
+            Distribute(p.Anchors, unaccounted, shares);
             for (int k = 0; k < shares.Length; k++) p.Anchors[k].Share = shares[k];
-            Distribute(p.Anchors, unaccounted, proportional: true, shares);
-            for (int k = 0; k < shares.Length; k++) p.Anchors[k].ShareProp = shares[k];
             for (int k = 0; k < p.Anchors.Count; k++)
             {
                 var a = p.Anchors[k];
-                if (a.IsCapital && unaccounted > 0f)
-                {
-                    p.CapitalShareUsed = a.Share / unaccounted;
-                    p.CapitalShareProp = a.ShareProp / unaccounted;
-                }
+                if (a.IsCapital && unaccounted > 0f) p.CapitalShareProp = a.Share / unaccounted;
                 if (a.Share > 0f) p.Elements.Add(new PictureElement { Kind = PictureElementKind.Anchor, X = a.X, Z = a.Z, Mass = a.Share });
             }
             return p;
@@ -145,53 +136,23 @@ namespace WhiskeyRealism.Strategic.Planner
             }
         }
 
-        // Spreads u over the anchors. CapitalShare: the capital takes 0.4 while it is not displaced and an objective anchor can take the rest;
-        // the rest goes to the undisplaced objective anchors by importance (equal shares when every weight is 0); with the capital displaced
-        // the objective anchors take all of it; with every anchor displaced the capital takes it anyway; with no capital the objective
-        // anchors take it, displaced or not when every one is. Proportional: every undisplaced anchor by importance, the capital at 1, with
-        // the same fallbacks and no share set aside.
-        private static void Distribute(List<PictureAnchor> anchors, float u, bool proportional, float[] into)
+        // Spreads u over the undisplaced anchors by importance (the capital at 1); with every anchor displaced the capital takes it (where
+        // vanilla keeps its capital defenders), with no capital the objective anchors take it, displaced or not when every one is.
+        private static void Distribute(List<PictureAnchor> anchors, float u, float[] into)
         {
             for (int k = 0; k < into.Length; k++) into[k] = 0f;
             if (u <= 0f || anchors.Count == 0) return;
             int capital = -1;
-            var objectives = new List<int>();     // the undisplaced objective anchors
             var allObjectives = new List<int>();
             var undisplaced = new List<int>();
             for (int k = 0; k < anchors.Count; k++)
             {
                 if (anchors[k].IsCapital) capital = k;
-                else
-                {
-                    allObjectives.Add(k);
-                    if (!anchors[k].Displaced) objectives.Add(k);
-                }
+                else allObjectives.Add(k);
                 if (!anchors[k].Displaced) undisplaced.Add(k);
             }
-            if (proportional)
-            {
-                var pool = undisplaced.Count > 0 ? undisplaced : capital >= 0 ? new List<int> { capital } : allObjectives;
-                SpreadByImportance(anchors, pool, u, into);
-                return;
-            }
-            if (capital >= 0)
-            {
-                bool capitalUndisplaced = !anchors[capital].Displaced;
-                if (objectives.Count == 0)
-                {
-                    into[capital] = u;
-                    return;
-                }
-                float rest = u;
-                if (capitalUndisplaced)
-                {
-                    into[capital] = CapitalShare * u;
-                    rest = u - into[capital];
-                }
-                SpreadByImportance(anchors, objectives, rest, into);
-                return;
-            }
-            SpreadByImportance(anchors, objectives.Count > 0 ? objectives : allObjectives, u, into);
+            var pool = undisplaced.Count > 0 ? undisplaced : capital >= 0 ? new List<int> { capital } : allObjectives;
+            SpreadByImportance(anchors, pool, u, into);
         }
 
         private static void SpreadByImportance(List<PictureAnchor> anchors, List<int> pool, float u, float[] into)
@@ -203,9 +164,8 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // The Faded and Anchor elements within straight distance r of (x, z), each weighted min(1, r / effective distance) exactly as
-        // TheaterPlanner.LandThreatNear weights a belief (a river delays it, never removes it). Afloat kinds add no land mass. proportional
-        // reads each anchor's share under the proportional rule instead (question-capital-share's alternative).
-        internal float Presumed(CampaignSnapshot s, float x, float z, float r, ITerrainLineProbe probe, bool proportional = false)
+        // TheaterPlanner.LandThreatNear weights a belief (a river delays it, never removes it). Afloat kinds add no land mass.
+        internal float Presumed(CampaignSnapshot s, float x, float z, float r, ITerrainLineProbe probe)
         {
             float total = 0f;
             for (int i = 0; i < Elements.Count; i++)
@@ -217,8 +177,7 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < Anchors.Count; i++)
             {
                 var a = Anchors[i];
-                float mass = proportional ? a.ShareProp : a.Share;
-                if (mass > 0f) total += mass * WeightWithin(a.X, a.Z, x, z, r, probe);
+                if (a.Share > 0f) total += a.Share * WeightWithin(a.X, a.Z, x, z, r, probe);
             }
             return total;
         }
@@ -317,10 +276,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 + " believed=" + p.Believed.ToString("0.0", inv) + " faded=" + p.Faded.ToString("0.0", inv)
                 + " unaccounted=" + p.Unaccounted.ToString("0.0", inv) + " unplaced=" + p.Unplaced.ToString("0.0", inv)
                 + " anchors=" + p.Anchors.Count + " displaced=" + p.DisplacedCount
-                + " capitalShare=" + p.CapitalShareUsed.ToString("0.00", inv) + " capitalShareProp=" + p.CapitalShareProp.ToString("0.00", inv)
+                + " capitalShareProp=" + p.CapitalShareProp.ToString("0.00", inv)
                 + " seen=" + p.Seen + " marks=" + p.Marks
                 + " enemyCapital=" + (p.HasEnemyCapital ? TelemetryLegacyParser.Quote(p.EnemyCapitalName ?? "capital") : "none")
-                + " enemyCapitalEst=" + p.EnemyCapitalEst.ToString("0", inv) + " enemyCapitalEstProp=" + p.EnemyCapitalEstProp.ToString("0", inv)
+                + " enemyCapitalEstProp=" + p.EnemyCapitalEstProp.ToString("0", inv)
                 + " top=" + TopAnchors(p);
         }
 

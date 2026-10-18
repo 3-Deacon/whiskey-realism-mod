@@ -874,16 +874,15 @@ namespace WhiskeyRealism.Strategic.Planner
             return MinStrength(c) * (1f + PresumedImportanceGain * c.Picture.UndisplacedImportance(x, z, r));
         }
 
-        // The enemy capital's estimate under each share: the believed army near it plus the men presumed there (the number
-        // question-capital-share is decided on).
+        // The enemy capital's estimate: the believed army near it plus the men presumed there (the number the covering force's expected
+        // short is read against).
         private static void NoteEnemyCapitalEstimates(Inputs c)
         {
             var p = c.Picture;
             if (p == null || !p.HasEnemyCapital) return;
             float range = c.S.RelocationRange;
             float believed = LandThreatNear(c, p.EnemyCapitalX, p.EnemyCapitalZ, range);
-            p.EnemyCapitalEst = believed + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe, proportional: false);
-            p.EnemyCapitalEstProp = believed + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe, proportional: true);
+            p.EnemyCapitalEstProp = believed + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe);
         }
 
         private static float HoldRatioNow(CampaignSnapshot s)

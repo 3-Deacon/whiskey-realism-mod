@@ -158,15 +158,15 @@ internal static partial class EnemyPictureTests
         AssertEqual(0, b.Elements.Count(e => e.Kind != PictureElementKind.Anchor), "it is no element");
     }
 
-    // Washington (the capital) takes 0.4 of the unaccounted men while it is not scouted and an objective anchor can take the rest.
+    // Washington (the capital) takes its importance's share of the unaccounted men while it is not scouted: vanilla's importance 1 beside the
+    // objective anchors' 0.5 and 0.3 (decided 2026-10-18: no fixed 0.4).
     private static void CapitalTakesItsShareWhenUnscouted()
     {
         var p = EnemyPicture.Build(Csa(100000f), NothingScouted);
         var capital = AnchorAt(p, WashingtonX, WashingtonZ);
         AssertTrue(capital.IsCapital, "Washington is the capital anchor");
-        AssertNear(0.4f * 100000f, capital.Share, 0.5f, "0.4 of the unaccounted men");
-        AssertNear(0.4f, p.CapitalShareUsed, 0.0001f, "the row's capitalShare");
-        AssertEqual(0.4f, EnemyPicture.CapitalShare, "the constant of D11 (question-capital-share)");
+        AssertNear(100000f / 1.8f, capital.Share, 0.5f, "1 of the 1 + 0.5 + 0.3 of the importance in play");
+        AssertNear(1f / 1.8f, p.CapitalShareProp, 0.0001f, "the row's capitalShareProp");
     }
 
     private static void ObjectiveAnchorsShareByImportance()
@@ -174,8 +174,8 @@ internal static partial class EnemyPictureTests
         var p = EnemyPicture.Build(Csa(100000f), NothingScouted);
         var winchester = AnchorAt(p, WinchesterX, WinchesterZ);
         var romney = AnchorAt(p, RomneyX, RomneyZ);
-        AssertNear(0.6f * 100000f * 0.5f / 0.8f, winchester.Share, 0.5f, "the other 0.6 goes by importance: Winchester 0.5 of 0.8");
-        AssertNear(0.6f * 100000f * 0.3f / 0.8f, romney.Share, 0.5f, "Romney 0.3 of 0.8");
+        AssertNear(100000f * 0.5f / 1.8f, winchester.Share, 0.5f, "every anchor by importance: Winchester 0.5 of 1.8");
+        AssertNear(100000f * 0.3f / 1.8f, romney.Share, 0.5f, "Romney 0.3 of 1.8");
         AssertEqual(3, p.Anchors.Count, "the capital and the two objectives the Union holds; the CSA's own records are no anchor");
     }
 
@@ -186,8 +186,8 @@ internal static partial class EnemyPictureTests
         var winchester = AnchorAt(p, WinchesterX, WinchesterZ);
         AssertTrue(winchester.Displaced, "a scouted anchor is displaced");
         AssertEqual(0f, winchester.Share, "and holds nothing");
-        AssertNear(0.6f * 100000f, AnchorAt(p, RomneyX, RomneyZ).Share, 0.5f, "the other objective takes the whole 0.6");
-        AssertNear(0.4f * 100000f, AnchorAt(p, WashingtonX, WashingtonZ).Share, 0.5f, "the capital keeps 0.4");
+        AssertNear(100000f * 0.3f / 1.3f, AnchorAt(p, RomneyX, RomneyZ).Share, 0.5f, "the other objective takes its 0.3 of the 1.3 still in play");
+        AssertNear(100000f / 1.3f, AnchorAt(p, WashingtonX, WashingtonZ).Share, 0.5f, "and the capital its 1 of them");
         AssertEqual(1, p.DisplacedCount, "the row's displaced count");
 
         var capitalSeen = EnemyPicture.Build(Csa(100000f), ScoutedAt(WashingtonX, WashingtonZ));
@@ -302,18 +302,63 @@ internal static partial class EnemyPictureTests
         AssertEqual("obj22", AnchorAt(p, RomneyX, RomneyZ).Label, "all of them");
     }
 
-    private static void BothCapitalSharesReported()
+    // One share: the capital at importance 1 among 1 + 0.5 + 0.3. The row carries capitalShareProp= and no capitalShare=.
+    private static void TheCapitalShareIsProportional()
     {
         var p = EnemyPicture.Build(Csa(100000f), NothingScouted);
-        AssertNear(0.4f, p.CapitalShareUsed, 0.0001f, "the share in force");
-        // Proportional: the capital at importance 1 among 1 + 0.5 + 0.3.
-        AssertNear(1f / 1.8f, p.CapitalShareProp, 0.001f, "the proportional share reported beside it");
+        AssertNear(1f / 1.8f, p.CapitalShareProp, 0.001f, "the share in force");
         var capital = AnchorAt(p, WashingtonX, WashingtonZ);
-        AssertNear(100000f / 1.8f, capital.ShareProp, 0.5f, "the capital's proportional mass");
-        AssertNear(100000f, p.Anchors.Sum(a => a.ShareProp), 0.5f, "and the proportional spread places every man too");
+        AssertNear(100000f / 1.8f, capital.Share, 0.5f, "the capital's mass");
+        AssertNear(100000f, p.Anchors.Sum(a => a.Share), 0.5f, "and the spread places every man");
         string row = PictureRowOf(p, Csa(100000f));
-        AssertContains(row, " capitalShare=0.40 ", "the row reports 0.40");
+        AssertFalse(row.Contains(" capitalShare="), "the row has no fixed-share field");
         AssertTrue(Regex.IsMatch(row, @" capitalShareProp=0\.56 "), "and the proportional share: " + row);
+    }
+
+    // The capital takes 1 / 1.8 of the unaccounted men (importance 1 beside objective anchors at 0.5 and 0.3): the mass its Anchor element
+    // carries, and the share the row reports.
+    private static void TheCapitalTakesItsImportanceShareOfTheUnaccounted()
+    {
+        var p = EnemyPicture.Build(Csa(100000f), NothingScouted);
+        float expected = p.Unaccounted * 1f / 1.8f;
+        var capital = AnchorAt(p, WashingtonX, WashingtonZ);
+        AssertNear(expected, capital.Share, 0.5f, "the capital's share of U");
+        var element = p.Elements.Single(e => e.Kind == PictureElementKind.Anchor && Math.Abs(e.X - WashingtonX) < 1f);
+        AssertNear(expected, element.Mass, 0.5f, "its Anchor element carries that mass");
+        AssertTrue(PictureRowOf(p, Csa(100000f)).Contains(" capitalShareProp=0.56 "), "the row reads 0.56");
+        // With the objective anchors' importance changed the share follows it (a fixed 0.4 would not).
+        var s = Csa(100000f);
+        for (int i = 0; i < s.Objectives.Count; i++)
+            if (s.Objectives[i].HolderAlliance == 0) { var o = s.Objectives[i]; o.Importance01 = 1f; s.Objectives[i] = o; }
+        var heavy = EnemyPicture.Build(s, NothingScouted);
+        AssertTrue(heavy.CapitalShareProp < p.CapitalShareProp - 0.05f, "more important objectives take men from the capital: " + heavy.CapitalShareProp + " against " + p.CapitalShareProp);
+    }
+
+    // No constant, no fixed-share branch and no second share anywhere under Strategic/Planner/ (decided 2026-10-18).
+    private static void NoFixedCapitalShareRemains()
+    {
+        string root = System.IO.Path.GetDirectoryName(FindRepoPath("src/WhiskeyRealism/Strategic/Planner/EnemyPicture.cs"));
+        foreach (string path in System.IO.Directory.GetFiles(root, "*.cs"))
+        {
+            string code = string.Join("\n", System.IO.File.ReadAllLines(path).Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+            string name = System.IO.Path.GetFileName(path);
+            AssertFalse(Regex.IsMatch(code, @"\bCapitalShare\b"), name + " has no CapitalShare constant");
+            AssertFalse(code.Contains("CapitalShareUsed"), name + " has no second capital share");
+            AssertFalse(code.Contains("ShareProp") && !code.Contains("CapitalShareProp"), name + " has no ShareProp field");
+            AssertFalse(Regex.IsMatch(code, @"\bShareProp\b"), name + " has no ShareProp member");
+            AssertFalse(code.Contains("proportional"), name + " has no proportional parameter");
+            AssertFalse(code.Contains("EnemyCapitalEst ") || Regex.IsMatch(code, @"\bEnemyCapitalEst\b"), name + " has no second capital estimate");
+        }
+        string row = CodeOnlyEp(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/EnemyPicture.cs"));
+        AssertFalse(row.Contains("\" capitalShare=\""), "the row prints no capitalShare=");
+        AssertFalse(row.Contains("\" enemyCapitalEst=\""), "and no enemyCapitalEst=");
+        AssertContains(row, "\" capitalShareProp=\"", "capitalShareProp= stays");
+        AssertContains(row, "\" enemyCapitalEstProp=\"", "and enemyCapitalEstProp=");
+    }
+
+    private static string CodeOnlyEp(string src)
+    {
+        return string.Join("\n", src.Split('\n').Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
     }
 
     // ---- the row ----
@@ -327,15 +372,16 @@ internal static partial class EnemyPictureTests
         var p = EnemyPicture.Build(s, NothingScouted);
         string row = EnemyPicture.Row(p, s);
         AssertTrue(row.StartsWith("[EnemyPicture] alliance=1 total=100000 believed=6000.0 faded=0.0 unaccounted=94000.0 unplaced=0.0 anchors=3 displaced=0 ", StringComparison.Ordinal), row);
-        foreach (string field in new[] { "capitalShare=", "capitalShareProp=", "seen=0", "marks=0", "enemyCapital=Washington", "enemyCapitalEst=", "enemyCapitalEstProp=", "top=" })
+        foreach (string field in new[] { "capitalShareProp=", "seen=0", "marks=0", "enemyCapital=Washington", "enemyCapitalEstProp=", "top=" })
             AssertContains(row, field, "the row has " + field);
+        AssertFalse(row.Contains(" capitalShare=") || row.Contains(" enemyCapitalEst="), "and no fixed-share field: " + row);
         AssertTrue(TelemetryLegacyParser.TryParse(row, TelemetryProfile.CampaignTuning, "s", out var ev), "the row parses");
         AssertEqual("Washington", ev.Fields.GetString("enemyCapital"), "the capital's name is one value");
         AssertEqual("EnemyPicture", TelemetryTagPolicy.Route(row).EventName, "the router knows it");
         AssertEqual(TelemetryCategory.State, TelemetryTagPolicy.Route(row).Category, "a State row");
         // top= is the three largest anchors, quoted as one value.
         Match top = Regex.Match(row, " top=(\"[^\"]*\"|\\S+)");
-        AssertTrue(top.Success && top.Groups[1].Value.Contains("Washington:37600.0"), "the largest anchor first: " + top.Value);
+        AssertTrue(top.Success && top.Groups[1].Value.Contains("Washington:52222.2"), "the largest anchor first: " + top.Value);
     }
 
     public static void Run()
@@ -362,7 +408,9 @@ internal static partial class EnemyPictureTests
             ("AfloatBeliefsAddNoLandMass", AfloatBeliefsAddNoLandMass),
             ("CapitalAnchorImportanceIsOne", CapitalAnchorImportanceIsOne),
             ("AnchorsAreLabelled", AnchorsAreLabelled),
-            ("BothCapitalSharesReported", BothCapitalSharesReported),
+            ("TheCapitalShareIsProportional", TheCapitalShareIsProportional),
+            ("TheCapitalTakesItsImportanceShareOfTheUnaccounted", TheCapitalTakesItsImportanceShareOfTheUnaccounted),
+            ("NoFixedCapitalShareRemains", NoFixedCapitalShareRemains),
             ("TheEnemyPictureRowHasTheFieldList", TheEnemyPictureRowHasTheFieldList),
         });
     }

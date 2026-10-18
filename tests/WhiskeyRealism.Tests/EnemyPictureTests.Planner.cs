@@ -685,27 +685,25 @@ internal static partial class EnemyPictureTests
     {
         var s = Csa(100000f);
         var p = EnemyPicture.Build(s, NothingScouted);
-        float at = p.Presumed(s, WashingtonX, WashingtonZ, 100f, null, proportional: false);
-        float prop = p.Presumed(s, WashingtonX, WashingtonZ, 100f, null, proportional: true);
-        AssertNear(AnchorAt(p, WashingtonX, WashingtonZ).Share, at, 0.5f, "within 100 of Washington only its own anchor: the share in force");
-        AssertNear(AnchorAt(p, WashingtonX, WashingtonZ).ShareProp, prop, 0.5f, "and under the proportional rule its proportional share");
-        AssertTrue(at != prop, "the two estimates differ");
-        float wide = p.Presumed(s, WinchesterX, WinchesterZ, 1000f, null, proportional: true);
+        float at = p.Presumed(s, WashingtonX, WashingtonZ, 100f, null);
+        AssertNear(AnchorAt(p, WashingtonX, WashingtonZ).Share, at, 0.5f, "within 100 of Washington only its own anchor: its proportional share");
+        AssertNear(100000f / 1.8f, at, 0.5f, "which is 1 of the 1.8 in play");
+        float wide = p.Presumed(s, WinchesterX, WinchesterZ, 1000f, null);
         AssertNear(100000f, wide, 1f, "a reach holding every anchor sums every anchor's proportional share");
     }
 
-    private static void EnemyCapitalEstimateReportedUnderBothShares()
+    private static void EnemyCapitalEstimateUsesTheProportionalShare()
     {
         var s = Csa(100000f);
         s.Beliefs.Add(Belief(1100f, -1000f, 4000f));          // far from every anchor: it scouts none of them and is not near the capital
         var plan = TheaterPlanner.Plan(s, SectorModel.Build(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, out EnemyPicture picture);
         AssertTrue(picture != null && picture.HasEnemyCapital, "the plan hands the picture back");
         var capital = AnchorAt(picture, WashingtonX, WashingtonZ);
-        AssertTrue(capital.Share > 0f && capital.Share != capital.ShareProp, "the two rules give the capital different masses: " + capital.Share + " and " + capital.ShareProp);
-        AssertNear(capital.Share, picture.EnemyCapitalEst, 5f, "the estimate under the share in force: what is presumed at the capital (nothing believed near it)");
-        AssertNear(capital.ShareProp, picture.EnemyCapitalEstProp, 5f, "and under the proportional one");
-        AssertTrue(picture.EnemyCapitalEst != picture.EnemyCapitalEstProp, "reported apart");
-        AssertContains(EnemyPicture.Row(picture, s), " enemyCapitalEstProp=", "both in the row");
+        AssertTrue(capital.Share > 0f, "the capital holds men: " + capital.Share);
+        AssertNear(capital.Share, picture.EnemyCapitalEstProp, 5f, "the estimate is what is presumed at the capital under its importance share (nothing believed near it)");
+        string row = EnemyPicture.Row(picture, s);
+        AssertContains(row, " enemyCapitalEstProp=", "the row reports it");
+        AssertFalse(row.Contains(" enemyCapitalEst="), "under no second name");
     }
 
     // ---- the plan and the flag ----
@@ -851,7 +849,7 @@ internal static partial class EnemyPictureTests
             ("TheAssignmentIsRewrittenEachPass", TheAssignmentIsRewrittenEachPass),
             ("NearestByStraightDistanceWeightedByTheProbe", NearestByStraightDistanceWeightedByTheProbe),
             ("TheProportionalEstimateUsesEveryAnchorsShare", TheProportionalEstimateUsesEveryAnchorsShare),
-            ("EnemyCapitalEstimateReportedUnderBothShares", EnemyCapitalEstimateReportedUnderBothShares),
+            ("EnemyCapitalEstimateUsesTheProportionalShare", EnemyCapitalEstimateUsesTheProportionalShare),
             ("PictureBuiltOncePerReview", PictureBuiltOncePerReview),
             ("ForesightPictureDefaultsOn", ForesightPictureDefaultsOn),
             ("PictureOffStillWritesThePictureRow", PictureOffStillWritesThePictureRow),
