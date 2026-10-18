@@ -137,6 +137,26 @@ namespace WhiskeyRealism.Strategic.Planner
             };
         }
 
+        // The move the tracker holds for the formation, for the miss row (a failed or given-up move names its target, start and tries).
+        public bool TryGetMove(int instanceId, out float fromX, out float fromZ, out float targetX, out float targetZ, out int issuedDay, out int retries, out int objectiveId)
+        {
+            if (!_entries.TryGetValue(instanceId, out var e))
+            {
+                fromX = fromZ = targetX = targetZ = 0f;
+                issuedDay = retries = 0;
+                objectiveId = -1;
+                return false;
+            }
+            fromX = e.FromX;
+            fromZ = e.FromZ;
+            targetX = e.TargetX;
+            targetZ = e.TargetZ;
+            issuedDay = e.IssuedDay;
+            retries = e.Retries;
+            objectiveId = e.ObjectiveId;
+            return true;
+        }
+
         public MoveOutcome Judge(int instanceId, float nowX, float nowZ, float waypointX, float waypointZ, int daySerial)
         {
             if (!_entries.TryGetValue(instanceId, out var e)) return MoveOutcome.None;

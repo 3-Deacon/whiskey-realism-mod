@@ -19,6 +19,12 @@ internal static class ReconNeverTasksTests
     {
         TestHarness.RunAll(new (string name, Action run)[]
         {
+            ("EveryUnfilledTaskCarriesAReason", EveryUnfilledTaskCarriesAReason),
+            ("NoneAbleNamesTheFormationsThatAreTooWeak", NoneAbleNamesTheFormationsThatAreTooWeak),
+            ("ClaimedNamesTheRoleThatHoldsTheAbleFormations", ClaimedNamesTheRoleThatHoldsTheAbleFormations),
+            ("GaveUpNamesTheTaskItsFormationGaveUpOn", GaveUpNamesTheTaskItsFormationGaveUpOn),
+            ("FreeIsThePoolLessWhatARoleHadClaimed", FreeIsThePoolLessWhatARoleHadClaimed),
+            ("AMissedMoveNamesItsFormationAndTarget", AMissedMoveNamesItsFormationAndTarget),
             ("TheSmokeShapeHasNothingFreeToScoutWith", TheSmokeShapeHasNothingFreeToScoutWith),
             ("AStagedMainEffortGetsOneScoutFromTheHoldReserve", AStagedMainEffortGetsOneScoutFromTheHoldReserve),
             ("TheHoldReserveIsDrawnOnceNotPerTask", TheHoldReserveIsDrawnOnceNotPerTask),
@@ -70,6 +76,117 @@ internal static class ReconNeverTasksTests
             ("TheMoverRowNamesAStagedGatheringThatWaits", TheMoverRowNamesAStagedGatheringThatWaits),
             ("AZeroCountedFailureIsNotAFailureRow", AZeroCountedFailureIsNotAFailureRow),
         });
+    }
+
+    // ---- smoke 2026-10-18: tasks went unfilled with why=- and moves gave up without a name ----
+
+    // Every recon task with no scout says why: the row's why= is never empty while unfilled is not.
+    private static void EveryUnfilledTaskCarriesAReason()
+    {
+        var worlds = new List<(string name, Day day)>
+        {
+            ("smoke shape, one reserve", Review(SmokeUnion())),
+            ("no reserve, the body is the pool", Review(SmokeUnion(bodyFlags: 0, withReserve: false))),
+            ("a believed army of 12000", EastWithArmy(12000f)),
+            ("a believed army of 16000", EastWithArmy(16000f)),
+            ("an unready holder", Review(EastWithAnUnreadyHolder())),
+        };
+        foreach (var (name, day) in worlds)
+        {
+            var counts = ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation);
+            AssertTrue(counts.Unfilled > 0, name + ": tasks stay unfilled");
+            AssertTrue(counts.Why != null && counts.Why.Length > 0, name + ": and the row says why: " + counts.Row(0));
+            AssertTrue(counts.Free <= counts.Pool, name + ": the formations still free are a part of the pool: " + counts.Row(0));
+        }
+    }
+
+    // Each reason is the cause it names, one world each. A union of ready formations too weak for a screen (2000 is vanilla's minimum for an
+    // offensive operation; a detachment needs only a body): the pool is not empty and nothing can take a screen.
+    private static void NoneAbleNamesTheFormationsThatAreTooWeak()
+    {
+        var s = Base();
+        s.Own.Add(Corps(1, 100f, 1500f));
+        s.Own.Add(Corps(2, 150f, 1500f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
+        var day = Review(s);
+        var counts = ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation);
+        AssertTrue(counts.Tasks > 0 && counts.Unfilled == counts.Tasks, "tasks exist and none is filled: " + counts.Row(0));
+        AssertTrue(counts.Pool > 0, "the pool is not empty: " + counts.Row(0));
+        AssertContains(counts.Row(0), " why=" + ForceAllocator.ReasonUnfilledNoneAble + " ", "too weak for a screen is the reason: " + counts.Row(0));
+    }
+
+    private static void ClaimedNamesTheRoleThatHoldsTheAbleFormations()
+    {
+        var day = EastWithArmy(12000f);
+        AssertContains(day.Allocation.ReconUnfilledWhy, ForceAllocator.ReasonUnfilledClaimedPrefix + ForceAllocator.ReasonHoldReserve,
+            "the one formation that could go is the East's hold reserve, which only the main objective's tasks may draw: " + day.Allocation.ReconUnfilledWhy);
+    }
+
+    private static void GaveUpNamesTheTaskItsFormationGaveUpOn()
+    {
+        var s = SmokeUnion();
+        var sectors = ExecutorFixtures.Sectors(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        var tasks = new List<ReconTask>();
+        ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), tasks);
+        var gaveUp = new List<GaveUpMove>();
+        foreach (var task in tasks) gaveUp.Add(new GaveUpMove { InstanceId = 2, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
+        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
+        AssertContains(alloc.ReconUnfilledWhy, ForceAllocator.ReasonUnfilledGaveUp, "the only formation that could go gave up on every post: " + alloc.ReconUnfilledWhy);
+    }
+
+    // The pool is the snapshot's count before any role; free= is what is left when the recon step begins. Here every ready formation is the
+    // East's hold reserve or the main effort's, so the pool is not empty and nothing is free.
+    private static void FreeIsThePoolLessWhatARoleHadClaimed()
+    {
+        var day = EastWithArmy(12000f);
+        var counts = ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation);
+        AssertTrue(counts.Pool >= 1, "the pool is not empty: " + counts.Row(0));
+        AssertEqual(0, counts.Free, "but a role claimed it: " + counts.Row(0));
+        var open = Base();
+        open.Own.Add(Corps(1, 100f, 4000f));
+        open.Own.Add(Corps(2, 120f, 4000f));
+        var calm = Review(open);
+        var calmCounts = ReconStep.CountsOf(calm.S, calm.Ledger, calm.Tasks, calm.Allocation);
+        AssertEqual(2, calmCounts.Pool, "a quiet map: both formations are the pool: " + calmCounts.Row(0));
+        AssertEqual(2, calmCounts.Free, "and nothing claimed them: " + calmCounts.Row(0));
+    }
+
+    // A move judged a miss names the formation, its role and where it was sent, so a give-up is no longer a count alone.
+    private static void AMissedMoveNamesItsFormationAndTarget()
+    {
+        var host = new FakeMoverHost();
+        var tracker = new MoveTracker();
+        var state = ExecutorFixtures.State();
+        Func<int, MoverTally> day = offset =>
+        {
+            var s = ExecutorFixtures.Wide(offset);
+            s.Own.Add(ExecutorFixtures.Corps(1, 350f, 6000f));
+            s.Own.Add(ExecutorFixtures.Corps(2, 360f, 5000f));
+            s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
+            var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
+            var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, state);
+        };
+        var first = day(0);
+        AssertEqual(2, first.Issued, "both bodies are sent");
+        AssertEqual(0, first.MissRows.Count, "and nothing has been judged yet");
+        var second = day(1);          // the fake host never moves a formation: its waypoint stays where it was
+        AssertEqual(2, second.Failed, "both missed");
+        AssertEqual(2, second.MissRows.Count, "and each miss has its row");
+        AssertContains(second.MissRows[0], "[CampaignMoverMiss] alliance=0 unit=", "the row names the unit");
+        AssertContains(second.MissRows[0], " role=MainEffort outcome=failed ", "its role and the outcome");
+        AssertContains(second.MissRows[0], " retries=0 ", "the first miss");
+        var missRoute = TelemetryTagPolicy.Route(second.MissRows[0]);
+        AssertEqual("CampaignMoverMiss", missRoute.EventName, "the router knows the row");
+        AssertEqual(TelemetryCategory.Failure, missRoute.Category, "and files a failed move as a failure");
+        var third = day(2);
+        AssertEqual(2, third.GaveUp, "the retry missed too");
+        AssertEqual(2, third.MissRows.Count, "two rows again");
+        AssertContains(third.MissRows[1], " outcome=gaveUp ", "now given up");
+        AssertContains(third.MissRows[1], " retries=1 ", "after the retry");
+        AssertContains(third.MissRows[1], " target=", "with the place it was sent to");
+        AssertEqual(TelemetryCategory.Write, TelemetryTagPolicy.Route(third.MissRows[1]).Category, "a give-up is the tally's gaveUp, a Write row");
     }
 
     // ---- fixtures ----
@@ -135,6 +252,12 @@ internal static class ReconNeverTasksTests
         day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, null, pinned);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
+    }
+
+    // Whether the draw from the hold reserve was refused for a believed threat: the [Recon] row's why= names it (among the other reasons).
+    private static bool Refused(Allocation a)
+    {
+        return a.ReconUnfilledWhy != null && Array.IndexOf(a.ReconUnfilledWhy.Split(','), ForceAllocator.ReasonScoutAgainstThreat) >= 0;
     }
 
     private static int Roles(Allocation a, FormationRole role)
@@ -310,7 +433,7 @@ internal static class ReconNeverTasksTests
         AssertEqual(FormationRole.Recon, Of(alloc, 30).Role, "the free formation scouts for a later main task");
         AssertEqual(last.Reason, Of(alloc, 30).Reason, "the last main task");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "the East reserve was refused for the first");
-        AssertTrue(alloc.ReconUnfilledReason == null, "and the push has its eyes: no reason is told");
+        AssertFalse(Refused(alloc), "and the push has its eyes: no reason is told");
         // A free formation that fills a task that does not see the main objective (the capital approach) leaves the push without eyes: the
         // reason stands.
         var other = new List<GaveUpMove>();
@@ -318,11 +441,11 @@ internal static class ReconNeverTasksTests
             other.Add(new GaveUpMove { InstanceId = 30, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
         var approach = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), other);
         AssertEqual(ReconPlanner.ReasonCapitalApproach, Of(approach, 30).Reason, "30 watches the capital approach");
-        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, approach.ReconUnfilledReason, "and the push still has no eyes: the reason stands");
+        AssertTrue(Refused(approach), "and the push still has no eyes: the reason stands");
         // Control: with the free formation gone the refusal stands.
         var bare = SmokeUnion();
         bare.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 12000f));
-        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, Review(bare).Allocation.ReconUnfilledReason, "control: nobody scouts, the refusal is the reason");
+        AssertTrue(Refused(Review(bare).Allocation), "control: nobody scouts, the refusal is the reason");
     }
 
     // The draw is for the push's own eyes. A higher-priority task of another kind (a screen posture, a belief) comes first in the list and
@@ -412,14 +535,14 @@ internal static class ReconNeverTasksTests
         // The body is the pool's only member and the last of the main effort: tasks exist, nobody can be sent.
         var none = Review(SmokeUnion(bodyFlags: 0, withReserve: false));
         AssertTrue(none.Tasks.Count >= 3, "tasks exist: " + none.Tasks.Count);
-        var rowNone = ReconStep.CountsOf(none.S, none.Ledger, none.Tasks).Row(0);
+        var rowNone = ReconStep.CountsOf(none.S, none.Ledger, none.Tasks, none.Allocation).Row(0);
         AssertContains(rowNone, " tasks=" + none.Tasks.Count + " unfilled=" + none.Tasks.Count + " ", "nobody was sent: every task is unfilled, " + rowNone);
-        AssertTrue(rowNone.EndsWith("pool=1"), "though the pool is not empty: " + rowNone);
+        AssertContains(rowNone, " why=mass-kept,unsuited pool=1 free=1", "though the pool is not empty, and the row says what stopped each: the screen would take the main effort's last body, the advance guard is the body itself: " + rowNone);
 
         var drawn = Review(SmokeUnion());
-        var row = ReconStep.CountsOf(drawn.S, drawn.Ledger, drawn.Tasks).Row(0);
+        var row = ReconStep.CountsOf(drawn.S, drawn.Ledger, drawn.Tasks, drawn.Allocation).Row(0);
         AssertContains(row, " tasks=" + drawn.Tasks.Count + " unfilled=" + (drawn.Tasks.Count - 1) + " ", "one task has its scout: " + row);
-        AssertContains(row, " listed=1 why=- pool=1", "the capital-defence body is named, and the one formation the pick can take is the pool: " + row);
+        AssertContains(row, " listed=1 why=claimed-recon pool=1 free=0", "the capital-defence body is named, the one formation the pick can take went to the first task and the others say so: " + row);
         AssertEqual(1, ReconPlanner.ListedCount(SmokeUnion(FormationFlags.InOffensiveOps)), "an offensive-operations entry is listed too");
         AssertEqual(0, ReconPlanner.ListedCount(SmokeUnion(0)), "an unlisted body is not");
         var busyListed = SmokeUnion(0);
@@ -649,8 +772,8 @@ internal static class ReconNeverTasksTests
             AssertTrue(believed > ForceAllocator.MinGarrisonStrength && believed >= need - 0.01f, army + ": the East need is the army's: " + need + " / " + believed);
             AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), army + ": nothing is drawn from the East reserve");
             AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, army + ": it keeps holding");
-            AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, army + ": and the refusal is named");
-            AssertContains(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation).Row(0), " why=believed-threat ", army + ": in the [Recon] row");
+            AssertTrue(Refused(day.Allocation), army + ": and the refusal is named");
+            AssertContains(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation).Row(0), " why=believed-threat,claimed-hold-reserve ", army + ": in the [Recon] row");
             AssertFalse(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks, day.Allocation).Equals(ReconStep.CountsOf(day.S, day.Ledger, day.Tasks)), army + ": a row that differs only by why= is a changed row");
         }
     }
@@ -668,7 +791,7 @@ internal static class ReconNeverTasksTests
         var day = Review(s);
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 5).Role, "the 1000-man formation scouts: the East keeps 6000 against 5400");
         AssertEqual(FormationRole.Hold, Of(day.Allocation, 2).Role, "and 2 keeps holding");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing was refused");
+        AssertFalse(Refused(day.Allocation), "nothing was refused");
     }
 
     // The boundary: the hold less the drawn formation equals the need exactly (an army of 10000: need 6000; a busy 3000, the 1000 and the 3000
@@ -684,7 +807,7 @@ internal static class ReconNeverTasksTests
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
         AssertNear(6000f, need, 0.5f, "the East need");
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 5).Role, "the 1000 scouts: 6000 remain against 6000");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
     }
 
     // The presumption alone sets the East need (nothing believed): the scout may go, and the sector's loss is a listed shortfall whose carrier is
@@ -693,7 +816,7 @@ internal static class ReconNeverTasksTests
     {
         var day = Review(SmokeUnion());
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "drawn");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
         AssertTrue(day.Allocation.Shortfalls.Contains(13) || day.Allocation.Shortfalls.Contains(14), "the East is short and names a busy holder: " + string.Join(",", day.Allocation.Shortfalls));
         AssertEqual(1, day.Allocation.Shortfalls.Count, "only the East");
         // A sector with no immobile holder either has no one to name.
@@ -925,7 +1048,7 @@ internal static class ReconNeverTasksTests
         AssertNear(7200f, need, 1f, "the East need is HoldRatio x 12000");
         AssertTrue(believed >= need - 0.01f, "and belief-driven");
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 3000 is drawn");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
         AssertTrue(HeldAtEnd(day, east, false) >= need, "and the East still holds " + HeldAtEnd(day, east, false) + " against " + need);
     }
 
@@ -942,7 +1065,7 @@ internal static class ReconNeverTasksTests
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
         AssertNear(7200f, need, 1f, "the East need (belief-driven)");
         AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "the 3000 is not drawn: the East holds 8000 without the builder");
-        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(Refused(day.Allocation), "and the refusal is named");
         AssertTrue(HeldAtEnd(day, east, false) >= need, "the East holds " + HeldAtEnd(day, east, false) + " against " + need);
     }
 
@@ -957,7 +1080,7 @@ internal static class ReconNeverTasksTests
         }));
         AssertEqual(FormationRole.Garrison, Of(day.Allocation, 30).Role, "the pledged formation marches to the post");
         AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "the 3000 is not drawn: the East holds 8000 without it");
-        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(Refused(day.Allocation), "and the refusal is named");
         AssertTrue(HeldAtEnd(day, east, false) >= 7200f, "the East holds " + HeldAtEnd(day, east, false));
     }
 
@@ -974,7 +1097,7 @@ internal static class ReconNeverTasksTests
         AssertEqual(FormationRole.Hold, Of(day.Allocation, 30).Role, "the unready formation is not seated at the post");
         AssertEqual(0, day.Allocation.Seats.Count, "the post is unmanned");
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 3000 is drawn: the East still holds 9000");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
         AssertTrue(HeldAtEnd(day, east, false) >= 7200f, "the East holds " + HeldAtEnd(day, east, false));
     }
 
@@ -1002,7 +1125,7 @@ internal static class ReconNeverTasksTests
         AssertEqual(FormationRole.DepotBuilder, Of(day.Allocation, 2).Role, "2 builds the pinned depot");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 3).Reason, "3 is in the reserve");
         AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "the 1000 is not drawn: the East would hold 8000 against 8400");
-        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(Refused(day.Allocation), "and the refusal is named");
     }
 
     // The capital reserve (the formations nearest the capital until its floor) holds the sector when the capital stands in it; ReserveRules.Hold
@@ -1028,7 +1151,7 @@ internal static class ReconNeverTasksTests
         foreach (var sp in day.Plan.Sectors) if (sp.SectorId == east) need = sp.HoldNeed;
         AssertNear(7200f, need, 1f, "the East need");
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the 1000 is drawn: the guard's 6000 and the 5000 still hold the East");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
         AssertTrue(HeldAtEnd(day, east, true) >= need, "the East holds " + HeldAtEnd(day, east, true) + " with its guard, against " + need);
     }
 
@@ -1064,7 +1187,7 @@ internal static class ReconNeverTasksTests
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 2).Reason, "the reserve is sized without the guard: 2 is in it");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(day.Allocation, 3).Reason, "and 3");
         AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "no scout is drawn: the East holds 7500 and would hold 6500 without the 1000");
-        AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, day.Allocation.ReconUnfilledReason, "and the refusal is named");
+        AssertTrue(Refused(day.Allocation), "and the refusal is named");
         AssertTrue(HeldAtEnd(day, east, false) >= need, "the East holds " + HeldAtEnd(day, east, false) + " against " + need);
         AssertEqual(0, day.Allocation.Shortfalls.Count, "no shortfall against the believed army");
     }
@@ -1126,7 +1249,7 @@ internal static class ReconNeverTasksTests
         AssertNear(20000f, need, 1f, "the remembered army sets the need");
         AssertTrue(believed > 0f && believed < need, "a believed force exists but does not drive it: " + believed);
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "so the East gives its scout though it cannot cover 20000 without it");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
         // A fresher belief (confidence 0.45: 0.6 x 20000 x 0.45 = 5400) puts a believed term above the floor, still under the presumption that sets the need: the
         // sector is still presumption-backed, not belief-driven.
         var fresher = Review(EastWithAStaleArmy(790f, 800f, 0.45f));
@@ -1135,7 +1258,7 @@ internal static class ReconNeverTasksTests
         AssertNear(20000f, need2, 1f, "the remembered army still sets the need");
         AssertTrue(believed2 > ForceAllocator.MinGarrisonStrength && believed2 < need2 - 0.01f, "a believed term above the floor but under the need: " + believed2);
         AssertEqual(FormationRole.Recon, Of(fresher.Allocation, 2).Role, "and the East still gives its scout");
-        AssertTrue(fresher.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(fresher.Allocation), "nothing refused");
     }
 
     // The threshold between the two causes of a need: the believed term close to the presumption (three remembered armies of 20000 at confidence
@@ -1157,7 +1280,7 @@ internal static class ReconNeverTasksTests
         AssertNear(20000f, need, 1f, "the remembered army sets the need");
         AssertTrue(believed > 0.85f * need && believed < need - 0.01f, "the believed term is near the need and under it: " + believed + " / " + need);
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 2).Role, "the East still gives its scout");
-        AssertTrue(day.Allocation.ReconUnfilledReason == null, "nothing refused");
+        AssertFalse(Refused(day.Allocation), "nothing refused");
     }
 
     // The carrier of a short sector is its nearest immobile holder to the army it faces: 14 (x 800) beside the belief at 1000, and 13 when

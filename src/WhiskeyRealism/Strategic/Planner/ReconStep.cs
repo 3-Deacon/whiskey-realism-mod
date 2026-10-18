@@ -15,21 +15,23 @@ namespace WhiskeyRealism.Strategic.Planner
         public int Tasks, Unfilled;
         // Of the formations the plan may mass, those in a vanilla offensive-operations or capital-defence list (no scout pick takes them).
         public int Listed;
-        // Why the hold reserve gave no scout to a staged main effort (ForceAllocator.ReasonScoutAgainstThreat), null when it was not refused.
+        // Of the pool, the formations no role had claimed when the recon step began (ForceAllocator.AssignRecon): what a pick could still take.
+        public int Free;
+        // Why tasks have no scout (Allocation.ReconUnfilledWhy: the distinct ForceAllocator.ReasonUnfilled* and believed-threat reasons), null when every task has one.
         public string Why;
 
         public bool Equals(ReconCounts other)
         {
             return Screens == other.Screens && Pickets == other.Pickets && AdvanceGuards == other.AdvanceGuards &&
                    Probes == other.Probes && Recalled == other.Recalled && UnwatchedApproaches == other.UnwatchedApproaches &&
-                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool && Tasks == other.Tasks && Unfilled == other.Unfilled && Listed == other.Listed && string.Equals(Why, other.Why, StringComparison.Ordinal);
+                   OldestBeliefDays == other.OldestBeliefDays && Pool == other.Pool && Tasks == other.Tasks && Unfilled == other.Unfilled && Listed == other.Listed && Free == other.Free && string.Equals(Why, other.Why, StringComparison.Ordinal);
         }
 
         public string Row(int alliance)
         {
             return "[Recon] alliance=" + alliance + " screens=" + Screens + " pickets=" + Pickets + " advanceGuards=" + AdvanceGuards +
                    " probes=" + Probes + " recalled=" + Recalled + " unwatchedApproaches=" + UnwatchedApproaches +
-                   " oldestBeliefDays=" + OldestBeliefDays + " tasks=" + Tasks + " unfilled=" + Unfilled + " listed=" + Listed + " why=" + (Why ?? "-") + " pool=" + Pool;
+                   " oldestBeliefDays=" + OldestBeliefDays + " tasks=" + Tasks + " unfilled=" + Unfilled + " listed=" + Listed + " why=" + (Why ?? "-") + " pool=" + Pool + " free=" + Free;
         }
     }
 
@@ -118,7 +120,11 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static ReconCounts CountsOf(CampaignSnapshot s, ReconMissionLedger missions, IReadOnlyList<ReconTask> tasks, Allocation allocation = null)
         {
             var counts = new ReconCounts();
-            if (allocation != null) counts.Why = allocation.ReconUnfilledReason;
+            if (allocation != null)
+            {
+                counts.Why = allocation.ReconUnfilledWhy;
+                counts.Free = allocation.ReconFree;
+            }
             if (missions != null)
             {
                 var list = missions.Missions;

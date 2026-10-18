@@ -547,7 +547,7 @@ internal static class ScoutFirstTests
         AssertEqual(0, day.Tasks.Count, "nobody could take a reconnaissance task, so none is planned");
         AssertEqual(0, day.Ledger.Missions.Count, "no mission");
         AssertEqual(0, ReconPlanner.ScoutPool(s), "the pool is empty");
-        AssertTrue(ReconStep.CountsOf(s, day.Ledger, day.Tasks).Row(0).EndsWith("pool=0"), "and the [Recon] row says so");
+        AssertTrue(ReconStep.CountsOf(s, day.Ledger, day.Tasks).Row(0).EndsWith("pool=0 free=0"), "and the [Recon] row says so");
     }
 
     // 1861: no cavalry-majority group. The staged main effort still gets scouts: an infantry advance guard and a probe drawn from its
@@ -646,7 +646,7 @@ internal static class ScoutFirstTests
         var s = Union(12, readiness: 3);
         var day = Review(s, new PlannerState(), new ReconMissionLedger());
         AssertEqual(12, ReconPlanner.ScoutPool(s), "every ready, unbusy, orderable formation");
-        AssertTrue(ReconStep.CountsOf(s, day.Ledger, day.Tasks).Row(0).EndsWith("pool=12"), "the [Recon] row");
+        AssertContains(ReconStep.CountsOf(s, day.Ledger, day.Tasks, day.Allocation).Row(0), " pool=12 free=", "the [Recon] row");
         var mixed = Union(12, readiness: 3);
         var busy = mixed.Own[0];
         busy.Flags |= FormationFlags.InBattle;
