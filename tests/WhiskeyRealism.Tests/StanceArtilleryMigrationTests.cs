@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
@@ -37,6 +38,14 @@ internal static class StanceArtilleryMigrationTests
             ("battle-core ArtilleryFallbackWheelHonoursVanillaReach", ArtilleryFallbackWheelHonoursVanillaReach),
             ("battle-core InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy", InterposedSupportCountsOnlyFriendsBetweenBatteryAndEnemy),
             ("battle-core ArtilleryIgnoresFeudPlayerAndHeldBatteries", ArtilleryIgnoresFeudPlayerAndHeldBatteries),
+            ("bc14w BOMBARD-START-INTENT a battery vanilla's start test would admit is given the bombard-start intent for the preparation point, and no other", BombardStartIntent),
+            ("bc14w FOCAL-PREP-ARTILLERY a battery whose group carries a preparation point keeps bombarding through the doctrine's cancel and counter-battery, except the safety rules", PreparationExemptsBombard),
+            ("bc14w BOMBARD-START the two field writes are executor-only behind the gate, in vanilla's order, and the producer notes the table", BombardStartWriter),
+            ("unit-churn ARTILLERY-RESTART a bombardment vanilla restarts after the doctrine's cancel is accepted for the window, not cancelled every cycle", ArtilleryRestartAcceptedForTheWindow),
+            ("unit-churn ARTILLERY-SAFETY the cancels that guard the battery are never accepted away: low ammo, an unsupported battery with the enemy close", ArtillerySafetyCancelsAreNeverSuppressed),
+            ("unit-churn ARTILLERY-MEMORY the restart is read from the executor's last combat behavior outcome: the doctrine's own 7, issued, inside the window", ArtilleryRestartIsReadFromTheLastOutcome),
+            ("unit-churn ARTILLERY-LOOP vanilla 9 against the doctrine's 7, ticked: the churn is bounded to one cancel per window", ArtilleryChurnLoopIsBounded),
+            ("unit-churn ARTILLERY-WIRING the producer feeds the memory and reports the accepted restart", ArtilleryRestartWiring),
         });
     }
 
@@ -478,6 +487,308 @@ internal static class StanceArtilleryMigrationTests
         {
             DoctrineOn = true, AuditOn = true, FallbackDistance = 180f, TurnTriggerDegrees = 20f, MaxCoverValueForRotation = 0.5f, AdditionalAngleInCover = 30f,
         };
+    }
+
+    // ------------------------------------------------------------------ BC14W: the bombard start
+
+    private static BattleArtilleryState PrepState(float ammoMean = 0.9f, float ammo = 0.9f, float px = 500f, float pz = -1100f, int guns = 4, float fireRange = 1000f,
+        DoctrineArtilleryDecision doctrine = default(DoctrineArtilleryDecision))
+    {
+        BattleArtilleryState b = State(ammo, false, doctrine);
+        b.Guns = guns;
+        b.FireRange = fireRange;
+        b.HasPreparation = true;
+        b.PreparationX = px;
+        b.PreparationZ = pz;
+        b.AmmoMean = ammoMean;
+        return b;
+    }
+
+    private static void BombardStartIntent()
+    {
+        BattleSnapshot s = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f);
+        AssertTrue(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(), out BattleOrderIntent start), "admitted");
+        AssertEqual(OrderChannel.CombatBehavior, start.Channel, "on the combat behavior channel");
+        AssertEqual(9, start.Value, "behavior 9, bombardment");
+        AssertTrue(start.TargetX == 500f && start.TargetZ == -1100f, "carrying the preparation point");
+        AssertTrue((start.Flags & IntentFlags.BombardStart) != 0, "flagged BombardStart");
+        AssertEqual(IntentSource.ArtilleryDoctrine, start.Source, "the artillery doctrine's");
+        AssertEqual(IntentPriority.Executor, start.Priority, "at executor priority");
+        AssertEqual(Battery, start.GroupId, "of the battery itself");
+
+        BattleOrderIntent none;
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, State(), out none), "a battery whose group carries no preparation point");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(pz: -1600f), out none), "a point beyond the fire range (1100 m of 1000)");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(guns: 0), out none), "no guns");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(ammoMean: 0.2f), out none), "mean ammo at 0.2 is not above it");
+        AssertTrue(BattleWriterPolicy.TryBombardStartIntent(s, 1, PrepState(ammoMean: 0.21f), out _), "just above it");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f), 1, PrepState(), out none), "already on counter-battery");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f), 1, PrepState(), out none), "already bombarding");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, paths: 1), 1, PrepState(), out none), "on a path");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.Routed), 1, PrepState(), out none), "routed");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.MarkedForRout), 1, PrepState(), out none), "marked for rout");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f, batteryFlags: UnitFlags.PermanentlyDetached), 1, PrepState(), out none), "permanently detached");
+        AssertFalse(BattleWriterPolicy.TryBombardStartIntent(s, 0, PrepState(), out none), "the brigade is no battery");
+
+        // In the doctrine: Enable Tactical Artillery Doctrine on, the start is the behavior channel's one intent; off (the audit alone), it is never made.
+        var buffer = new BattleOrderIntent[4];
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, PrepState(), Rules(), buffer);
+        int starts = 0;
+        for (int i = 0; i < n; i++) if ((buffer[i].Flags & IntentFlags.BombardStart) != 0) starts++;
+        AssertEqual(1, starts, "the doctrine submits the start");
+        BattleArtilleryRules audit = Rules();
+        audit.DoctrineOn = false;
+        n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, PrepState(), audit, buffer);
+        for (int i = 0; i < n; i++) AssertTrue((buffer[i].Flags & IntentFlags.BombardStart) == 0, "with the doctrine off the producer runs and starts nothing");
+        n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, State(), Rules(), buffer);
+        for (int i = 0; i < n; i++) AssertTrue((buffer[i].Flags & IntentFlags.BombardStart) == 0, "a battery with no preparation point starts nothing");
+        BattleArtilleryState held = PrepState();
+        held.InHold = true;
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, held, Rules(), buffer), "a battery in its hold is left alone");
+    }
+
+    // ------------------------------------------------------------------ unit-churn: the 7 <-> 9 loop (smoke 2026-10-17, D/2nd US Artillery)
+
+    // Vanilla's CheckAIBombardment (3869-3911) starts a bombardment (9) on every micro cycle where its group conditions hold and cancels one only on
+    // its own conditions; the doctrine's cancel (7) is Whiskey's. Neither remembered the other: 41 alternations in 10 minutes, each a courier order in the
+    // brigade's queue. A restart after our own cancel is accepted for a window; the safety cancels stay.
+    private static BattleArtilleryState Restarted(BattleArtilleryState b)
+    {
+        b.RestartedAfterOurCancel = true;
+        return b;
+    }
+
+    private static void ArtilleryRestartAcceptedForTheWindow()
+    {
+        var soft = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "displace");
+        BattleSnapshot bombarding = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+        var buffer = new BattleOrderIntent[4];
+
+        AssertEqual(1, CountCancels(bombarding, State(ammo: 0.9f, doctrine: soft), out _), "the first cancel is made as before");
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(bombarding, 1, Restarted(State(ammo: 0.9f, doctrine: soft)), Rules(), buffer, out bool accepted);
+        AssertEqual(0, n, "vanilla restarted it inside the window: no second cancel");
+        AssertTrue(accepted, "and the producer is told, for the row");
+
+        // A friend within danger close (the brigade's own line, 200 m of a 1000 m battery) is the same: the proxy is not a reason to fight vanilla every cycle.
+        BattleSnapshot friendClose = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+        AddFriendlyInfantry(friendClose, 500f, -450f);
+        var dangerClose = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "friendly-danger-close");
+        AssertEqual(1, CountCancels(friendClose, State(ammo: 0.9f, doctrine: dangerClose), out _), "a friend in danger close cancels the first time");
+        AssertEqual(0, BattleWriterPolicy.ArtilleryDoctrineIntents(friendClose, 1, Restarted(State(ammo: 0.9f, doctrine: dangerClose)), Rules(), buffer, out accepted),
+            "and is accepted once vanilla restarts it");
+        AssertTrue(accepted, "reported");
+
+        // Nothing was suppressed when there was nothing to cancel.
+        BattleWriterPolicy.ArtilleryDoctrineIntents(bombarding, 1, Restarted(State(ammo: 0.9f)), Rules(), buffer, out accepted);
+        AssertFalse(accepted, "a supported, supplied bombardment has no cancel to accept");
+        // A battery not bombarding is not touched by the memory.
+        BattleSnapshot firing = ArtillerySnapshot(cbo: 7, mounted: false, enemyDistance: 600f);
+        BattleWriterPolicy.ArtilleryDoctrineIntents(firing, 1, Restarted(State(ammo: 0.9f, doctrine: soft)), Rules(), buffer, out accepted);
+        AssertFalse(accepted, "only a bombardment (9) is a restart");
+    }
+
+    private static void ArtillerySafetyCancelsAreNeverSuppressed()
+    {
+        var buffer = new BattleOrderIntent[4];
+        BattleSnapshot bombarding = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(bombarding, 1, Restarted(State(ammo: 0.05f)), Rules(), buffer, out bool accepted), "ammo below 0.10 cancels again");
+        AssertFalse(accepted, "not accepted");
+        BattleSnapshot close = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 150f);
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(close, 1, Restarted(State(ammo: 0.9f)), Rules(), buffer, out accepted),
+            "an unsupported battery with the enemy inside 0.2 of its range cancels again");
+        AssertFalse(accepted, "not accepted");
+        // The conserve-ammo micro write is a safety cancel too (ammo below 0.10 on the audit).
+        AssertEqual(1, BattleWriterPolicy.ArtilleryDoctrineIntents(bombarding, 1, Restarted(State(ammo: 0.09f)), Rules(), buffer, out _), "conserve ammo");
+    }
+
+    private static void ArtilleryRestartIsReadFromTheLastOutcome()
+    {
+        const double window = BattleWriterPolicy.ArtilleryRestartAcceptHours;
+        var cancel = new OrderOutcome
+        {
+            GroupId = Battery, Channel = OrderChannel.CombatBehavior, Kind = OrderOutcomeKind.Issued, Source = IntentSource.ArtilleryDoctrine, Value = 7, AtHours = 10.0,
+            Flags = IntentFlags.CancelsBombard,
+        };
+        AssertTrue(BattleWriterPolicy.RestartedAfterOwnCancel(cancel, 10.0 + window * 0.5), "our 7, half a window ago");
+        AssertTrue(BattleWriterPolicy.RestartedAfterOwnCancel(cancel, 10.0), "in the same instant");
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(cancel, 10.0 + window), "at the window's end the cancel is allowed again");
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(cancel, 9.0), "a stamp from the future (reload, new battle) has expired");
+        OrderOutcome other = cancel;
+        other.Value = 8;
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1), "a counter-battery switch is not a cancel");
+        other = cancel;
+        other.Source = IntentSource.FireControl;
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1), "only the artillery doctrine's own 7");
+        other = cancel;
+        other.Kind = OrderOutcomeKind.Skipped;
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1), "a skipped cancel never reached the battery");
+        other = cancel;
+        other.Channel = OrderChannel.Formation;
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1), "the combat behavior channel only");
+        other = cancel;
+        other.Flags = IntentFlags.None;
+        AssertFalse(BattleWriterPolicy.RestartedAfterOwnCancel(other, 10.1),
+            "the doctrine's counter-battery release (8 to 7) and its ammo-conserving cease-fire are also a 7 from the same source: neither cancels a bombardment");
+
+        // The cancel the policy builds carries the flag; the counter-battery release does not.
+        var soft = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "displace");
+        var buffer = new BattleOrderIntent[4];
+        int made = BattleWriterPolicy.ArtilleryDoctrineIntents(ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f), 1, State(ammo: 0.9f, doctrine: soft), Rules(), buffer);
+        bool sawCancel = false;
+        for (int k = 0; k < made; k++)
+            if (buffer[k].Reason == "artillery-cancel-bombard")
+            {
+                sawCancel = true;
+                AssertTrue((buffer[k].Flags & IntentFlags.CancelsBombard) != 0, "the cancel is flagged as one");
+            }
+        AssertTrue(sawCancel, "the doctrine cancelled the bombardment it dislikes");
+        made = BattleWriterPolicy.ArtilleryDoctrineIntents(ArtillerySnapshot(cbo: 8, mounted: false, enemyDistance: 600f), 1, State(ammo: 0.9f), Rules(), buffer);
+        bool sawRelease = false;
+        for (int k = 0; k < made; k++)
+            if (buffer[k].Reason == "artillery-counterbattery-release")
+            {
+                sawRelease = true;
+                AssertEqual(7, buffer[k].Value, "the release is a 7");
+                AssertEqual(IntentFlags.None, buffer[k].Flags & IntentFlags.CancelsBombard, "and is not a cancel of a bombardment");
+            }
+        AssertTrue(sawRelease, "counter-battery with no enemy gun in range is released");
+
+        // The executor keeps the issued value, which is what makes the above readable.
+        var executor = new OrderExecutor();
+        executor.Bind(new AllowGuard(), null);
+        var seven = new BattleOrderIntent { GroupId = Battery, Channel = OrderChannel.CombatBehavior, Value = 7, Heading = -1f, Priority = IntentPriority.Executor, Source = IntentSource.ArtilleryDoctrine, Reason = "artillery-cancel-bombard", Flags = IntentFlags.CancelsBombard };
+        executor.RecordIssued(seven, 10.0, null, 0, null, 0, 0, 0);
+        AssertTrue(executor.TryGetLastOutcome(Battery, OrderChannel.CombatBehavior, out OrderOutcome kept), "recorded");
+        AssertEqual(7, kept.Value, "with the value it issued");
+        AssertEqual(IntentFlags.CancelsBombard, kept.Flags, "and the flags it carried");
+    }
+
+    // The loop as it ran: each tick vanilla starts a bombardment when the battery is not bombarding (its group conditions hold), then the doctrine looks.
+    private static void ArtilleryChurnLoopIsBounded()
+    {
+        var soft = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "displace");
+        var buffer = new BattleOrderIntent[4];
+        BattleSnapshot bombarding = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+        const double tick = 9.0 / 3600.0 * 20.0;          // a macro cycle at 20x compression, in battle hours
+        OrderOutcome last = default(OrderOutcome);
+        bool haveLast = false;
+        int cancels = 0;
+        double now = 10.0;
+        for (int i = 0; i < 40; i++, now += tick)
+        {
+            BattleArtilleryState b = State(ammo: 0.9f, doctrine: soft);
+            b.RestartedAfterOurCancel = haveLast && BattleWriterPolicy.RestartedAfterOwnCancel(last, now);
+            int n = BattleWriterPolicy.ArtilleryDoctrineIntents(bombarding, 1, b, Rules(), buffer);
+            for (int k = 0; k < n; k++)
+            {
+                if (buffer[k].Channel != OrderChannel.CombatBehavior || buffer[k].Value != 7) continue;
+                cancels++;
+                last = new OrderOutcome { GroupId = Battery, Channel = OrderChannel.CombatBehavior, Kind = OrderOutcomeKind.Issued, Source = buffer[k].Source, Value = 7, Flags = buffer[k].Flags, AtHours = now };
+                haveLast = true;
+            }
+        }
+        double windows = Math.Ceiling(40 * tick / BattleWriterPolicy.ArtilleryRestartAcceptHours);
+        AssertTrue(cancels >= 1, "the doctrine still cancels");
+        AssertTrue(cancels <= windows, "at most one cancel per window (was one per cycle: " + cancels + " of 40 against " + windows + ")");
+    }
+
+    private static void ArtilleryRestartWiring()
+    {
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ArtilleryIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "BattleWriterPolicy.RestartedAfterOwnCancel(", "the producer reads the executor's last outcome through the policy");
+        FlankResponseTests.AssertPinned(producer, "state.RestartedAfterOurCancel = executor != null &&\n                        executor.TryGetLastOutcome(own[i].InstanceId, OrderChannel.CombatBehavior, out OrderOutcome lastBehavior) &&\n                        BattleWriterPolicy.RestartedAfterOwnCancel(lastBehavior, now);",
+            "and hands the whole expression to the doctrine, on the battery's combat behavior channel");
+        FlankResponseTests.AssertPinned(producer, "out bool cancelAccepted", "and learns when a cancel was accepted away");
+        FlankResponseTests.AssertPinned(producer, "TacticalArtilleryRestartAccepted", "which is a bounded telemetry row");
+        string policy = FlankResponseTests.SourceText("Tactical", "BattleWriterPolicy.cs");
+        FlankResponseTests.AssertPinned(policy, "ArtilleryRestartAcceptHours = 0.25", "the window is a named constant (a quarter of a battle hour, the stance hold's length)");
+    }
+
+    private static int CountCancels(BattleSnapshot s, BattleArtilleryState b, out int counterBattery)
+    {
+        var buffer = new BattleOrderIntent[4];
+        int n = BattleWriterPolicy.ArtilleryDoctrineIntents(s, 1, b, Rules(), buffer);
+        int cancels = 0;
+        counterBattery = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (buffer[i].Channel != OrderChannel.CombatBehavior) continue;
+            if (buffer[i].Value == 7) cancels++;
+            if (buffer[i].Value == 8) counterBattery++;
+        }
+        return cancels;
+    }
+
+    private static void PreparationExemptsBombard()
+    {
+        var deny = new DoctrineArtilleryDecision(DoctrineConsumerAction.Deny, "doctrine-says-no");
+        BattleSnapshot bombarding = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f);
+
+        // The doctrine's own Deny cancels a bombardment; with a preparation point it does not.
+        AssertEqual(1, CountCancels(bombarding, State(ammo: 0.9f, doctrine: deny), out _), "without a preparation point a Deny cancels");
+        AssertEqual(0, CountCancels(bombarding, PrepState(doctrine: deny), out _), "with one it does not: the doctrine does not stop the bombardment it started");
+
+        // Counter-battery: an enemy battery in range switches a bombardment to 8; not under preparation.
+        BattleSnapshot enemyGuns = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, enemyUnitTyp: TacticalUnitType.Artillery);
+        CountCancels(enemyGuns, State(), out int counter);
+        AssertEqual(1, counter, "without a preparation point enemy guns draw counter-battery");
+        CountCancels(enemyGuns, PrepState(), out counter);
+        AssertEqual(0, counter, "with one the battery keeps bombarding");
+
+        // The safety rules stay: low ammo, an unsupported battery with the enemy close, a friend in danger close.
+        AssertEqual(1, CountCancels(bombarding, PrepState(ammo: 0.05f), out _), "ammo below 0.10 cancels");
+        BattleSnapshot close = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 150f);
+        AssertEqual(1, CountCancels(close, PrepState(), out _), "an unsupported battery with the enemy inside 0.2 of its range cancels");
+        BattleSnapshot friendClose = ArtillerySnapshot(cbo: 9, mounted: false, enemyDistance: 600f, parentFlags: UnitFlags.None);
+        AddFriendlyInfantry(friendClose, 500f, -450f);
+        AssertEqual(1, CountCancels(friendClose, PrepState(doctrine: deny), out _), "friendly infantry in danger close keeps the doctrine's Deny a cancel");
+        AssertEqual(0, CountCancels(bombarding, PrepState(doctrine: deny), out _), "the same Deny with no friend close is exempt");
+
+        // The exemption is the point's: a battery ordered to prepare is exempt only while its order carries it.
+        AssertEqual(1, CountCancels(bombarding, State(ammo: 0.05f), out _), "a battery without the point is cancelled as before");
+    }
+
+    private static void AddFriendlyInfantry(BattleSnapshot s, float x, float z)
+    {
+        s.AddOwn(new UnitRecord
+        {
+            InstanceId = 77, UnitTyp = TacticalUnitType.Infantry, X = x, Z = z, Strength = 400,
+            Flags = UnitFlags.Alive | UnitFlags.Active | UnitFlags.IsInfantry,
+        });
+    }
+
+    private static void BombardStartWriter()
+    {
+        string runtime = FlankResponseTests.SourceText("Tactical", "Battle", "OrderExecutorRuntime.cs");
+        string start = FlankResponseTests.Between(runtime, "private static bool StartBombard(", "// Artillery limber");
+        FlankResponseTests.AssertPinned(start, "TacticalWriteGuard.ModeAllowsWrites()", "behind Commander Mode Active");
+        FlankResponseTests.AssertPinned(start, "TacticalWriteGuard.CanWrite(unit)", "and the write guard (never a player-owned battery)");
+        int behavior = start.IndexOf("TacticalCombatBehaviorWriter.EnsureBehavior(bunits, unit, BattleWriterPolicy.CombatBehaviorBombard, perRegiment: false)", StringComparison.Ordinal);
+        int position = start.IndexOf("unit.bombardposition =", StringComparison.Ordinal);
+        int range = start.IndexOf("unit.bombardrange = GamePrefs.bombardmentmaxrangesize;", StringComparison.Ordinal);
+        AssertTrue(behavior >= 0 && position > behavior && range > position, "the behavior first, only then the position and the range, as vanilla writes them (3897-3900)");
+        AssertTrue(start.IndexOf("lastfeudactiontime", StringComparison.Ordinal) < 0, "and not the W&L feud action timer, which Whiskey never acts for");
+        FlankResponseTests.AssertPinned(runtime, "(w.Flags & IntentFlags.BombardStart) != 0", "the combat behavior case routes the flagged intent to it");
+
+        // The pattern: the two writes are battle writes the gate scan knows, and nothing else in the source makes them.
+        AssertTrue(BattleWriteGateTests.IsUngatedWriter("unit.bombardposition = p;"), "bombardposition = is a vanilla battle write");
+        AssertTrue(BattleWriteGateTests.IsUngatedWriter("unit.bombardrange = GamePrefs.bombardmentmaxrangesize;"), "bombardrange = too");
+        AssertFalse(BattleWriteGateTests.IsUngatedWriter("if (unit.bombardrange == r) return;"), "a comparison is not a write");
+        AssertFalse(BattleWriteGateTests.IsUngatedWriter("if (TacticalWriteGuard.CanWrite(unit)) unit.bombardposition = p;"), "behind a gate it is accepted");
+        var writers = new List<string>();
+        string src = TestFixtures.FindRepoPath("src/WhiskeyRealism");
+        var write = new System.Text.RegularExpressions.Regex(@"\.bombardposition\s*=[^=]|\.bombardrange\s*=[^=]");
+        var comment = new System.Text.RegularExpressions.Regex(@"//[^\n]*");
+        foreach (string path in System.IO.Directory.GetFiles(src, "*.cs", System.IO.SearchOption.AllDirectories))
+            if (write.IsMatch(comment.Replace(System.IO.File.ReadAllText(path), string.Empty))) writers.Add(System.IO.Path.GetFileName(path));
+        AssertEqual("OrderExecutorRuntime.cs", string.Join(",", writers), "only the executor's runtime writes the bombard fields");
+
+        // The producer: the preparation point comes from the parent group's doctrine order, the table is noted from the intents the doctrine made.
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ArtilleryIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "PreparationTable.ForAlliance(", "the preparation table is the producer's to write");
+        FlankResponseTests.AssertPinned(producer, "IntentFlags.BombardStart", "noted when a battery passed the start test");
+        FlankResponseTests.AssertPinned(producer, "state.HasPreparation = order.HasPreparation", "the point is the parent order's");
+        FlankResponseTests.AssertPinned(producer, "PlayExecutorRuntime.ActivatedHours(", "keyed by the play's activation hour");
     }
 
     private sealed class AllowGuard : IOrderGuard

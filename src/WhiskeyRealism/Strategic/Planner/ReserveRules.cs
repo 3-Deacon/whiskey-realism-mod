@@ -9,10 +9,54 @@ namespace WhiskeyRealism.Strategic.Planner
     // diverge (G3 verify r1 F4/F9). Pure: snapshot in, flags out.
     internal static class ReserveRules
     {
+        // What ReserveRules.Hold sized each sector's reserve on: Sector[k] is the sum for a sector with a need (0 otherwise), and each
+        // formation that went into a sum put its Share into sector ShareSector (-1 when into none).
+        internal sealed class HoldTally
+        {
+            internal readonly float[] Sector;
+            internal readonly float[] Share;
+            internal readonly int[] ShareSector;
+
+            internal HoldTally(int sectors, int formations)
+            {
+                Sector = new float[sectors];
+                Share = new float[formations];
+                ShareSector = new int[formations];
+                for (int i = 0; i < formations; i++) ShareSector[i] = -1;
+            }
+
+            internal void Add(int formation, int sector, float share)
+            {
+                Share[formation] = share;
+                ShareSector[formation] = sector;
+            }
+        }
+
         // A belief's live weight: strength x confidence, 0 once expired.
         internal static float Live(in EnemyBelief b)
         {
             return b.Confidence01 > 0f ? System.Math.Max(0f, b.Strength) * System.Math.Min(1f, b.Confidence01) : 0f;
+        }
+
+        // Vanilla's own weighting of the enemy near a place it defends (AssignUnitToDefendCapital 11733-11740): each army within range counts
+        // live strength / max(10, distance)^0.3 x 0.5. The capital floor (TheaterPlanner.CapitalThreat) and a garrison post's threat
+        // (GarrisonPlanner) both read it here, on beliefs, so there is one formula. An afloat army counts at its straight distance (it
+        // cannot be stopped by a river); a land army at the distance the probe gives (the straight one with no probe).
+        internal const float VanillaThreatMinDistance = 10f, VanillaThreatExponent = 0.3f, VanillaThreatScale = 0.5f;
+
+        internal static float VanillaThreat(CampaignSnapshot s, float x, float z, float range, ITerrainLineProbe probe)
+        {
+            float weighted = 0f;
+            for (int i = 0; i < s.Beliefs.Count; i++)
+            {
+                var b = s.Beliefs[i];
+                float live = Live(b);
+                float straight = RiverLines.Distance(b.X, b.Z, x, z);
+                if (live <= 0f || straight >= range) continue;
+                float d = Afloat(b) ? straight : RiverLines.EffectiveDistance(b.X, b.Z, x, z, probe, s.Crossings);
+                weighted += live / (float)System.Math.Pow(System.Math.Max(VanillaThreatMinDistance, d), VanillaThreatExponent) * VanillaThreatScale;
+            }
+            return weighted;
         }
 
         // Afloat armies cannot be engaged by land (EstablishCampaignBattle 80632-80635).
@@ -143,13 +187,17 @@ namespace WhiskeyRealism.Strategic.Planner
         // a CIC side hold nothing. A formation that Recovers is leaving for supply and counts 0 (G4
         // verify r2 N2). The player's group is never in the massable list (TheaterPlanner.MassEligible),
         // so it is never reserved. holdReserved[i] is the sector whose hold
-        // keeps formation i, -1 none. need/nearX/nearZ are per sector.
+        // keeps formation i, -1 none. need/nearX/nearZ are per sector. tally (optional) receives what the reserve was sized on: per sector
+        // with a need, the sum of what holds there anyway plus the reserved formations, and per formation the share it put into that sum
+        // (the measure ForceAllocator tests a scout draw against). The capital reserve counts in the capital's own sector only: a guard
+        // standing elsewhere marches to the capital and holds nothing where it stands.
         internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ,
-                                  bool[] capitalReserved, int[] holdReserved)
+                                  bool[] capitalReserved, int[] holdReserved, HoldTally tally = null)
         {
             int n = s.Own.Count;
             for (int i = 0; i < holdReserved.Length; i++) holdReserved[i] = -1;
             var order = new List<int>();
+            int capitalSector = s.HasCapital ? sectors.SectorAt(s.CapitalX, s.CapitalZ) : -1;
             for (int sector = 0; sector < sectors.Count; sector++)
             {
                 if (need[sector] <= 0f) continue;
@@ -161,8 +209,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     if (HoldSectorOf(sectors, f) != sector) continue;
                     if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i])
                     {
-                        if (WlChainRules.CountsTowardCoverage(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
-                            held += HoldStrength(f);
+                        if (WlChainRules.CountsTowardCoverage(f.Chain) && !Recovers(f, s.MinMoraleForMovement) && (!capitalReserved[i] || sector == capitalSector))
+                        {
+                            float share = HoldStrength(f);
+                            held += share;
+                            tally?.Add(i, sector, share);
+                        }
                     }
                     else order.Add(i);
                 }
@@ -170,8 +222,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int k = 0; k < order.Count && held < need[sector]; k++)
                 {
                     holdReserved[order[k]] = sector;
-                    held += System.Math.Max(0f, s.Own[order[k]].Strength);
+                    float share = System.Math.Max(0f, s.Own[order[k]].Strength);
+                    held += share;
+                    tally?.Add(order[k], sector, share);
                 }
+                if (tally != null) tally.Sector[sector] = held;
             }
         }
 

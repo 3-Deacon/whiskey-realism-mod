@@ -41,10 +41,12 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         }
 
         // Where the carrier unit's move stands: queued, queued with its courier gone, or no longer queued,
-        // when the unit's path, position and contact say whether it was carried out or lost (WlMoveState).
+        // when the unit's path end, position and contact say whether it was carried out or lost (WlMoveState),
+        // and `basis` says which of them carried it.
         // Only an entry that WlMoveState.Carries counts, so an older move of the same unit is another order's.
-        internal static MoveState StateOf(Regiment unit, in WlMoveCarrier carrier)
+        internal static MoveState StateOf(Regiment unit, in WlMoveCarrier carrier, out MoveBasis basis)
         {
+            basis = MoveBasis.None;
             var queue = OwnerQueue(unit);
             GameObject moved = unit.gameObject;
             bool queued = false;
@@ -59,10 +61,27 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
             if (queued) return WlMoveState.Classify(true, lost, false);
             Vector3 at = unit.transform.position;
-            float dx = at.x - carrier.X;
-            float dz = at.z - carrier.Z;
-            float distance = Mathf.Sqrt(dx * dx + dz * dz);
-            return WlMoveState.Classify(false, false, WlMoveState.CarriedOutAfterGone(unit.regimentpaths > 0, distance, unit.combatstatussubordinates > 0f));
+            float distance = FlatDistance(at.x, at.z, carrier.X, carrier.Z);
+            // The held path's end: the unit's last set waypoint (SetGroupFormation stamps it on every group move,
+            // 92067; RegimentSetPath on a regiment, 131254). Read only while a path is held.
+            Vector3 last = unit.lastsetwaypointposition;
+            float pathEnd = FlatDistance(last.x, last.z, carrier.X, carrier.Z);
+            basis = WlMoveState.BasisAfterGone(IsMoving(unit), pathEnd, distance, unit.combatstatussubordinates > 0f, carrier.SlackMeters);
+            return WlMoveState.Classify(false, false, basis != MoveBasis.None);
+        }
+
+        // The unit is on a march (WlMoveState.IsMoving): the one reading of "still moving" for the move gate, the vanilla pursuit
+        // check and compliance.
+        internal static bool IsMoving(Regiment unit)
+        {
+            return WlMoveState.IsMoving(unit.regimentpaths, unit.groupsubordinatesmoving);
+        }
+
+        private static float FlatDistance(float ax, float az, float bx, float bz)
+        {
+            float dx = ax - bx;
+            float dz = az - bz;
+            return Mathf.Sqrt(dx * dx + dz * dz);
         }
 
         private static Regiment.OrderQueue Latest(Regiment unit)

@@ -45,6 +45,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 case BattlePlanId.GenericMethodical:    return GenericMethodical();
                 case BattlePlanId.GenericDesperate:     return GenericDesperate();
 
+                // ---- Offensive: assault on the focal point of perceived enemy works (BC14W) ----
+                case BattlePlanId.FocalAssault:         return FocalAssault();
+
                 default: return null;
             }
         }
@@ -280,6 +283,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 new PlayRect(PlayRectKind.LeftWing,  -0.6f, +0.3f, 0.4f, 0.4f, 300f, priority: 8),
                 new PlayRect(PlayRectKind.RightWing, +0.6f, +0.3f, 0.4f, 0.4f, 300f, priority: 8),
                 new PlayRect(PlayRectKind.Reserve,    0.0f, -0.4f, 0.4f, 0.4f, 0f,   priority: 6),
+            });
+        }
+
+        private static PlayTemplate FocalAssault()
+        {
+            // BC14W (spec 7A requirement-focal-assault): projected toward the works' focal point, not the enemy anchor, and centred, so
+            // never mirrored. The column and its support form one assault body striking the focal point; the two demonstrations are the
+            // main body and pin the rest of the works. No rect has a start offset: the timing is the ledger's releases (the column is a BC11
+            // maneuver, the support a start delay that follows the column's strike).
+            return new PlayTemplate("FocalAssault", BattlePlanId.FocalAssault, new[]
+            {
+                new PlayRect(PlayRectKind.AssaultColumn,   0.0f, +0.6f, 0.3f, 0.4f, 0f, priority: 10, envelops: true),
+                new PlayRect(PlayRectKind.AssaultSupport,  0.0f, +0.45f, 0.3f, 0.3f, 0f, priority: 9),
+                new PlayRect(PlayRectKind.Demonstration,  -0.7f, +0.5f, 0.4f, 0.4f, 0f, priority: 7),
+                new PlayRect(PlayRectKind.Demonstration,  +0.7f, +0.5f, 0.4f, 0.4f, 0f, priority: 7),
+                new PlayRect(PlayRectKind.Reserve,         0.0f, -0.3f, 0.3f, 0.3f, 0f, priority: 5),
             });
         }
 

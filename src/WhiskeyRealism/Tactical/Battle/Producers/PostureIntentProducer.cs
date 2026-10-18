@@ -50,18 +50,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
     // order ledger, duplicate-waypoint and safe-waypoint checks, the write gate
     // and the groupsubordinatesmoving stamp.
 
-    // What the posture producer decided for one group this tick; the facing
-    // pulse and fire control read it (they ran only on a group #61 left alone).
-    internal struct GroupPosture
-    {
-        public bool Has;
-        public CommandNodeOperationalState State;
-        public bool CloseEngaged;
-        public bool FlankRisk;
-        public bool Submitted;
-        public bool FacingSubmitted;
-    }
-
     // Per-side scratch built once per snapshot (TickId): subtree aggregates, the
     // enemy record index, the friendly grid and the shared NavMesh budget.
     internal static class PostureTick
@@ -79,9 +67,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             public GroupPosture[] Groups = new GroupPosture[BattleSnapshot.InitialCapacity];
             public readonly Dictionary<int, int> EnemyIndexById = new Dictionary<int, int>(256);
             public readonly TacticalFriendlySpatialGrid Friendly = new TacticalFriendlySpatialGrid();
-            // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side,
-            // consumed only by this producer (TryNavPlan).
+            // Up to 4 nav plans (12 NavMesh.CalculatePath) per arbiter tick and side, the posture producer's alone: its single
+            // consumer is TryNavPlan. The producer walks the command groups in ascending instance id from the budget's cursor (BC15 decision 7).
             public readonly NavPlanBudget Nav = new NavPlanBudget(4);
+            // The command groups of this snapshot by ascending instance id: GroupIds[k] belongs to own index GroupOrder[k].
+            public int[] GroupIds = new int[64];
+            public int[] GroupOrder = new int[64];
+            public int GroupCount;
+            // BC15: the posture each group's last evaluation recorded, kept for the ticks the group is carried (PostureRecordCache).
+            public readonly PostureRecordCache Records = new PostureRecordCache();
             // BC10 decision 4: the NavMesh query filter of the path probe, built once per
             // snapshot from the live area costs plus AddPath's battle costs.
             public NavMeshQueryFilter NavFilter;
@@ -89,7 +83,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC10 decision 6: one road-route plan (a NavMesh path and an A*) per side and snapshot.
             public readonly NavPlanBudget RouteBudget = new NavPlanBudget(1);
             public readonly RoadRouteScratch RouteScratch = new RoadRouteScratch();
-            public int LastOwnCount;
             public bool NavDeferred;
             public readonly List<float> SupportMainX = new List<float>(8);
             public readonly List<float> SupportMainZ = new List<float>(8);
@@ -132,9 +125,26 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             for (int e = 0; e < s.EnemyRecordCount; e++)
                 if (enemy[e].InstanceId != 0) t.EnemyIndexById[enemy[e].InstanceId] = e;
 
+            // The command groups in ascending instance id (the nav budget's walk order).
+            if (t.GroupIds.Length < n)
+            {
+                t.GroupIds = new int[Math.Max(n, t.GroupIds.Length * 2)];
+                t.GroupOrder = new int[t.GroupIds.Length];
+            }
+            int groups = 0;
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < n; i++)
+            {
+                if (!PostureIntentProducer.IsCommandGroup(own[i])) continue;
+                t.GroupIds[groups] = own[i].InstanceId;
+                t.GroupOrder[groups] = i;
+                groups++;
+            }
+            Array.Sort(t.GroupIds, t.GroupOrder, 0, groups);
+            t.GroupCount = groups;
+
             // #61 BuildFriendlyGrid from the snapshot: standing own combat units.
             t.Friendly.Clear();
-            UnitRecord[] own = s.Own;
             for (int i = 0; i < n; i++)
             {
                 UnitFlags f = own[i].Flags;
@@ -143,13 +153,18 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 t.Friendly.Add(own[i].InstanceId, own[i].X, own[i].Z);
             }
 
-            t.Nav.NextApply(t.LastOwnCount);
+            t.Nav.NextApply();
             t.NavFilterReady = false;
-            t.RouteBudget.NextApply(0);
-            t.LastOwnCount = n;
+            t.RouteBudget.NextApply();
             t.SupportMainBuilt = false;
             t.TickId = s.TickId;
             return t;
+        }
+
+        /// <summary>BC15: a stand-down or a new battle day: no carried posture survives it.</summary>
+        internal static void ForgetLast(int alliance)
+        {
+            if (alliance >= 0 && alliance < _states.Length) _states[alliance].Records.Clear();
         }
 
         /// <summary>The scratch only when the posture producer already ran on this snapshot.</summary>
@@ -165,9 +180,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             for (int a = 0; a < _states.Length; a++)
             {
                 _states[a].TickId = -1;
-                _states[a].LastOwnCount = 0;
                 _states[a].Friendly.Clear();
                 _states[a].EnemyIndexById.Clear();
+                _states[a].Records.Clear();
             }
         }
     }
@@ -194,7 +209,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         public void Produce(BattleSnapshot s, IIntentSink sink)
         {
-            using (TelemetryPerf.Scope("tactical.producer.posture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.posture.wake" : "tactical.producer.posture", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 PostureTick.State t = PostureTick.For(s);
                 if (t == null || sink == null) return;
@@ -203,52 +218,67 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 if (army == null) return;
 
                 UnitRecord[] own = s.Own;
-                int n = s.OwnCount;
                 var leafMap = army.CurrentLeafBrigadeMap;
                 // BC13: the opportunity producer (which runs just before this one) published the side's exploit table.
                 ExploitTable exploits = ExploitTable.ForAlliance(s.Alliance);
-                int start = t.Nav.StartIndex(n);
-                for (int k = 0; k < n; k++)
+                int start = t.Nav.StartIndex(t.GroupIds, t.GroupCount);
+                for (int k = 0; k < t.GroupCount; k++)
                 {
-                    int i = (start + k) % n;
+                    int i = t.GroupOrder[(start + k) % t.GroupCount];
                     ref UnitRecord rec = ref own[i];
-                    if (!IsCommandGroup(rec)) continue;
 
-                    // #61 iterated AIBattle.unitsused, then the leaf brigades
-                    // outside it; the pool is captured on the coordinator tick.
-                    if (ArmyPostureInputsRuntime.InAiPool(s.Alliance, rec.InstanceId))
+                    // BC15: a Distant group that is not due submits nothing; its last posture stays on record, flags included, for fire control and recon.
+                    if (!BattleLodRuntime.IsDue(s, i))
                     {
-                        // An exploit order overrides the ledger order of the asset; a descendant follows (requirement-exploit-override).
-                        bool hasState = PostureLedger.TryResolveState(rec.InstanceId, side, out CommandNodeOperationalState state);
-                        bool hasOrder = false;
-                        CommandDoctrineOrder order = default(CommandDoctrineOrder);
-                        ExploitOverrideKind exploitKind = ExploitOverrideKind.None;
-                        if (exploits.TryOverride(rec.InstanceId, out CommandDoctrineOrder exploitOrder, out CommandNodeOperationalState exploitState))
-                        {
-                            exploitKind = ExploitPosture.KindOf(in exploitOrder);
-                            state = ExploitPosture.Overlay(state, hasState, exploitState, exploitKind);
-                            hasState = true;
-                            hasOrder = true;
-                            order = exploitOrder;
-                        }
-                        else if (hasState)
-                        {
-                            hasOrder = PostureLedger.TryResolveDoctrineOrder(rec.InstanceId, army, state.NodeId, out order);
-                        }
-                        if (!hasState) continue;
-                        bool submitted = PosturePipeline.Run(s, t, i, state, hasOrder, order, side, sink,
-                            IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason,
-                            recordTick: true, exploitKind);
-                        t.Groups[i].Submitted = submitted;
+                        // The second pass of a lapsed-claim wake-up (decision 14) must not put last tick's row over a group that ran in the first.
+                        if (!BattleLodRuntime.InWakePass) t.Records.Carry(t.Groups, i, rec.InstanceId);
                         continue;
                     }
 
-                    if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) continue;
-                    if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) continue;
-                    if (leaf.LeafTask == CommandTaskType.None) continue;
-                    ProduceLeaf(s, t, i, leaf, side, army, sink, exploits);
+                    ProduceGroup(s, t, i, side, army, leafMap, exploits, sink);
+                    t.Records.Remember(t.Groups, i, rec.InstanceId);
                 }
             }
+        }
+
+        private static void ProduceGroup(BattleSnapshot s, PostureTick.State t, int i, TacticalBattleOrchestrator side, ArmyOrchestrator army,
+            IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap, ExploitTable exploits, IIntentSink sink)
+        {
+            ref UnitRecord rec = ref s.Own[i];
+
+            // #61 iterated AIBattle.unitsused, then the leaf brigades
+            // outside it; the pool is captured on the coordinator tick.
+            if (ArmyPostureInputsRuntime.InAiPool(s.Alliance, rec.InstanceId))
+            {
+                // An exploit order overrides the ledger order of the asset; a descendant follows (requirement-exploit-override).
+                bool hasState = PostureLedger.TryResolveState(rec.InstanceId, side, out CommandNodeOperationalState state);
+                bool hasOrder = false;
+                CommandDoctrineOrder order = default(CommandDoctrineOrder);
+                ExploitOverrideKind exploitKind = ExploitOverrideKind.None;
+                if (exploits.TryOverride(rec.InstanceId, out CommandDoctrineOrder exploitOrder, out CommandNodeOperationalState exploitState))
+                {
+                    exploitKind = ExploitPosture.KindOf(in exploitOrder);
+                    state = ExploitPosture.Overlay(state, hasState, exploitState, exploitKind);
+                    hasState = true;
+                    hasOrder = true;
+                    order = exploitOrder;
+                }
+                else if (hasState)
+                {
+                    hasOrder = PostureLedger.TryResolveDoctrineOrder(rec.InstanceId, army, state.NodeId, out order);
+                }
+                if (!hasState) return;
+                bool submitted = PosturePipeline.Run(s, t, i, state, hasOrder, order, side, sink,
+                    IntentPriority.Executor, IntentSource.PostureExecutor, PostureIntentPlan.ExecutorReason,
+                    recordTick: true, exploitKind);
+                t.Groups[i].Submitted = submitted;
+                return;
+            }
+
+            if (rec.UnitTyp < TacticalUnitType.BattleGroupBrigade || leafMap == null) return;
+            if (!leafMap.TryGetValue(rec.InstanceId, out TacticalLeafBrigadeMap.LeafAssignment leaf)) return;
+            if (leaf.LeafTask == CommandTaskType.None) return;
+            ProduceLeaf(s, t, i, leaf, side, army, sink, exploits, leafMap);
         }
 
         // AI-controlled command groups: Active, not player-owned (spec §3).
@@ -260,7 +290,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         // #61 TryApplyLeafBrigade + ApplyLeafBrigadePosture (B-leaf, BR-M1).
         private static void ProduceLeaf(BattleSnapshot s, PostureTick.State t, int i, TacticalLeafBrigadeMap.LeafAssignment leaf,
-            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits)
+            TacticalBattleOrchestrator side, ArmyOrchestrator army, IIntentSink sink, ExploitTable exploits, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap)
         {
             UnitRecord[] own = s.Own;
             ref UnitRecord rec = ref own[i];
@@ -284,23 +314,33 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             ReinforcementOpportunity opportunity = ReinforcementOpportunity.NoOpportunity;
             try { opportunity = army.CurrentReinforcementOpportunity.Opportunity; }
             catch { /* NoOpportunity keeps the ledger task */ }
-            CommandTaskType task = TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, out string overrideReason);
+            CommandTaskType task = TacticalOpportunityTaskOverride.Override(leaf.LeafTask, leaf.LeafRole, opportunity, leaf.WorksHeld, out string overrideReason);
 
-            // Arrival synchronization: a Main brigade on AttackObjective waits as
-            // Screen for its SupportMain siblings (TacticalMainArrivalSynchronizer).
+            // A Main brigade on AttackObjective advances only with its flanks covered (MainFlankGuard): while one is exposed and no guard is assigned to it
+            // nor does it rest on impassable terrain, the brigade holds where it stands. Then arrival synchronization: it waits as Screen for its SupportMain
+            // siblings (TacticalMainArrivalSynchronizer).
             if (task == CommandTaskType.AttackObjective && leaf.LeafRole == DirectChildRole.Main)
             {
-                float aggression01 = Mathf.Clamp01((army.CommanderPersonality.Aggression + 1f) * 0.5f);
-                CommandTaskType held = ResolveMainArrivalHold(s, t, i, aggression01, task, out bool holding, out string arrivalReason);
-                if (holding)
+                if (army.CurrentBattleStance != BattleStance.Defender && FlankHolding(s, i, leafMap, out string flankReason))
                 {
-                    task = held;
-                    if (overrideReason == null) overrideReason = arrivalReason;
+                    task = CommandTaskType.HoldObjective;
+                    if (overrideReason == null) overrideReason = flankReason;
+                }
+                else
+                {
+                    float aggression01 = Mathf.Clamp01((army.CommanderPersonality.Aggression + 1f) * 0.5f);
+                    CommandTaskType held = ResolveMainArrivalHold(s, t, i, aggression01, task, out bool holding, out string arrivalReason);
+                    if (holding)
+                    {
+                        task = held;
+                        if (overrideReason == null) overrideReason = arrivalReason;
+                    }
                 }
             }
             else
             {
                 _mainArrivalHold.Remove(id);
+                _flankHold.Remove(id);
             }
 
             // BC9 stance guard: a Defender's leaf brigade gets no Probe or attack task.
@@ -315,8 +355,28 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, t.Descendants[i]);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
+            // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
+            // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk, army.CurrentBattleStance);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
+
+            // A flank guard (the leaf map's overlay, MainFlankGuard) is sent to the post at its main's flank: GuardFlank is no movement task for the slot
+            // path, so the move is its own, through the same leaf Move intent.
+            if (leaf.HasFlankPost)
+            {
+                bool withdrawing = FormationWithdraws(s, t, i, task, side);
+                FlankGuardLeaf.GuardOutcome guardOutcome = FlankGuardLeaf.PlanGuard(s, i, in leaf, closeEngaged, pending, withdrawing, out BattleOrderIntent guardMove, out string guardWhy);
+                if (guardOutcome != FlankGuardLeaf.GuardOutcome.NoPost)
+                {
+                    // The Move to the post, or the standing claim that keeps the division's own move from re-pathing the guard back; nothing while
+                    // its formation withdraws.
+                    if (guardOutcome != FlankGuardLeaf.GuardOutcome.Withdrawing) sink.Submit(guardMove);
+                    if (guardOutcome == FlankGuardLeaf.GuardOutcome.Move) t.Groups[i].Submitted = true;
+                    PostureTelemetry.Leaf(s, i, leaf, task, guardWhy, guardOutcome == FlankGuardLeaf.GuardOutcome.Move);
+                    return;
+                }
+            }
             int slotParent = rec.ParentIndex;
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
             RefuseFlank parentRefuse = executor != null && slotParent >= 0 && slotParent < s.OwnCount
@@ -336,7 +396,22 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             if (!move.Move) { PostureTelemetry.Leaf(s, i, leaf, task, move.Reason, false); return; }
 
             sink.Submit(PostureIntentPlan.LeafMove(id, task, x, z, slotHeading, inContactWithdrawal: flankRisk));
+            t.Groups[i].Submitted = true;
             PostureTelemetry.Leaf(s, i, leaf, task, "submitted", true);
+        }
+
+        // The guard's group or its formation withdraws: a withdrawal task on it, on a group above it (the ledger's state, or the posture row of this tick), or a
+        // recent withdrawal move for any of them (the ancestor walk unit churn's column deployment uses).
+        private static bool FormationWithdraws(BattleSnapshot s, PostureTick.State t, int index, CommandTaskType task, TacticalBattleOrchestrator side)
+        {
+            if (ColumnDeployment.WithdrawalTask(task)) return true;
+            var host = new FacingPulseIntentProducer.GroupWalkHost(t.Groups, s.Own, OrderExecutor.ForAlliance(s.Alliance), s.DoctrineHours);
+            ApproachLine.Walk(s.Own, s.OwnCount, index, ref host, out _, out bool walked);
+            if (walked) return true;
+            int a = s.Own[index].ParentIndex;
+            for (int hops = 0; a >= 0 && a < s.OwnCount && hops < ApproachLine.MaxGroupHops; hops++, a = s.Own[a].ParentIndex)
+                if (PostureLedger.TryResolveState(s.Own[a].InstanceId, side, out CommandNodeOperationalState state) && ColumnDeployment.WithdrawalTask(state.Task)) return true;
+            return false;
         }
 
         // BR-M1: holds a Main-effort brigade on AttackObjective as Screen until its
@@ -371,6 +446,39 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return resolved;
         }
 
+        // The Main brigade's flank hold (MainFlankGuard, FlankGuardLeaf.MainHolds) has hysteresis on the doctrine clock; a change of the hold is one
+        // TacticalFlankGuardHold row.
+        private static readonly Dictionary<int, MainFlankGuard.HoldState> _flankHold = new Dictionary<int, MainFlankGuard.HoldState>();
+        private static readonly List<MainFlankGuard.Neighbour> _flankNeighbours = new List<MainFlankGuard.Neighbour>(16);
+
+        private static bool FlankHolding(BattleSnapshot s, int mainIndex, IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> leafMap, out string reason)
+        {
+            bool holds = FlankGuardLeaf.MainHolds(s, mainIndex, leafMap, _flankHold, TerrainPicture.CurrentForPlanning(), _flankNeighbours,
+                out MainFlankGuard.Cover cover, out string change, out reason);
+            if (change != null) EmitFlankHold(s, s.Own[mainIndex].InstanceId, holds, change, cover);
+            return holds;
+        }
+
+        private static void EmitFlankHold(BattleSnapshot s, int id, bool holding, string reason, MainFlankGuard.Cover cover)
+        {
+            try
+            {
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalFlankGuardHold", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalFlankGuardHold", holding ? "hold" : "release", reason)
+                        .WithField("open", cover.Reason)
+                        .WithField("side", s.Alliance)
+                        .WithField("group", id)
+                        .WithField("holding", holding)
+                        .WithField("leftOpen", cover.LeftOpen)
+                        .WithField("rightOpen", cover.RightOpen)
+                        .WithField("leftAnchored", cover.LeftAnchored)
+                        .WithField("rightAnchored", cover.RightAnchored)
+                        .WithField("hours", s.DoctrineHours));
+            }
+            catch { /* telemetry never changes an order */ }
+        }
+
         // SupportMain leaf positions, once per tick per side (BR-M6).
         private static void BuildSupportMain(BattleSnapshot s, PostureTick.State t)
         {
@@ -394,13 +502,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         /// <summary>BC13: the Main-effort brigade is held as Screen until its SupportMain siblings arrive (an exploit never picks it).</summary>
         internal static bool UnderArrivalHold(int groupId)
         {
-            return _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
+            return _flankHold.TryGetValue(groupId, out MainFlankGuard.HoldState hold) && hold.Holding
+                || _mainArrivalHold.TryGetValue(groupId, out MainArrivalHoldLatch.State latch) && latch.Active && !latch.Released;
         }
 
         private static void Reset()
         {
             _mainArrivalHold.Clear();
             _arrivalSupportScratch.Clear();
+            _flankHold.Clear();
+            _flankNeighbours.Clear();
         }
     }
 
@@ -427,9 +538,12 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 }
 
                 CommandIntentResolution resolution = army.ResolveCommandIntentForGroup(0, instanceId);
-                return resolution.Found &&
+                bool built = resolution.Found &&
                     CommandNodeOperationsRuntime.TryBuildSingle(resolution.Intent, army.CurrentOperation,
                         side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);
+                // BC14W: a state built here is not one the store guarded; it passes the same guard with this side's context.
+                if (built) state = army.GuardFallback(in state);
+                return built;
             }
             catch
             {
@@ -488,8 +602,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             ref UnitRecord rec = ref s.Own[i];
             UnitFlags descendants = t.Descendants[i];
 
+            // BC15 decision 7: this evaluation starts with no plan outstanding for the group; TryNavPlan reports a deferral again if the budget is spent.
+            if (recordTick) BattleLodRuntime.NavPlanned(s, rec.InstanceId);
+
             if (hasOrder && order.Task != state.Task)
-                state = WithRoleAndTask(state, order.Role, order.Task);
+                state = state.WithRoleAndTask(order.Role, order.Task);
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, descendants);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
@@ -507,8 +624,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     followed.CloseEngaged = closeEngaged;
                     followed.FlankRisk = flankRisk;
                 }
+                // BC14W (requirement-works-pin): a follower of a non-breach exploit aimed at unbroken works is held at stance 2 as its asset is.
+                int followerStance = recordTick && ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId)
+                    ? PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, 0)
+                    : 0;
                 PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, ExploitLifecycle.FollowReason),
-                    0, ExploitLifecycle.FollowReason);
+                    followerStance, ExploitLifecycle.FollowReason);
+                // A stance is no order that moves or re-lays the group: the follower keeps its facing pulse and fire control (BC13).
                 return false;
             }
 
@@ -526,7 +648,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool probe = recordTick && !exploit && ReconIntentProducer.TryProbe(s.Alliance, rec.InstanceId, out _, out _);
             if (probe)
             {
-                state = WithRoleAndTask(state, CommandNodeRole.Probe, CommandTaskType.Probe);
+                state = state.WithRoleAndTask(CommandNodeRole.Probe, CommandTaskType.Probe);
                 if (hasOrder) order = order.WithTask(CommandTaskType.Probe, ProbeReason);
             }
 
@@ -537,13 +659,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         sideDefending: defender));
             if (recon.Task != state.Task)
             {
-                state = WithRoleAndTask(state, state.Role, recon.Task);
+                state = state.WithRoleAndTask(state.Role, recon.Task);
                 if (hasOrder) order = order.WithTask(recon.Task, recon.Reason);
             }
 
-            if (hasCavalry && !probe && !exploit && TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
+            // BC14W: the cavalry follow turns a task into an attack on the nearest enemy; a group the works hold guard holds is left a hold.
+            if (hasCavalry && !probe && !exploit && !WorksHoldGuard.Holds(state.Task, state.Reason) &&
+                TryCavalryFollow(s, t, i, state, flankRisk, out CommandTaskType cavalryTask, out string cavalryReason))
             {
-                state = WithRoleAndTask(state, state.Role, cavalryTask);
+                state = state.WithRoleAndTask(state.Role, cavalryTask);
                 if (hasOrder) order = order.WithTask(cavalryTask, cavalryReason);
             }
 
@@ -552,7 +676,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             CommandTaskType emergency = CommandFormationCorrection.TaskForLocalFlankEmergency(state.Task, closeEngaged, flankRisk);
             if (emergency != state.Task)
             {
-                state = WithRoleAndTask(state, state.Role, emergency);
+                state = state.WithRoleAndTask(state.Role, emergency);
                 // The posture pipeline's local flank emergency rewrote an exploit's task: the opportunity producer reads this on its
                 // next tick and aborts the exploit as flank-threat (one tick late by design: the table has one writer).
                 if (exploit && recordTick) ExploitFeedback.SetFlankEmergency(rec.InstanceId);
@@ -566,19 +690,66 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             string overrideReason = null;
             CommandTaskType overridden = exploit
                 ? state.Task
-                : TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, out overrideReason);
+                : TacticalOpportunityTaskOverride.Override(state.Task, DirectChildRole.Main, opportunity, WorksHoldGuard.Holds(state.Task, state.Reason), out overrideReason);
             if (overridden != state.Task && overrideReason != null)
             {
                 OnceLog.Info("tactical-brigade-posture:opportunity-override",
                     "[TacticalBrigadePosture] opportunity override: " + state.Task + " -> " + overridden
                     + " (opportunity=" + opportunity + " reason=" + overrideReason + ")");
-                state = WithRoleAndTask(state, state.Role, overridden);
+                state = state.WithRoleAndTask(state.Role, overridden);
                 if (hasOrder) order = order.WithTask(overridden, overrideReason);
             }
 
             // BC9 stance guard, after every rewrite above (GT recon, cavalry follow, local
             // emergency, opportunity): a Defender gets no Probe and no attack task.
             PostureStanceGuard.Apply(stance, ref state, hasOrder, ref order);
+
+            // BC14W (requirement-works-hold): a group the works hold guard holds gets the hold's one stance (the mapper's, 2, flagged WorksHold) before
+            // the posture decision and whatever it returns, so an idle group already in formation is still held out of vanilla's assault. A former
+            // fix whose lane lies outside the works band still goes to its lane (its decision is the fix's) and holds and fires there.
+            // BC14W (requirement-works-pin): the asset of a non-breach exploit aimed at unbroken works does not march onto them. Its order becomes the
+            // works hold with a lane: a hold at the band's edge on its approach line (where it stands if already in the band), keeping the exploit's heading
+            // toward the aim, so it fires and faces the works from outside. When the aim is broken in the table stops pinning it and the strike resumes.
+            if (exploit && hasOrder && order.PrimaryTarget.HasValue && army?.Feasibility?.HeldWorks != null &&
+                (TacticalCommandTaskToStanceMapper.WorksPinHolds(order.Task, true) || WorksHoldGuard.Holds(order.Task, order.Reason)) &&
+                ExploitTable.ForAlliance(s.Alliance).PinsExploit(rec.InstanceId))
+            {
+                MoveContest.PinHoldPoint(rec.X, rec.Z, order.PrimaryTarget.X, order.PrimaryTarget.Z, army.Feasibility.HeldWorks, out float pinX, out float pinZ);
+                order = order.WithWorksHold(WorksHoldGuard.Holds(order.Task, order.Reason) ? order.PreGuardTask : order.Task, null, DoctrineTargetPoint.From(pinX, pinZ));
+                WorksHoldGuard.ApplyState(in state, new WorksGuardContext { WorksHold = true, IsExploit = true, ExploitKind = OpeningKind.IsolatedCluster, ExploitAimOnWorks = true },
+                    out state);
+            }
+            bool worksHeld = WorksHoldGuard.Holds(state.Task, state.Reason) || (hasOrder && WorksHoldGuard.Holds(order.Task, order.Reason));
+            int worksStance = worksHeld && recordTick
+                ? PostureIntentPlan.SubmitWorksHoldStance(sink, rec.InstanceId, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId))
+                : 0;
+            // BC14W (requirement-works-pin): a fix facing unbroken works that the hold does not guard is pinned at stance 2 the same way: it keeps its
+            // task, lane and fire, but is never given the attack stance vanilla escalates to an assault, until the strike it pins for has broken in. (An
+            // exploit asset on unbroken works was made a hold above, so it has the hold's stance; its followers are pinned before their early return.)
+            if (worksStance == 0 && recordTick && !exploit && army != null && army.PinsWorksNode(state.NodeId))
+                worksStance = PostureIntentPlan.SubmitWorksPinStance(sink, rec.InstanceId, state.Task, priority, source, ExploitPosture.IntentExploitId(exploit, hasOrder, order.ExploitId));
+            bool worksLane = worksHeld && hasOrder && WorksHoldGuard.LaneOpen(in order, army?.Feasibility?.HeldWorks);
+
+            // BC14W: a held group is not left to walk into the works band by a move Whiskey did not issue (vanilla's chain move, its micro cycle): the
+            // contest answers a new move into the band with the hold, a Stop near the hold point or a Move back to it, at once (IntentFlags.Contest).
+            // BC14O: the same turn answers vanilla's chain move against a move Whiskey gave a group under the current plan (a re-issue, never in a hold).
+            if (recordTick && (Plugin.EnemyWorksDoctrineEnabled() || Plugin.ObjectiveDoctrineEnabled()))
+            {
+                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, closeEngaged, state.Task, army, physical, priority, source, sink);
+                if (contested > 0)
+                {
+                    // Like every early exit, the group's posture is recorded for the producers that read it this tick (recon's ledger-task test, the
+                    // facing pulse, fire control).
+                    ref GroupPosture contestedGroup = ref t.Groups[i];
+                    contestedGroup.Has = true;
+                    contestedGroup.State = state;
+                    contestedGroup.CloseEngaged = closeEngaged;
+                    contestedGroup.FlankRisk = flankRisk;
+                    PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, PostureIntentPlan.ContestReason),
+                        worksStance + contested, PostureIntentPlan.ContestReason);
+                    return true;
+                }
+            }
 
             // BC9: a probe that ended short of a superior enemy holds the ground it gained
             // while the ledger keeps the task it probed under (BattleRecon.ProbeTick).
@@ -587,13 +758,13 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 out holdX, out holdZ, out holdDirX, out holdDirZ);
 
             int targetFormation = rec.UnitTyp > TacticalUnitType.MaxCombat
-                ? CommandFormationCorrection.TargetFormationForTask(state.Task, rec.Formation)
+                ? CommandFormationCorrection.TargetFormationForTask(state.Task, rec.Formation, hasOrder && order.HasFormation, order.Formation)
                 : -1;
             bool orderPending = PostureSense.PendingOrder(rec, physical.ActiveMove, CanBypassStaleQueuedOrder(state.Task));
             bool alreadyCorrect = !physical.PathInterrupted &&
                 (physical.ActiveMove ||
                  ((targetFormation < 0 || rec.Formation == targetFormation) &&
-                  idle == TacticalIdleClassification.ValidIdle && CommandPostureExecutor.IdleCanSatisfyTask(state.Task)));
+                  idle == TacticalIdleClassification.ValidIdle && CommandPostureExecutor.IdleCanSatisfyTask(worksLane ? CommandTaskType.FixEnemy : state.Task)));
             var eligibility = new WriteEligibilitySnapshot(
                 modeAllowsWrites: true,
                 playerProtected: physical.PlayerProtected,
@@ -606,7 +777,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 closeEngaged: closeEngaged);
 
             PostureExecutionDecision decision = hasOrder
-                ? CommandPostureExecutor.Decide(order, physical, eligibility, (float)s.DoctrineHours)
+                ? CommandPostureExecutor.Decide(order, physical, eligibility, (float)s.DoctrineHours, worksLane)
                 : CommandPostureExecutor.Decide(state, physical, eligibility);
 
             if (recordTick)
@@ -616,6 +787,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 g.State = state;
                 g.CloseEngaged = closeEngaged;
                 g.FlankRisk = flankRisk;
+                g.RouteColumn = false;
             }
 
             // BC11 decision 2: the refused flank. A group already doing its task (idle, formation right) used to
@@ -636,15 +808,24 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 else
                 {
                     PostureRoutes.Forget(rec.InstanceId);
-                    PostureTelemetry.Group(s, i, reason, state, decision, 0, decision.Reason);
+                    PostureTelemetry.Group(s, i, reason, state, decision, worksStance, decision.Reason);
                     return false;
                 }
             }
 
             bool hasTarget = PostureTargets.TryResolve(s, t, i, side, state, order, decision.Target, out float x, out float z);
+            // BC14W: a held group's own interrupted-path recovery reads the contest's band: a recovery into it is refused, and the plan becomes the
+            // hold (a formation, no waypoint) whose decision clears the interrupted flag, so the group does not re-enter recovery each tick.
+            if (hasTarget && worksHeld && decision.Target == PostureExecutionTarget.RecoveryPath &&
+                !MoveContest.RecoveryAllowed(true, x, z, army?.Feasibility?.HeldWorks))
+            {
+                decision = new PostureExecutionDecision(PostureExecutionAction.SetFormation, "works-hold-recovery", PostureExecutionTarget.CurrentPosition,
+                    clearInterruptedPaths: true);
+                hasTarget = false;
+            }
             if (!hasTarget && t.NavDeferred)
             {
-                PostureTelemetry.Group(s, i, reason, state, decision, 0, "nav-budget-deferred");
+                PostureTelemetry.Group(s, i, reason, state, decision, worksStance, "nav-budget-deferred");
                 return false;
             }
             string targetReason = hasTarget ? decision.Reason : "target-unresolved";
@@ -671,10 +852,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 bool avoidCovered = PostureIntentPlan.AvoidsCoveredCrossings(state.Task, rec.X, rec.Z, x, z);
                 if (PostureRoutes.Resolve(s, t, i, x, z, avoidCovered, out roadRoute, out columnWait) == PostureRoutes.Outcome.Deferred)
                 {
-                    PostureTelemetry.Group(s, i, reason, state, decision, 0, "road-route-deferred");
+                    PostureTelemetry.Group(s, i, reason, state, decision, worksStance, "road-route-deferred");
                     return false;
                 }
                 if (roadRoute.Use || columnWait) targetFormation = RoadRoutePlanner.ColumnGroupFormation;
+                if (recordTick) t.Groups[i].RouteColumn = roadRoute.Use || columnWait;
                 if (columnWait) targetReason = "road-column-wait";
                 else if (roadRoute.Use) targetReason = "road-route";
             }
@@ -725,8 +907,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ViaX1 = roadRoute.ViaX1,
                 ViaZ1 = roadRoute.ViaZ1,
                 ColumnWait = columnWait,
+                StanceSubmitted = worksStance > 0,
             };
-            int submitted = PostureIntentPlan.Submit(sink, request);
+            int submitted = worksStance + PostureIntentPlan.Submit(sink, request);
             // BC11 decision 4: an EnvelopmentManeuver Turn faces the group at the enemy line end (the executor
             // wheels it out of combat, rotates its regiments in place in combat).
             if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&
@@ -741,7 +924,34 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 submitted += PostureIntentPlan.SubmitFacing(sink, s, i, descendants, heading, state.Task, refuse,
                     priority, source, reason, t.RegimentQueue, t.Regiments);
             PostureTelemetry.Group(s, i, reason, state, decision, submitted, targetReason, facingSource);
-            return submitted > 0;
+            return submitted > worksStance;
+        }
+
+        // BC14W: one group's turn of the works contest (MoveContest): the memory is asked every tick for a held group, a recon mission group is neither
+        // contested nor counted, and the answer is turned into the executor's Stop or Move. Returns the intents submitted.
+        private static int WorksContest(BattleSnapshot s, int i, in UnitRecord rec, in CommandDoctrineOrder order, bool hasOrder, bool worksHeld,
+            bool worksLane, bool closeEngaged, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
+            IIntentSink sink)
+        {
+            OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
+            double issuedHours = 0.0;
+            bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out _, out _, out issuedHours);
+            float issuedX = 0f, issuedZ = 0f;
+            if (hasIssued) executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out _);
+            double nowHours = s.DoctrineHours;
+            var facts = new ContestTurnFacts
+            {
+                Alliance = s.Alliance, GroupId = rec.InstanceId, Tick = s.TickId, Task = task, Priority = priority, Source = source,
+                Held = worksHeld, CloseEngaged = closeEngaged,
+                Recon = ReconIntentProducer.MissionScoutId(s.Alliance) == rec.InstanceId || ReconIntentProducer.HasProbeOrHold(s.Alliance, rec.InstanceId),
+                HasPath = physical.ActiveMove || physical.Paths > 0,
+                HasLastIssued = hasIssued, IssuedX = issuedX, IssuedZ = issuedZ, IssuedHours = issuedHours,
+                X = rec.X, Z = rec.Z, WaypointX = rec.LastWaypointX, WaypointZ = rec.LastWaypointZ,
+                HasLane = worksLane && order.PrimaryTarget.HasValue, LaneX = order.PrimaryTarget.X, LaneZ = order.PrimaryTarget.Z,
+                Stance = rec.AiStance, Works = army?.Feasibility?.HeldWorks,
+                PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,
+            };
+            return ContestTurn.Run(in facts, sink);
         }
 
         // #61 CanBypassStaleQueuedOrder: movement tasks may pass a stalled queued order.
@@ -847,10 +1057,6 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return TacticalCavalryFollowMode.None;
         }
 
-        internal static CommandNodeOperationalState WithRoleAndTask(CommandNodeOperationalState state, CommandNodeRole role, CommandTaskType task)
-        {
-            return new CommandNodeOperationalState(state.NodeId, state.Echelon, role, task, state.TaskState, state.X, state.Z, state.FacingDegrees);
-        }
     }
 
     // Road march routing glue (BC10 decision 6): plans a route for a posture Move, caches it,
@@ -1281,9 +1487,11 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         private static bool TryNavPlan(BattleSnapshot s, PostureTick.State t, int i, CommandNodeOperationalState state,
             CommandDoctrineOrder order, PostureExecutionTarget kind, ref float x, ref float z)
         {
-            if (!t.Nav.TryConsume())
+            if (!t.Nav.TryConsume(s.Own[i].InstanceId))
             {
                 t.NavDeferred = true;
+                // BC15 decision 7: a group waiting for a plan stays Full until one runs for it.
+                BattleLodRuntime.NavDeferred(s, s.Own[i].InstanceId);
                 return false;
             }
 
@@ -1709,17 +1917,29 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         public void Produce(BattleSnapshot s, IIntentSink sink)
         {
-            using (TelemetryPerf.Scope("tactical.producer.facing-pulse", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.facing-pulse.wake" : "tactical.producer.facing-pulse", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
-                if (Plugin.EnableTacticalContactFacingPulse == null || !Plugin.EnableTacticalContactFacingPulse.Value) return;
+                bool pulseOn = Plugin.EnableTacticalContactFacingPulse != null && Plugin.EnableTacticalContactFacingPulse.Value;
+                bool deployOn = pulseOn && Plugin.EnableColumnDeployment != null && Plugin.EnableColumnDeployment.Value;
+                // The approach in line has its own flag and does not depend on the pulse or on the column deployment: the table is rebuilt here whenever it is on.
+                bool approachOn = Plugin.EnableApproachLineAdvance != null && Plugin.EnableApproachLineAdvance.Value;
+                if (!pulseOn && !approachOn) return;
                 PostureTick.State t = PostureTick.Current(s);
                 OrderExecutor executor = OrderExecutor.ForAlliance(s != null ? s.Alliance : -1);
                 if (t == null || executor == null || sink == null) return;
+
+                // Unit churn: a march column that is fired on or flanked deploys at once (ColumnDeployment), whether or not its brigade moved this tick,
+                // and the approach table is rebuilt. Both read the contact flags and the group intent the posture producer recorded, so they run ahead of
+                // the group loop below, not inside it.
+                if (deployOn || approachOn) SubmitColumnDeployments(s, t, executor, sink, deployOn, approachOn);
+                if (!pulseOn) return;
 
                 for (int i = 0; i < s.OwnCount; i++)
                 {
                     ref GroupPosture g = ref t.Groups[i];
                     if (!g.Has || g.Submitted) continue;
+                    // BC15: the pulse is tiered with the posture it follows; a carried group's record is kept, its pulse is not re-run.
+                    if (!BattleLodRuntime.IsDue(s, i)) continue;
                     TacticalFacingPulseScope scope = ScopeFor(g.State.Echelon);
                     if (scope == TacticalFacingPulseScope.Division)
                     {
@@ -1766,7 +1986,112 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     }
                     g.FacingSubmitted = submitted || pulses > 0;
                 }
+
+                // BC15: the record a carried tick restores is complete only now (FacingSubmitted is set above), so it is taken here.
+                for (int i = 0; i < s.OwnCount; i++)
+                    if (t.Groups[i].Has && BattleLodRuntime.IsDue(s, i)) t.Records.Remember(t.Groups, i, s.Own[i].InstanceId);
             }
+        }
+
+        // Unit churn (2026-10-17): vanilla marches a regiment in column for any path over 60 m and deploys it only inside 100 m of an enemy, facing the way it
+        // was walking; the brigade-level formation correction follows groupformation, which stays Line. A column that is fired on, shot in the flank,
+        // outflanked, or whose brigade is in close contact stops and deploys facing the threat. A group the withdrawal doctrine or a fall back is walking away
+        // is left in column, as is a regiment inside the cooldown of its last deployment.
+        private static readonly double DeployCooldownHours = TacticalBattleClock.RealSecondsAtOneXToHours(ColumnDeployment.CooldownRealSecondsAtOneX);
+        private const double WithdrawalWindowHours = 0.25;
+        private const int MaxDeploymentsPerTick = 16;
+        // Rifle fire comes from inside this; a threat bearing from further away is no bearing at all.
+        private const float DeployBearingReachMeters = 700f;
+
+        private static void SubmitColumnDeployments(BattleSnapshot s, PostureTick.State t, OrderExecutor executor, IIntentSink sink, bool deployOn, bool approachOn)
+        {
+            UnitRecord[] own = s.Own;
+            int submitted = 0;
+            // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass while its flag is on. With the
+            // flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
+            if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
+            for (int u = 0; u < s.OwnCount; u++)
+            {
+                ref UnitRecord rec = ref own[u];
+                UnitFlags f = rec.Flags;
+                // The cheap rejects first: this loop visits every own unit every tick.
+                if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;
+                if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
+                if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
+                bool inColumn = rec.Formation == ColumnDeployment.RegimentMarchColumn;
+
+                // The group whose intent the regiment follows: the nearest group above it with a recorded posture (ApproachLine.Walk, the one ancestor walk).
+                var walk = new GroupWalkHost(t.Groups, own, executor, s.DoctrineHours);
+                ApproachLine.Walk(own, s.OwnCount, u, ref walk, out int group, out bool walkWithdrawing);
+                bool withdrawing = (f & UnitFlags.OnRetreat) != 0 || walkWithdrawing;
+                bool recorded = group >= 0;
+                bool closeEngaged = false, flankRisk = false, routeColumn = false;
+                CommandTaskType groupTask = CommandTaskType.None;
+                int groupFormation = -1;
+                if (recorded)
+                {
+                    groupTask = t.Groups[group].State.Task;
+                    groupFormation = own[group].Formation;
+                    routeColumn = t.Groups[group].RouteColumn;
+                    closeEngaged = t.Groups[group].CloseEngaged;
+                    flankRisk = t.Groups[group].FlankRisk;
+                }
+
+                bool approaching = false;
+                if (approachOn && recorded)
+                {
+                    int enemy = s.ClosestVisibleEnemy(group, out float enemyDistance);
+                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, true));
+                    if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);
+                }
+                if (!deployOn || !inColumn || submitted >= MaxDeploymentsPerTick) continue;
+
+                bool recent = PostureIntentPlan.IssuedWithin(executor, rec.InstanceId, OrderChannel.Formation, IntentSource.FacingPulse, s.DoctrineHours, DeployCooldownHours);
+                ColumnDeployReason reason = ColumnDeployment.Decide(new ColumnDeployInput(true, false, rec.Formation, rec.ReceivedFire, rec.FireFromFlank, rec.Outflanked,
+                    flankRisk, closeEngaged, withdrawing, PostureSense.Routed(rec), recent, approaching));
+                if (reason == ColumnDeployReason.None) continue;
+
+                // Facing: the strongest perceived pressure on the front when the flank response is on (the brigade pulse's own rule), else the closest
+                // visible enemy within rifle reach; none keeps the regiment's facing.
+                float heading = -1f;
+                if (Plugin.FlankResponseEnabled() && FlankFacing.MostPressuredBearing(s, u, rec.RotationY, out float pressure, out _)) heading = pressure;
+                else
+                {
+                    int k = s.ClosestVisibleEnemy(u, out float distance);
+                    if (k >= 0 && distance <= (reason == ColumnDeployReason.Approaching ? ApproachLine.AssaultRangeMeters : DeployBearingReachMeters))
+                        heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
+                }
+                sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading, reason));
+                submitted++;
+            }
+        }
+
+        // ApproachLine.Walk over the posture table and the executor's outcomes; a struct, so the walk allocates nothing.
+        internal readonly struct GroupWalkHost : IGroupWalkHost
+        {
+            private readonly GroupPosture[] _groups;
+            private readonly UnitRecord[] _own;
+            private readonly OrderExecutor _executor;
+            private readonly double _nowHours;
+
+            public GroupWalkHost(GroupPosture[] groups, UnitRecord[] own, OrderExecutor executor, double nowHours)
+            {
+                _groups = groups;
+                _own = own;
+                _executor = executor;
+                _nowHours = nowHours;
+            }
+
+            public bool HasPosture(int index) => _groups[index].Has;
+            public CommandTaskType TaskOf(int index) => _groups[index].State.Task;
+            public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);
+        }
+
+        internal static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
+        {
+            return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
+                last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&
+                nowHours - last.AtHours < WithdrawalWindowHours;
         }
 
         // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).

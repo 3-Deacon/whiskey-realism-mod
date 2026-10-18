@@ -22,6 +22,7 @@ internal static class OrderArbiterTests
             ("battle-core ArbiterResolveAllocatesNothingAfterWarmup", ArbiterResolveAllocatesNothingAfterWarmup),
             ("battle-core ArbiterForAllianceBoundsChecked", ArbiterForAllianceBoundsChecked),
             ("battle-core DedupeWithin60m", DedupeWithin60m),
+            ("bc14w WORKS-CONTEST-EXECUTOR the executor records the last move it issued, and a contest intent lands inside the recent-order window", WorksContestExecutor),
             ("battle-core SafetyBypassesRecentOrderButNotDedupe", SafetyBypassesRecentOrderButNotDedupe),
             ("battle-core TaskHoldBlocksSameTaskOnly", TaskHoldBlocksSameTaskOnly),
             ("battle-core ClampMatchesVanillaBoundsNegativeZ", ClampMatchesVanillaBoundsNegativeZ),
@@ -42,6 +43,8 @@ internal static class OrderArbiterTests
             ("battle-core FeudNeverExecuted", FeudNeverExecuted),
             ("battle-core GuardRefusalSkipsWithGuardReason", GuardRefusalSkipsWithGuardReason),
             ("battle-core DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly", DetachedPlayerAncestorOrdersItselfAndDispatchesMovesOnly),
+            ("battle-core MaintenanceMoveOfThePlayersAncestorSendsNoDispatch", MaintenanceMoveOfThePlayersAncestorSendsNoDispatch),
+            ("battle-core RecoveryAndLeafSlotMovesAreMarkedMaintenance", RecoveryAndLeafSlotMovesAreMarkedMaintenance),
             ("battle-core AncestorFanOutDispatchesOnce", AncestorFanOutDispatchesOnce),
             ("battle-core FanOutOutcomeCountsTheOrderedSet", FanOutOutcomeCountsTheOrderedSet),
             ("battle-core GatedOffArbiterPublishesNoClaims", GatedOffArbiterPublishesNoClaims),
@@ -55,6 +58,10 @@ internal static class OrderArbiterTests
             ("battle-core EqualOrLowerDescendantClaimDoesNotFanOut", EqualOrLowerDescendantClaimDoesNotFanOut),
             ("battle-core UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant", UnrelatedSafetyClaimDoesNotShieldAnEqualDescendant),
             ("battle-core GroupMoveYieldsWhenEveryChildIsClaimed", GroupMoveYieldsWhenEveryChildIsClaimed),
+            ("battle-core PostedFlankGuardClaimFansTheParentMoveOutAroundIt", PostedFlankGuardClaimFansTheParentMoveOutAroundIt),
+            ("battle-core PostedGuardAtItsPostStillHoldsTheClaim", PostedGuardAtItsPostStillHoldsTheClaim),
+            ("battle-core StandingClaimWritesNothing", StandingClaimWritesNothing),
+            ("battle-core PostClaimOutranksExecutorAndYieldsToSafety", PostClaimOutranksExecutorAndYieldsToSafety),
         });
     }
 
@@ -250,6 +257,69 @@ internal static class OrderArbiterTests
         view.Own[g].CombatBehaviorOrdered = 2;
         AssertEqual(SkipReason.Duplicate, executor.Plan(view, Behavior(1, 2, IntentPriority.Executor, IntentSource.FireControl), 1.0).Skip, "same ordered behavior");
         AssertTrue(executor.Plan(view, Behavior(1, 3, IntentPriority.Executor, IntentSource.FireControl), 1.0).Execute, "new behavior");
+    }
+
+    // BC14W (spec § 7A, the contest rule): LastIssuedMove is what the contest tells Whiskey's own moves from vanilla's by; a contest intent lands at once.
+    private static void WorksContestExecutor()
+    {
+        var view = new FixtureBattleView();
+        int g = view.AddGroup(1, 100f, -100f);
+        int child = view.AddGroup(2, 120f, -100f);
+        var executor = NewExecutor();
+        executor.TaskHoldHours = 0f;
+        double t = 4.0;
+
+        AssertFalse(executor.LastIssuedMove(1, out _, out _, out _), "nothing issued yet");
+        var first = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        Record(executor, first, t, pathsBefore: 0, pathsAfter: 1);
+        AssertTrue(executor.LastIssuedMove(1, out float x, out float z, out double hours), "a Move is recorded");
+        AssertTrue(x == 500f && z == -500f && hours == t, "its target and hour");
+        var second = Move(1, 700f, -300f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        Record(executor, second, t + 0.5, pathsBefore: 1, pathsAfter: 1);
+        executor.LastIssuedMove(1, out x, out z, out hours);
+        AssertTrue(x == 700f && z == -300f && hours == t + 0.5, "each issued Move overwrites it");
+
+        // A group Move that fanned out to a child records the child's own target too (its waypoint is the child's, offset from the group's).
+        var fan = Move(1, 900f, -900f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        var targets = new[]
+        {
+            new IssuedTarget { InstanceId = 1, X = 900f, Z = -900f },
+            new IssuedTarget { InstanceId = 2, X = 920f, Z = -900f },
+        };
+        executor.RecordIssued(fan, t + 1.0, targets, 2, new UnitWaypoint[0], 0, 0, 1);
+        AssertTrue(executor.LastIssuedMove(2, out x, out z, out _) && x == 920f && z == -900f, "the fanned-out child has its own");
+        executor.RecordIssued(Stance(1, 2, IntentPriority.Executor, IntentSource.PostureExecutor), t + 2.0, null, 0, null, 0, 0, 0);
+        executor.LastIssuedMove(1, out x, out z, out hours);
+        AssertTrue(x == 900f && hours == t + 1.0, "a stance is no move");
+
+        // BattleScope clears the static executors' records.
+        OrderExecutor shared = OrderExecutor.ForAlliance(0);
+        Record(shared, first, t, 0, 1);
+        AssertTrue(shared.LastIssuedMove(1, out _, out _, out _), "recorded on the side's executor");
+        WhiskeyRealism.Util.BattleScope.ResetAll();
+        AssertFalse(shared.LastIssuedMove(1, out _, out _, out _), "BattleScope clears it");
+
+        // The contest intent lands inside the recent-order window; the same move without the flag is cooling down.
+        view.Own[g].LastWaypointX = 700f;
+        view.Own[g].LastWaypointZ = -300f;
+        view.Own[g].RegimentPaths = 1;
+        double soon = t + 1.0 + 10.0 / 3600.0;
+        var back = Move(1, 200f, -200f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective);
+        AssertEqual(SkipReason.Cooldown, executor.Plan(view, back, soon).Skip, "an ordinary move 10 battle-s after an order cools down");
+        BattleOrderIntent contest = back;
+        contest.Flags |= IntentFlags.Contest;
+        AssertTrue(executor.Plan(view, contest, soon).Execute, "the contest move lands");
+        BattleOrderIntent usesDelay = contest;
+        usesDelay.Flags |= IntentFlags.UseOrderDelay;
+        AssertTrue(executor.Plan(view, usesDelay, soon).Execute, "and inside the courier cadence too");
+
+        // A contest stop of a moving group lands inside the window; an ordinary stop is cooling down.
+        var stop = new BattleOrderIntent { GroupId = 1, Channel = OrderChannel.Stop, Heading = -1f, Priority = IntentPriority.Executor,
+            Source = IntentSource.PostureExecutor, Task = CommandTaskType.HoldObjective, Reason = "test" };
+        executor.RecordIssued(stop, soon - 0.001, null, 0, null, 0, 0, 0);
+        AssertEqual(SkipReason.Cooldown, executor.Plan(view, stop, soon).Skip, "an ordinary stop right after a stop cools down");
+        stop.Flags |= IntentFlags.Contest;
+        AssertTrue(executor.Plan(view, stop, soon).Execute, "the contest stop lands");
     }
 
     private static void SafetyBypassesRecentOrderButNotDedupe()
@@ -708,6 +778,60 @@ internal static class OrderArbiterTests
         AssertEqual(OrderExecutor.NoDispatch, ordinary.DispatchType, "no W&L dispatch outside the player's chain");
     }
 
+    // Smoke 2026-10-17 order 13: an interrupted path the posture executor re-issued for the player's division reached the panel as an order.
+    // A Maintenance move is carried out like any other but sends the player nothing.
+    private static void MaintenanceMoveOfThePlayersAncestorSendsNoDispatch()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(1, 100f, -100f, flags: UnitFlags.AncestorOfPlayerCommand);
+        view.AddGroup(2, 100f, -140f, parentIndex: division,
+            flags: UnitFlags.PlayerCommand | UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached);
+        var executor = NewExecutor();
+
+        BattleOrderIntent maintenance = Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective);
+        maintenance.Flags |= IntentFlags.Maintenance;
+        var plan = executor.Plan(view, maintenance, 1.0);
+        AssertTrue(plan.Execute, "the move itself is carried out");
+        AssertEqual(OrderExecutor.NoDispatch, plan.DispatchType, "and the player is sent no order for it");
+        AssertFalse(OrderExecutor.ShouldDispatch(plan, executedTargets: 1), "so nothing is dispatched");
+
+        var control = NewExecutor().Plan(view, Move(1, 500f, -500f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.HoldObjective), 1.0);
+        AssertEqual(12, control.DispatchType, "control: the same move without the flag dispatches");
+    }
+
+    // The two producers of a re-lay mark their Move: PostureIntentPlan.Submit for RecoverInterruptedOrder, LeafMove for a formation slot.
+    private static void RecoveryAndLeafSlotMovesAreMarkedMaintenance()
+    {
+        var leaf = PostureIntentPlan.LeafMove(5, CommandTaskType.AdvanceToAssembly, 100f, 200f, 90f, inContactWithdrawal: false);
+        AssertEqual(OrderChannel.Move, leaf.Channel, "a leaf slot move is a Move");
+        AssertTrue((leaf.Flags & IntentFlags.Maintenance) != 0, "and a re-lay, not an order for the player");
+
+        foreach (var action in new[] { PostureExecutionAction.RecoverInterruptedOrder, PostureExecutionAction.SetWaypoint, PostureExecutionAction.FallbackToLine })
+        {
+            var sink = new MaintenanceSink();
+            PostureIntentPlan.Submit(sink, new PostureIntentRequest
+            {
+                GroupId = 5, Action = action, Task = CommandTaskType.AdvanceToAssembly, HasTarget = true, TargetX = 100f, TargetZ = 200f,
+                Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor, Reason = "test",
+            });
+            int moves = 0;
+            foreach (var intent in sink.Intents)
+            {
+                if (intent.Channel != OrderChannel.Move) continue;
+                moves++;
+                bool marked = (intent.Flags & IntentFlags.Maintenance) != 0;
+                AssertEqual(action == PostureExecutionAction.RecoverInterruptedOrder, marked, action + ": only an interrupted-order recovery is maintenance");
+            }
+            AssertEqual(1, moves, action + " submits one Move");
+        }
+    }
+
+    private sealed class MaintenanceSink : IIntentSink
+    {
+        public readonly System.Collections.Generic.List<BattleOrderIntent> Intents = new System.Collections.Generic.List<BattleOrderIntent>();
+        public void Submit(in BattleOrderIntent intent) => Intents.Add(intent);
+    }
+
     private static void AncestorFanOutDispatchesOnce()
     {
         var view = new FixtureBattleView();
@@ -981,6 +1105,93 @@ internal static class OrderArbiterTests
             AssertFalse(plan.Targets.FannedOut, child + " claim below does not outrank the group move");
             AssertEqual(brigade, plan.Targets.TargetIndices[0], "the group orders itself");
         }
+    }
+
+    // Verify round 2: the posted flank guard's claim had the parent's own priority, and an equal claim does not fan the parent's move out, so the parent's
+    // SetWaypoint (groupmoveonly false) re-pathed every attached unit and walked the guard back. A posted guard holds a claim one rung above the posture
+    // executor (IntentPriority.Post), renewed every tick it is posted.
+    private static void PostedFlankGuardClaimFansTheParentMoveOutAroundIt()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(10, 100f, -100f);
+        int guard = view.AddGroup(11, 40f, -120f, parentIndex: division);
+        int middle = view.AddGroup(12, 100f, -120f, parentIndex: division);
+        int right = view.AddGroup(13, 160f, -120f, parentIndex: division);
+        var groupMove = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+
+        var moving = NewExecutor();
+        BattleOrderIntent toPost = PostureIntentPlan.FlankPostMove(11, 20f, -140f, 315f);
+        var winners = new[] { toPost, groupMove };
+        moving.BeginTickClaims(view, winners, winners.Length);
+        var plan = moving.Plan(view, groupMove, 1.0);
+        AssertTrue(plan.Execute && plan.Targets.FannedOut, "the parent moves, fanned out around the guard on its way");
+        AssertFalse(Targets(plan, guard), "the guard is excluded");
+        AssertTrue(Targets(plan, middle) && Targets(plan, right), "the siblings move");
+        AssertFalse(Targets(plan, division), "the division is not ordered as a group");
+
+        // the same guard with the old, equal-priority claim is re-pathed with the group
+        var equal = NewExecutor();
+        BattleOrderIntent old = Move(11, 20f, -140f, IntentPriority.Executor, IntentSource.PostureExecutor, CommandTaskType.GuardFlank);
+        var oldWinners = new[] { old, groupMove };
+        equal.BeginTickClaims(view, oldWinners, oldWinners.Length);
+        var undone = equal.Plan(view, groupMove, 1.0);
+        AssertFalse(undone.Targets.FannedOut, "(an equal claim does not shield: the division orders itself and the guard walks back)");
+    }
+
+    private static void PostedGuardAtItsPostStillHoldsTheClaim()
+    {
+        var view = new FixtureBattleView();
+        int division = view.AddGroup(10, 100f, -100f);
+        int guard = view.AddGroup(11, 40f, -120f, parentIndex: division);
+        int middle = view.AddGroup(12, 100f, -120f, parentIndex: division);
+        var groupMove = Move(10, 400f, -400f, IntentPriority.Executor, IntentSource.PostureExecutor);
+        var executor = NewExecutor();
+        // at its post the guard has nothing to write, but its standing claim is submitted every tick
+        BattleOrderIntent claim = PostureIntentPlan.FlankPostClaim(11, 40f, -120f);
+        var winners = new[] { claim, groupMove };
+        executor.BeginTickClaims(view, winners, winners.Length);
+        var plan = executor.Plan(view, groupMove, 1.0);
+        AssertTrue(plan.Execute && plan.Targets.FannedOut, "the division's move fans out around a guard that is only holding its post");
+        AssertFalse(Targets(plan, guard), "the guard stays");
+        AssertTrue(Targets(plan, middle), "the other brigade moves");
+
+        // a guard that is no longer posted submits nothing: the claim is gone with the tick
+        var released = NewExecutor();
+        var only = new[] { groupMove };
+        released.BeginTickClaims(view, only, only.Length);
+        AssertFalse(released.Plan(view, groupMove, 1.0).Targets.FannedOut, "no standing claim, no shield");
+    }
+
+    private static void StandingClaimWritesNothing()
+    {
+        var view = new FixtureBattleView();
+        view.AddGroup(11, 40f, -120f);
+        var executor = NewExecutor();
+        BattleOrderIntent claim = PostureIntentPlan.FlankPostClaim(11, 40f, -120f);
+        AssertEqual(IntentFlags.StandingClaim, claim.Flags, "the claim carries the flag");
+        var plan = executor.Plan(view, claim, 1.0);
+        AssertFalse(plan.Execute, "nothing to write");
+        AssertEqual(SkipReason.StandingClaim, plan.Skip, "and the reason says why");
+        executor.NoteRefusal(11, plan.Skip);
+        AssertFalse(executor.IsUnsettled(11), "a standing claim is the steady state of a posted guard, not a refusal the tier pass has to look at");
+    }
+
+    private static void PostClaimOutranksExecutorAndYieldsToSafety()
+    {
+        AssertTrue(IntentPriority.Post > IntentPriority.Executor && IntentPriority.Post < IntentPriority.Safety, "Post sits between the posture executor and Safety");
+        var arbiter = new OrderArbiter();
+        arbiter.BeginTick();
+        arbiter.Submit(Move(11, 100f, -100f, IntentPriority.Executor, IntentSource.PostureExecutor));
+        arbiter.Submit(PostureIntentPlan.FlankPostClaim(11, 40f, -120f));
+        var winners = new BattleOrderIntent[4];
+        int n = arbiter.Resolve(winners);
+        AssertEqual(1, n, "one Move claim");
+        AssertEqual(IntentPriority.Post, winners[0].Priority, "the guard's claim beats a posture move onto it");
+        arbiter.BeginTick();
+        arbiter.Submit(PostureIntentPlan.FlankPostClaim(11, 40f, -120f));
+        arbiter.Submit(Move(11, 0f, -300f, IntentPriority.Safety, IntentSource.Withdrawal, CommandTaskType.None));
+        n = arbiter.Resolve(winners);
+        AssertEqual(IntentPriority.Safety, winners[0].Priority, "a withdrawal still moves a posted guard");
     }
 
     // A Safety claim elsewhere on the field raises the tick's highest claim, so

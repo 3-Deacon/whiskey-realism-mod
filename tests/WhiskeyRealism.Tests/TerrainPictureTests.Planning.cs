@@ -753,7 +753,8 @@ internal static partial class TerrainPictureTests
 
         // A corridor intercept is still a line to form up behind: its line slots keep the assembly distance.
         string planner = FlankResponseTests.SourceText("Tactical", "Operations", "TacticalBattleLinePlanner.cs");
-        FlankResponseTests.AssertPinned(planner, "double assemblyStandOff = defensiveAnchor.OnTerrainLine ? 0d : AssemblyDistance;", "only a terrain line has a zero line stand-off");
+        FlankResponseTests.AssertPinned(planner, "double assemblyStandOff = defensiveAnchor.OnTerrainLine || defensiveAnchor.OnOwnFront ? 0d : AssemblyDistance;",
+            "only a terrain line and the defended own front have a zero line stand-off");
     }
 
     // Distance from a point to the segment (ax, az)-(bx, bz).

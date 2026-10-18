@@ -7,7 +7,7 @@ namespace WhiskeyRealism.Strategic
     // alliance for every caller (63965-63982); this helper takes the asking alliance's own
     // research and import state, so it answers for the AI too. Pure; the runtime reads
     // weapon[id].IsResearched(alliance), IsImported(alliance) and productionmultiplier
-    // (WeaponOrderabilityRuntime). Shared with stage G's G9 purchase planner.
+    // (WeaponOrderabilityRuntime). Shared with the G9 purchase pick (OrdnancePicker).
     public static class WeaponOrderability
     {
         public static bool IsOrderable(bool researched, bool imported, float productionMultiplier)

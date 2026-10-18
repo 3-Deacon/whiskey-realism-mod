@@ -52,7 +52,7 @@ internal static class ReconPlannerTests
             ("MissionExpiresAfterTwentyDays", MissionExpiresAfterTwentyDays),
             ("ProbeEscalateClearsAndWithdrawRecalls", ProbeEscalateClearsAndWithdrawRecalls),
             ("MissionsKeyedByUnitKey", MissionsKeyedByUnitKey),
-            ("AlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
+            ("ReconAlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
             ("ReconNeverReadsDestinations", ReconNeverReadsDestinations),
             ("ScoutingOrderOnlyForCavalryScreens", ScoutingOrderOnlyForCavalryScreens),
             ("RecallClearsScoutingOrder", RecallClearsScoutingOrder),
@@ -1272,7 +1272,7 @@ internal static class ReconPlannerTests
         AssertEqual(0, counts.Recalled, "none recalled");
         AssertEqual(3, counts.UnwatchedApproaches, "the three approach tasks, not the belief or probe tasks");
         AssertEqual(12, counts.OldestBeliefDays, "the oldest live belief; the expired one does not count");
-        AssertEqual("[Recon] alliance=0 screens=1 pickets=1 advanceGuards=1 probes=1 recalled=0 unwatchedApproaches=3 oldestBeliefDays=12 pool=4", counts.Row(0), "the row text");
+        AssertEqual("[Recon] alliance=0 screens=1 pickets=1 advanceGuards=1 probes=1 recalled=0 unwatchedApproaches=3 oldestBeliefDays=12 tasks=5 unfilled=5 listed=0 why=- pool=4", counts.Row(0), "the row text (no mission stands at any task's hold point, so none of the five tasks is filled)");
         AssertTrue(counts.Equals(ReconStep.CountsOf(s, ledger, tasks)), "the same review twice is the same row (rows on change)");
 
         ledger.OnProbeContact(4, ContactEvidenceLedger.Build(Evidence(friendly: 1000f, enemy: 9000f)), Today);
@@ -1379,10 +1379,10 @@ internal static class ReconPlannerTests
         string syncRecon = BodyOf(src, "private static void SyncRecon(");
         AssertContains(syncRecon, "TelemetryPerf.Scope(\"campaign.planner.recon\", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0)", "scope campaign.planner.recon");
         AssertContains(syncRecon, "Recon[snapshot.Alliance].Sync(snapshot, ReconTasks[snapshot.Alliance], allocation);", "binds the allocation's Recon assignments to missions");
-        AssertTrue(syncRecon.IndexOf("if (FlagOn(Plugin.EnableCampaignReconnaissance))", StringComparison.Ordinal) < syncRecon.IndexOf("EmitRecon(snapshot);", StringComparison.Ordinal) && syncRecon.IndexOf("EmitRecon(snapshot);", StringComparison.Ordinal) < syncRecon.IndexOf("else", StringComparison.Ordinal), "the row only while the flag is on (G5d: the else ends every mission)");
+        AssertTrue(syncRecon.IndexOf("if (FlagOn(Plugin.EnableCampaignReconnaissance))", StringComparison.Ordinal) < syncRecon.IndexOf("EmitRecon(snapshot, allocation);", StringComparison.Ordinal) && syncRecon.IndexOf("EmitRecon(snapshot, allocation);", StringComparison.Ordinal) < syncRecon.IndexOf("else", StringComparison.Ordinal), "the row only while the flag is on (G5d: the else ends every mission)");
 
         string emit = BodyOf(src, "private static void EmitRecon(");
-        AssertContains(emit, "ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a])", "the row's counts");
+        AssertContains(emit, "ReconStep.CountsOf(snapshot, Recon[a], ReconTasks[a], allocation)", "the row's counts");
         AssertContains(emit, "TelemetryRouter.LegacyInfo(counts.Row(a), TelemetryLayer.Campaign);", "the [Recon] row, on change");
         AssertContains(emit, "ReconRowEmitted[a] && counts.Equals(LastReconCounts[a])", "rows on change, no string built otherwise");
 

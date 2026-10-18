@@ -35,8 +35,20 @@ namespace WhiskeyRealism.Tactical.Operations
             int exploitId = -1,
             bool hasVia = false,
             float viaX = 0f,
-            float viaZ = 0f)
+            float viaZ = 0f,
+            bool hasFormation = false,
+            int formation = -1,
+            bool hasPreparation = false,
+            float preparationX = 0f,
+            float preparationZ = 0f,
+            CommandTaskType preGuardTask = CommandTaskType.None)
         {
+            HasFormation = hasFormation && formation >= 0;
+            _formation = HasFormation ? formation : -1;
+            HasPreparation = hasPreparation && IsFinite(preparationX) && IsFinite(preparationZ);
+            _preparationX = HasPreparation ? preparationX : 0f;
+            _preparationZ = HasPreparation ? preparationZ : 0f;
+            PreGuardTask = preGuardTask;
             ExploitId = exploitId;
             HasVia = hasVia && IsFinite(viaX) && IsFinite(viaZ);
             _viaX = HasVia ? viaX : 0f;
@@ -107,11 +119,46 @@ namespace WhiskeyRealism.Tactical.Operations
         /// <summary>The via's world z; NaN when there is no via.</summary>
         public float ViaZ => HasVia ? _viaZ : float.NaN;
 
+        private readonly int _formation;
+        private readonly float _preparationX;
+        private readonly float _preparationZ;
+
+        /// <summary>
+        /// BC14W (requirement-focal-execution), additive: the group formation the order asks for (the focal assault column's March Column, 4); it
+        /// replaces the formation the task would give. False is none, so default(CommandDoctrineOrder) carries none.
+        /// </summary>
+        public bool HasFormation { get; }
+
+        /// <summary>The ordered group formation; -1 when there is none.</summary>
+        public int Formation => HasFormation ? _formation : -1;
+
+        /// <summary>
+        /// BC14W, additive: the bombardment point of the focal assault's preparation (the focal point): the artillery doctrine reads it for the batteries
+        /// of the child. False is none.
+        /// </summary>
+        public bool HasPreparation { get; }
+
+        /// <summary>The preparation point's world x; NaN when there is none.</summary>
+        public float PreparationX => HasPreparation ? _preparationX : float.NaN;
+
+        /// <summary>The preparation point's world z; NaN when there is none.</summary>
+        public float PreparationZ => HasPreparation ? _preparationZ : float.NaN;
+
+        /// <summary>BC14W: the task the works hold guard replaced (<see cref="WorksHoldGuard.Reason"/> is then the order's reason); None when it replaced nothing.</summary>
+        public CommandTaskType PreGuardTask { get; }
+
         /// <summary>BC11: the order is an EnvelopmentManeuver hold (stand where you are, no target to plan a route to).</summary>
         public bool ManeuverHold { get; }
 
         public bool HasPurpose { get { return Role != CommandNodeRole.Unknown || Task != CommandTaskType.None; } }
         public bool AllowsIdle { get { return AllowedIdle != DoctrineAllowedIdleReason.None; } }
+
+        /// <summary>
+        /// The order of a node the ledger could not place (<see cref="TacticalBattleLinePlanner.NoPositionReason"/>): no post to go to. Its
+        /// movement tasks are no move; the executor must not substitute an objective stand-off from the node's live position (smoke
+        /// 2026-10-17: a Defender walked toward the enemy line that way).
+        /// </summary>
+        public bool HasNoPost { get { return string.Equals(Reason, TacticalBattleLinePlanner.NoPositionReason, System.StringComparison.Ordinal); } }
 
         public static CommandDoctrineOrder Create(
             string nodeId,
@@ -168,7 +215,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 ManeuverHeading,
                 ManeuverHold,
                 ExploitId,
-                HasVia, _viaX, _viaZ);
+                HasVia, _viaX, _viaZ, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ, PreGuardTask);
         }
 
         public CommandDoctrineOrder WithTask(CommandTaskType task, string reason)
@@ -193,7 +240,8 @@ namespace WhiskeyRealism.Tactical.Operations
                 ManeuverHeading,
                 ManeuverHold,
                 ExploitId,
-                HasVia, _viaX, _viaZ);
+                HasVia, _viaX, _viaZ, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ,
+                task == CommandTaskType.HoldObjective && WorksHoldGuard.Holds(task, reason) ? PreGuardTask : CommandTaskType.None);
         }
 
         /// <summary>
@@ -223,7 +271,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 maneuverHeading,
                 maneuverHold,
                 ExploitId,
-                HasVia, _viaX, _viaZ);
+                HasVia, _viaX, _viaZ, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ, PreGuardTask);
         }
 
         /// <summary>BC13: the same order marked as exploit <paramref name="exploitId"/>'s (see <see cref="ExploitId"/>).</summary>
@@ -249,7 +297,7 @@ namespace WhiskeyRealism.Tactical.Operations
                 ManeuverHeading,
                 ManeuverHold,
                 exploitId,
-                HasVia, _viaX, _viaZ);
+                HasVia, _viaX, _viaZ, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ, PreGuardTask);
         }
 
         /// <summary>
@@ -278,7 +326,36 @@ namespace WhiskeyRealism.Tactical.Operations
                 ManeuverHeading,
                 ManeuverHold,
                 ExploitId,
-                true, x, z);
+                true, x, z, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ, PreGuardTask);
+        }
+
+        /// <summary>BC14W: the same order asking for group formation <paramref name="formation"/>. Every other field is forwarded.</summary>
+        public CommandDoctrineOrder WithFormation(int formation)
+        {
+            return new CommandDoctrineOrder(NodeId, Role, Task, ObjectiveId, PrimaryTarget, SupportTarget, FallbackTarget, AllowedIdle, MinCommitUntilSeconds,
+                IssuedAtSeconds, Confidence01, Sop, Delivery, ParentNodeId, CourierIntervalSeconds, Reason, ManeuverHeading, ManeuverHold, ExploitId,
+                HasVia, _viaX, _viaZ, true, formation, HasPreparation, _preparationX, _preparationZ, PreGuardTask);
+        }
+
+        /// <summary>BC14W: the same order carrying the preparation point. Every other field is forwarded.</summary>
+        public CommandDoctrineOrder WithPreparation(float x, float z)
+        {
+            return new CommandDoctrineOrder(NodeId, Role, Task, ObjectiveId, PrimaryTarget, SupportTarget, FallbackTarget, AllowedIdle, MinCommitUntilSeconds,
+                IssuedAtSeconds, Confidence01, Sop, Delivery, ParentNodeId, CourierIntervalSeconds, Reason, ManeuverHeading, ManeuverHold, ExploitId,
+                HasVia, _viaX, _viaZ, HasFormation, _formation, true, x, z, PreGuardTask);
+        }
+
+        /// <summary>
+        /// BC14W: the works hold guard's rewrite: the task becomes HoldObjective with the reason <see cref="WorksHoldGuard.Reason"/> (or
+        /// <paramref name="reason"/>: an exploit follower keeps the follow reason, which is how it is recognised), and the task it replaced is kept
+        /// in <see cref="PreGuardTask"/>. Every other field is forwarded.
+        /// </summary>
+        public CommandDoctrineOrder WithWorksHold(CommandTaskType preGuardTask, string reason = null, DoctrineTargetPoint? holdPoint = null)
+        {
+            return new CommandDoctrineOrder(NodeId, Role, CommandTaskType.HoldObjective, ObjectiveId, holdPoint ?? PrimaryTarget, SupportTarget, FallbackTarget, AllowedIdle,
+                MinCommitUntilSeconds, IssuedAtSeconds, Confidence01, TacticalSopDecision.ForAssignedTask(Role, CommandTaskType.HoldObjective), Delivery,
+                ParentNodeId, CourierIntervalSeconds, reason ?? WorksHoldGuard.Reason, ManeuverHeading, ManeuverHold, ExploitId,
+                HasVia, _viaX, _viaZ, HasFormation, _formation, HasPreparation, _preparationX, _preparationZ, preGuardTask);
         }
 
         private static string SanitizeText(string value, string fallback)
@@ -314,8 +391,10 @@ namespace WhiskeyRealism.Tactical.Operations
     {
         public ManeuverNodeEntry(string nodeId, WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase, CommandTaskType task,
             bool hasTarget, float targetX, float targetZ, float heading, string reason, bool hasVia = false, float viaX = 0f, float viaZ = 0f,
-            bool isGuard = false)
+            bool isGuard = false, bool hasFormation = false, int formation = -1)
         {
+            HasFormation = hasFormation && formation >= 0;
+            Formation = HasFormation ? formation : -1;
             IsGuard = isGuard;
             HasVia = hasVia;
             ViaX = viaX;
@@ -343,6 +422,10 @@ namespace WhiskeyRealism.Tactical.Operations
         public bool HasVia { get; }
         public float ViaX { get; }
         public float ViaZ { get; }
+
+        /// <summary>BC14W: the group formation the node's order asks for (the focal assault's March Column); HasFormation false is none.</summary>
+        public bool HasFormation { get; }
+        public int Formation { get; }
 
         /// <summary>
         /// BC14: the entry is a reserve's crossing guard (requirement-defender-crossing-release), not a BC11 maneuver: the doctrine build applies it

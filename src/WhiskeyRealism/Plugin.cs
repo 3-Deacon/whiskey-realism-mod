@@ -65,6 +65,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableFlankResponseAndEnvelopment;
         internal static ConfigEntry<bool> EnableVanillaFlankThreatTallyFix;
         internal static ConfigEntry<bool> EnableBattleTerrainPicture;
+        internal static ConfigEntry<bool> EnableBattleAiLevelOfDetail;
         internal static ConfigEntry<bool> EnablePerCommanderPersonality;
         internal static ConfigEntry<bool> EnableCommanderOpportunity;
         internal static ConfigEntry<bool> EnableDefenderCounterstroke;
@@ -76,6 +77,8 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaArtilleryChainSideFix;
         internal static ConfigEntry<bool> EnableVanillaMacroAssaultUpgradeFix;
         internal static ConfigEntry<bool> EnableManeuverFeasibility;
+        internal static ConfigEntry<bool> EnableEnemyWorksDoctrine;
+        internal static ConfigEntry<bool> EnableObjectiveDoctrine;
         internal static ConfigEntry<bool> EnableCrossingMoveGate;
 
         /// <summary>Tactical / Enable Crossing Move Gate (a doctrine move whose straight leg crosses a river takes a crossing the side knows, or is not made).</summary>
@@ -89,6 +92,13 @@ namespace WhiskeyRealism
         internal static bool TerrainPictureEnabled()
         {
             try { return EnableBattleTerrainPicture != null && EnableBattleTerrainPicture.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>Tactical / Enable Battle AI Level Of Detail (BC15: the tier pass, the carried claims and the id-ordered nav walk).</summary>
+        internal static bool BattleAiLevelOfDetailEnabled()
+        {
+            try { return EnableBattleAiLevelOfDetail != null && EnableBattleAiLevelOfDetail.Value; }
             catch { return false; }
         }
 
@@ -124,6 +134,27 @@ namespace WhiskeyRealism
         internal static bool ManeuverFeasibilityEnabled()
         {
             try { return EnableManeuverFeasibility != null && EnableManeuverFeasibility.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Tactical / Enable Enemy Works Doctrine (BC14W: the works picture, turn-first pricing, the works hold, FocalAssault with the bombard start,
+        /// the Defender's works station). True only with Enable Maneuver Feasibility also on: the slice reads the core's ledger.
+        /// </summary>
+        internal static bool EnemyWorksDoctrineEnabled()
+        {
+            try { return ManeuverFeasibilityEnabled() && EnableEnemyWorksDoctrine != null && EnableEnemyWorksDoctrine.Value; }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Tactical / Enable Objective Doctrine (BC14O: an objective's value from vanilla's own points, the victory clock, one main effort on the
+        /// best feasible objective with screens for the others, the designer chains as a timed prior). True only with Enable Maneuver Feasibility
+        /// also on: the slice reads the core's ledger.
+        /// </summary>
+        internal static bool ObjectiveDoctrineEnabled()
+        {
+            try { return ManeuverFeasibilityEnabled() && EnableObjectiveDoctrine != null && EnableObjectiveDoctrine.Value; }
             catch { return false; }
         }
 
@@ -192,6 +223,8 @@ namespace WhiskeyRealism
         public static ConfigEntry<string> TacticalRegimentDiagnosticNames;
         public static ConfigEntry<bool> EnableTacticalMapKnowledgeDiagnostics;
         public static ConfigEntry<bool> EnableTacticalContactFacingPulse;
+        public static ConfigEntry<bool> EnableColumnDeployment;
+        public static ConfigEntry<bool> EnableApproachLineAdvance;
         public static ConfigEntry<bool> EnableTacticalReinforcementOpportunityDoctrine;
         public static ConfigEntry<bool> EnableTacticalDeploymentObserver;
         public static ConfigEntry<bool> EnableTacticalDeploymentTerrainDiscipline;
@@ -255,6 +288,9 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableSupplyDepotSteering;
         internal static ConfigEntry<bool> EnableFortSteering;
         internal static ConfigEntry<bool> EnableRailroadSteering;
+        internal static ConfigEntry<bool> EnableGarrisonManning;
+        internal static ConfigEntry<bool> EnableRearmPriority;
+        internal static ConfigEntry<bool> EnableOrdnancePurchaseSteering;
         internal static ConfigEntry<bool> FixAiPerkPickRange;
         internal static ConfigEntry<bool> FixPontoonTrainCreekSpeed;
         internal static ConfigEntry<bool> FixEngineerBranchBonus;
@@ -431,7 +467,9 @@ namespace WhiskeyRealism
                 "Enable Tactical Observer",
                 true,
                 "Default ON. Emits tactical observer summaries, decision-matrix rows, ops-ledger/posture rows and the commander-intent/reserve-drift rows to the tactical tuning sidecar, deduped per signature (Tactical Observer Min Seconds Between Summaries). " +
-                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state.");
+                "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state. " +
+                "It also gates the BC16 record-only formation observers (LayoutObserverPatch): TacticalLayoutMirror rows (how each group order laid its brigades' regiments out, left to right or mirrored), TacticalFormationFlip rows " +
+                "(a group whose formation changed twice within 0.1 battle-hours) and the once-per-battle [FormationProbe] line. They write nothing into the battle.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",
@@ -632,6 +670,16 @@ namespace WhiskeyRealism
                 "The picture itself builds either way (the playbook terrain reads it). Off: objectives keep their types and zero " +
                 "terrain strength, the defensive anchor keeps its terrain-anchor-preserved behaviour, no strong-ground evidence, and " +
                 "ReverseSlopeDefense is never chosen (it needs a crest line).");
+            EnableBattleAiLevelOfDetail = Config.Bind(
+                "Tactical",
+                "Enable Battle AI Level Of Detail",
+                true,
+                "Default ON. BC15: the battle AI spends its producer time where the battle is. A group far from every enemy the side perceives " +
+                "(none within 1.5 km, no fire, no melee, nothing moving under it), settled, on a holding task (hold, form up, flank guard, reserve " +
+                "wait, consolidate), with no order in flight and nothing changed in what its producers read, re-evaluates every fourth " +
+                "side-stat cycle instead of every cycle; its last claims stand in between. Every wake-up reads perceived and own state only: a " +
+                "sighting within 3 km, fire, its parent moving, its order target or its path corridor changing, a new closest enemy bearing, a " +
+                "plan change. The player's own command chain is never slowed. Off: every group runs every producer on every cycle, as before.");
             EnablePerCommanderPersonality = Config.Bind(
                 "Tactical",
                 "Enable Per-Commander Personality",
@@ -727,14 +775,34 @@ namespace WhiskeyRealism
                 "march on a synchronized release, inside a time budget, through a chosen crossing; a broken assumption replans; a Defender " +
                 "sends a reserve to guard a crossing the enemy can reach first. Off: plans are picked and executed as before, and Enable " +
                 "Enemy Works Doctrine and Enable Objective Doctrine act as off.");
+            EnableEnemyWorksDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Enemy Works Doctrine",
+                true,
+                "Default ON. BC14W: against enemy works the AI has seen (soldiers behind parapets, breastworks, walls or sunken roads, and " +
+                "entrenchment pieces once perceived), the army turns an open end of the works first and leaves a force holding in front; when " +
+                "no turn will do, a willing commander assaults the works' focal point (a salient or a junction) in march column after a " +
+                "bombardment, and an unwilling one holds instead of ordering a hopeless assault. A Defender in works keeps a reserve behind its " +
+                "most threatened point. Needs Enable Maneuver Feasibility. Off: works are priced as open ground, no works assault and no hold.");
+            EnableObjectiveDoctrine = Config.Bind(
+                "Tactical",
+                "Enable Objective Doctrine",
+                true,
+                "Default ON. BC14O: the army puts its main effort on the most valuable objective it can take by vanilla's own victory points, " +
+                "not the nearest; it presses harder when it is behind on the victory bar late in the day and holds more when it is ahead; " +
+                "secondary objectives draw at most two screens; a historical battle's designer timetable is a strong hint from its due hour, " +
+                "not an override. The AI reads the victory bar exactly as the player sees it, nothing more. Needs Enable Maneuver Feasibility. " +
+                "Off: objectives are valued and chosen as before.");
             EnableCrossingMoveGate = Config.Bind(
                 "Tactical",
                 "Enable Crossing Move Gate",
                 true,
                 "Default ON. A doctrine move (posture Screen and Probe, the leaf slots, division-play, the reserve release) whose straight " +
                 "leg crosses a river is made through a crossing the side knows (perceived clear or watched, BC14's crossing picture) or is not " +
-                "made; a withdrawal, a fallback, a deployment placement and a scout's look are not gated. Needs Enable Maneuver Feasibility " +
-                "(the river map); with no river map the gate lets every move through. Off: moves are checked for water at their target as before.");
+                "made; a withdrawal, a fallback, a deployment placement and a scout's look are not gated. A leg end on open river or a ford takes the " +
+                "bank the leg reaches or leaves it by. Needs Enable Maneuver Feasibility (the river map): while the map is still being built on " +
+                "a terrain with fords a gated move waits (at most 72 battle seconds); with the feasibility off, the build failed or no ford on " +
+                "the map the gate lets every move through. Off: moves are checked for water at their target as before.");
             EnableVanillaArtilleryChainSideFix = Config.Bind(
                 "Tactical",
                 "Enable Vanilla Artillery Chain Side Fix",
@@ -1041,6 +1109,27 @@ namespace WhiskeyRealism
                 "with no detached or player-owned subordinate, a group facing toward the closest visible enemy; up to 4 of its regiments in " +
                 "contact may be rotated in place to face visible contact. Orders go through the battle-core order executor. Disable for rollback " +
                 "without turning off Tactical Commander Mode.");
+            EnableColumnDeployment = Config.Bind(
+                "Tactical",
+                "Enable Column Deployment",
+                true,
+                "Default ON. Battle-core facing-pulse producer: an AI infantry regiment that vanilla put in march column (a path longer than 60 m with no " +
+                "enemy within 100 m) and that is fired on, shot in the flank, outflanked or in close contact with its brigade stops its march (the game's " +
+                "own manual stop restores its line) and turns to face the pressure, instead of marching on in column until an enemy is within 100 m " +
+                "(vanilla deploys it there, facing the way it was walking). A regiment on a bridge or crossing, of a withdrawing group, routed or mounted " +
+                "is left alone. A regiment marked for the approach in line (Enable Approach Line Advance) is deployed where it stands and keeps marching. " +
+                "Needs Enable Tactical Contact Facing Pulse. Disable for rollback without turning off Tactical Commander Mode.");
+            EnableApproachLineAdvance = Config.Bind(
+                "Tactical",
+                "Enable Approach Line Advance",
+                true,
+                "Default ON. User-approved skipping Prefix on the game's CheckFormationChange (2026-10-17). For an AI infantry regiment that Whiskey commands " +
+                "(Commander Mode Active, never a player's unit, never the W&L feud instance) in a group whose current intent is a line advance or hold (not a " +
+                "road route or a march column) and whose closest perceived enemy is inside 500 m, the game's re-column step is skipped, so the regiment keeps " +
+                "its line and advances in line instead of falling back into march column. Independent of Enable Column Deployment and of the contact " +
+                "facing pulse: only this switch, Commander Mode Active and the battle core's posture record decide which regiments are marked. With " +
+                "Enable Column Deployment on, a column regiment inside 500 m also deploys to line first, where it stands, and keeps marching. Every other regiment runs the game's method " +
+                "unchanged. Disable for rollback: vanilla's formation change runs for every regiment.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(
                 "Tactical",
                 "Enable Tactical Reinforcement Opportunity Doctrine",
@@ -1349,6 +1438,35 @@ namespace WhiskeyRealism
                 "startable line begins: the one that connects own supply to the main axis or a threatened sector. Not used for the player's " +
                 "alliance, the W&L commander-in-chief's side, Europe, or while vanilla's job machine is paused (vanilla's own roll runs then). " +
                 "Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = vanilla's roll.");
+            EnableGarrisonManning = Config.Bind(
+                "Campaign Planner", "Enable Garrison Manning", true,
+                "Default ON. Vanilla defends only the capital ahead of an attack; key towns, rail hubs, ports, depots and forts away from it are " +
+                "held by whatever happens to stand there. With this on, an own objective town, rail hub, port, built depot or fort that a " +
+                "believed enemy army threatens (vanilla's own capital threat weighting, on what the side has seen) gets a garrison: the " +
+                "smallest fighting formation that covers the need (else the nearest two together), from those that would otherwise just hold or sit in reserve, never the main " +
+                "effort, the capital guard, a scout or the W&L player's own command. It marches to the post and holds it, out of vanilla's " +
+                "offensive and defensive pools, until no army has been near for a fortnight; at most six posts at a time. The secession " +
+                "garrison for Kentucky and Missouri is separate and not behind this. Needs Enable Campaign Planner; the march also needs " +
+                "Enable Campaign Planner Executors; OFF = no ordinary post.");
+            EnableRearmPriority = Config.Bind(
+                "Campaign Planner", "Enable Rearm Priority", true,
+                "Default ON. Vanilla re-arms its units in the order they stand in the scene, twice a game day, so the units that happen to come " +
+                "first take the scarce new models. With this on the AI alliances' units are re-armed in the order of the planner's roles: the " +
+                "main effort first, then support, reserve, hold, capital guard, depot builders, scouts and garrisons, then units the plan does " +
+                "not name, and units recovering or in transit last. Vanilla's own rule for which model a unit takes, its stock checks and its " +
+                "skip of the W&L player's units are unchanged; only the order changes, and vanilla's list order is restored afterward. Not used " +
+                "for the new-campaign equipping pass, the player's alliance outside W&L, the W&L commander-in-chief's side, Europe, or while " +
+                "vanilla's job machine is paused. Needs Enable Campaign Planner and Enable Campaign Planner Executors; OFF = vanilla's order.");
+            EnableOrdnancePurchaseSteering = Config.Bind(
+                "Campaign Planner", "Enable Ordnance Purchase Steering", true,
+                "Default ON. When vanilla's AI orders rifles or guns it picks at random among the researched or imported models that beat its " +
+                "own average, ignoring price, delivery time and rate of fire, and can order models the order screen refuses (Gatling, Coffee " +
+                "Mill, Williams gun). With this on the model is the best of those same candidates that the order screen allows, by value per " +
+                "cost, delivery time, battle value (rate of fire counted in full), standardization and an edge over the enemy arms the side has " +
+                "actually seen. Vanilla still decides when to buy, how much, whether the credit and the capital allow it, and charges the " +
+                "order; with no allowed candidate vanilla's pick stands. Never used for the W&L commander-in-chief's side, the player's " +
+                "alliance outside W&L, Europe, or while vanilla's job machine is paused. Needs Enable Campaign Planner and Enable Campaign " +
+                "Planner Executors; OFF = vanilla's random pick.");
             FixAiPerkPickRange = Config.Bind(
                 "Campaign", "Fix AI Perk Pick Range", true,
                 "Default ON. Vanilla's campaign AI perk pick draws Random.Range(0, count - 1), so no AI army ever takes River Expedition " +

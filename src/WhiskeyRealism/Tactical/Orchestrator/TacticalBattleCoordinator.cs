@@ -161,6 +161,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             unchecked { BattleDayEpoch++; }
             // The reserve release starts over on a new day, plan or no plan.
             if (army != null) ReserveReleaseState.ForAlliance(army.AllianceId)?.Clear();
+            // BC14O: and the main-effort objective's hysteresis.
+            if (army != null) WhiskeyRealism.Tactical.Battle.ObjectiveLatch.ForAlliance(army.AllianceId)?.Clear();
             if (army == null || !army.HasPlan) return;
             var intent = ArmyIntentInference.Build(enemyVisible);
             army.ObserveIntent(intent);
@@ -341,6 +343,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 }
                 return h;
             }
+        }
+
+        /// <summary>
+        /// BC14W: whether a command state's strength counts as the operation's assigned strength (T14): the node is tasked to attack or support, or was
+        /// before the works hold guard turned its attack into a hold (a former FixEnemy never counted), so the director's input neither drops nor rises
+        /// under the hold.
+        /// </summary>
+        internal static class OperationStrength
+        {
+            internal static bool CountsAsAssigned(Operations.CommandTaskType task, Operations.CommandTaskType preGuardTask)
+                => IsAssigned(task) || IsAssigned(preGuardTask);
+
+            private static bool IsAssigned(Operations.CommandTaskType task)
+                => task == Operations.CommandTaskType.AttackObjective || task == Operations.CommandTaskType.SupportAttack;
         }
 
         /// <summary>

@@ -84,6 +84,10 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC13: an exploit's Advance and Strike Moves are not delayed either, as vanilla's own isolated-target move
         // (CheckForSeparatedEnemy 8188, useorderdelay: false): the courier cadence never applies, and the asset
         // settles the moment it is ordered. The posture pipeline passes exploit for an exploit order only.
+        //
+        // BC14W: a works-hold contest move (IntentFlags.Contest) is not delayed either, and the recent-order window and the courier cadence do not
+        // apply to it (InCooldown): it turns back a move vanilla (or an order queued before the hold) just gave a held group, restoring the standing
+        // order the group already holds, and a courier delay would let the group walk into the works band first. It carries no UseOrderDelay flag.
         public static bool ShouldUseOrderDelayForExecutorWaypoint(
             CommandTaskType task,
             bool battleActive,
@@ -488,6 +492,12 @@ namespace WhiskeyRealism.Tactical.Battle
         // The flank each group's children were last refused on by an executed write
         // (absent = unskewed). Read by the leaf slot (LeafSlotTarget).
         private readonly Dictionary<int, RefuseFlank> _refuseByGroup = new Dictionary<int, RefuseFlank>(64);
+        // BC14W: the last Move target issued to each group (and each unit a group Move fanned out to), read by the works contest.
+        private struct LastMove { public float X, Z; public double Hours; }
+        private readonly Dictionary<int, LastMove> _lastMove = new Dictionary<int, LastMove>(128);
+        // BC15: groups whose winner the planner refused last tick for any reason but Duplicate (a recent-order window, the failed-write
+        // backoff, a water or off-map target, a missing crossing). A refusal is not a settled group: it is retried when its window ends.
+        private readonly List<int> _refusedLastTick = new List<int>(32);
         private PendingMove[] _pending = new PendingMove[32];
         // Parallel to _pending, pooled per slot: the units each pending move went
         // to, and the units whose waypoint was already on their target before it.
@@ -569,19 +579,27 @@ namespace WhiskeyRealism.Tactical.Battle
         /// (ChainNoTargets) when nothing else is left. EndTickClaims clears them so
         /// inline plans between ticks (#42, #56) see none.
         /// </summary>
-        public void BeginTickClaims(IBattleUnitView s, BattleOrderIntent[] winners, int count)
+        public void BeginTickClaims(IBattleUnitView s, BattleOrderIntent[] winners, int count,
+            BattleOrderIntent[] carried = null, int carriedCount = 0)
         {
             EndTickClaims();
             if (s == null || winners == null) return;
             int own = s.OwnCount;
             EnsureCapacity(own);
             _moveClaimCount = own;
-            for (int i = 0; i < count && i < winners.Length; i++)
+            RaiseMoveClaims(s, winners, count, own);
+            // BC15: a Distant group that is not due carries its Move claim; the chain planner shields it exactly as it would a submitted one.
+            if (carried != null) RaiseMoveClaims(s, carried, carriedCount, own);
+        }
+
+        private void RaiseMoveClaims(IBattleUnitView s, BattleOrderIntent[] claims, int count, int own)
+        {
+            for (int i = 0; i < count && i < claims.Length; i++)
             {
-                if (winners[i].Channel != OrderChannel.Move) continue;
-                int idx = s.IndexOfOwn(winners[i].GroupId);
+                if (claims[i].Channel != OrderChannel.Move) continue;
+                int idx = s.IndexOfOwn(claims[i].GroupId);
                 if (idx < 0 || idx >= own) continue;
-                int priority = (int)winners[i].Priority;
+                int priority = (int)claims[i].Priority;
                 if (priority > _moveClaim[idx]) _moveClaim[idx] = priority;
                 if (priority > _moveClaimMax) _moveClaimMax = priority;
             }
@@ -634,6 +652,8 @@ namespace WhiskeyRealism.Tactical.Battle
             if (_guard == null) return Skip(plan, SkipReason.ModeNotActive);
             int idx = s.IndexOfOwn(w.GroupId);
             if (idx < 0) return Skip(plan, SkipReason.Inactive);
+            // A standing claim is a claim and nothing more: BeginTickClaims already raised it from the winners; there is nothing to write.
+            if ((w.Flags & IntentFlags.StandingClaim) != 0) return Skip(plan, SkipReason.StandingClaim);
             UnitRecord[] own = s.Own;
             ref UnitRecord rec = ref own[idx];
 
@@ -718,6 +738,13 @@ namespace WhiskeyRealism.Tactical.Battle
                         if (count == viaX.Length) tooMany = true;
                         else { viaX[count] = toX; viaZ[count] = toZ; count++; }
                     }
+                    if (crossing == CrossingVerdict.Pending)
+                    {
+                        // The river map is not built yet: the move waits for it instead of passing unchecked.
+                        plan.Execute = false;
+                        plan.Skip = SkipReason.CrossingPending;
+                        return plan;
+                    }
                     if (crossing == CrossingVerdict.NoKnownCrossing || tooMany)
                     {
                         // No crossing the side knows, or more vias than the executor can carry: the move is not made.
@@ -743,7 +770,7 @@ namespace WhiskeyRealism.Tactical.Battle
             //    hold, courier cadence, dedupe; a retry skips the first two once)
             //    are its throttle; Emit's 110 m record and vanilla's own repeat
             //    check (8643) sit behind it.
-            if (w.Channel == OrderChannel.Move && !immediate && plan.Targets.PlayerShareNeedsDispatch)
+            if (w.Channel == OrderChannel.Move && !immediate && (w.Flags & IntentFlags.Maintenance) == 0 && plan.Targets.PlayerShareNeedsDispatch)
                 plan.DispatchType = TacticalDispatchTypeMapper.Map(w.Task, EnemyObservedNear(s, x, z), rec.AiStanceOrdered == AssaultStance);
             return plan;
         }
@@ -762,9 +789,14 @@ namespace WhiskeyRealism.Tactical.Battle
             _lastOrderAt[key] = nowHours;
             SetLastOutcome(new OrderOutcome
             {
-                GroupId = i.GroupId, Channel = i.Channel, Kind = OrderOutcomeKind.Issued, Source = i.Source, AtHours = nowHours,
+                GroupId = i.GroupId, Channel = i.Channel, Kind = OrderOutcomeKind.Issued, Source = i.Source, AtHours = nowHours, Value = i.Value, Flags = i.Flags,
             });
             if (i.Channel != OrderChannel.Move) return;
+
+            _lastMove[i.GroupId] = new LastMove { X = i.TargetX, Z = i.TargetZ, Hours = nowHours };
+            int fanned = targets != null ? Math.Min(Math.Max(targetCount, 0), targets.Length) : 0;
+            for (int k = 0; k < fanned; k++)
+                if (targets[k].InstanceId != i.GroupId) _lastMove[targets[k].InstanceId] = new LastMove { X = targets[k].X, Z = targets[k].Z, Hours = nowHours };
 
             if (i.Task != CommandTaskType.None) _taskHold[i.GroupId] = new TaskStamp(i.Task, nowHours);
             if (UsesOrderDelay(i)) _courierAt[i.GroupId] = nowHours;
@@ -907,6 +939,70 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             if (refuse == RefuseFlank.None) _refuseByGroup.Remove(groupId);
             else _refuseByGroup[groupId] = refuse;
+        }
+
+        /// <summary>
+        /// BC14W: the last Move target Whiskey issued to the group, or to a unit a group Move fanned out to (that unit's own waypoint), with the hour;
+        /// false with none. The contest tells Whiskey's moves from vanilla's by it.
+        /// </summary>
+        public bool LastIssuedMove(int groupId, out float x, out float z, out double hours)
+        {
+            if (_lastMove.TryGetValue(groupId, out LastMove move))
+            {
+                x = move.X;
+                z = move.Z;
+                hours = move.Hours;
+                return true;
+            }
+            x = 0f;
+            z = 0f;
+            hours = 0.0;
+            return false;
+        }
+
+        /// <summary>
+        /// BC15 decision 1: the unit has an order the executor has not finished with: a move issued and not yet judged, a retry ticket,
+        /// or a winner the planner refused last tick for a reason other than Duplicate (<see cref="NoteRefusal"/>). This is the unit's own
+        /// order; the tier pass asks the same of every unit through <see cref="UnsettledCount"/> and gives it to every group above the unit.
+        /// </summary>
+        public bool IsUnsettled(int groupId)
+        {
+            if (FindPending(groupId) >= 0) return true;
+            for (int t = 0; t < _ticketCount; t++)
+                if (_tickets[t].Intent.GroupId == groupId) return true;
+            return _refusedLastTick.Contains(groupId);
+        }
+
+        /// <summary>
+        /// BC15: the arbiter tick records a winner the planner refused. Duplicate is the steady state of a settled group and is not recorded;
+        /// every other reason is. The tier pass reads the set at the start of the next tick and then calls <see cref="ClearRefusals"/>.
+        /// </summary>
+        public void NoteRefusal(int groupId, SkipReason reason)
+        {
+            if (reason == SkipReason.None || reason == SkipReason.Duplicate || reason == SkipReason.StandingClaim) return;
+            if (!_refusedLastTick.Contains(groupId)) _refusedLastTick.Add(groupId);
+        }
+
+        /// <summary>
+        /// BC15 decision 1: how many units carry an order the executor has not finished with (pending move, retry ticket, last tick's refusal;
+        /// a unit may count twice). <see cref="UnsettledId"/> lists them, so the tier pass folds them up the command tree in one pass over this
+        /// list instead of asking every unit.
+        /// </summary>
+        public int UnsettledCount => _pendingCount + _ticketCount + _refusedLastTick.Count;
+
+        /// <summary>The instance id of the <paramref name="k"/>th unsettled order, 0 &lt;= k &lt; <see cref="UnsettledCount"/>.</summary>
+        public int UnsettledId(int k)
+        {
+            if (k < _pendingCount) return _pending[k].Intent.GroupId;
+            k -= _pendingCount;
+            if (k < _ticketCount) return _tickets[k].Intent.GroupId;
+            return _refusedLastTick[k - _ticketCount];
+        }
+
+        /// <summary>BC15: the tier pass has read last tick's refusals.</summary>
+        public void ClearRefusals()
+        {
+            _refusedLastTick.Clear();
         }
 
         /// <summary>The flank the executor last refused on the group's children, or None.</summary>
@@ -1064,6 +1160,10 @@ namespace WhiskeyRealism.Tactical.Battle
             bool move = w.Channel == OrderChannel.Move;
             if (move && _backoffUntil.TryGetValue(w.GroupId, out double until) && now < until && now >= until - FailedWriteBackoffHours)
                 return true;
+
+            // BC14W: the works contest restores the standing order the group already holds, so it is no new order: neither the recent-order window,
+            // the task hold nor the courier cadence applies to it (a failed write's backoff, above, still does).
+            if ((w.Flags & IntentFlags.Contest) != 0) return false;
 
             // A hold refresh of the stance the group already has is not a new
             // order (IsDuplicate): the recent-order cooldown does not apply.
@@ -1271,8 +1371,10 @@ namespace WhiskeyRealism.Tactical.Battle
             _backoffUntil.Clear();
             _lastOutcome.Clear();
             _refuseByGroup.Clear();
+            _lastMove.Clear();
             _pendingCount = 0;
             _ticketCount = 0;
+            _refusedLastTick.Clear();
             EndTickClaims();
         }
 

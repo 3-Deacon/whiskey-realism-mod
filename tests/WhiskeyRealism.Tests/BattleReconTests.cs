@@ -2,6 +2,7 @@ using System;
 using WhiskeyRealism.Strategic;
 using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
+using WhiskeyRealism.Tactical.Battle.Producers;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
 using static TestHarness;
@@ -19,8 +20,10 @@ internal static class BattleReconTests
             ("recon only a started mission names a target in its row (no scout is sent to the map origin)", OnlyAStartedMissionNamesATarget),
             ("recon scout is a standing AI cavalry regiment", ScoutIsStandingAiCavalryRegiment),
             ("bc14 LOOK-RECON a crossing look is taken after stale entry points and bands, from the stand-off, inside the mission cap, never toward a superior enemy", CrossingLookRecon),
+            ("recon an unanswered crossing look names why: no scout, the start budget, no safe stand-off, a look just made", AnUnansweredLookNamesItsReason),
             ("recon scout never a company, player-owned, feuding or shaken regiment", ScoutFilterRefusals),
             ("recon scout's brigade must be settled and not moved by posture this tick", ScoutParentMustBeSettled),
+            ("recon scout under a leaf brigade: the leaf's posture row (unit churn) holds a scout back while the brigade moved, and carries the ledger task a probe hold compares", ScoutUnderALeafBrigade),
             ("recon stale entry point beats stale band and forward", StaleEntryPointPickedFirst),
             ("recon stale band when every entry point is watched", StaleBandPickedNext),
             ("recon forward only before any contact", ForwardOnlyBeforeContact),
@@ -39,6 +42,7 @@ internal static class BattleReconTests
             ("recon mission times out", MissionTimesOut),
             ("probe nominates one group per empty band in the probe phase", ProbeNominatesPerEmptyBand),
             ("probe never for a defender or outside the probe phase", ProbeNeverForDefenderOrOtherPhase),
+            ("bc14w WORKS-PROBE a look point on held works or in the works band is refused, so no probe is nominated for it", WorksProbe),
             ("probe skips linked groups and player subtrees", ProbeSkipsLinkedAndPlayerSubtree),
             ("probe one start per band per doctrine hour", ProbeBoundedPerBandPerHour),
             ("probe ends on visible contact with one stop", ProbeEndsOnContactWithStop),
@@ -306,6 +310,26 @@ internal static class BattleReconTests
         AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "brigade is the player's");
     }
 
+    // Unit churn (2026-10-17): a leaf brigade now records a GroupPosture row (LeafPosture.Record), which the recon producer copies into the picture
+    // (PostureMoved from Submitted, PostureTask from the row's task). Before, a leaf brigade had no row: its scouts were never held back by a move the
+    // brigade had just been given, and a probe or hold on it compared the ledger task against None.
+    private static void ScoutUnderALeafBrigade()
+    {
+        var s = Field(1.0);
+        var p = Picture(s);
+        int a = s.IndexOfOwn(CavA);
+        int brigade = s.IndexOfOwn(CavBrigade);
+        GroupPosture row = LeafPosture.Record(DirectChildRole.Reserve, CommandTaskType.ReserveWait, CavBrigade, closeEngaged: false, flankRisk: false, BattleStance.Meeting);
+        p.PostureMoved[brigade] = row.Has && row.Submitted;
+        p.PostureTask[brigade] = row.Has ? row.State.Task : CommandTaskType.None;
+        AssertTrue(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "a leaf brigade that stays (a reserve, a hold) leaves its cavalry free to scout");
+        AssertEqual(CommandTaskType.ReserveWait, p.PostureTask[brigade], "and the ledger task a probe's hold compares is the leaf's own, not None");
+
+        row.Submitted = true;   // ProduceLeaf marks the row when it submits the brigade's move
+        p.PostureMoved[brigade] = row.Has && row.Submitted;
+        AssertFalse(BattleRecon.IsScoutCandidate(s, a, Settings(), p), "a leaf brigade that was just given a move holds its scouts back, as a pool brigade's does");
+    }
+
     // ------------------------------------------------------------------ targets
 
     private static void StaleEntryPointPickedFirst()
@@ -432,6 +456,75 @@ internal static class BattleReconTests
         var u = Field(4.1);
         rig.Plan(u, WithEntry(Picture(u), 30f, -200f, -1.0));
         AssertEqual(ReconLeg.Outbound, rig.Memory.Leg, "after the hour");
+    }
+
+    // Smoke 2026-10-17: a Defender's ledger posted two crossing looks from 14.2 h and no Crossing mission started in the next 1.6 h; the row said nothing of why.
+    // A look that is requested and not started names the first thing in the way (a static literal, one row per signature and throttle).
+    private static void AnUnansweredLookNamesItsReason()
+    {
+        // No scout: the cavalry brigade was ordered by posture this tick.
+        var noScout = Field(3.0);
+        var p1 = Picture(noScout);
+        p1.AddLook(0f, -200f);
+        p1.PostureMoved[noScout.IndexOfOwn(CavBrigade)] = true;
+        var rig1 = new Rig();
+        rig1.Plan(noScout, p1);
+        AssertEqual(ReconLeg.None, rig1.Memory.Leg, "no mission");
+        AssertTrue((rig1.Last.Events & ReconEvents.LookIdle) != 0, "the look is reported idle");
+        AssertEqual("no-scout", rig1.Last.LookIdleReason, "no cavalry regiment is free to ride");
+
+        // The start budget: four starts in the hour.
+        var capped = new Rig();
+        double h = 3.0;
+        for (int k = 0; k < ReconSettings.MaxMissionStartsPerHour; k++)
+        {
+            var t = Field(h);
+            var q = Picture(t);
+            q.AddLook(-400f + 200f * k, -200f);
+            capped.Plan(t, q);
+            EndMission(capped, h + 0.01);
+            h += 0.05;
+        }
+        var over = Field(h);
+        var overPicture = Picture(over);
+        overPicture.AddLook(600f, -200f);
+        capped.Plan(over, overPicture);
+        AssertEqual("start-budget", capped.Last.LookIdleReason, "four missions this hour");
+
+        // A superior enemy at the stand point: nowhere safe to look from.
+        var near = Field(3.0);
+        SeeEnemy(near, 0f, -260f, 2000f, 3.0);
+        var nearPicture = Picture(near);
+        nearPicture.AddLook(0f, -200f);
+        var refused = new Rig();
+        refused.Plan(near, nearPicture);
+        AssertEqual("no-stand-off", refused.Last.LookIdleReason, "no safe stand-off point");
+
+        // The same crossing inside the hour.
+        var again = new Rig();
+        var a1 = Field(3.0);
+        var look1 = Picture(a1);
+        look1.AddLook(0f, -200f);
+        again.Plan(a1, look1);
+        EndMission(again, 3.01);
+        var a2 = Field(3.2);
+        var look2 = Picture(a2);
+        look2.AddLook(30f, -200f);
+        again.Plan(a2, look2);
+        AssertEqual("look-recent", again.Last.LookIdleReason, "ridden to a moment ago");
+
+        // A started mission, or no look pending, reports nothing.
+        var ok = Field(3.0);
+        var okPicture = Picture(ok);
+        okPicture.AddLook(0f, -200f);
+        var started = new Rig();
+        started.Plan(ok, okPicture);
+        AssertEqual(0, (int)(started.Last.Events & ReconEvents.LookIdle), "a started mission is not idle");
+        var none = Field(3.0);
+        var nonePicture = Picture(none);
+        var quiet = new Rig();
+        quiet.Plan(none, nonePicture);
+        AssertEqual(0, (int)(quiet.Last.Events & ReconEvents.LookIdle), "no look, nothing to report");
     }
 
     // BC14 requirement-crossing-look: the feasibility ledger's look requests become a Crossing target of the same mission machinery.
@@ -682,6 +775,61 @@ internal static class BattleReconTests
         AssertFalse(rig.Memory.TryGetProbe(InfDivision, out _, out _), "the division is not in the AI pool");
         AssertTrue((rig.Last.Events & ReconEvents.ProbeNominated) != 0, "nomination event");
         AssertEqual(0, rig.Sink.CountOf(OrderChannel.Move), "the probe move is the posture producer's");
+    }
+
+    // A held-works picture reduced to the two questions the recon planner asks: a box of works and the band in front of it.
+    private sealed class BoxWorks : IWorksQuery
+    {
+        public bool StrikeBrokenIn(float x, float z) => false;
+        private readonly float _x, _z, _half;
+        public BoxWorks(float x, float z, float half) { _x = x; _z = z; _half = half; }
+        public bool OnHeldWorks(float x, float z) => Math.Abs(x - _x) <= _half && Math.Abs(z - _z) <= _half;
+        public bool InWorksBand(float x, float z) => Math.Abs(x - _x) <= _half + 150f && Math.Abs(z - _z) <= _half + 150f;
+    }
+
+    // BC14W: under the works doctrine a Scout or Probe never looks into held works or their band (spec § 7A requirement-works-hold).
+    private static void WorksProbe()
+    {
+        var s = Field(3.0);
+        int inf = s.IndexOfOwn(InfBrigade);
+
+        // The infantry brigade's look point is (400, -800); the works stand on it, the cavalry brigade's look point (0, -800) is clear.
+        var rig = new Rig();
+        ReconPicture p = Picture(s, confidence: 0.6f, phase: BattlePhase.Probe);
+        p.Works = new BoxWorks(400f, -800f, 50f);
+        AssertFalse(BattleRecon.LookPoint(s, inf, Settings(), p, out _, out _), "a look point on held works is refused");
+        rig.Plan(s, p);
+        AssertFalse(rig.Memory.TryGetProbe(InfBrigade, out _, out _), "no probe is nominated into the works");
+        AssertTrue(rig.Memory.TryGetProbe(CavBrigade, out _, out _), "the clear band still probes");
+
+        // In the band, short of the works themselves: refused too.
+        p.Works = new BoxWorks(400f, -640f, 50f);
+        AssertFalse(BattleRecon.LookPoint(s, inf, Settings(), p, out _, out _), "a look point inside the works band is refused");
+        var bandRig = new Rig();
+        bandRig.Plan(s, p);
+        AssertFalse(bandRig.Memory.TryGetProbe(InfBrigade, out _, out _), "no probe is nominated into the band");
+
+        // Works farther off than the band leave the look as it was.
+        p.Works = new BoxWorks(400f, 400f, 50f);
+        AssertTrue(BattleRecon.LookPoint(s, inf, Settings(), p, out float x, out float z), "works beyond the band refuse nothing");
+        AssertNear(400f, x, 0.5f, "x");
+        AssertNear(-800f, z, 0.5f, "z");
+
+        // No query (the works doctrine off, or no works seen): nothing changes.
+        p.Works = null;
+        AssertTrue(BattleRecon.LookPoint(s, inf, Settings(), p, out _, out _), "with no query the look point stands");
+        var plain = new Rig();
+        plain.Plan(s, p);
+        AssertTrue(plain.Memory.TryGetProbe(InfBrigade, out _, out _) && plain.Memory.TryGetProbe(CavBrigade, out _, out _), "and both bands probe");
+
+        // The picture's query is per tick: BeginTick clears it, so a stale picture never refuses a later look.
+        p.Works = new BoxWorks(400f, -800f, 50f);
+        p.BeginTick(s.OwnCount);
+        AssertTrue(p.Works == null, "BeginTick clears the works query");
+
+        // The producer fills it from the side's ledger and from nowhere else.
+        string producer = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "ReconIntentProducer.cs");
+        FlankResponseTests.AssertPinned(producer, "p.Works = army?.Feasibility?.HeldWorks;", "the picture takes the ledger's held works");
     }
 
     private static void ProbeNeverForDefenderOrOtherPhase()
@@ -1570,7 +1718,7 @@ internal static class BattleReconTests
         AssertPinned(coordinator, "sideDefending: sideStance == BattleStance.Defender);", "#45 default scorer cap");
 
         AssertPinned(Source("Tactical", "Orchestrator", "TacticalBattleOrchestrator.cs"),
-            "CommandNodeOperationsRuntime.Build( Army.CurrentCommandNodeIntents, OperationsLedger.CurrentOperation, OperationsLedger.CurrentObjectives, Army.CurrentBattleStance);",
+            "CommandNodeOperationsRuntime.Build( Army.CurrentCommandNodeIntents, OperationsLedger.CurrentOperation, OperationsLedger.CurrentObjectives, Army.CurrentBattleStance, OperationsLedger.Ground);",
             "node planning");
         AssertPinned(Source("Tactical", "Battle", "Producers", "PostureIntentProducer.cs"),
             "side.OperationsLedger?.CurrentObjectives, army.CurrentBattleStance, out state);", "posture fallback node");

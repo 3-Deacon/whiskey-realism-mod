@@ -263,7 +263,7 @@ internal static class BattleCoreIntegrationTests
         AssertTrue(mode.Groups["body"].Value.Contains("plugin.Enabled.Value"), "every battle write fails closed with the plugin disabled");
 
         string tick = File.ReadAllText(FindRepoPath("src/WhiskeyRealism/Tactical/Battle/BattleCoreTick.cs"));
-        int claims = tick.IndexOf("executor.BeginTickClaims(snapshot, _winners, winners);", StringComparison.Ordinal);
+        int claims = tick.IndexOf("executor.BeginTickClaims(snapshot, _winners, winners, _carried, carriedCount);", StringComparison.Ordinal);
         int observe = tick.IndexOf("executor.ObserveOutcomes(", StringComparison.Ordinal);
         int retries = tick.IndexOf("executor.PlanRetry(", StringComparison.Ordinal);
         int end = tick.IndexOf("executor.EndTickClaims();", StringComparison.Ordinal);

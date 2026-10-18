@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using WhiskeyRealism.Tactical.PlayerOrders;
 
 using static TestHarness;
@@ -77,13 +78,25 @@ internal static partial class WlOrderFlowTests
         public readonly List<int> MoveAskedAbout = new List<int>();
         public bool RecordAsks;
         public int MoveAsks;
-        public MoveState MoveOf(in CourierEntry e)
+        public MoveBasis Basis = MoveBasis.Path;
+        public MoveBasis GateOnLastRow;
+        public MoveState MoveOf(in CourierEntry e, out MoveBasis basis)
         {
             MoveAsks++;
+            basis = Basis;
             if (RecordAsks) MoveAskedAbout.Add(e.Carrier.UnitId);
             return CarrierMoves.TryGetValue(e.Carrier.UnitId, out MoveState state) ? state : Move;
         }
         public bool ReleaseStillDue(in CourierEntry e) => ReleaseDue;
+        public bool TaskChangedSince;
+        public double TaskHeldAt = double.NegativeInfinity;
+        public int TaskAsks;
+        public bool TaskHolds(in CourierEntry e, out double heldAtHours)
+        {
+            TaskAsks++;
+            heldAtHours = TaskHeldAt;
+            return !TaskChangedSince;
+        }
         public void SetDelivering(bool on) => Delivering = on;
         public void ClearSlot() { SavedBeforeClear = Slot; Slot = null; }
         public void RestoreSlot(object saved) { Slot = (FakeOrder)saved; RestoredWith = saved; }
@@ -125,7 +138,7 @@ internal static partial class WlOrderFlowTests
         }
 
         public void Accepted(in CourierEntry e) => AcceptedTypes.Add(e.Type);
-        public void Row(in CourierEntry e, string action, string reason) => Rows.Add(e.Type + ":" + action + ":" + reason);
+        public void Row(in CourierEntry e, string action, string reason) { Rows.Add(e.Type + ":" + action + ":" + reason); GateOnLastRow = e.Gate; }
         public void NotifyP62(in CourierEntry e, P62Outcome outcome) => P62.Add((e.Type, outcome));
 
         public bool TryBuildRetreat(out CourierEntry entry)
@@ -627,6 +640,30 @@ internal static partial class WlOrderFlowTests
         AssertEqual(0, host.Calls, "nothing delivered during the end-of-day cycle");
         AssertEqual(1, CountRows(host, "discard:eod-clear"), "reported");
         AssertFalse(RowsOf(host).Contains("15:"), "no retreat is derived during the EOD cycle");
+    }
+
+    // Smoke 2026-10-17 order 8: a type 11 captured at the end of day one reached the panel after the night; no eod-clear row was
+    // written because no delivery pass ran inside the sequence. The coordinator's phase change clears the queue itself.
+    private static void EndOfDayPhaseChangeClearsTheQueueWithoutAPass()
+    {
+        var host = new FakeHost { Eod = false };
+        var flow = NewFlow(host);
+        Put(flow, 1, 9, 99, unit: 1, x: 0f);
+        Put(flow, 2, 9, 99, unit: 2, x: 5000f);
+        flow.ClearForEndOfDay();
+        AssertEqual(0, flow.Queue.Count, "cleared with no delivery pass");
+        AssertEqual(2, CountRows(host, "discard:eod-clear"), "one reported row each");
+        flow.ClearForEndOfDay();
+        AssertEqual(2, CountRows(host, "discard:eod-clear"), "an empty queue writes nothing, so every tick of the sequence may call it");
+    }
+
+    private static void EndOfDayClearIsWiredToTheCoordinatorsPhase()
+    {
+        string code = Code("src/WhiskeyRealism/Tactical/Orchestrator/TacticalBattleCoordinatorRuntime.cs");
+        AssertTrue(Regex.IsMatch(code, @"if \(dayPhase == EndOfDayPhase\.Suspended\)\s*\{[^}]*PlayerOrders\.WlOrderFlowRuntime\.OnEndOfDay\(\);"),
+            "the coordinator clears the flow's queue in its Suspended branch");
+        string flow = Code(FlowRuntime);
+        AssertTrue(BodyOf(flow, "internal static void OnEndOfDay(").Contains("catch (Exception ex)"), "never throws");
     }
 
     private static void CrossScopeEntryDiscarded()

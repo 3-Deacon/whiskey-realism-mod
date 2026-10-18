@@ -48,6 +48,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         private static readonly BattleHost Host = new BattleHost();
         internal static readonly WlOrderFlow Flow = new WlOrderFlow(Host);
+        private static readonly StaleDispatchVoid StaleVoid = new StaleDispatchVoid();
         private static readonly OrderAgeTracker Age = new OrderAgeTracker();
         private static readonly CourierLeg[] Legs = new CourierLeg[MaxChainLegs];
         private static readonly int[] Chain = new int[MaxChainLegs];
@@ -180,6 +181,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             // identity and the target the unit was given. Has false when the dispatch moved nothing through
             // the queue.
             public WlMoveCarrier Carrier;
+            // An executor dispatch: the group's CommandTaskType (as an int) the order was made for; 0 = none.
+            public int DispatchTask;
         }
 
         // The capture Prefix: false means vanilla must not run this call (it was queued or dropped).
@@ -223,6 +226,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return (UnityEngine.Object)_parent != null ? _parent : _command;
         }
 
+        // Who gave the order that opened this session: the Whiskey origin the delivery recorded, else vanilla's own.
+        // PlayerComplianceRuntime reads it to leave the automatic holds out of the sample.
+        internal static OrderOrigin OriginOfSession(int session)
+        {
+            return _originSession == session ? _originOfSession : OrderOrigin.Vanilla;
+        }
+
         // Doctrine hours since the order on the panel was accepted (+infinity when Whiskey never saw it issued).
         internal static double ActiveOrderAgeHours()
         {
@@ -233,15 +243,60 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         // True when the order went on a courier. With both order-flow switches off the call goes to vanilla
         // as it always did, and the result is whether vanilla showed a new order.
         internal static bool EnqueueWhiskey(Regiment unit, int type, float x, float z, float rotation, string destinationName, OrderOrigin origin, OrderIntentKind kind,
-            in WlMoveCarrier carrier)
+            in WlMoveCarrier carrier, int dispatchTask)
         {
             var call = new OrderCall
             {
                 Unit = unit, Type = type, Position = new Vector3(x, 0f, z), Name = destinationName,
                 Rotation = rotation, Width = ZoneWidth, Depth = ZoneDepth, Origin = origin, Kind = kind,
-                Carrier = carrier,
+                Carrier = carrier, DispatchTask = dispatchTask,
             };
             return EnqueueCall(in call);
+        }
+
+        // The coordinator's end-of-day phase change (battle start of the night sequence): the order flow's queue is void.
+        // Reads and edits the courier queue only. Safe to call every tick of the sequence.
+        internal static void OnEndOfDay()
+        {
+            try
+            {
+                Flow.ClearForEndOfDay();
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-order:eod-clear", "[W&LOrder] clearing the queue at the end of day failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // A written group Move makes queued orders to the player stale (StaleDispatchVoid): the ordered group's executor orders, those of
+        // every child it moved, and those of every non-detached descendant group whose new target differs by more than 110 m, with the
+        // vanilla orders armed with those descendants. One `discard superseded-intent` row each, before the new move's own order is
+        // queued. Reads and edits the courier queue only; it never touches a unit.
+        internal static bool HasQueuedOrders => Flow.Queue.Count > 0;
+
+        internal static void VoidStaleOrders(UnitRecord[] own, int count, int groupIndex, bool maintenance, float x, float z,
+            IssuedTarget[] issued, int issuedCount, float sizeX, float sizeZ)
+        {
+            try
+            {
+                StaleVoid.Apply(Flow.Queue, own, count, groupIndex, maintenance, x, z, issued, issuedCount, sizeX, sizeZ, WlCourierQueue.SupersededIntent);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("wl-order:supersede-intent", "[W&LOrder] voiding a superseded order failed: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // The executor made no dispatch to the player for a move of this group (`drop` row): the same order again, or a
+        // maintenance move. Bounded by the drop ring.
+        internal static void NoteDispatchSkipped(int groupId, int type, string reason)
+        {
+            var entry = new CourierEntry
+            {
+                UnitId = groupId, Type = type, Origin = OrderOrigin.Executor, IssuerKey = groupId,
+                IssuedAt = TacticalDoctrineTime.NowBattleHours,
+            };
+            EmitRow(in entry, "drop", reason);
         }
 
         // #62's order, with the candidate its bookkeeping follows through the delivery callback.
@@ -340,12 +395,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 return CaptureVerdict.Pass;
             entry.P62Candidate = call.P62;
             entry.Kind = call.Kind;
+            entry.DispatchTask = call.DispatchTask;
+            entry.AdmitReason = reason;
             // The executor moved the unit (or its children) through the order queue: the player is told one
             // leg after that move is carried out, not when it is queued (WlOrderFlow.ReleaseOnMove).
             if (call.Carrier.Has && CouriersOn())
             {
                 entry.AwaitsMove = true;
                 entry.Carrier = call.Carrier;
+            }
+            else if (call.Origin == OrderOrigin.Vanilla && CouriersOn() && TryPursuit(unit, type, position, out WlMoveCarrier pursuit))
+            {
+                entry.Pursuit = true;
+                entry.Carrier = pursuit;
             }
 
             if (verdict == CaptureVerdict.Drop)
@@ -357,6 +419,36 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             queued = Flow.Enqueue(in entry, PlayerOrderReadmitPolicy.MinHoldBattleHours);
             if (queued) OnceLog.Info("wl-order:first-capture", "[W&LOrder] first courier queued type=" + type + " origin=" + call.Origin);
             return verdict;
+        }
+
+        // A vanilla order of a type whose caller sets the called unit on a waypoint just before the order
+        // (WlMoveState.VanillaFollowsAWaypoint) arms the delivery check "does the chain still pursue the point" when the
+        // unit holds a path now. The carrier's target is the ORDER's position with the callers' slack, not the unit's last set
+        // waypoint read here: UpdateMovingTargets sends a unit more than 150 m from its objective through BlockedMovingOrder,
+        // which sets the waypoint two frames after this call (3382), so at capture the waypoint can still be the previous
+        // move's. By delivery (a courier leg later) it has been set; the callers' waypoint differs from the order's point by
+        // at most WlMoveState.VanillaWaypointSlackMeters. Some callers set the waypoint only for units that are not under the
+        // player's command (6958, 8185) with the order outside that test: a unit with no path was not sent, and the order is
+        // not armed. Type 12 is armed only when its point is within that slack of the unit's last waypoint (the one caller that
+        // moves the unit); the waypoint is read for that shape test only, never as the carrier's target.
+        private static bool TryPursuit(Regiment unit, int type, Vector3 position, out WlMoveCarrier pursuit)
+        {
+            pursuit = default(WlMoveCarrier);
+            if (!WlMoveState.VanillaFollowsAWaypoint(type) || (UnityEngine.Object)unit == null || !WlMoveQueue.IsMoving(unit)) return false;
+            // A type 12 is armed only in the shape of the waypoint caller (6958-7002): its point lies near the unit's last waypoint.
+            // Its other caller (6463) orders a defence at an objective or the parent's centre with no move (WlMoveState.ArmsVanillaOrder).
+            Vector3 last = unit.lastsetwaypointposition;
+            float dx = last.x - position.x;
+            float dz = last.z - position.z;
+            if (!WlMoveState.ArmsVanillaOrder(type, (last.x == 0f && last.z == 0f) ? float.MaxValue : Mathf.Sqrt(dx * dx + dz * dz))) return false;
+            // The player is never his own chain: an order to his own command asks nothing of anyone else.
+            if ((UnityEngine.Object)unit == (UnityEngine.Object)_command) return false;
+            pursuit = new WlMoveCarrier
+            {
+                UnitId = unit.gameObject.GetInstanceID(), OrderType = WlMoveCarrier.NoQueueEntry, X = position.x, Z = position.z,
+                SlackMeters = WlMoveState.VanillaWaypointSlackMeters,
+            };
+            return true;
         }
 
         // A vanilla campaign call (calledfromcampaign: true): vanilla's gate (8366) first, with the
@@ -464,6 +556,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 Legs = legs,
                 Meters = meters,
                 LegHours = delay,
+                PlayerDetached = (UnityEngine.Object)_command != null && _command.permanentlydetached,
             };
             entry.DueAt = WlOrderFlow.DueAt(now, delay, CouriersOn(), deferUntil);
             return true;
@@ -533,6 +626,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             }
             if (_isCic) return;
             Age.Observe(DLC_WL.GivenOrders.givenorderssession, TacticalDoctrineTime.NowBattleHours);
+            // An order that took the panel without a Whiskey delivery (vanilla's pass-through 13/14, a scene load) ends what the
+            // executor remembers having told the player.
+            Tactical.Battle.TacticalPlayerDispatchRuntime.Memory.NotePanel(DLC_WL.GivenOrders.givenorderssession, 0);
             DLC_WL.GivenOrders slot = DLC_WL.givenorder;
             if (slot == null || slot.type != 13) Latch.Reset();
             Flow.RunPass();
@@ -774,6 +870,11 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                         .WithField("legs", row.Legs)
                         .WithField("meters", (double)row.Meters)
                         .WithField("dest", row.Name ?? string.Empty)
+                        .WithField("x", (double)row.X)
+                        .WithField("z", (double)row.Z)
+                        .WithField("gate", MoveBasisName.Of(row.Gate))
+                        .WithField("admit", row.AdmitReason ?? string.Empty)
+                        .WithField("detached", row.PlayerDetached)
                         .WithField("session", DLC_WL.GivenOrders.givenorderssession));
             }
             catch
@@ -825,12 +926,18 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
             public bool UnitGone(in CourierEntry e) => ResolveUnit(e.UnitId) == null;
 
-            public MoveState MoveOf(in CourierEntry e)
+            public MoveState MoveOf(in CourierEntry e, out MoveBasis basis)
             {
                 // The unit whose queued move carries the order (the ordered group, or the latest child a fan-out
                 // ordered); one that is gone has no move to wait for.
+                basis = MoveBasis.None;
                 Regiment carrier = ResolveUnit(e.Carrier.UnitId);
-                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, in e.Carrier);
+                return carrier == null ? MoveState.Executed : WlMoveQueue.StateOf(carrier, in e.Carrier, out basis);
+            }
+
+            public bool TaskHolds(in CourierEntry e, out double heldAtHours)
+            {
+                return Tactical.Battle.TacticalPlayerDispatchRuntime.TaskHolds(e.UnitId, e.DispatchTask, out heldAtHours);
             }
 
             // The release is stale when contact has resumed (or the hysteresis no longer holds) while its
@@ -867,11 +974,19 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                 _originSession = Session;
                 _originOfSession = e.Origin;
                 Age.Accepted(Session, NowHours);
+                // The panel now shows this order: the executor's earlier dispatches to other places no longer stand; its own does.
+                Tactical.Battle.TacticalPlayerDispatchRuntime.Memory.NotePanel(Session, e.Origin == OrderOrigin.Executor ? e.UnitId : 0);
                 WlOrderTextRuntime.OnAccepted(in e);
                 OnceLog.Info("wl-order:first-delivery", "[W&LOrder] first order delivered type=" + e.Type + " origin=" + e.Origin);
             }
 
-            public void Row(in CourierEntry e, string action, string reason) => EmitRow(in e, action, reason);
+            public void Row(in CourierEntry e, string action, string reason)
+            {
+                EmitRow(in e, action, reason);
+                // A dispatch that never reached the panel is no longer "told": the next order to the same place is sent.
+                if (action == "discard" && e.Origin == OrderOrigin.Executor)
+                    Tactical.Battle.TacticalPlayerDispatchRuntime.Memory.ForgetDispatch(e.UnitId);
+            }
 
             public void NotifyP62(in CourierEntry e, P62Outcome outcome)
             {

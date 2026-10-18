@@ -350,6 +350,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     SampleDoctrineClock();
                     if (dayPhase == EndOfDayPhase.Suspended)
                     {
+                        // Orders on their way to the W&L player's panel are void: vanilla clears the slot (47985).
+                        PlayerOrders.WlOrderFlowRuntime.OnEndOfDay();
                         MarkSideStatCycleProcessed(battleKey, vanillaLastSideStat);
                         return;
                     }
@@ -488,6 +490,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _lastHeavyBuildFrame[i] = -1;
                 _replanAfterNight[i] = true;
             }
+            // BC15: the battle AI tiers start over with the day (every group Full for the minimum hold).
+            Battle.BattleLodRuntime.NewBattleDay();
             TelemetryRouter.LegacyInfo("[TacticalOrchestrator] new battle day: snapshots rebuilt and plans re-evaluated", TelemetryLayer.Tactical);
         }
 
@@ -655,7 +659,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     deltaSeconds: 0f,
                     ownEvidence: bundleForReplan.OwnEvidence,
                     enemyVisible: bundleForReplan.EnemyVisible,
-                    ownMainEffortStrength: bundleForReplan.OwnMainEffortStrength,
+                    ownActiveForce: bundleForReplan.OwnActiveForce,
                     ownArmyMorale: bundleForReplan.OwnArmyMorale,
                     ownReservesCommittedFraction: bundleForReplan.OwnReservesCommittedFraction,
                     ownReinforcementsArriving: bundleForReplan.OwnReinforcementsArriving,
@@ -755,14 +759,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         var objectives = TacticalBattleSnapshotBuilder.BuildObjectiveRecords(snapshot, battle);
                         objectivesToUse = objectives;
                         bundleForStrategic = bundle;
-                        forceMain = bundle.OwnMainEffortStrength;
+                        forceMain = bundle.OwnActiveForce;
                         forceReserveAvail = Math.Max(0f, 1f - Clamp01(bundle.OwnReservesCommittedFraction));
                     }
                     else
                     {
                         // Gated: the side's snapshot for this Tick (heavy gate evaluated once).
                         var snap = EnsureSideSnapshot(side, battle);
-                        int intentsHash = unchecked(CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash);
+                        // BC14W: the works hold, its reason and the set of children that face works join the gate, so a hold that turns true or false
+                        // forces a store of the orders on the same heavy tick.
+                        int worksHoldHash = side.Army.Feasibility != null ? side.Army.Feasibility.WorksHoldHash : 0;
+                        // A works station keeps its child's Reserve role, so its guard point joins the gate as well.
+                        int intentsHash = unchecked(((CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash) * 31 + worksHoldHash) * 31 + side.Army.GuardHash);
                         bool inputsChanged = _snapshotGeneration[s] != _lastLedgerSnapshotGeneration[s]
                             || intentsHash != _lastLedgerIntentsHash[s];
                         if (!ShouldTickOperationsLedger(inputsChanged, mode != _lastLedgerMode[s], nowBattleSeconds, _lastLedgerTickBattleSeconds[s]))
@@ -771,7 +779,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         _lastLedgerIntentsHash[s] = intentsHash;
                         objectivesToUse = snap.Objectives;
                         bundleForStrategic = BundleFromSnapshot(snap);
-                        forceMain = snap.OwnMainEffortStrength;
+                        forceMain = snap.OwnActiveForce;
                         forceReserveAvail = Math.Max(0f, 1f - Clamp01(snap.OwnReservesCommittedFraction));
                     }
                     _lastLedgerMode[s] = mode;
@@ -781,6 +789,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     var force = new ForceAvailabilitySnapshot(forceMain, forceReserveAvail);
 
                     side.OperationsLedger.SetRuntimeClock(nowBattleSeconds);
+                    // The ledger plans from where the side's command nodes stand and what it knows of the rivers (smoke 2026-10-17).
+                    side.OperationsLedger.SetGround(CommandGroundRuntime.For(SideSnapshot(side), side.AllianceId));
                     side.TickOperationsLedger(
                         mode,
                         objectivesToUse,
@@ -814,8 +824,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float total = 0f;
                 for (int i = 0; i < states.Count; i++)
                 {
-                    var task = states[i].Task;
-                    if (task != CommandTaskType.AttackObjective && task != CommandTaskType.SupportAttack) continue;
+                    if (!OperationStrength.CountsAsAssigned(states[i].Task, states[i].PreGuardTask)) continue;
                     int instanceId = ParseCommandNodeInstanceId(states[i].NodeId);
                     if (instanceId == 0) continue;
                     if (!mapBuilt)
@@ -947,7 +956,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return new ArmyEvidenceBuilder.Bundle(
                 snap.OwnEvidence,
                 snap.EnemyVisible,
-                snap.OwnMainEffortStrength,
+                snap.OwnActiveForce,
                 snap.OwnArmyMorale,
                 snap.OwnReservesCommittedFraction,
                 snap.OwnReinforcementsArriving,
@@ -1665,7 +1674,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     for (int c = 0; c < childCount; c++)
                         childIds[c] = deployedReserve[c] ? string.Empty : side.Army.CurrentDirectChildIntents[c].ChildId;
                     zoneAssignments = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayExecutorRuntime
-                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored);
+                        .ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored, side.Army.Feasibility);
                 }
                 side.Army.ObserveDirectChildEvidenceWithZones(evidence, perChildIntent, zoneAssignments);
                 // BC11 decision 4: the enveloping children's state machines (the doctrine build overrides their nodes).
@@ -1690,7 +1699,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         + " childName=" + SafeLog(dci.DisplayName)
                         + " raw=" + dci.RawUnitTyp
                         + " effective=" + dci.EffectiveCommandLevel
-                        + " role=" + dci.Role
+                        + " role=" + DirectChildRoleSummary.Label(dci.Role, side.Army.CurrentBattleStance)
+                        + " allocated=" + dci.Role
                         + " sector=" + dci.PrimarySector
                         + " support=" + dci.SupportPriority01.ToString("0.00")
                         + " enemyIntent=" + dci.EnemyIntent.PrimaryIntent
@@ -1853,6 +1863,26 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // All reflection/Unity-API calls are try/catch guarded; on any
         // failure the per-group entry is skipped (no intent for it).
 
+        // Unit churn: a division whose doctrine order is FixEnemy and that vanilla escalated to assault (4240) is taken back to the attack stance its task
+        // maps to. The entry is a Skip carrying the charge answer alone: the scorer's producer does not visit a division, and the demotion producer
+        // reads this entry only for a group at assault. A leaf brigade under the division takes the division's stance by order.
+        private static void CacheDivisionChargeAnswer(Dictionary<int, TacticalResolvedGroupDecision> cache, Regiment group, int instanceId, int vanillaOrdered,
+            int macro, bool chargeDenialOn, bool orchestratorArmyOn)
+        {
+            if (macro == 3 || !TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out _) || order.Task != CommandTaskType.FixEnemy) return;
+            ChargeDenialDecision ifAssault = TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(
+                chargeDenialOn, orchestratorArmyOn, DoctrineConsumerAction.Observe, false, fixEnemyTask: true));
+            if (!ifAssault.Demotes) return;
+            cache[instanceId] = new TacticalResolvedGroupDecision(
+                finalStance: ifAssault.DemoteStance,
+                kind: TacticalDoctrineDecisionKind.Skip,
+                reason: ifAssault.Reason,
+                fromDoctrine: true,
+                fromLedger: false,
+                isChargeOverride: vanillaOrdered == TacticalCommandTaskToStanceMapper.StanceAssault,
+                chargeAction: ChargeOverrideAction.DemoteToHold);
+        }
+
         private static void PopulateResolvedDecisionsForSide(TacticalBattleOrchestrator side, AIBattle battle,
             Battle.BattleSnapshot snapshot, EnemyVisibleState enemyVisible)
         {
@@ -1906,7 +1936,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 int fallbackBand = ArmyEvidenceBuilder.DefaultMainEffortSector(enemyVisible.FrontAxis);
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {
-                    if (!TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp)) continue;
+                    bool localStanceWriter = TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp);
+                    if (!localStanceWriter && !TacticalDoctrineScorer.AllowsChargeDemotion(own[i].UnitTyp)) continue;
                     var group = Battle.BattleSnapshotBuilder.UnitAt(snapshot, i, enemy: false);
                     if ((UnityEngine.Object)group == null) continue;
 
@@ -1932,7 +1963,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         continue;
                     }
 
+                    // A pool division has the charge answer only (unit churn): never a stance of #45's own.
+                    if (!localStanceWriter)
+                    {
+                        CacheDivisionChargeAnswer(cache, group, instanceId, own[i].AiStanceOrdered, macro, chargeDenialOn, orchestratorArmyOn);
+                        continue;
+                    }
+
                     int vanillaOrdered = own[i].AiStanceOrdered;
+                    // BC14W (requirement-works-pin): the asset of a non-breach exploit aimed at unbroken works, and its followers, hold the posture executor's
+                    // pinned stance 2 (flagged WorksHold); #45 writes none.
+                    if (Battle.ExploitTable.ForAlliance(allianceId).PinsExploit(own[i].InstanceId))
+                    {
+                        cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: false);
+                        continue;
+                    }
                     int band = enemyVisible.SectorForInstance(own[i].InstanceId, fallbackBand);
                     var sector = BuildSectorForGroup(snapshot, i, group, band);
 
@@ -1944,8 +1989,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     DoctrineConsumerAction doctrineAction = DoctrineConsumerAction.Observe;
                     int dStance = -1;
                     string dReason = null;
+                    string doctrineNodeId = null;
+                    CommandTaskType doctrineTask = CommandTaskType.None;
                     if (macro != 3 && TacticalDoctrineOrderResolver.TryResolve(group, out CommandDoctrineOrder order, out BattlefieldPictureSnapshot picture))
                     {
+                        doctrineNodeId = order.NodeId;
+                        doctrineTask = order.Task;
                         DoctrineStanceDecision dDec = DoctrineConsumerDecisions.DecideStance(
                             order,
                             DoctrineConsumerDecisions.EnemyMainLineExposed(order, picture),
@@ -1955,11 +2004,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         dReason = dDec.Reason;
                     }
 
+                    // BC14W: a group the works hold guard holds takes its stance from the posture executor; #45 writes none and keeps only the
+                    // charge demotion (the doctrine Deny of a hold, to stance 2, for a vanilla assault).
+                    if (doctrineAction == DoctrineConsumerAction.Deny && string.Equals(dReason, DoctrineConsumerDecisions.WorksHoldReason, StringComparison.Ordinal))
+                    {
+                        cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: true);
+                        continue;
+                    }
+
+                    // BC14W (requirement-works-pin): the doctrine Allow of a fix facing unbroken works is the attack stance the pin withholds; the posture
+                    // executor holds the group at stance 2 (flagged WorksHold), #45 writes none.
+                    if (doctrineAction == DoctrineConsumerAction.Allow && side.Army != null && side.Army.PinsWorksNode(doctrineNodeId))
+                    {
+                        cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: true);
+                        continue;
+                    }
+
                     ChargeDenialDecision ifAssault = TacticalChargeDenial.DecideForVanillaAssault(new ChargeDenialInput(
                         chargeDenialOn,
                         orchestratorArmyOn,
                         doctrineAction,
-                        chargeDenialOn && !orchestratorArmyOn && localReactionsOn && LegacyReactionDeniesCharge(instanceId)));
+                        chargeDenialOn && !orchestratorArmyOn && localReactionsOn && LegacyReactionDeniesCharge(instanceId),
+                        fixEnemyTask: doctrineTask == CommandTaskType.FixEnemy));
                     ChargeOverrideAction chargeAction = ifAssault.Demotes
                         ? ChargeOverrideAction.DemoteToHold
                         : ChargeOverrideAction.PreserveVanilla;
@@ -1997,8 +2063,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     // 3) Ledger task stance.
                     if (macro != 3 && TacticalLedgerStateResolver.TryResolve(group, out CommandNodeOperationalState state))
                     {
+                        if (WorksHoldGuard.Holds(state.Task, state.Reason))
+                        {
+                            cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: false);
+                            continue;
+                        }
                         int lStance = TacticalCommandTaskToStanceMapper.MapForGroupStanceScorer(
                             state.Task, TacticalDoctrineScorer.ShouldCommitVisibleWeakPoint(sector), sideStance);
+                        // BC14W (requirement-works-pin): the attack stance of a fix facing unbroken works is withheld; the posture executor owns its stance 2.
+                        if (TacticalCommandTaskToStanceMapper.WorksPinHoldsStance(lStance, side.Army != null && side.Army.PinsWorksNode(state.NodeId)))
+                        {
+                            cache[instanceId] = TacticalResolvedGroupDecision.ForWorksHold(vanillaOrdered, chargeDenialOn, orchestratorArmyOn, fromDoctrine: false);
+                            continue;
+                        }
                         // The ledger claims ownership whenever it resolves
                         // (the former #45 rule) — even when the stance is
                         // invalid or equals vanillaOrdered. A Skip with

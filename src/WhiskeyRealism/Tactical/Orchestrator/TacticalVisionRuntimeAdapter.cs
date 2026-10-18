@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
@@ -355,7 +356,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Map objectives come from TacticalStableSceneCache (vanilla objective references
         // cached per battle; owner and active state read live on every capture, BR-H5)
         // instead of a FindObjectsOfType<Objectives>() scan per heavy build.
-        private static void AddMapObjectiveObservations(
+        internal static void AddMapObjectiveObservations(
             IReadOnlyList<MapObjectiveCapture> mapObjectives,
             int allianceId,
             List<ObjectiveObservationInput> observations,
@@ -365,6 +366,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             HashSet<string> seenObjectiveIds)
         {
             if (mapObjectives == null) return;
+
+            // BC14O (requirement-objective-value): under Enable Objective Doctrine an objective is worth vanilla's own points, normalised over
+            // the live objectives; otherwise the fixed 0.45 / 0.80.
+            bool pointValues = Plugin.ObjectiveDoctrineEnabled();
+            float maxLivePoints = pointValues ? MaxLivePoints(mapObjectives) : 0f;
 
             for (int i = 0; i < mapObjectives.Count; i++)
             {
@@ -384,12 +390,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     TacticalObjectiveSource.VerifiedSceneObject,
                     capture.Point,
                     sourceConfidence: 0.90f,
-                    value: friendlyOwned ? 0.45f : 0.80f,
+                    value: pointValues
+                        ? ObjectiveScoring.Value(ObjectiveScoring.Normalised(capture.Points, maxLivePoints), friendlyOwned)
+                        : (friendlyOwned ? 0.45f : 0.80f),
                     typeAnchorVerified: true));
                 statuses.Add(friendlyOwned ? TacticalObjectiveStatus.Secured : TacticalObjectiveStatus.Scouting);
                 enemyStrengths.Add(0f);
                 friendlyStrengths.Add(0f);
             }
+        }
+
+        /// <summary>The largest <see cref="MapObjectiveCapture.Points"/> over the live objectives (gameObject.activeInHierarchy, as vanilla tests one); 0 with none.</summary>
+        internal static float MaxLivePoints(IReadOnlyList<MapObjectiveCapture> captures)
+        {
+            float max = 0f;
+            for (int i = 0; captures != null && i < captures.Count; i++)
+                if (captures[i].LiveInHierarchy && captures[i].Points > max) max = captures[i].Points;
+            return max;
         }
 
         // Main-thread map-objective capture. Scans the scene once and extracts pure
@@ -407,11 +424,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 for (int i = 0; i < mapObjectives.Length; i++)
                 {
                     Objectives obj = mapObjectives[i];
-                    result[i] = new MapObjectiveCapture(
-                        MapObjectiveId(obj, i),
-                        SafeObjectivePoint(obj),
-                        obj != null ? obj.owner : -2,
-                        obj != null && obj.isActiveAndEnabled);
+                    result[i] = ReadObjectiveLive(obj, MapObjectiveId(obj, i), SafeObjectivePoint(obj));
                 }
                 return result;
             }
@@ -420,6 +433,31 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return Array.Empty<MapObjectiveCapture>();
             }
         }
+
+        /// <summary>
+        /// One objective as a capture, the single place both builders (the live scan and the scene cache's) read it: owner and points are managed
+        /// fields and are read first; the two liveness flags are native reads, each in a method of its own and guarded on its own, so a failed one
+        /// costs only its own flag. The null test is on the reference: a Unity null (a destroyed object) still has its last owner and points, and
+        /// its flags read false.
+        /// </summary>
+        internal static MapObjectiveCapture ReadObjectiveLive(Objectives obj, string id, TacticalMapPoint point)
+        {
+            if (ReferenceEquals(obj, null)) return new MapObjectiveCapture(id, point, -2, false);
+            int owner = -2, points = 0;
+            bool active = false, live = false;
+            try { owner = obj.owner; points = obj.points; } catch { }
+            try { active = IsActiveAndEnabled(obj); } catch { }
+            try { live = IsActiveInHierarchy(obj); } catch { }
+            return new MapObjectiveCapture(id, point, owner, active, points, live);
+        }
+
+        // The native reads, one method each and never inlined: the runtime resolves a native call when the method holding it is compiled, so
+        // outside the game (the test harness) the method that holds one cannot even start. Kept apart, the failure is the caller's to catch.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool IsActiveAndEnabled(Objectives obj) => obj.isActiveAndEnabled;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static bool IsActiveInHierarchy(Objectives obj) => obj.gameObject.activeInHierarchy;
 
         /// <summary>
         /// Vanilla's own objective list: BattleUnits.objectives (static, 78910), built in

@@ -96,6 +96,22 @@ internal static partial class ManeuverFeasibilityTests
 
         public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
         public string BrokenAssumption => null;
+        public bool TryFocalPoint(out FocalPoint focal) { focal = default(FocalPoint); return false; }
+        public bool WorksHold(out string reason) { reason = null; return false; }
+        public bool AssaultsWorks(string childId) => false;
+        public bool FacesWorks(string childId) => false;
+        public bool PinsWorks(string childId) => false;
+        public int WorksHoldHash => 0;
+        public float Willingness => -1f;
+        public IWorksQuery HeldWorks => null;
+        public bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount) { station = default(StationPoint); childCount = 0; return false; }
+        public string StationChildId(int column) => null;
+
+        // BC14O: no objective table.
+        public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => default(WhiskeyRealism.Tactical.Battle.ObjectivePressure);
+        public int ObjectiveCount => 0;
+        public bool HoldsPlayerOwned(string childId) => false;
+        public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate) { estimate = default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate); return false; }
         public int ThreatCount => 1;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public double EvaluatedHours => 0.0;

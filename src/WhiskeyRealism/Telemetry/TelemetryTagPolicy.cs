@@ -84,8 +84,12 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalFeudGuard", TelemetryCategory.Gate);
             AddTactical("TacticalDirectChildDiscovery", TelemetryCategory.State);
             AddTactical("TacticalDirectChildIntent", TelemetryCategory.Decision);
+            AddTactical("TacticalFlankGuard", TelemetryCategory.Decision);
+            AddTactical("TacticalFlankGuardHold", TelemetryCategory.Decision);
             AddTactical("TacticalDefenderReserve", TelemetryCategory.Decision);
             AddTactical("TacticalLeafReserve", TelemetryCategory.Decision);
+            AddTactical("TacticalReserveReleaseMove", TelemetryCategory.Decision);
+            AddTactical("TacticalCrossingGate", TelemetryCategory.Decision);
             AddTactical("TacticalPlayExecution", TelemetryCategory.Decision);
             AddTactical("TacticalDirectChildGate", TelemetryCategory.Gate);
             AddTactical("TacticalDeploymentPhase", TelemetryCategory.State);
@@ -100,6 +104,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalEnvelopment", TelemetryCategory.Decision);
             AddTactical("TacticalReserveRelease", TelemetryCategory.Decision);
             AddTactical("TacticalVanillaFlankMove", TelemetryCategory.State);
+            AddTactical("TacticalLod", TelemetryCategory.State);
             // BC13: commander personality, openings, exploits, cavalry strike discipline, stance cooldown, separated-enemy steer.
             AddTactical("TacticalCommanderPersonality", TelemetryCategory.State);
             AddTactical("TacticalOpening", TelemetryCategory.State);
@@ -107,6 +112,10 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCavalryStrike", TelemetryCategory.Decision);
             AddTactical("TacticalStanceCooldown", TelemetryCategory.State);
             AddTactical("TacticalSeparatedEnemySteer", TelemetryCategory.State);
+            // BC16 step 0 (record only): the corps-level layout mirror check and the formation tug-of-war. State, not Trace: Trace sheds first
+            // and these rows decide whether A4 is built (plan decision 9).
+            AddTactical("TacticalLayoutMirror", TelemetryCategory.State);
+            AddTactical("TacticalFormationFlip", TelemetryCategory.State);
             // Scope B alignment (2026-05-22): canonical stance-write event +
             // newer telemetry tags that emit but were not yet registered.
             // Unregistered tags fall through to default routing which can
@@ -167,7 +176,11 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("CampaignSteer", TelemetryCategory.Write);
             AddCampaign("CampaignTempo", TelemetryCategory.Decision);
             AddCampaign("DepotTask", TelemetryCategory.Write);
+            AddCampaign("Garrison", TelemetryCategory.State);
+            AddCampaign("GarrisonPost", TelemetryCategory.Write);
             AddCampaign("RailroadSteer", TelemetryCategory.Write);
+            AddCampaign("Ordnance", TelemetryCategory.Decision);
+            AddCampaign("OrdnancePurchase", TelemetryCategory.Write);
             AddCampaign("CapitalFloor", TelemetryCategory.Write);
             AddCampaign("ReplacementFlow", TelemetryCategory.Write);
             AddCampaign("Succession", TelemetryCategory.Decision);
@@ -256,6 +269,10 @@ namespace WhiskeyRealism.Telemetry
         // CamelCase exception type name (…Exception), or the missing-anchor / missing
         // required phrases. Substrings inside other words ("errorBudget", "failureRisk",
         // "exceptional") are not serious; they used to promote doctrine rows to Failure.
+        // A counter that reads zero ("failed=0") is a tally of nothing, not an event: the campaign
+        // mover's and the recon executor's summary rows carry one on every line and were all filed
+        // as Failure (smoke 2026-10-17: 26 CampaignMover rows in failures.jsonl, none a failure).
+        // "failed=2" and "failed=0.5" are still serious.
         internal static bool IsSeriousLine(string line)
         {
             if (string.IsNullOrWhiteSpace(line))
@@ -273,7 +290,7 @@ namespace WhiskeyRealism.Telemetry
                 int start = i;
                 while (i < line.Length && char.IsLetterOrDigit(line[i]))
                     i++;
-                if (i > start && IsSeriousToken(line, start, i - start))
+                if (i > start && IsSeriousToken(line, start, i - start) && !IsZeroCounter(line, i))
                     return true;
             }
 
@@ -284,6 +301,15 @@ namespace WhiskeyRealism.Telemetry
         {
             "failed", "failure", "failures", "exception", "exceptions", "error", "errors", "fatal"
         };
+
+        // True when the token that ended at `end` is a key with the value 0 ("failed=0"): '=' then a lone zero, not "0.5" or "05".
+        private static bool IsZeroCounter(string line, int end)
+        {
+            if (end + 1 >= line.Length || line[end] != '=' || line[end + 1] != '0') return false;
+            if (end + 2 >= line.Length) return true;
+            char next = line[end + 2];
+            return !char.IsDigit(next) && next != '.';
+        }
 
         private static bool IsSeriousToken(string line, int start, int length)
         {

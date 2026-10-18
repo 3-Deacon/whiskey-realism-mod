@@ -33,6 +33,7 @@ namespace WhiskeyRealism.Tactical
     //     disables the micro advance (5694), so the group would never close to
     //     fire range unless the enemy came to it; screen (1) gives ground. Attack
     //     closes to 0.85 × range without the charges of assault (4).
+    //     BC14W: a fix facing unbroken enemy works is pinned at defend (2) instead (WorksPinHolds, Map(task, worksPin)); see § 7A requirement-works-pin.
     //   Hold / HoldChoke / GuardFlank / Consolidate / Delay / FormUp /
     //     AdvanceToAssembly / FallBackToLine / Reserve / Release / Recover →
     //     defend (2): hold the ground reached, fire, no micro advance.
@@ -78,6 +79,15 @@ namespace WhiskeyRealism.Tactical
                     return StanceNone;
             }
         }
+
+        // BC14W (requirement-works-pin): a group the ledger holds as a fix facing unbroken works never takes the attack stance. Vanilla escalates a
+        // group at attack (3) to an assault (4) on its own strength test; at defend (2) the group fires from where it stands and its skirmishers and
+        // guns demonstrate, and vanilla does not charge it. Only an attack task is lowered: a Screen or Scout keeps its screen (1).
+        public static bool WorksPinHolds(CommandTaskType task, bool worksPin) => WorksPinHoldsStance(Map(task), worksPin);
+
+        public static bool WorksPinHoldsStance(int stance, bool worksPin) => worksPin && stance == StanceAttack;
+
+        public static int Map(CommandTaskType task, bool worksPin) => WorksPinHolds(task, worksPin) ? StanceDefend : Map(task);
 
         // #45 group-stance scorer view of a ledger task. Returns -1 for tasks the
         // scorer has no opinion on (movement/recon tasks belong to #61, which

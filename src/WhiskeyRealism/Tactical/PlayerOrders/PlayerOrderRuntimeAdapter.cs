@@ -362,8 +362,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
                         true,
                         state.Role.ToString(),
                         state.Task.ToString(),
-                        new PlayerOrderPoint(state.X, state.Z),
-                        new PlayerOrderPoint(state.X, state.Z),
+                        // Where the node stands, or no point for a node the ledger could not place (its X/Z were the map origin).
+                        state.HasPosition ? new PlayerOrderPoint(state.X, state.Z) : default(PlayerOrderPoint),
+                        state.HasPosition ? new PlayerOrderPoint(state.X, state.Z) : default(PlayerOrderPoint),
                         army.CurrentOperation.PrimaryObjectiveId,
                         "command-operation");
                 }

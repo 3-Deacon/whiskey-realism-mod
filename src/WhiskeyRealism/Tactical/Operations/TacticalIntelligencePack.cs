@@ -69,7 +69,7 @@ namespace WhiskeyRealism.Tactical.Operations
             for (int i = 0; i < nodes.Length; i++)
             {
                 CommandNodeOperationalState node = nodes[i];
-                if (node.Role == CommandNodeRole.Unknown || !IsFinite(node.X) || !IsFinite(node.Z))
+                if (node.Role == CommandNodeRole.Unknown || !node.HasPosition || !IsFinite(node.X) || !IsFinite(node.Z))
                     continue;
 
                 if (count == 0)
@@ -158,158 +158,6 @@ namespace WhiskeyRealism.Tactical.Operations
                     ? new Direction(dx / length, dz / length)
                     : new Direction(0f, 1f);
             }
-        }
-    }
-
-    public enum TacticalMassingPhase
-    {
-        NoContact = 0,
-        ProbeForLine = 1,
-        FormLine = 2,
-        MassSupport = 3,
-        CommitAssault = 4,
-        Exploit = 5,
-        PauseOrFallback = 6
-    }
-
-    public readonly struct TacticalMassingInput
-    {
-        public TacticalMassingInput(
-            TacticalOperationPhase operationPhase,
-            int mainEffortCount,
-            int supportCount,
-            int reserveCount,
-            bool artilleryReady,
-            bool objectiveExposed,
-            float objectiveConfidence01,
-            float ownStrength,
-            float enemyStrength,
-            float reserveFraction)
-            : this(
-                operationPhase,
-                mainEffortCount,
-                supportCount,
-                reserveCount,
-                artilleryReady,
-                objectiveExposed,
-                objectiveConfidence01,
-                ownStrength,
-                enemyStrength,
-                reserveFraction,
-                new TacticalEnduranceDecision(
-                    canAssault: true,
-                    canHold: true,
-                    canFallback: true,
-                    needsRelief: false,
-                    reason: "endurance-ready"))
-        {
-        }
-
-        public TacticalMassingInput(
-            TacticalOperationPhase operationPhase,
-            int mainEffortCount,
-            int supportCount,
-            int reserveCount,
-            bool artilleryReady,
-            bool objectiveExposed,
-            float objectiveConfidence01,
-            float ownStrength,
-            float enemyStrength,
-            float reserveFraction,
-            TacticalEnduranceDecision endurance)
-        {
-            OperationPhase = operationPhase;
-            MainEffortCount = Math.Max(0, mainEffortCount);
-            SupportCount = Math.Max(0, supportCount);
-            ReserveCount = Math.Max(0, reserveCount);
-            ArtilleryReady = artilleryReady;
-            ObjectiveExposed = objectiveExposed;
-            ObjectiveConfidence01 = Clamp01(objectiveConfidence01);
-            OwnStrength = SanitizeNonNegative(ownStrength);
-            EnemyStrength = SanitizeNonNegative(enemyStrength);
-            ReserveFraction = Clamp01(reserveFraction);
-            Endurance = endurance;
-        }
-
-        public TacticalOperationPhase OperationPhase { get; }
-        public int MainEffortCount { get; }
-        public int SupportCount { get; }
-        public int ReserveCount { get; }
-        public bool ArtilleryReady { get; }
-        public bool ObjectiveExposed { get; }
-        public float ObjectiveConfidence01 { get; }
-        public float OwnStrength { get; }
-        public float EnemyStrength { get; }
-        public float ReserveFraction { get; }
-        public TacticalEnduranceDecision Endurance { get; }
-
-        private static float SanitizeNonNegative(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
-            return value;
-        }
-
-        private static float Clamp01(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f) return 0f;
-            return value > 1f ? 1f : value;
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-    }
-
-    public readonly struct TacticalMassingDecision
-    {
-        public TacticalMassingDecision(TacticalMassingPhase phase, bool mayCommitAssault, string reason)
-        {
-            Phase = phase;
-            MayCommitAssault = mayCommitAssault;
-            Reason = string.IsNullOrWhiteSpace(reason) ? "massing-unspecified" : reason.Trim();
-        }
-
-        public TacticalMassingPhase Phase { get; }
-        public bool MayCommitAssault { get; }
-        public string Reason { get; }
-    }
-
-    public static class TacticalMassingCycle
-    {
-        public static TacticalMassingDecision Evaluate(TacticalMassingInput input)
-        {
-            if (!input.ObjectiveExposed || input.ObjectiveConfidence01 < 0.45f)
-                return new TacticalMassingDecision(TacticalMassingPhase.ProbeForLine, false, "probe-contact");
-
-            if (input.MainEffortCount <= 0)
-                return new TacticalMassingDecision(TacticalMassingPhase.FormLine, false, "no-main-effort");
-
-            float odds = input.OwnStrength / Math.Max(1f, input.EnemyStrength);
-            if (input.SupportCount <= 0 && odds < 1.65f)
-                return new TacticalMassingDecision(TacticalMassingPhase.MassSupport, false, "support-not-ready");
-
-            if (input.ReserveFraction < 0.10f && input.ReserveCount <= 0)
-                return new TacticalMassingDecision(TacticalMassingPhase.MassSupport, false, "reserve-not-ready");
-
-            if (!input.Endurance.CanAssault || input.Endurance.NeedsRelief)
-                return new TacticalMassingDecision(TacticalMassingPhase.MassSupport, false, "endurance-" + input.Endurance.Reason);
-
-            if (!input.ArtilleryReady && odds < 1.80f)
-                return new TacticalMassingDecision(TacticalMassingPhase.MassSupport, false, "artillery-not-ready");
-
-            if (odds < 1.35f)
-                return new TacticalMassingDecision(TacticalMassingPhase.PauseOrFallback, false, "odds-not-ready");
-
-            if (input.OperationPhase == TacticalOperationPhase.Exploiting && odds >= 1.50f)
-                return new TacticalMassingDecision(TacticalMassingPhase.Exploit, true, "exploit-ready");
-
-            bool mayAssault = input.OperationPhase == TacticalOperationPhase.Committed &&
-                input.ObjectiveConfidence01 >= 0.70f;
-            return new TacticalMassingDecision(
-                mayAssault ? TacticalMassingPhase.CommitAssault : TacticalMassingPhase.FormLine,
-                mayAssault,
-                mayAssault ? "commit-ready" : "formed-not-committed");
         }
     }
 
@@ -674,28 +522,5 @@ namespace WhiskeyRealism.Tactical.Operations
             float max = input.MaxRange > 0f ? input.MaxRange : Math.Max(1f, input.OptimalRange);
             return input.TargetDistance <= max;
         }
-    }
-
-    public readonly struct TacticalEnduranceDecision
-    {
-        public TacticalEnduranceDecision(
-            bool canAssault,
-            bool canHold,
-            bool canFallback,
-            bool needsRelief,
-            string reason)
-        {
-            CanAssault = canAssault;
-            CanHold = canHold;
-            CanFallback = canFallback;
-            NeedsRelief = needsRelief;
-            Reason = string.IsNullOrWhiteSpace(reason) ? "endurance-unspecified" : reason.Trim();
-        }
-
-        public bool CanAssault { get; }
-        public bool CanHold { get; }
-        public bool CanFallback { get; }
-        public bool NeedsRelief { get; }
-        public string Reason { get; }
     }
 }

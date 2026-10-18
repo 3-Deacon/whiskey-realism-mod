@@ -38,7 +38,7 @@ internal static class CommanderPlannerTests
             ("OnlyMainEffortCommandsAreTargets", OnlyMainEffortCommandsAreTargets),
             ("NoMainEffortNoAppointment", NoMainEffortNoAppointment),
             ("TargetInBattleSkipped", TargetInBattleSkipped),
-            ("AlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
+            ("CommanderAlliancesTwoToFourIgnored", AlliancesTwoToFourIgnored),
             ("NoVerticalSwapOnPlayerSideInCareer", NoVerticalSwapOnPlayerSideInCareer),
             ("RoleFollowsTheaterAndPrimacy", RoleFollowsTheaterAndPrimacy),
             ("ValleyRoleNeedsAShenandoahCommand", ValleyRoleNeedsAShenandoahCommand),

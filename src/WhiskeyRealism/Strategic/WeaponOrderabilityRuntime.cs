@@ -6,7 +6,7 @@ namespace WhiskeyRealism.Strategic
     // Runtime adapter of WeaponOrderability (not in the test csproj): reads one model's
     // research, import and production state for the asking alliance from GameVars.weapon.
     // A failed read answers "not masked" (vanilla's own candidate rule then stands) with one
-    // bounded warning. Stage G's G9 purchase planner adds its own reads here.
+    // bounded warning. The G9 purchase pick (OrdnanceRuntime) reads the same three facts per candidate and applies WeaponOrderability.IsOrderable.
     internal static class WeaponOrderabilityRuntime
     {
         internal static bool IsResearchedButUnorderable(int alliance, int weaponId)

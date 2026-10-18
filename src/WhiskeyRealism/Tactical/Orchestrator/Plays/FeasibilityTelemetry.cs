@@ -9,15 +9,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     // TacticalManeuverBody, TacticalReplan, TacticalCrossingWatch, and the OnceLogs of the feasibility layer. Every row builds its strings only
     // after the router has said the profile wants it, and the per-candidate and per-body rows are throttled by what changed, so the stream
     // is bounded by the evaluation's own state changes.
-    internal static class FeasibilityTelemetry
+    internal static partial class FeasibilityTelemetry
     {
-        private const double CandidateRowSpacingHours = 0.05, CrossingRowSpacingHours = 0.1;
+        private const double CandidateRowSpacingHours = 0.05, CrossingRowSpacingHours = 0.1, WorksRowSpacingHours = 0.1;
         private const float PenaltyBucket = 0.1f;
 
         private static readonly double[][] CandidateAt = { NewHours(), NewHours() };
         private static readonly int[][] CandidateState = { NewStates(), NewStates() };
         private static readonly int[][] BodyState = { new int[ManeuverFeasibility.PlanSlots * ManeuverFeasibility.MaxBodies], new int[ManeuverFeasibility.PlanSlots * ManeuverFeasibility.MaxBodies] };
         private static readonly double[] CrossingAt = { double.NegativeInfinity, double.NegativeInfinity };
+        // BC14W: the last TacticalEnemyWorks and TacticalWorksHold rows per side, and the gate the last hold row said (0 none, 1 hopeless-assault, 2 turn-not-struck).
+        private static readonly double[] EnemyWorksAt = { double.NegativeInfinity, double.NegativeInfinity };
+        private static readonly double[] WorksHoldAt = { double.NegativeInfinity, double.NegativeInfinity };
+        private static readonly int[] WorksHoldState = new int[2];
 
         static FeasibilityTelemetry()
         {
@@ -46,6 +50,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 CandidateState[a] = NewStates();
                 Array.Clear(BodyState[a], 0, BodyState[a].Length);
                 CrossingAt[a] = double.NegativeInfinity;
+                EnemyWorksAt[a] = double.NegativeInfinity;
+                WorksHoldAt[a] = double.NegativeInfinity;
+                WorksHoldState[a] = 0;
+                ResetObjectives(a);
             }
         }
 
@@ -58,7 +66,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         /// <summary>One row per pick or kept plan, with the flag off too (so an on and an off run compare): who was offered, who won and why.</summary>
         public static void PlanSelection(int alliance, string trigger, bool kept, BattleStance stance, float odds, SelectionReport report, BattlePlanId winner,
-            bool mirrored, double ledgerAgeHours, double nowHours)
+            bool mirrored, double ledgerAgeHours, double nowHours, float willingness = -1f)
         {
             try
             {
@@ -81,6 +89,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                             .WithField("feasibilityFiltered", report.FeasibilityFiltered)
                             .WithField("allImpossible", report.AllImpossible)
                             .WithField("ledgerAgeHours", double.IsInfinity(ledgerAgeHours) || double.IsNaN(ledgerAgeHours) ? -1.0 : ledgerAgeHours)
+                            .WithField("willingness", willingness)
                             .WithField("doctrineHours", nowHours);
                         for (int rank = 0; rank < 3 && rank < report.Count; rank++)
                         {
@@ -259,6 +268,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("approach", body.Approach)
                         .WithField("exposure", body.Exposure)
                         .WithField("turn", body.Turn)
+                        .WithField("assaultsWorks", body.AssaultsWorks)
+                        .WithField("barUsed", body.BarUsed)
+                        .WithField("enemyOpen", body.EnemyOpen)
                         .WithField("penalty", body.Penalty)
                         .WithField("assumption", why)
                         .WithField("suppression", suppressed)
@@ -339,6 +351,124 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             catch (Exception ex)
             {
                 OnceLog.Warning("tactical-battle-core:feasibility-telemetry", "[Feasibility] crossing-watch row threw: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        // ---- TacticalEnemyWorks, TacticalWorksHold (BC14W) -----------------------------------------------------
+
+        /// <summary>
+        /// The side's works picture, every 0.1 doctrine-h while it has any (the enemy's for an Attacker or Meeting side, its own for a Defender, whose row also
+        /// names the standing station's focal point and child).
+        /// </summary>
+        public static void EnemyWorks(int alliance, FeasibilityLedger ledger, WorksPointTable table, double nowHours)
+        {
+            try
+            {
+                int side = Side(alliance);
+                WorksPicture picture = ledger.Job.Works;
+                if (picture.SegmentCount == 0 && (table == null || table.Count == 0)) return;
+                if (!EnemyWorksRowDue(side, nowHours)) return;
+                if (!Wanted(TelemetryCategory.State)) return;
+                bool own = ledger.Job.Input.Stance == BattleStance.Defender;
+                bool hasFocal = picture.TryFocal(out FocalPoint focal);
+                StationBinding station = ReserveReleaseState.ForAlliance(alliance)?.Station ?? default(StationBinding);
+                int segments = picture.SegmentCount, held = picture.HeldSegmentCount, openEnds = picture.OpenEnds, anchoredEnds = picture.AnchoredEnds;
+                int salients = picture.SalientCount, junctions = picture.JunctionCount, samples = picture.WorksSamples;
+                int perceived = table != null ? table.PerceivedCount : 0, probes = table != null ? table.ProbesLastTick : 0;
+                int dropped = picture.PointsDropped + (table != null ? table.Dropped : 0);
+                string focalKind = hasFocal ? focal.Kind.ToString() : string.Empty, stationChild = station.ChildId ?? string.Empty;
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.State, "TacticalEnemyWorks", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(alliance)
+                        .WithField("own", own)
+                        .WithField("segments", segments)
+                        .WithField("heldSegments", held)
+                        .WithField("openEnds", openEnds)
+                        .WithField("anchoredEnds", anchoredEnds)
+                        .WithField("salients", salients)
+                        .WithField("junctions", junctions)
+                        .WithField("worksSamples", samples)
+                        .WithField("worksPointsPerceived", perceived)
+                        .WithField("worksProbes", probes)
+                        .WithField("worksPointsDropped", dropped)
+                        .WithField("focalX", hasFocal ? focal.X : 0f)
+                        .WithField("focalZ", hasFocal ? focal.Z : 0f)
+                        .WithField("focalKind", focalKind)
+                        .WithField("focalScore", hasFocal ? focal.Score : 0f)
+                        .WithField("stationFocalX", station.Has ? station.FocalX : 0f)
+                        .WithField("stationFocalZ", station.Has ? station.FocalZ : 0f)
+                        .WithField("stationChild", stationChild)
+                        .WithField("doctrineHours", nowHours));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:feasibility-telemetry", "[Feasibility] enemy-works row threw: " + ex.GetType().Name + " " + ex.Message);
+            }
+        }
+
+        /// <summary>The side's works row is due every 0.1 doctrine-h (the time is taken when it is).</summary>
+        internal static bool EnemyWorksRowDue(int side, double nowHours)
+        {
+            if (nowHours - EnemyWorksAt[side] < WorksRowSpacingHours) return false;
+            EnemyWorksAt[side] = nowHours;
+            return true;
+        }
+
+        /// <summary>
+        /// The works hold row is due on each change of the gate (none, hopeless-assault, turn-not-struck, each with or without a pinned fix) and every 0.1
+        /// doctrine-h while it holds; the gate and the time are taken when it is.
+        /// </summary>
+        internal static bool WorksHoldRowDue(int side, bool hold, string reason, double nowHours, bool pinned = false)
+        {
+            int state = !hold ? 0 : (string.Equals(reason, FeasibilityLedger.ReasonHopelessAssault, StringComparison.Ordinal) ? 1 : 2);
+            if (pinned) state += 3;
+            bool changed = state != WorksHoldState[side];
+            if (!changed && !(hold && nowHours - WorksHoldAt[side] >= WorksRowSpacingHours)) return false;
+            WorksHoldState[side] = state;
+            WorksHoldAt[side] = nowHours;
+            return true;
+        }
+
+        /// <summary>
+        /// The works hold, on each change of the gate and every 0.1 doctrine-h while it holds: what held, the selected plan's worst works assault, the stored
+        /// products the guard rewrote at the last store, and the counts of the contest since the last row (read and cleared here).
+        /// </summary>
+        public static void WorksHold(int alliance, FeasibilityLedger ledger, int guarded, double nowHours)
+        {
+            try
+            {
+                int side = Side(alliance);
+                bool hold = ledger.WorksHold(out string reason);
+                ledger.WorksReport(out float detail, out float barUsed, out int assaultChildren, out int facingChildren, out int pinnedChildren);
+                if (!WorksHoldRowDue(side, hold, reason, nowHours, pinnedChildren > 0)) return;
+                if (!Wanted(TelemetryCategory.Decision)) return;
+                MoveContestState contest = MoveContestState.ForAlliance(alliance);
+                int chain = 0, onset = 0, advances = 0, entries = 0;
+                contest?.TakeCounts(out chain, out onset, out advances, out entries);
+                BattlePlanId plan = ledger.HasSelection ? ledger.SelectedPlan : BattlePlanId.Unknown;
+                string why = reason ?? string.Empty, planName = plan.ToString();
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalWorksHold", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithSide(alliance)
+                        .WithDecision("TacticalWorksHold", hold ? why : (pinnedChildren > 0 ? "pinned" : "released"), "side=" + alliance + "|hold=" + hold + "|reason=" + why)
+                        .WithField("hold", hold)
+                        .WithField("reason", why)
+                        .WithField("plan", planName)
+                        .WithField("detail", detail)
+                        .WithField("barUsed", barUsed)
+                        .WithField("assaultChildren", assaultChildren)
+                        .WithField("facingChildren", facingChildren)
+                        .WithField("pinnedChildren", pinnedChildren)
+                        .WithField("guarded", guarded)
+                        .WithField("advancesOnWorks", advances)
+                        .WithField("bandEntries", entries)
+                        .WithField("vanillaChainContest", chain)
+                        .WithField("onsetContests", onset)
+                        .WithField("doctrineHours", nowHours));
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:feasibility-telemetry", "[Feasibility] works-hold row threw: " + ex.GetType().Name + " " + ex.Message);
             }
         }
 

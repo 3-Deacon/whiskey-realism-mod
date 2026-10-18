@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -44,8 +45,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             InferredIntent enemyIntent,
             int mainEffortSector,
             float mainEffortOwnStrength,
-            float mainEffortOdds)
+            float mainEffortOdds,
+            float ownArmyStrength = 0f)
         {
+            OwnArmyStrength = ownArmyStrength;
             Morale = morale;
             ReservesCommitted = reservesCommitted;
             ReinforcementShare = reinforcementShare;
@@ -66,10 +69,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float MainEffortOwnStrength { get; }
         public float MainEffortOdds { get; }
 
+        /// <summary>
+        /// The whole army's active strength when the main band's strength was taken. A band's strength is the men standing in a lateral band of the
+        /// front, so it falls when a wing marches into the next band; only the army total tells men lost from men moved (0: not taken).
+        /// </summary>
+        public float OwnArmyStrength { get; }
+
         public bool HasMainEffortSnapshot(int sector) => MainEffortSector == sector && MainEffortOwnStrength > 0f;
 
-        public ReplanBaseline WithMainEffort(int sector, float ownStrength, float odds) =>
-            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, sector, ownStrength, odds);
+        public ReplanBaseline WithMainEffort(int sector, float ownStrength, float odds, float ownArmyStrength) =>
+            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, sector, ownStrength, odds, ownArmyStrength);
+
+        public ReplanBaseline WithMainEffortOdds(float odds) =>
+            new ReplanBaseline(Morale, ReservesCommitted, ReinforcementShare, EnemyIntent, MainEffortSector, MainEffortOwnStrength, odds, OwnArmyStrength);
     }
 
     /// <summary>
@@ -189,8 +201,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (_feasibility != null && _feasibility.TryGet(pb.Id, out Plays.CandidateResult scored)) nextPlan = nextPlan.WithMirrored(scored.Mirrored);
             double now = TacticalDoctrineTime.NowBattleHours;
             double ledgerAge = _feasibility != null && _feasibility.HasEvaluation ? now - _feasibility.EvaluatedHours : double.PositiveInfinity;
-            bool kept = hysteresis && HasPlan && pb.Id == _plan.PlanId;
-            Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now);
+            bool kept = HasPlan && pb.Id == _plan.PlanId && (hysteresis || nextPlan.Mirrored == _plan.Mirrored);
+            Plays.FeasibilityTelemetry.PlanSelection(AllianceId, trigger, kept, ctx.Stance, ctx.CurrentOdds, _selection, pb.Id, nextPlan.Mirrored, ledgerAge, now, _feasibility != null ? _feasibility.Willingness : -1f);
 
             // Envelopment-active tightening: commit reserves sooner when the
             // doctrine signaled AttackNow + clear advantage. Caps to the
@@ -304,7 +316,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 evidence.Terrain,
                 evidence.CurrentOdds,
                 opposingCommanderHint,
-                defaultMainEffortSector: evidence.DefaultMainEffortSector,
+                defaultMainEffortSector: TryObjectiveSector(out int objectiveSector) ? objectiveSector : evidence.DefaultMainEffortSector,
                 jitterSeed: AllianceId * 31 + 7,
                 envelopmentPressure: envelopmentPressure,
                 allianceId: AllianceId,
@@ -317,8 +329,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 hasCrestLine: evidence.CrestLine.Has,
                 feasibility: withFeasibility ? _feasibility : null,
                 hysteresisPlan: hysteresis && HasPlan ? _plan.PlanId : BattlePlanId.Unknown,
-                hysteresisMargin: Plays.ManeuverFeasibility.ReplanScoreMargin);
+                hysteresisMargin: Plays.ManeuverFeasibility.ReplanScoreMargin,
+                focalSector: FocalSectorOf(_feasibility),
+                hasFocalPoint: _feasibility != null && _feasibility.TryFocalPoint(out _));
             return ctx;
+        }
+
+        // BC14W: the front-axis band the ledger's focal point stands in; -1 with no focal point or no axis.
+        private int FocalSectorOf(Plays.IFeasibilityLookup feasibility)
+        {
+            if (feasibility == null || !_frontAxis.IsValid || !feasibility.TryFocalPoint(out WhiskeyRealism.Tactical.Battle.FocalPoint focal)) return -1;
+            return _frontAxis.SectorOf(focal.X, focal.Z);
         }
 
         /// <summary>
@@ -381,12 +402,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public bool ConsiderMainEffortShift(int decisiveSectorId, float decisiveSectorOdds, float currentMainEffortOdds)
         {
-            if (!HasPlan) return false;
-            if (decisiveSectorId < 0) return false;
-            if (_plan.MainEffortSector == decisiveSectorId) return false;
-            if (_plan.Phase == BattlePhase.Consolidate ||
-                _plan.Phase == BattlePhase.Withdraw)
-                return false;
+            if (!CanMoveMainEffortTo(decisiveSectorId)) return false;
             // Hysteresis: only shift if candidate is materially better.
             // If currentMainEffortOdds <= 0 (no contact in current sector),
             // any positive candidate wins — there's nothing to lose.
@@ -397,6 +413,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _plan = _plan.WithMainEffortSector(decisiveSectorId);
             return true;
+        }
+
+        // The main effort may move to the band: there is a plan, the band exists and is not the current one, the plan is not a FocalAssault (its main
+        // effort is the focal point's band, set at its pick) and not in Consolidate or Withdraw. Shared by the odds-based shift and the objective's.
+        private bool CanMoveMainEffortTo(int sector)
+        {
+            if (!HasPlan || sector < 0) return false;
+            if (_plan.PlanId == BattlePlanId.FocalAssault) return false;
+            if (_plan.MainEffortSector == sector) return false;
+            return _plan.Phase != BattlePhase.Consolidate && _plan.Phase != BattlePhase.Withdraw;
+        }
+
+        /// <summary>
+        /// BC14O: the plan's main effort follows the main-effort objective (requirement-main-effort-objective). Refused in Consolidate and Withdraw and
+        /// for a FocalAssault plan, as the odds-based shift is; no hysteresis of its own, because the objective's latch carries the margin.
+        /// </summary>
+        public bool SetObjectiveMainEffort(int sector)
+        {
+            if (!CanMoveMainEffortTo(sector)) return false;
+            _plan = _plan.WithMainEffortSector(sector);
+            return true;
+        }
+
+        /// <summary>
+        /// BC14O: the front-axis band of the latched main-effort objective, false when the doctrine is off, nothing is latched or the army has no axis.
+        /// </summary>
+        internal bool TryObjectiveSector(out int sector)
+        {
+            sector = -1;
+            if (_feasibility == null || !_frontAxis.IsValid || !Plugin.ObjectiveDoctrineEnabled()) return false;
+            ObjectiveLatch latch = ObjectiveLatch.ForAlliance(AllianceId);
+            if (latch == null || !latch.Has) return false;
+            sector = _frontAxis.SectorOf(latch.X, latch.Z);
+            return sector >= 0;
         }
 
         /// <summary>
@@ -436,7 +486,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 reservesCommittedFraction: reservesCommittedFraction,
                 commanderAggression01: aggression01,
                 mainEffortReadiness: mainEffortReadiness,
-                intelConfidence01: intelConfidence01);
+                intelConfidence01: intelConfidence01,
+                worksHold: WorksHoldOn);
 
             var decision = TacticalPhaseProgressionDoctrine.Decide(input);
             if (decision.NextPhase != _plan.Phase)
@@ -463,22 +514,28 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public void Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, string trigger) => Replan(evidence, enemyIntent, hysteresis: false, trigger);
 
         /// <summary>
-        /// Re-picks the plan. With <paramref name="hysteresis"/> (BC14's broken maneuver assumption) the catalog keeps the current plan unless
-        /// it is gone, impossible or beaten by <see cref="Plays.ManeuverFeasibility.ReplanScoreMargin"/>; a kept plan keeps its side, phase and
-        /// age and only refreshes the baselines the edge triggers compare with. Returns true when the plan was kept.
+        /// Re-picks the plan. With <paramref name="hysteresis"/> (a replan that is no crisis, and BC14's broken maneuver assumption) the catalog keeps
+        /// the current plan unless it is gone, impossible or beaten by <see cref="Plays.ManeuverFeasibility.ReplanScoreMargin"/>. A pick that lands
+        /// on the plan already held (same plan, same side), with or without the margin, is a kept plan: it keeps its side, phase and age, wipes none
+        /// of the release memory (the staggered release, the objective latch, the leaf releases: the old re-pick of the same plan cleared them and
+        /// every role they held reverted) and only refreshes the baselines the edge triggers compare with; it keeps its age unless <paramref name="restartAgeIfKept"/>
+        /// (a review of the plan, as against the maneuver monitor's finding). Returns true when the plan was kept.
         /// </summary>
-        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null)
+        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null, bool restartAgeIfKept = false)
         {
             if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), hysteresis, trigger ?? "replan", out var nextPlan))
             {
                 return false;
             }
 
-            if (hysteresis && HasPlan && nextPlan.PlanId == _plan.PlanId)
+            if (HasPlan && nextPlan.PlanId == _plan.PlanId && (hysteresis || nextPlan.Mirrored == _plan.Mirrored))
             {
                 _currentIntentModel = enemyIntent;
                 _historyGlobalOdds = evidence.CurrentOdds;
                 _lastReplanOpportunity = _currentReinforcementOpportunity.Opportunity;
+                // A review that reaffirms the plan starts its time over (the commitment and the deadline both run from the last review); a
+                // broken maneuver assumption is the monitor's finding, not a review of the plan, and leaves the age.
+                if (restartAgeIfKept) _planAgeSeconds = 0f;
                 _feasibility?.CaptureSelection(_plan.PlanId, _plan.Mirrored);
                 return true;
             }
@@ -495,6 +552,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _plan = nextPlan;
             HasPlan = true;
+            // BC14O: a new plan starts the main-effort objective's hysteresis over.
+            ObjectiveLatch.ForAlliance(AllianceId)?.Clear();
             // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
             ReserveRelease.Clear();
             _armyReleaseHysteresis.Clear();
@@ -673,15 +732,61 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             // per-child enemy intent are not part of the evidence signature.
             for (int i = 0; i < evidence.Count; i++) _directChildEvidenceCache[i] = evidence[i];
             IReadOnlyList<DirectChildIntent> previousIntents = _directChildIntents;
-            _directChildIntents = DirectChildAllocator.StabilizeMain(
-                DirectChildAllocator.AllocateWithZones(
-                    _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
-                    perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext()),
-                _mainHysteresis);
+            IReadOnlyList<DirectChildIntent> allocated = DirectChildAllocator.AllocateWithZones(
+                _plan, _commanderPersonality, _directChildSnapshots, _directChildEvidenceCache,
+                perChildEnemyIntent, zoneAssignments, BuildReserveReleaseContext());
+            _directChildIntents = DirectChildAllocator.StabilizeMain(allocated, _mainHysteresis);
+            ScreenSecondaryObjectives();
+            // A child keeps its role until the plan (its id, side, phase or main effort band) changes, an hour passes or a crisis forces it: the
+            // allocation above is a pure function of flickering evidence (smoke 2026-10-17: 3 to 6 role changes in 7 allocations under one plan).
+            _directChildIntents = _roleHold.Apply(_directChildIntents, RoleHoldPlanKey(), HoursSource());
+            // Any further pass that keeps an intent from an earlier tick (a role hold) goes ABOVE this line. The release marks are a fact about the
+            // allocation that just ran, so they are re-derived from it last, immediately before the command tree reads the intents: a kept intent
+            // must not carry a taken-back release into the tree (DirectChildAllocator.RestampReleases; pinned by a source test).
+            _directChildIntents = DirectChildAllocator.RestampReleases(_directChildIntents, allocated);
             _commandNodeIntents = CommandTreeIntentAllocator.Allocate(_commandTree, _directChildIntents);
             EmitFlankReserveReleaseTelemetry(previousIntents, _directChildIntents);
             EmitStaggeredReleaseTelemetry();
             EmitDirectChildIntentTelemetry();
+        }
+
+        private readonly DirectChildRoleHold _roleHold = new DirectChildRoleHold();
+
+        // What the roles were allocated for: a different plan, side, phase or main effort band is a new organisation of the line.
+        private int RoleHoldPlanKey()
+            => unchecked((((int)_plan.PlanId * 31 + (_plan.Mirrored ? 1 : 0)) * 31 + (int)_plan.Phase) * 31 + _plan.MainEffortSector);
+
+        // ---- BC14O economy of force ----
+
+        /// <summary>BC14O: the main-effort objective the last doctrine store picked (the TacticalMainEffort row's subject).</summary>
+        internal ObjectivePick CurrentObjectivePick { get; private set; }
+
+        private readonly SecondaryObjective[] _secondaries = new SecondaryObjective[ObjectiveScoring.MaxSecondaryScreens];
+        private bool[] _playerOwnedChildren = Array.Empty<bool>();
+
+        /// <summary>BC14O: the secondary objectives the last allocation drew a screen for (the TacticalMainEffort row's <c>secondaryScreens</c>).</summary>
+        internal int SecondaryScreens
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < _directChildIntents.Count; i++) if (_directChildIntents[i].HasScreenTarget) n++;
+                return n;
+            }
+        }
+
+        // The ledger's secondary objectives (every feasible enemy-held or threatened objective but the main effort, best score first) each draw a
+        // Screen-role child the play already holds, at most MaxSecondaryScreens of them.
+        private void ScreenSecondaryObjectives()
+        {
+            if (_feasibility == null || !HasPlan || !_frontAxis.IsValid || !Plugin.ObjectiveDoctrineEnabled()) return;
+            ObjectiveLatch latch = ObjectiveLatch.ForAlliance(AllianceId);
+            int count = ObjectiveScoring.Secondaries(_feasibility, latch?.Id, _secondaries);
+            if (count == 0) return;
+            if (_playerOwnedChildren.Length < _directChildIntents.Count) _playerOwnedChildren = new bool[_directChildIntents.Count];
+            for (int i = 0; i < _directChildIntents.Count; i++) _playerOwnedChildren[i] = _feasibility.HoldsPlayerOwned(_directChildIntents[i].ChildId);
+            _directChildIntents = DirectChildAllocator.ScreenSecondaryObjectives(
+                _directChildIntents, _secondaries, count, _frontAxis, _plan.PlanId, _playerOwnedChildren);
         }
 
         // ---- BC13 staggered reserve release ----
@@ -700,6 +805,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         private readonly float[] _threatRow = new float[Plays.ManeuverFeasibility.MaxChildren];
         // The threats the last allocation was handed: the release row names the one a guard answers.
         private int _lastThreatCount;
+        // BC14W: the Defender's works station and each allocation child's time to it, in the allocation's child order.
+        private float[] _stationShiftBuffer = new float[Plays.ManeuverFeasibility.MaxChildren];
+        private readonly float[] _stationRow = new float[Plays.ManeuverFeasibility.MaxChildren];
 
         // The army-level release and return damped as the leaf one is (verify r2: the crisis release is stateless and flipped with the picture).
         private readonly ReleaseHysteresis _armyReleaseHysteresis = new ReleaseHysteresis();
@@ -725,12 +833,40 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (feasible && _feasibility != null)
                 threats = FillThreatMatrix(_feasibility, _directChildSnapshots, _threatBuffer, _threatShiftBuffer, _threatRow, out threatChildren);
             _lastThreatCount = threats;
+            Plays.StationPoint station = default(Plays.StationPoint);
+            int stationChildren = 0;
+            if (feasible && _feasibility != null && Plugin.EnemyWorksDoctrineEnabled())
+                FillStation(_feasibility, _directChildSnapshots, _stationShiftBuffer, _stationRow, out station, out stationChildren);
             return new ReserveReleaseContext(
                 _lastGlobalOdds, flank, ReserveRelease, exploiting, HoursSource(),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Aggression),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.Caution),
                 WhiskeyRealism.Tactical.Battle.CommanderPersonalityDerivation.To01(_commanderPersonality.CasualtyTolerance),
-                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis);
+                staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis, station, _stationShiftBuffer, stationChildren);
+        }
+
+        /// <summary>
+        /// The Defender's works station and each allocation child's time to it from the ledger into the pooled buffer, by child id as the threat matrix
+        /// is: a child the ledger did not time (another child list, one that arrived since) gets NaN, which the allocator reads as never stationed.
+        /// With no station, or more children than the ledger's cap, the station is none.
+        /// </summary>
+        internal static void FillStation(Plays.IFeasibilityLookup ledger, IReadOnlyList<DirectChildSnapshot> snapshots, float[] shiftBuffer, float[] row,
+            out Plays.StationPoint station, out int allocationChildren)
+        {
+            allocationChildren = snapshots.Count;
+            if (allocationChildren > Plays.ManeuverFeasibility.MaxChildren || !ledger.TryStation(out station, row, out int children) || !station.Has)
+            {
+                station = default(Plays.StationPoint);
+                allocationChildren = 0;
+                return;
+            }
+            for (int c = 0; c < allocationChildren; c++)
+            {
+                int column = -1;
+                for (int k = 0; k < children; k++)
+                    if (string.Equals(ledger.StationChildId(k), snapshots[c].ChildId, StringComparison.Ordinal)) { column = k; break; }
+                shiftBuffer[c] = column >= 0 ? row[column] : float.NaN;
+            }
         }
 
         /// <summary>
@@ -867,17 +1003,45 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     int before = IndexOfChild(previous, current[i].ChildId);
                     if (before < 0 || !previous[before].HasGuardPoint || current[i].HasGuardPoint) continue;
                     string childId = current[i].ChildId;
+                    // BC14W: a guard point on a Reserve child was the works station, not a crossing guard.
+                    string revertedReason = previous[before].Role == DirectChildRole.Reserve ? "works-station" : "crossing-threat";
                     WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
                         WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
                         WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
                         "TacticalReserveRelease",
                         WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
                         ev => ev
-                            .WithDecision("TacticalReserveRelease", "crossing-threat", "side=" + AllianceId + "|child=" + childId + "|reverted")
+                            .WithDecision("TacticalReserveRelease", revertedReason, "side=" + AllianceId + "|child=" + childId + "|reverted")
                             .WithField("side", AllianceId)
                             .WithField("child", childId)
-                            .WithField("reason", "crossing-threat")
+                            .WithField("reason", revertedReason)
                             .WithField("reverted", true));
+                }
+                // BC14W: a Reserve child that has just been stationed behind a focal point of the Defender's works (a state change, so bounded).
+                for (int i = 0; i < current.Count; i++)
+                {
+                    if (current[i].Role != DirectChildRole.Reserve || !current[i].HasGuardPoint) continue;
+                    int before = IndexOfChild(previous, current[i].ChildId);
+                    if (before >= 0 && previous[before].Role == DirectChildRole.Reserve && previous[before].HasGuardPoint) continue;
+                    DirectChildIntent stationed = current[i];
+                    StationBinding station = ReserveRelease.Station;
+                    WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                        WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                        WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                        "TacticalReserveRelease",
+                        WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                        ev => ev
+                            .WithDecision("TacticalReserveRelease", "works-station", "side=" + AllianceId + "|child=" + stationed.ChildId)
+                            .WithField("side", AllianceId)
+                            .WithField("child", stationed.ChildId)
+                            .WithField("reason", "works-station")
+                            .WithField("focalX", station.FocalX)
+                            .WithField("focalZ", station.FocalZ)
+                            .WithField("guardX", stationed.Guard.X)
+                            .WithField("guardZ", stationed.Guard.Z)
+                            .WithField("guardHeading", stationed.Guard.Heading)
+                            .WithField("enemyArrivalHours", station.ArrivalAtChoice)
+                            .WithField("reverted", false));
                 }
             }
             catch (System.Exception ex)
@@ -911,43 +1075,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (_directChildIntents == null || _directChildIntents.Count == 0) return;
             try
             {
-                var sb = new System.Text.StringBuilder();
-                int mainCount = 0;
-                int supportMainCount = 0;
-                int refuseLeftCount = 0;
-                int refuseRightCount = 0;
-                int fixCount = 0;
-                int screenCount = 0;
-                int reserveCount = 0;
-                int fallbackCount = 0;
-                int unknownCount = 0;
-                for (int i = 0; i < _directChildIntents.Count; i++)
-                {
-                    var intent = _directChildIntents[i];
-                    if (i > 0) sb.Append(',');
-                    sb.Append(intent.ChildId ?? "?").Append('=').Append(intent.Role).Append(':').Append(intent.PrimarySector);
-                    switch (intent.Role)
-                    {
-                        case DirectChildRole.Main:        mainCount++; break;
-                        case DirectChildRole.SupportMain: supportMainCount++; break;
-                        case DirectChildRole.Fix:         fixCount++; break;
-                        case DirectChildRole.Screen:      screenCount++; break;
-                        case DirectChildRole.RefuseLeft:  refuseLeftCount++; break;
-                        case DirectChildRole.RefuseRight: refuseRightCount++; break;
-                        case DirectChildRole.Reserve:     reserveCount++; break;
-                        case DirectChildRole.Fallback:    fallbackCount++; break;
-                        case DirectChildRole.Unknown:     unknownCount++; break;
-                    }
-                }
-                string roleSummary = "main=" + mainCount
-                    + " sup=" + supportMainCount
-                    + " fix=" + fixCount
-                    + " scrn=" + screenCount
-                    + " rL=" + refuseLeftCount
-                    + " rR=" + refuseRightCount
-                    + " rsrv=" + reserveCount
-                    + " fbck=" + fallbackCount
-                    + " unk=" + unknownCount;
+                // The roles are reported as what they are on this side of the field (DirectChildRoleSummary): a Defender's Main, SupportMain and Fix
+                // children are Defender, not an attack side label.
+                BattleStance stance = _currentForceBalanceStance;
+                DirectChildRoleSummary.Counts counts = DirectChildRoleSummary.Count(_directChildIntents, stance);
+                int mainCount = counts.Main;
+                int supportMainCount = counts.SupportMain;
+                int refuseLeftCount = counts.RefuseLeft;
+                int refuseRightCount = counts.RefuseRight;
+                int fixCount = counts.Fix;
+                int screenCount = counts.Screen;
+                int reserveCount = counts.Reserve;
+                int fallbackCount = counts.Fallback;
+                int unknownCount = counts.Unknown;
+                string roleSummary = counts.Summary;
                 string sig = "side=" + AllianceId + "|" + roleSummary;
                 if (string.Equals(sig, _lastDirectChildIntentTelemetrySig, System.StringComparison.Ordinal))
                     return;
@@ -960,7 +1101,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         DirectChildIntentTelemetrySeconds, false))
                     return;
 
-                string detail = sb.ToString();
+                string detail = DirectChildRoleSummary.Detail(_directChildIntents, stance);
                 string opportunity = _currentReinforcementOpportunity.Opportunity.ToString();
                 float currentRatio = _currentReinforcementOpportunity.CurrentRatio;
                 int mainEffortSector = HasPlan ? _plan.MainEffortSector : -1;
@@ -988,6 +1129,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                         .WithField("reserveCount", reserveCount)
                         .WithField("fallbackCount", fallbackCount)
                         .WithField("unknownCount", unknownCount)
+                        .WithField("defenderCount", counts.Defender)
+                        .WithField("stance", stance.ToString())
                         .WithField("brigades", detail));
             }
             catch (System.Exception ex)
@@ -1079,12 +1222,55 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // iterate brigades nested inside divisions (the Union-AI-doesn't-move
         // case that motivated the cascade).
 
+        // The leaf map the producers read: the cascade (cached by signature) with the flank guards laid over it (ApplyFlankGuards, on its own clock).
         private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _leafBrigadeMap =
             new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _cascadeLeafMap =
+            new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private readonly Dictionary<int, MainFlankGuard.Post> _flankPosts = new Dictionary<int, MainFlankGuard.Post>();
+        private string _flankPostSignature = string.Empty;
         private string _leafBrigadeMapSignature = string.Empty;
+        private double _leafBrigadeMapBuiltHours;
+        private const double LeafMapRefreshHours = 5.0 / 60.0;
 
+        /// <summary>
+        /// The leaf map the posture producers read. While the works hold is on, a cached copy whose entries under a child that faces works are
+        /// guarded (<see cref="TacticalLeafBrigadeMap.LeafAssignment.WorksHeld"/>); it is rebuilt when the leaf map, the hold hash or the maneuvers change.
+        /// </summary>
         public IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> CurrentLeafBrigadeMap
-            => _leafBrigadeMap;
+            => WorksHoldOn ? GuardedLeafMap() : _leafBrigadeMap;
+
+        private string[] _leafTopChildIds = Array.Empty<string>();
+        private readonly Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _guardedLeafMap = new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> _guardedLeafSource;
+        private int _guardedLeafHoldHash, _guardedLeafManeuverHash;
+
+        private IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> GuardedLeafMap()
+        {
+            int hash = _feasibility.WorksHoldHash;
+            if (ReferenceEquals(_guardedLeafSource, _leafBrigadeMap) && _guardedLeafHoldHash == hash && _guardedLeafManeuverHash == _maneuverHash)
+                return _guardedLeafMap;
+            _guardedLeafMap.Clear();
+            _guardedLeaves = 0;
+            foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in _leafBrigadeMap)
+            {
+                TacticalLeafBrigadeMap.LeafAssignment leaf = pair.Value;
+                var context = new WorksGuardContext { WorksHold = true };
+                int top = leaf.TopLevelChildIndex;
+                if (top >= 0 && top < _leafTopChildIds.Length)
+                {
+                    context.FacesWorks = _feasibility.FacesWorks(_leafTopChildIds[top]);
+                    context.InManeuverTable = _worksManeuverNodes.TryGet(
+                        WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_leafTopChildIds[top]), out _);
+                }
+                if (WorksHoldGuard.ApplyLeaf(in leaf, in context, out TacticalLeafBrigadeMap.LeafAssignment guarded)) _guardedLeaves++;
+                _guardedLeafMap[pair.Key] = guarded;
+            }
+            _guardedLeafSource = _leafBrigadeMap;
+            _guardedLeafHoldHash = hash;
+            _guardedLeafManeuverHash = _maneuverHash;
+            return _guardedLeafMap;
+        }
 
         // The Defender's reserve trace of the latest leaf map: one record per holding command that split among
         // two or more subordinates (what it had, what it holds back, why). Empty for an army that is not the Defender.
@@ -1196,6 +1382,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (tree == null)
             {
                 _leafBrigadeMap = new Dictionary<int, TacticalLeafBrigadeMap.LeafAssignment>();
+                _cascadeLeafMap = _leafBrigadeMap;
+                _flankPosts.Clear();
+                _flankPostSignature = string.Empty;
                 _leafBrigadeMapSignature = string.Empty;
                 return;
             }
@@ -1206,15 +1395,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             RefreshLeafRelease(releaseAggression01, live);
 
             string sig = ComputeLeafMapSignature(tree);
-            if (sig == _leafBrigadeMapSignature && _leafBrigadeMap.Count > 0) return;
+            // The cascade is cached by signature as it always was. The flank guards (MainFlankGuard) are laid over it every few doctrine minutes, because they
+            // read where the brigades stand, which the signature does not carry; the cascade's own roles never move with the geometry.
+            double builtAgo = HoursSource() - _leafBrigadeMapBuiltHours;
+            bool cascadeStale = !(sig == _leafBrigadeMapSignature && _cascadeLeafMap.Count > 0);
+            if (!cascadeStale)
+            {
+                if (builtAgo >= LeafMapRefreshHours) LayFlankGuards(tree, cascadeRebuilt: false);
+                return;
+            }
 
             var topAssignments = new List<TacticalLeafBrigadeMap.TopAssignment>(_directChildIntents.Count);
+            var topChildIds = new List<string>(_directChildIntents.Count);
             for (int i = 0; i < _directChildIntents.Count; i++)
             {
                 int instanceId = TacticalBattleCoordinator.ParseInstanceIdFromChildId(_directChildIntents[i].ChildId);
                 if (instanceId == 0) continue;
                 topAssignments.Add(new TacticalLeafBrigadeMap.TopAssignment(instanceId, _directChildIntents[i].Role));
+                topChildIds.Add(_directChildIntents[i].ChildId);
             }
+            // BC14W: LeafAssignment.TopLevelChildIndex indexes the top assignments, which skip a child with no instance id.
+            _leafTopChildIds = topChildIds.ToArray();
 
             float aggression01 = (_commanderPersonality.Aggression + 1f) * 0.5f;
             if (aggression01 < 0f) aggression01 = 0f;
@@ -1247,11 +1448,80 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             _defenderReserveReport.Clear();
-            _leafBrigadeMap = TacticalLeafBrigadeMap.BuildMap(
+            _cascadeLeafMap = TacticalLeafBrigadeMap.BuildMap(
                 tree, topAssignments, aggression01, envelopmentMode, _frontAxis, _flankThreat,
                 defenderReserve: _currentForceBalanceStance == BattleStance.Defender, _defenderReserveReport, _leafRelease.Released);
             _leafBrigadeMapSignature = sig;
             EmitDefenderReserveTelemetry();
+            LayFlankGuards(tree, cascadeRebuilt: true);
+        }
+
+        // The main efforts' open flanks the latest overlay gave a guard (MainFlankGuard.AssignGuards), by instance id.
+        private readonly List<MainFlankGuard.GuardAssignment> _flankGuardReport = new List<MainFlankGuard.GuardAssignment>();
+        private string _lastFlankGuardSig = string.Empty;
+
+        // The flank guards over the cached cascade: a unit that holds a post keeps it, the exposed sides without one are given a guard. The map the producers
+        // read changes only when the posts do, so the works-hold copy of it is not rebuilt for nothing.
+        private void LayFlankGuards(IReadOnlyDictionary<int, TacticalCommandTreeProbe.ProbeNode> tree, bool cascadeRebuilt)
+        {
+            _flankGuardReport.Clear();
+            _leafBrigadeMapBuiltHours = HoursSource();
+            IReadOnlyDictionary<int, TacticalLeafBrigadeMap.LeafAssignment> overlay = TacticalLeafBrigadeMap.ApplyFlankGuards(
+                _cascadeLeafMap, tree, _frontAxis, _currentForceBalanceStance == BattleStance.Defender, FlankAnchoredProbe(), _flankPosts, _flankGuardReport);
+
+            var sb = new System.Text.StringBuilder();
+            foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in overlay)
+                if (pair.Value.HasFlankPost) sb.Append(pair.Key).Append('>').Append(pair.Value.FlankPostMain).Append(pair.Value.FlankPostLeft ? 'L' : 'R').Append(',');
+            string postSig = sb.ToString();
+            if (cascadeRebuilt || postSig != _flankPostSignature) _leafBrigadeMap = overlay;
+            _flankPosts.Clear();
+            foreach (KeyValuePair<int, TacticalLeafBrigadeMap.LeafAssignment> pair in overlay)
+                if (pair.Value.HasFlankPost) _flankPosts[pair.Key] = new MainFlankGuard.Post(pair.Value.FlankPostMain, pair.Value.FlankPostLeft);
+            _flankPostSignature = postSig;
+            EmitFlankGuardTelemetry();
+        }
+
+        // Whether a flank end (x, z), looking outward along (ox, oz), rests on a river (never a crest: a crest is cover, not a wall); null without a ready terrain picture.
+        private static Func<float, float, float, float, bool> FlankAnchoredProbe()
+        {
+            WhiskeyRealism.Tactical.Battle.TerrainPicture picture = WhiskeyRealism.Tactical.Battle.TerrainPicture.CurrentForPlanning();
+            if (picture == null || !picture.Ready) return null;
+            return (x, z, ox, oz) => WhiskeyRealism.Tactical.Operations.TacticalTerrainLinePlanner.FlankAnchored(picture, x, z, ox, oz, includeCrest: false);
+        }
+
+        // One row when the guards given to the main efforts' open flanks change (signature-deduped): which reserve or support went to which main, on which side.
+        private void EmitFlankGuardTelemetry()
+        {
+            if (_flankGuardReport.Count == 0 && _lastFlankGuardSig.Length == 0) return;
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < _flankGuardReport.Count; i++)
+                {
+                    MainFlankGuard.GuardAssignment a = _flankGuardReport[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append(a.Guard).Append("->").Append(a.Main).Append(a.Left ? ":left:" : ":right:").Append(a.Kept ? "kept" : a.From.ToString());
+                }
+                string sig = "side=" + AllianceId + "|" + sb;
+                if (string.Equals(sig, _lastFlankGuardSig, System.StringComparison.Ordinal)) return;
+                _lastFlankGuardSig = _flankGuardReport.Count == 0 ? string.Empty : sig;
+                string detail = sb.ToString();
+                int count = _flankGuardReport.Count;
+                WhiskeyRealism.Telemetry.TelemetryRouter.Emit(
+                    WhiskeyRealism.Telemetry.TelemetryLayer.Tactical,
+                    WhiskeyRealism.Telemetry.TelemetryCategory.Decision,
+                    "TacticalFlankGuard",
+                    WhiskeyRealism.Telemetry.TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalFlankGuard", "assign", sig)
+                        .WithField("side", AllianceId)
+                        .WithField("guards", count)
+                        .WithField("assignments", detail));
+            }
+            catch (System.Exception ex)
+            {
+                try { Plugin.Log?.LogWarning("[TacticalFlankGuard] emit failed: " + ex.Message); } catch { }
+            }
         }
 
         /// <summary>
@@ -1501,6 +1771,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// <summary>A hash of the maneuver orders; the ledger gate ticks when it changes (a phase change must reach the doctrine orders).</summary>
         internal int ManeuverHash => _maneuverHash;
 
+        /// <summary>A hash of the guard points of the latest allocation (crossing guards and the works station); the ledger gate ticks when it changes.</summary>
+        internal int GuardHash => DirectChildAllocator.GuardHash(_directChildIntents);
+
         internal void SetManeuvers(IReadOnlyList<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver> maneuvers)
         {
             _maneuvers = maneuvers ?? Array.Empty<WhiskeyRealism.Tactical.Orchestrator.Plays.ChildManeuver>();
@@ -1528,11 +1801,158 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 return;
             }
 
-            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance,
-                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents),
-                HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
+            // BC14W (requirement-works-hold): while the works hold is on, the command states are guarded first, in place; the orders built from them
+            // (which take their task from each node's role, not from the state) are then guarded into the army's own array. The ledger's own list
+            // stays as it built it. Both stored products are guarded in this one store, before any reader of the tick.
+            ManeuverNodeTable maneuverNodes =
+                WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents);
+            _worksManeuverNodes = maneuverNodes;
+            bool worksHold = WorksHoldOn;
+            _guardedStates = 0;
+            _guardedOrderCount = 0;
+            if (worksHold) GuardStates(copiedCommandOperations);
+            ledger.StoreDoctrineForCommandStates(copiedCommandOperations, _currentForceBalanceStance, maneuverNodes,
+                feasibility: _feasibility, allianceId: AllianceId, reverseSlope: HasPlan && _plan.PlanId == BattlePlanId.ReverseSlopeDefense);
             _currentOperation = ledger.CurrentOperation;
-            _currentDoctrineOrders = ledger.CurrentDoctrineOrders;
+            CurrentObjectivePick = ledger.CurrentObjectivePick;
+            _currentDoctrineOrders = FinishOrders(ledger.CurrentDoctrineOrders, worksHold);
+        }
+
+        // ---- BC14W: the works hold on the stored products (requirement-works-hold) ----
+
+        private ManeuverNodeTable _worksManeuverNodes = new ManeuverNodeTable();
+        private int _guardedStates, _guardedOrderCount, _guardedLeaves;
+
+        /// <summary>The stored states, built orders and leaf entries the works hold guard rewrote at the last store (the TacticalWorksHold row's <c>guarded</c>).</summary>
+        internal int WorksGuarded => _guardedStates + _guardedOrderCount + _guardedLeaves;
+        private readonly List<CommandDoctrineOrder> _guardedOrders = new List<CommandDoctrineOrder>(64);
+        private string[] _childNodeIds = Array.Empty<string>();
+
+        /// <summary>The ledger's works hold is on and Enable Enemy Works Doctrine is: the stored orders, states and leaf entries of the children that face works are guarded.</summary>
+        internal bool WorksHoldOn => Plugin.EnemyWorksDoctrineEnabled() && _feasibility != null && _feasibility.WorksHold(out _);
+
+        // The node id of each direct child ("node-" + the child's instance id), refreshed when the children change. The child ids the table was made from are
+        // kept beside it: comparing them allocates nothing, where making each node id again to compare would allocate a string per child per call.
+        private string[] _childNodeSources = Array.Empty<string>();
+
+        private string[] ChildNodeIds()
+        {
+            int n = _directChildIntents.Count;
+            bool same = _childNodeSources.Length == n;
+            for (int i = 0; same && i < n; i++)
+                same = string.Equals(_childNodeSources[i], _directChildIntents[i].ChildId, StringComparison.Ordinal);
+            if (same) return _childNodeIds;
+            _childNodeIds = new string[n];
+            _childNodeSources = new string[n];
+            for (int i = 0; i < n; i++)
+            {
+                _childNodeSources[i] = _directChildIntents[i].ChildId;
+                _childNodeIds[i] = WhiskeyRealism.Tactical.Orchestrator.Plays.EnvelopmentManeuver.NodeIdOfChild(_directChildIntents[i].ChildId);
+            }
+            return _childNodeIds;
+        }
+
+        // The top-level child a command node belongs to (CommandNodeIntent.SourceNodeId is the child's own node), or -1.
+        private int ChildIndexOfNode(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId)) return -1;
+            string source = nodeId;
+            for (int i = 0; i < _commandNodeIntents.Count; i++)
+            {
+                if (!string.Equals(_commandNodeIntents[i].NodeId, nodeId, StringComparison.Ordinal)) continue;
+                source = _commandNodeIntents[i].SourceNodeId;
+                break;
+            }
+            string[] ids = ChildNodeIds();
+            for (int i = 0; i < ids.Length; i++)
+                if (string.Equals(ids[i], source, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
+        /// <summary>What the guard needs to know about a command node: whether the ledger has its child assaulting or facing works and whether BC11 holds the node.</summary>
+        internal WorksGuardContext WorksContextOfNode(string nodeId)
+        {
+            int child = ChildIndexOfNode(nodeId);
+            return new WorksGuardContext
+            {
+                WorksHold = true,
+                FacesWorks = child >= 0 && _feasibility != null && _feasibility.FacesWorks(_directChildIntents[child].ChildId),
+                InManeuverTable = _worksManeuverNodes.TryGet(nodeId, out _),
+            };
+        }
+
+        /// <summary>
+        /// BC14W (requirement-works-pin): the node belongs to a child the ledger holds as a fix facing unbroken works. Its attack stance (3) is held at
+        /// defend (2) with the works-hold flag; the task is not changed, so the fix keeps its lane and its fire. False with the flag off.
+        /// </summary>
+        internal bool PinsWorksNode(string nodeId)
+        {
+            if (!Plugin.EnemyWorksDoctrineEnabled() || _feasibility == null) return false;
+            int child = ChildIndexOfNode(nodeId);
+            return child >= 0 && _feasibility.PinsWorks(_directChildIntents[child].ChildId);
+        }
+
+        internal void GuardStates(CommandNodeOperationalState[] states)
+        {
+            for (int i = 0; i < states.Length; i++)
+                if (WorksHoldGuard.ApplyState(in states[i], WorksContextOfNode(states[i].NodeId), out CommandNodeOperationalState guarded))
+                {
+                    states[i] = guarded;
+                    _guardedStates++;
+                }
+        }
+
+        // The ledger's built orders, finished into the army's own array when the works hold guards them or the focal assault prepares its bombardment; the
+        // ledger's own list is returned as it is when neither applies.
+        internal IReadOnlyList<CommandDoctrineOrder> FinishOrders(IReadOnlyList<CommandDoctrineOrder> orders, bool worksHold)
+        {
+            bool prepare = PreparationPoint(out float preparationX, out float preparationZ);
+            if (!worksHold && !prepare) return orders;
+            _guardedOrders.Clear();
+            for (int i = 0; i < orders.Count; i++)
+            {
+                CommandDoctrineOrder order = orders[i];
+                if (worksHold && WorksHoldGuard.Apply(in order, WorksContextOfNode(order.NodeId), out order)) _guardedOrderCount++;
+                if (prepare && ChildIndexOfNode(order.NodeId) >= 0) order = order.WithPreparation(preparationX, preparationZ);
+                _guardedOrders.Add(order);
+            }
+            return _guardedOrders;
+        }
+
+        /// <summary>
+        /// BC14W (requirement-focal-execution): the point the focal assault's batteries bombard before the column goes in. The plan's focal point from its
+        /// activation until the column strikes (its Attack, or its abandonment), and never while the works hold keeps the column: no preparation for an
+        /// assault that is not going in. Every node of the plan's children carries it, so a battery's parent group order holds it wherever the guns stand.
+        /// </summary>
+        internal bool PreparationPoint(out float x, out float z)
+        {
+            x = 0f;
+            z = 0f;
+            if (!Plugin.EnemyWorksDoctrineEnabled() || !HasPlan || _plan.PlanId != BattlePlanId.FocalAssault || _feasibility == null) return false;
+            if (!_feasibility.TryFocalPoint(out WhiskeyRealism.Tactical.Battle.FocalPoint focal)) return false;
+            if (_feasibility.WorksHold(out string reason) && string.Equals(reason, WhiskeyRealism.Tactical.Orchestrator.Plays.FeasibilityLedger.ReasonHopelessAssault, StringComparison.Ordinal))
+                return false;
+            for (int m = 0; m < _maneuvers.Count; m++)
+            {
+                if (_maneuvers[m].Kind != WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.AssaultColumn) continue;
+                WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase phase = _maneuvers[m].Order.Phase;
+                if (phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Attack || phase == WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverPhase.Abandoned)
+                    return false;
+            }
+            x = focal.X;
+            z = focal.Z;
+            return true;
+        }
+
+        /// <summary>
+        /// A command state the fallback builder made for a group the ledger has no state for (PostureLedger.TryResolveState's TryBuildSingle), guarded
+        /// with this side's context: the node is the group's own, found through the allocated command intents.
+        /// </summary>
+        internal CommandNodeOperationalState GuardFallback(in CommandNodeOperationalState state)
+        {
+            if (!WorksHoldOn) return state;
+            WorksHoldGuard.ApplyState(in state, WorksContextOfNode(state.NodeId), out CommandNodeOperationalState guarded);
+            return guarded;
         }
 
         /// <summary>Test-only: directly install a plan without going through a playbook.</summary>

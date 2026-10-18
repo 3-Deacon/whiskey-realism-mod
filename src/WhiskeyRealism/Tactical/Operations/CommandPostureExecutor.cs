@@ -426,6 +426,25 @@ namespace WhiskeyRealism.Tactical.Operations
                 task == CommandTaskType.Consolidate;
         }
 
+        private static bool MovesToItsPost(CommandTaskType task)
+        {
+            switch (task)
+            {
+                case CommandTaskType.FormUp:
+                case CommandTaskType.AdvanceToAssembly:
+                case CommandTaskType.Scout:
+                case CommandTaskType.Probe:
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Screen:
+                case CommandTaskType.GuardFlank:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         public static PostureExecutionDecision Decide(
             CommandDoctrineOrder order,
             CommandPhysicalState physical,
@@ -447,7 +466,8 @@ namespace WhiskeyRealism.Tactical.Operations
             CommandDoctrineOrder order,
             CommandPhysicalState physical,
             WriteEligibilitySnapshot eligibility,
-            float nowSeconds)
+            float nowSeconds,
+            bool holdLane = false)
         {
             if (!eligibility.ModeAllowsWrites)
             {
@@ -544,6 +564,10 @@ namespace WhiskeyRealism.Tactical.Operations
                 return NoWrite("movement-in-progress");
             }
 
+            // A node the ledger could not place has no post: its movement tasks are no move (a hold, a fallback and a reserve's legal idle
+            // are decided above and below), not an objective stand-off from where it happens to stand.
+            if (order.HasNoPost && MovesToItsPost(order.Task)) return NoWrite("no-position");
+
             switch (order.Task)
             {
                 case CommandTaskType.FormUp:
@@ -563,6 +587,9 @@ namespace WhiskeyRealism.Tactical.Operations
                         "fallback-line",
                         PostureExecutionTarget.DoctrineFallbackTarget,
                         clearInterruptedPaths: true);
+                case CommandTaskType.HoldObjective when holdLane && WorksHoldGuard.Holds(order.Task, order.Reason) && WorksHoldGuard.HasLane(in order):
+                    // BC14W: a former fix whose lane lies outside the works band still goes to its lane and holds and fires there; so does a pinned exploit at the band's edge.
+                    return FormationAndWaypoint("fix-lane-hold", PostureExecutionTarget.DoctrinePrimaryTarget);
                 default:
                     return Decide(
                         new CommandNodeOperationalState(
@@ -1141,6 +1168,9 @@ namespace WhiskeyRealism.Tactical.Operations
         public int RoadLinkCount, RoadLink0, RoadLink1;
         public float ViaX0, ViaZ0, ViaX1, ViaZ1;
         public bool ColumnWait;
+        // BC14W: the works-hold stance was already submitted for the group this tick (PostureIntentPlan.SubmitWorksHoldStance): the request's own stance
+        // is not submitted again.
+        public bool StanceSubmitted;
     }
 
     // #61 ApplyDecision as intents (plan BC5a). Stance goes with every move
@@ -1171,10 +1201,102 @@ namespace WhiskeyRealism.Tactical.Operations
             if (guarded == state.Task && (!hasOrder || TacticalDecisionDoctrine.TaskForStance(order.Task, stance) == order.Task))
                 return false;
             state = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, guarded, state.TaskState,
-                state.X, state.Z, state.FacingDegrees);
+                state.X, state.Z, state.FacingDegrees, state.Reason, state.PreGuardTask, state.HasPosition);
             if (hasOrder) order = order.WithTask(guarded, guarded == CommandTaskType.Screen ? ScreenReason : HoldReason);
             return true;
         }
+    }
+
+    /// <summary>
+    /// BC14W (requirement-works-hold): the works hold guard rewrites the stored orders, command states and leaf entries of the children that
+    /// face perceived enemy works, turning an attack into a hold. The reason is how every later reader tells a guarded hold from a task the
+    /// ledger gave.
+    /// </summary>
+    public static class WorksHoldGuard
+    {
+        public const string Reason = "works-hold";
+
+        /// <summary>The one predicate every reader keys on: the task is HoldObjective and the reason is the guard's (a later rewrite that changes either is no longer the guard's).</summary>
+        public static bool Holds(CommandTaskType task, string reason)
+            => task == CommandTaskType.HoldObjective && string.Equals(reason, Reason, StringComparison.Ordinal);
+
+        /// <summary>A guarded order that goes to a point outside the works band and holds there: a former fix (its lane) or an exploit held at the band's edge (requirement-works-pin).</summary>
+        public static bool HasLane(in CommandDoctrineOrder order) => order.PreGuardTask == CommandTaskType.FixEnemy || order.ExploitId >= 0;
+
+        /// <summary>
+        /// A guarded former fix whose lane (the order's primary target, 170 units from the line objective) lies outside the works band still goes to
+        /// it and holds and fires there; every other guarded order holds where it stands.
+        /// </summary>
+        public static bool LaneOpen(in CommandDoctrineOrder order, IWorksQuery works)
+            => works != null && Holds(order.Task, order.Reason) && HasLane(in order) && order.PrimaryTarget.HasValue
+               && !works.InWorksBand(order.PrimaryTarget.X, order.PrimaryTarget.Z);
+
+        /// <summary>
+        /// Whether the context calls for turning <paramref name="task"/> into a hold. While the hold is on, a node whose top-level child assaults or
+        /// faces works (and that BC11 does not hold) stops attacking: an attack, a support attack and a fix become holds. A breach exploit (Gap,
+        /// Penetration) passes, as does one of any other kind aimed off the works; a Probe and every holding task pass unchanged.
+        /// </summary>
+        public static bool Guards(in WorksGuardContext context, CommandTaskType task)
+        {
+            if (!context.WorksHold) return false;
+            if (task != CommandTaskType.AttackObjective && task != CommandTaskType.SupportAttack && task != CommandTaskType.FixEnemy) return false;
+            if (context.IsExploit)
+                return context.ExploitKind != OpeningKind.Gap && context.ExploitKind != OpeningKind.Penetration && context.ExploitAimOnWorks;
+            return context.FacesWorks && !context.InManeuverTable;
+        }
+
+        /// <summary>The order, guarded when the context calls for it (true), else unchanged.</summary>
+        public static bool Apply(in CommandDoctrineOrder order, in WorksGuardContext context, out CommandDoctrineOrder guarded)
+        {
+            if (!Guards(in context, order.Task))
+            {
+                guarded = order;
+                return false;
+            }
+            guarded = order.WithWorksHold(order.Task);
+            return true;
+        }
+
+        /// <summary>The command state, guarded when the context calls for it (true), else unchanged.</summary>
+        public static bool ApplyState(in CommandNodeOperationalState state, in WorksGuardContext context, out CommandNodeOperationalState guarded)
+        {
+            if (!Guards(in context, state.Task))
+            {
+                guarded = state;
+                return false;
+            }
+            guarded = new CommandNodeOperationalState(state.NodeId, state.Echelon, state.Role, CommandTaskType.HoldObjective, state.TaskState,
+                state.X, state.Z, state.FacingDegrees, Reason, state.Task, state.HasPosition);
+            return true;
+        }
+
+        /// <summary>The leaf entry, guarded when the context calls for it (true): its task becomes a hold and it is marked, every other field forwarded.</summary>
+        public static bool ApplyLeaf(in TacticalLeafBrigadeMap.LeafAssignment leaf, in WorksGuardContext context, out TacticalLeafBrigadeMap.LeafAssignment guarded)
+        {
+            if (!Guards(in context, leaf.LeafTask))
+            {
+                guarded = leaf;
+                return false;
+            }
+            guarded = new TacticalLeafBrigadeMap.LeafAssignment(leaf.InstanceId, leaf.DisplayName, leaf.LeafRole, CommandTaskType.HoldObjective,
+                leaf.CascadeChain, leaf.ParentNameChain, leaf.TopLevelChildIndex, worksHeld: true, flankPostMain: leaf.FlankPostMain, flankPostLeft: leaf.FlankPostLeft);
+            return true;
+        }
+    }
+
+    /// <summary>What the works hold guard needs to know about one node, leaf or exploit order (requirement-works-hold).</summary>
+    public struct WorksGuardContext
+    {
+        /// <summary>The ledger's works hold is on.</summary>
+        public bool WorksHold;
+        /// <summary>The node's top-level child assaults or faces works.</summary>
+        public bool FacesWorks;
+        /// <summary>BC11 holds the node (it is in the side's maneuver table): the maneuver, not the guard, owns its order.</summary>
+        public bool InManeuverTable;
+        /// <summary>The order or state is an exploit's (the asset's or a follower's), with the exploit's opening kind and whether its aim lies on held works.</summary>
+        public bool IsExploit;
+        public OpeningKind ExploitKind;
+        public bool ExploitAimOnWorks;
     }
 
     public static class PostureIntentPlan
@@ -1293,8 +1415,35 @@ namespace WhiskeyRealism.Tactical.Operations
         /// </summary>
         public static BattleOrderIntent LeafMove(int groupId, CommandTaskType task, float x, float z, float heading, bool inContactWithdrawal)
         {
-            return MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false, exploit: false,
+            BattleOrderIntent move = MoveIntent(groupId, task, x, z, heading, inContactWithdrawal, avoidCoveredCrossings: false, exploit: false,
                 IntentPriority.Executor, IntentSource.PostureExecutor, LeafReason);
+            // A leaf brigade keeping its slot in the division's formation: a re-lay, not an order for the player.
+            move.Flags |= IntentFlags.Maintenance;
+            return move;
+        }
+
+        public const string FlankPostReason = "flank-post";
+
+        /// <summary>
+        /// A posted flank guard's Move to its post (MainFlankGuard.PostOf), at <see cref="IntentPriority.Post"/>: above the posture executor, so the move of
+        /// the division it sits in fans out around it instead of re-pathing it back.
+        /// </summary>
+        public static BattleOrderIntent FlankPostMove(int groupId, float x, float z, float heading)
+        {
+            return MoveIntent(groupId, CommandTaskType.GuardFlank, x, z, heading, inContactWithdrawal: false, avoidCoveredCrossings: false, exploit: false,
+                IntentPriority.Post, IntentSource.PostureExecutor, FlankPostReason);
+        }
+
+        /// <summary>
+        /// The standing claim of a flank guard that is at its post, on its way to it, in contact or waiting on an order: a Move claim at
+        /// <see cref="IntentPriority.Post"/> and nothing to write (<see cref="IntentFlags.StandingClaim"/>). It is renewed every tick the guard is posted.
+        /// </summary>
+        public static BattleOrderIntent FlankPostClaim(int groupId, float x, float z)
+        {
+            BattleOrderIntent claim = MoveIntent(groupId, CommandTaskType.GuardFlank, x, z, -1f, inContactWithdrawal: false, avoidCoveredCrossings: false,
+                exploit: false, IntentPriority.Post, IntentSource.PostureExecutor, FlankPostReason);
+            claim.Flags = IntentFlags.StandingClaim;
+            return claim;
         }
 
         public static BattleOrderIntent FacingPulse(int unitId, float heading)
@@ -1363,8 +1512,91 @@ namespace WhiskeyRealism.Tactical.Operations
             return age >= 0.0 && age < windowHours;
         }
 
+        /// <summary>
+        /// BC14W (requirement-works-hold): the one stance of a group under the works hold, from the mapper alone (HoldObjective, 2) at the posture
+        /// executor's priority with <see cref="IntentFlags.WorksHold"/>. The pipeline submits it for every guarded group each tick, before the
+        /// posture decision and whatever that returns, so an idle group already in formation (an <c>already-correct</c> decision writes nothing) is
+        /// still held out of vanilla's assault; the writer's dedupe on the ordered stance keeps a standing group from being rewritten.
+        /// </summary>
+        public const string ContestReason = "works-hold-contest";
+
+        /// <summary>
+        /// BC14W: the works contest's halt of a held group a move outside the stored orders is walking into the works band. A Stop, not a Move to the
+        /// point the group stands on (the executor's Move duplicate rule drops that one, while a Stop of a moving group is never a duplicate).
+        /// <see cref="IntentFlags.Contest"/> exempts it from the recent-order window.
+        /// </summary>
+        public static BattleOrderIntent ContestStop(int groupId, IntentPriority priority, IntentSource source)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stop, Heading = -1f, Task = CommandTaskType.HoldObjective,
+                Priority = priority, Source = source, Flags = IntentFlags.Contest, Reason = ContestReason,
+            };
+        }
+
+        /// <summary>
+        /// BC14W: the works contest's move back to the hold point, beyond the dedupe radius of it. No <see cref="IntentFlags.UseOrderDelay"/>: it restores
+        /// the standing order the group already holds, so it is the group's own halt, not a new courier order.
+        /// </summary>
+        public static BattleOrderIntent ContestMove(int groupId, float x, float z, IntentPriority priority, IntentSource source)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z, Heading = -1f, Task = CommandTaskType.HoldObjective,
+                Priority = priority, Source = source, Flags = IntentFlags.Contest, Reason = ContestReason,
+            };
+        }
+
+        public const string ChainContestReason = "chain-contest";
+
+        /// <summary>
+        /// BC14O (requirement-historical-chain): the move Whiskey gave the group, sent again after vanilla's chain move took it elsewhere, under the group's
+        /// own task (never a hold). <see cref="IntentFlags.Contest"/> exempts it from the recent-order window and the courier cadence; like the works
+        /// contest's move it is the group restoring its standing order, so it carries no order delay.
+        /// </summary>
+        public static BattleOrderIntent ContestReissue(int groupId, float x, float z, CommandTaskType task, IntentPriority priority, IntentSource source)
+        {
+            return new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Move, TargetX = x, TargetZ = z, Heading = -1f, Task = task,
+                Priority = priority, Source = source, Flags = IntentFlags.Contest, Reason = ChainContestReason,
+            };
+        }
+
+        public static int SubmitWorksHoldStance(IIntentSink sink, int groupId, IntentPriority priority, IntentSource source, int exploitId)
+        {
+            if (sink == null || groupId == 0) return 0;
+            int stance = TacticalCommandTaskToStanceMapper.Map(CommandTaskType.HoldObjective);
+            if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return 0;
+            sink.Submit(new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stance, Value = stance, Heading = -1f, Task = CommandTaskType.HoldObjective,
+                Priority = priority, Source = source, Flags = IntentFlags.WorksHold, Reason = WorksHoldGuard.Reason, ExploitId = exploitId,
+            });
+            return 1;
+        }
+
+        public const string WorksPinReason = "works-pin";
+
+        /// <summary>
+        /// BC14W (requirement-works-pin): the stance of a fix facing unbroken works, submitted every posture tick like the works hold's: the mapper's
+        /// pinned stance (2) for the task's attack stance, flagged <see cref="IntentFlags.WorksHold"/> so vanilla's own attack (3, 4) is taken. A task
+        /// that maps to no attack stance gets none (a Screen keeps its screen).
+        /// </summary>
+        public static int SubmitWorksPinStance(IIntentSink sink, int groupId, CommandTaskType task, IntentPriority priority, IntentSource source, int exploitId)
+        {
+            if (sink == null || groupId == 0 || !TacticalCommandTaskToStanceMapper.WorksPinHolds(task, true)) return 0;
+            sink.Submit(new BattleOrderIntent
+            {
+                GroupId = groupId, Channel = OrderChannel.Stance, Value = TacticalCommandTaskToStanceMapper.Map(task, true), Heading = -1f, Task = task,
+                Priority = priority, Source = source, Flags = IntentFlags.WorksHold, Reason = WorksPinReason, ExploitId = exploitId,
+            });
+            return 1;
+        }
+
         private static int SubmitStance(IIntentSink sink, in PostureIntentRequest r)
         {
+            if (r.StanceSubmitted) return 0;
             int stance = TacticalCommandTaskToStanceMapper.Map(r.Task);
             if (stance == TacticalCommandTaskToStanceMapper.StanceNone) return 0;
             sink.Submit(new BattleOrderIntent
@@ -1380,6 +1612,8 @@ namespace WhiskeyRealism.Tactical.Operations
             BattleOrderIntent move = MoveIntent(r.GroupId, r.Task, r.TargetX, r.TargetZ, -1f, r.InContactWithdrawal, r.AvoidCoveredCrossings, r.Exploit,
                 r.Priority, r.Source, r.Reason);
             move.ExploitId = r.ExploitId;
+            // Re-issuing an interrupted order is the group going on with what it was doing, not a new order for the player.
+            if (r.Action == PostureExecutionAction.RecoverInterruptedOrder) move.Flags |= IntentFlags.Maintenance;
             if (r.ViaCount > 0)
             {
                 move.ViaCount = Math.Min(r.ViaCount, 2);

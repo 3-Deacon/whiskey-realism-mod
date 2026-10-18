@@ -38,6 +38,30 @@ internal static partial class ManeuverFeasibilityTests
         public BattlePlanId SelectedPlan => BattlePlanId.Unknown;
 
         public string BrokenAssumption => null;
+        public bool TryFocalPoint(out FocalPoint focal) { focal = default(FocalPoint); return false; }
+        public bool WorksHold(out string reason) { reason = null; return false; }
+        public bool AssaultsWorks(string childId) => false;
+        public bool FacesWorks(string childId) => false;
+        public bool PinsWorks(string childId) => false;
+        public int WorksHoldHash => 0;
+        public float Willingness => -1f;
+        public IWorksQuery HeldWorks => null;
+        public bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount) { station = default(StationPoint); childCount = 0; return false; }
+        public string StationChildId(int column) => null;
+
+        // BC14O: no objective table.
+        public WhiskeyRealism.Tactical.Battle.ObjectivePressure PressureValue;
+        public WhiskeyRealism.Tactical.Battle.ObjectivePressure Pressure => PressureValue;
+        /// <summary>BC14O: the objective table this lookup publishes (null: none).</summary>
+        public WhiskeyRealism.Tactical.Battle.ObjectiveEstimate[] Rows;
+        public int ObjectiveCount => Rows == null ? 0 : Rows.Length;
+        public bool HoldsPlayerOwned(string childId) => false;
+        public bool TryObjective(int index, out WhiskeyRealism.Tactical.Battle.ObjectiveEstimate estimate)
+        {
+            bool has = Rows != null && index >= 0 && index < Rows.Length;
+            estimate = has ? Rows[index] : default(WhiskeyRealism.Tactical.Battle.ObjectiveEstimate);
+            return has;
+        }
         public int ThreatCount => 0;
         public int LookRequests(Span<float> xs, Span<float> zs) => 0;
         public double EvaluatedHours => 0.0;
@@ -188,7 +212,7 @@ internal static partial class ManeuverFeasibilityTests
 
         // The executor passes the plan's side to the projection (source pin: the runtime is not in the harness).
         string executor = File.ReadAllText(TestFixtures.FindRepoPath("src/WhiskeyRealism/Tactical/Orchestrator/Plays/PlayExecutorRuntime.cs"));
-        AssertContains(executor, "PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest, mirrored)", "the executor projects the plan's side");
+        AssertContains(executor, "PlayProjection.Project(template, armyX, armyZ, targetX, targetZ, frontage, in crest, mirrored)", "the executor projects the plan's side toward its target");
     }
 
     static void FeasRegress()

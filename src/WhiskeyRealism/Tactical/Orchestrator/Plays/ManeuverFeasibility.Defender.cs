@@ -9,7 +9,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     // timed (the earliest enemy body's march to it and on to the line's flank end) against the Defender's fastest reserve. The selected
     // candidate's counted crossings also leave as the threat list the allocator's crossing release reads.
 
-    internal enum DefenderStage : byte { Setup, Bodies, Earliest, Looks, Flank, Sort, Reserves, Done }
+    internal enum DefenderStage : byte { Setup, Bodies, Earliest, Looks, Flank, Sort, Reserves, Station, Done }
 
     /// <summary>A Defender's enemy bodies and counted crossings, prepared once per evaluation (in work units) and shared by every candidate.</summary>
     internal sealed class DefenderPicture
@@ -64,8 +64,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary>Every counted crossing before the earliest <see cref="ManeuverFeasibility.MaxThreatCrossings"/> are kept.</summary>
         public readonly CrossingThreat[] Staged = new CrossingThreat[Links];
 
+        // BC14W requirement-defender-works-reserve (ManeuverFeasibility.Station.cs): the own focal points the station may answer, the earliest enemy arrival at
+        // each (courier plus march from the nearest bodies), the station and the time of every child to it.
+        public bool StationRouting;
+        public int StationFocals, StationUnit;
+        public readonly float[] StationFocalX = new float[ManeuverFeasibility.MaxStationFocals], StationFocalZ = new float[ManeuverFeasibility.MaxStationFocals];
+        public readonly float[] StationFocalArrival = new float[ManeuverFeasibility.MaxStationFocals];
+        /// <summary>The bodies nearest each station focal point (at most <see cref="ManeuverFeasibility.StationBodies"/>), by body index.</summary>
+        public readonly int[] StationNear = new int[ManeuverFeasibility.MaxStationFocals * ManeuverFeasibility.StationBodies];
+        public int StationNearCount;
+        public bool HasStation;
+        public StationPoint Station;
+        public readonly float[] StationShift = new float[ManeuverFeasibility.MaxChildren];
+        public int StationChildCount;
+
         public void Reset()
         {
+            StationFocals = 0;
+            StationUnit = 0;
+            StationRouting = false;
+            HasStation = false;
+            StationChildCount = 0;
             BodyCount = 0;
             LookCount = 0;
             Rides = 0;
@@ -214,9 +233,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     return false;
                 }
 
+                case DefenderStage.Station:
+                    return StepStation(job, d);
+
                 default: // Reserves
                 {
-                    if (d.Cursor >= job.ChildCount) { d.Stage = DefenderStage.Done; return true; }
+                    if (d.Cursor >= job.ChildCount)
+                    {
+                        // BC14W: a Defender holding its own works places its station next (a monitor run does not build it).
+                        bool station = BeginStation(job, d);
+                        d.Stage = station ? DefenderStage.Station : DefenderStage.Done;
+                        return !station;
+                    }
                     ChildFact child = job.Children[d.Cursor++];
                     if (!child.DeployedReserve || child.HasPlayerOwned || child.OwnIndex < 0) return false;
                     if (!graph.ArrivalsFrom(child.X, child.Z, child.BaseSpeed, child.MeanFatigue, false)) return false;
@@ -309,7 +337,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         }
 
         // requirement-enemy-picture: the samples linked singly at 150 units; beyond MaxEnemyBodies the weakest merge into the nearest kept body.
-        private static void BuildEnemyBodies(FeasibilityJob job, DefenderPicture d)
+        // BC14W builds them in the Attacker run too when works exist (the junctions of requirement-works-shape), into the same scratch.
+        internal static void BuildEnemyBodies(FeasibilityJob job, DefenderPicture d)
         {
             EnemyPicture enemy = job.Enemy;
             int count = enemy.Count;

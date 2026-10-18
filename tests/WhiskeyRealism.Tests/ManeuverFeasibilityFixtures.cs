@@ -202,6 +202,15 @@ internal static class ManeuverFeasibilityFixtures
         /// <summary>Enemy unit records that are not observations: units the side does not perceive.</summary>
         public readonly List<UnitRecord> HiddenEnemies = new List<UnitRecord>();
         public float AssumedEnemyLateral, AssumedEnemyDepth;
+        /// <summary>BC14W: the works points the side has perceived (null: none).</summary>
+        public IFortificationPoints WorksPoints;
+        /// <summary>BC14O: the live objectives in the scenario frame and the victory clock (null: no clock, so no pressure).</summary>
+        public readonly List<ObjectiveFact> Objectives = new List<ObjectiveFact>();
+        public VictoryClock? Clock;
+        /// <summary>BC14O: the children that screen a secondary objective at the previous allocation.</summary>
+        public readonly List<string> ScreenChildren = new List<string>();
+        /// <summary>BC14O: each due designer chain's next objective (the capture's id).</summary>
+        public readonly List<string> DueChains = new List<string>();
 
         private static FeasField _flat;
 
@@ -242,14 +251,17 @@ internal static class ManeuverFeasibilityFixtures
         /// regiments stand at the corps and face the enemy. Returns the corps' index in the tree; its child id is appended.
         /// </summary>
         public int AddCorps(float lateral, float depth, float strength, int regiments = 4, UnitFlags regimentFlags = 0, bool deployedReserve = false,
-            float fireRange = 100f, float fatigue = 0f)
+            float fireRange = 100f, float fatigue = 0f, float cover = 0f, int coverObject = 0)
         {
             float x = X(lateral), z = Z(depth);
             int corps = Tree.Add(TacticalUnitType.BattleGroupDivision, x, z, ArmyIndex);
             int brigade = Tree.Add(TacticalUnitType.BattleGroupBrigade, x, z, corps);
             for (int r = 0; r < regiments; r++)
-                Tree.Add(TacticalUnitType.Infantry, x, z, brigade, UnitFlags.IsInfantry | regimentFlags,
+            {
+                int regiment = Tree.Add(TacticalUnitType.Infantry, x, z, brigade, UnitFlags.IsInfantry | regimentFlags,
                     strength / regiments, morale: 1f, fireRange: fireRange, rotationY: 0f, fatigue: fatigue);
+                if (cover > 0f) _cover[regiment] = (cover, coverObject);
+            }
             ChildIds.Add("child-" + Tree.InstanceId(corps));
             DeployedReserve.Add(deployedReserve);
             return corps;
@@ -273,12 +285,14 @@ internal static class ManeuverFeasibilityFixtures
         }
 
         public EnemyObservation AddEnemy(float lateral, float depth, float strength, float heading = 180f, float fireRange = 100f,
-            int unitTyp = TacticalUnitType.Infantry, ObservationState state = ObservationState.Visible, float confidence = 1f)
+            int unitTyp = TacticalUnitType.Infantry, ObservationState state = ObservationState.Visible, float confidence = 1f,
+            float cover = 0f, int coverObject = 0, bool standing = false)
         {
             var o = new EnemyObservation
             {
                 InstanceId = 5000 + Enemies.Count, UnitTyp = unitTyp, X = X(lateral), Z = Z(depth), Strength = strength, State = state,
                 Confidence01 = confidence, Heading = heading, FireRange = fireRange, Morale = 1f,
+                CoverValue = cover, CoverObject = coverObject, Standing = standing,
             };
             Enemies.Add(o);
             return o;
@@ -292,9 +306,17 @@ internal static class ManeuverFeasibilityFixtures
             AddEnemy(450f, depth, totalStrength / 3f);
         }
 
+        // BC14W: own regiments standing in works cover (tree index to the cover value and object), applied to the snapshot's records.
+        private readonly Dictionary<int, (float value, int obj)> _cover = new Dictionary<int, (float, int)>();
+
         public BattleSnapshot Snapshot()
         {
             BattleSnapshot s = Tree.Build(Now, Enemies.ToArray());
+            foreach (KeyValuePair<int, (float value, int obj)> c in _cover)
+            {
+                s.Own[c.Key].CoverValue = c.Value.value;
+                s.Own[c.Key].CoverObject = c.Value.obj;
+            }
             for (int i = 0; i < Contact.Count; i++) s.SetClosestVisibleEnemy(Contact[i], 0, 100f);
             for (int i = 0; i < HiddenEnemies.Count; i++)
             {
@@ -303,6 +325,10 @@ internal static class ManeuverFeasibilityFixtures
             }
             return s;
         }
+
+        /// <summary>BC14O: a live objective at (lateral, depth); enemy-held unless <paramref name="own"/> or <paramref name="neutral"/>.</summary>
+        public void AddObjective(string id, float lateral, float depth, float points, bool own = false, bool neutral = false, bool threatened = false)
+            => Objectives.Add(new ObjectiveFact { Id = id, X = X(lateral), Z = Z(depth), Points = points, OwnHeld = own, EnemyHeld = !own && !neutral, Threatened = threatened });
 
         /// <summary>An own regiment under the army that is no direct child's (a picket): it counts in the centroid and covers ground.</summary>
         public int AddPicket(float lateral, float depth, float rotationY, float fireRange = 100f, float strength = 400f)
@@ -360,7 +386,10 @@ internal static class ManeuverFeasibilityFixtures
                 ChildIds = ChildIds.ToArray(), ChildCount = ChildIds.Count, DeployedReserve = DeployedReserve.ToArray(),
                 Candidates = plans, CandidateCount = plans.Length, ReachByUnitType = ShippedReachByType, HasAssumedEnemy = HasAssumedEnemy,
                 AssumedEnemyX = X(AssumedEnemyLateral), AssumedEnemyZ = Z(AssumedEnemyDepth),
-                Cache = new LegCostCache(),
+                Cache = new LegCostCache(), Works = WorksPoints,
+                Objectives = Objectives.ToArray(), ObjectiveCount = Objectives.Count, Clock = Clock ?? default(VictoryClock), HasClock = Clock.HasValue,
+                ScreenChildIds = ScreenChildren.ToArray(), ScreenChildCount = ScreenChildren.Count,
+                DueChainObjectiveIds = DueChains.ToArray(), DueChainCount = DueChains.Count,
             };
         }
 

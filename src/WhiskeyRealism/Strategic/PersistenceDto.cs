@@ -59,6 +59,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("careerKey")] public string CareerKey;
         [JsonProperty("reliability")] public float Reliability;
         [JsonProperty("samples")] public int Samples;
+        // The measure the estimate was taken with (PlayerComplianceLedger.MeasureVersion); absent (0) in a sidecar written
+        // before the 2026-10-17 fix, whose estimate is not adopted.
+        [JsonProperty("measure")] public int Measure;
     }
 
     internal class FactionDto
@@ -99,6 +102,15 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("reinforcementDecision")] public int ReinforcementDecision = -1;
         // The decision whose main objective was seen scouted (a march released on a fresh picture is not re-staged); absent: -1.
         [JsonProperty("scoutedDecision")] public int ScoutedDecision = -1;
+        // The target record that decision was scouted at (the latch does not speak for another record of the same objective); absent: not recorded.
+        [JsonProperty("scoutedTargetX")] public float? ScoutedTargetX;
+        [JsonProperty("scoutedTargetZ")] public float? ScoutedTargetZ;
+        // The target record the main effort is on, and the record challenging it (with the reviews it has led by the margin); absent: none.
+        [JsonProperty("currentTargetX")] public float? CurrentTargetX;
+        [JsonProperty("currentTargetZ")] public float? CurrentTargetZ;
+        [JsonProperty("recordChallengerX")] public float? RecordChallengerX;
+        [JsonProperty("recordChallengerZ")] public float? RecordChallengerZ;
+        [JsonProperty("recordChallengerDays")] public int RecordChallengerDays;
         [JsonProperty("departments")] public List<DepartmentDto> Departments = new List<DepartmentDto>();
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;
@@ -107,6 +119,20 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("depotTasks")] public List<DepotTaskDto> DepotTasks = new List<DepotTaskDto>();
         [JsonProperty("moves")] public List<MoveDto> Moves = new List<MoveDto>();
         [JsonProperty("reconMissions")] public List<ReconMissionDto> ReconMissions = new List<ReconMissionDto>();
+        // G8: the garrison ledger, D8's secession posts and the ordinary ones. Additive in v3: an older file has none.
+        [JsonProperty("garrisonPosts")] public List<GarrisonPostDto> GarrisonPosts = new List<GarrisonPostDto>();
+    }
+
+    internal class GarrisonPostDto
+    {
+        [JsonProperty("kind")] public string Kind;
+        [JsonProperty("x")] public float X;
+        [JsonProperty("z")] public float Z;
+        // Every member's unit key (name:commander) in seat order; empty for a post no formation held. "unitKey" is the first member's: what an
+        // older file carries (it loads as one member) and what an older reader still finds.
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("unitKeys")] public List<string> UnitKeys = new List<string>();
+        [JsonProperty("quietSinceDay")] public int QuietSinceDay = -1;
     }
 
     internal class DepartmentDto
@@ -128,6 +154,8 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("source")] public int Source;
         [JsonProperty("traits")] public int Traits;
         [JsonProperty("lastEmbarkedDay")] public int LastEmbarkedDay = -1;
+        [JsonProperty("rifleQuality")] public float RifleQuality;
+        [JsonProperty("gunQuality")] public float GunQuality;
     }
 
     internal class AppointmentDto

@@ -168,6 +168,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return SectorOfLateral(LateralOf(x, z));
         }
 
+        /// <summary>The lateral of the middle of a band (the centre of the front when the axis has no bands).</summary>
+        public float CenterLateralOfSector(int sector)
+        {
+            if (!IsValid || BandCount <= 0) return (LateralMin + LateralMax) * 0.5f;
+            float width = (LateralMax - LateralMin) / BandCount;
+            return LateralMin + (sector + 0.5f) * width;
+        }
+
         public int SectorOfLateral(float lateral)
         {
             if (!IsValid || BandCount <= 1) return 0;

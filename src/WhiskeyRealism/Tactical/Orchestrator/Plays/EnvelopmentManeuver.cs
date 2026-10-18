@@ -115,6 +115,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool ViaPassed, AttackViaPassed;
         /// <summary>The spec's HoldsForRelease.</summary>
         public bool HoldsForRelease;
+        /// <summary>
+        /// BC14W (requirement-works-hold): the works hold is <c>hopeless-assault</c> and this body assaults works (or it is a start delay of the plan):
+        /// the Hold is kept, its ceiling suppressed and its latched release and budget cleared. See <see cref="EnvelopmentManeuver.HoldForWorksFor"/>.
+        /// </summary>
+        public bool HoldForWorks;
+
+        // BC14W requirement-focal-execution (AssaultColumn): the focal point the assault strikes (the inward target of the corridor and river checks, the
+        // Turn's heading and the Attack's target), the group's formation read from the snapshot (the Turn waits for the column), and the preparation floor
+        // (no earlier than the first battery's bombardment plus PreparationHours). Each value beside its flag.
+        public bool HasFocal;
+        public float FocalX, FocalZ;
+        /// <summary>The focal point's kind (<c>FocalKind</c>), for the row only.</summary>
+        public byte FocalKind;
+        public int GroupFormation;
+        public bool HasPreparationFloor;
+        public double PreparationFloorHours;
     }
 
     public struct ManeuverState
@@ -140,6 +156,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float ViaX, ViaZ;
         public bool HasAttackVia;
         public float AttackViaX, AttackViaZ;
+
+        /// <summary>BC14W: the hour the works hold last cleared (latched when <see cref="ManeuverInput.HoldForWorks"/> turns false after a hold), beside its flag.</summary>
+        public bool HasWorksClear;
+        public double WorksClearHours;
+        /// <summary>BC14W: the body is held for the works now (set while <see cref="ManeuverInput.HoldForWorks"/> keeps it in Hold); the next step without the flag is the clear.</summary>
+        public bool WorksHeld;
+
+        /// <summary>BC14W: the focal point latched at the March (a column's Turn heading and Attack target); a later evaluation's focal point does not move it.</summary>
+        public bool HasFocal;
+        public float FocalX, FocalZ;
+        public byte FocalKind;
     }
 
     public struct ManeuverOrder
@@ -148,6 +175,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public CommandTaskType Task;
         public float TargetX, TargetZ, Heading;   // Heading -1 = none
         public string Reason;                      // static literal
+
+        /// <summary>BC14W: the group formation the order asks for (the focal assault's March Column, 4); HasFormation false is none.</summary>
+        public bool HasFormation;
+        public int Formation;
 
         /// <summary>BC14: the crossing the order is routed through (the March's or the Attack's via); HasVia false is none.</summary>
         public bool HasVia;
@@ -160,13 +191,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
     /// <summary>One child's maneuver order with the lateral axis its nodes are laid out on.</summary>
     public readonly struct ChildManeuver
     {
-        public ChildManeuver(string childId, ManeuverOrder order, float lateralX, float lateralZ)
+        public ChildManeuver(string childId, ManeuverOrder order, float lateralX, float lateralZ, PlayRectKind kind = PlayRectKind.Unknown)
         {
             ChildId = childId ?? string.Empty;
             Order = order;
             LateralX = lateralX;
             LateralZ = lateralZ;
+            Kind = kind;
         }
+
+        /// <summary>The rect kind the child's maneuver runs for (the army reads the focal assault's column by it); Unknown when not given.</summary>
+        public PlayRectKind Kind { get; }
 
         public string ChildId { get; }
         public ManeuverOrder Order { get; }
@@ -191,6 +226,43 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public const float InwardStepMeters = 2f;
         public const float MarchStepMeters = 10f;
 
+        /// <summary>
+        /// BC14W: whether the maneuver of a body holds for the works. Only the <c>hopeless-assault</c> hold sets it, for a body that assaults works and
+        /// for a start delay of the plan (the focal assault's support); <c>turn-not-struck</c> never does: the turning wing must march.
+        /// </summary>
+        public static bool HoldForWorksFor(string worksHoldReason, bool assaultsWorks, bool startDelay)
+            => worksHoldReason == FeasibilityLedger.ReasonHopelessAssault && (assaultsWorks || startDelay);
+
+        /// <summary>
+        /// BC14W (requirement-focal-execution): the doctrine hour a follower of the focal assault is released. The support goes
+        /// <see cref="WorksRules.EchelonDelayHours"/> after the column enters its Attack, the demonstrations as it does; both wait while the column has not
+        /// (the preparation floor, the formation wait and the works hold move them with it), and go at once when there is no column or it was abandoned.
+        /// </summary>
+        public static double FollowerReleaseHours(PlayRectKind kind, bool hasColumn, ManeuverPhase columnPhase, double columnPhaseSinceHours, double nowHours)
+        {
+            if (!hasColumn || columnPhase == ManeuverPhase.Abandoned) return nowHours;
+            if (columnPhase != ManeuverPhase.Attack) return double.PositiveInfinity;
+            return columnPhaseSinceHours + (kind == PlayRectKind.AssaultSupport ? WorksRules.EchelonDelayHours : 0.0);
+        }
+
+        // BC14W: the works hold keeps the body in Hold, with no ceiling and no release or budget latched; the hour it clears is latched
+        // (NoteWorksClear) and the ceiling counts from it. Only a body still before its March is held: a wing on the march is not recalled.
+        private static ManeuverOrder WorksHoldOrder(ref ManeuverState state, in ManeuverInput input)
+        {
+            state.WorksHeld = true;
+            state.HasFirstPlannedRelease = false;
+            state.HasBudget = false;
+            return HoldOrder(in input, "works-hold");
+        }
+
+        private static void NoteWorksClear(ref ManeuverState state, in ManeuverInput input)
+        {
+            if (!state.WorksHeld) return;
+            state.WorksHeld = false;
+            state.HasWorksClear = true;
+            state.WorksClearHours = input.NowHours;
+        }
+
         // ---- the state machine ---------------------------------------------------------------
 
         public static ManeuverOrder Step(ref ManeuverState state, in ManeuverInput input)
@@ -211,6 +283,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         // long after the play's activation and then returns to its allocator role. It never marches, turns or attacks.
         private static ManeuverOrder StepStartDelay(ref ManeuverState state, in ManeuverInput input)
         {
+            // BC14W: a start delay of a plan whose works assault is hopeless stays unreleased, whatever its offset or planned release.
+            if (input.HoldForWorks && (state.Phase == ManeuverPhase.None || state.Phase == ManeuverPhase.Hold))
+            {
+                if (state.Phase == ManeuverPhase.None)
+                {
+                    state.Phase = ManeuverPhase.Hold;
+                    state.PhaseSinceHours = input.NowHours;
+                }
+                return WorksHoldOrder(ref state, in input);
+            }
+            if (state.Phase == ManeuverPhase.Hold) NoteWorksClear(ref state, in input);
             if (input.HoldsForRelease) return StepFixHold(ref state, in input);
             if (!(input.StartOffsetSeconds > 0f))
             {
@@ -268,6 +351,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         {
             double ceiling = input.PlayActivatedHours + MaxManeuverHours;
             if (state.HasFirstPlannedRelease) ceiling = Math.Max(ceiling, state.FirstPlannedReleaseHours + MaxManeuverHours);
+            if (state.HasWorksClear) ceiling = Math.Max(ceiling, state.WorksClearHours + MaxManeuverHours);
             return ceiling;
         }
 
@@ -281,6 +365,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
             if (state.Phase == ManeuverPhase.Hold)
             {
+                if (input.HoldForWorks) return WorksHoldOrder(ref state, in input);
+                NoteWorksClear(ref state, in input);
+                // BC14W: the column goes in no earlier than the first battery's bombardment plus PreparationHours (no floor, no wait). The floor beats the
+                // Hold ceiling: shells that have not fallen are not a reason to launch the assault.
+                if (input.Kind == PlayRectKind.AssaultColumn && input.HasPreparationFloor && input.NowHours < input.PreparationFloorHours)
+                    return HoldOrder(in input, "await-preparation");
                 // The ceiling: a Hold never outlasts MaxManeuverHours from the play's activation (a Center child that never makes
                 // contact, or is destroyed, must not hold the wings for good); the wings then proceed on their own checks. BC14: with a
                 // planned release it is never earlier than an hour past the release first planned.
@@ -321,6 +411,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 // Latched at the March and never changed after it (requirement-crossing-via, requirement-maneuver-time-budget).
                 state.HasBudget = input.HasTimeBudget;
                 state.BudgetHours = input.TimeBudgetHours;
+                state.HasFocal = input.Kind == PlayRectKind.AssaultColumn && input.HasFocal;
+                state.FocalX = input.FocalX;
+                state.FocalZ = input.FocalZ;
+                state.FocalKind = input.FocalKind;
                 state.HasVia = input.HasVia;
                 state.ViaX = input.ViaX;
                 state.ViaZ = input.ViaZ;
@@ -351,18 +445,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     {
                         state.Phase = ManeuverPhase.Turn;
                         state.PhaseSinceHours = input.NowHours;
-                        return TurnOrder(in input);
+                        return TurnOrder(in state, in input);
                     }
                     return march;
                 }
                 case ManeuverPhase.Turn:
-                    if (input.ChildInContact || input.NowHours - state.PhaseSinceHours >= TurnHoldHours)
+                    if (TurnEnds(in state, in input))
                     {
                         state.Phase = ManeuverPhase.Attack;
                         state.PhaseSinceHours = input.NowHours;
                         return AttackOrder(in state, in input);
                     }
-                    return TurnOrder(in input);
+                    return TurnOrder(in state, in input);
                 default:
                     return AttackOrder(in state, in input);
             }
@@ -399,30 +493,46 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 TargetX = outflank ? input.OutflankX : input.AnchorX, TargetZ = outflank ? input.OutflankZ : input.AnchorZ,
                 Heading = -1f, Reason = outflank ? "march-outflank" : "march-anchor",
                 HasVia = via, ViaX = via ? state.ViaX : 0f, ViaZ = via ? state.ViaZ : 0f,
+                HasFormation = input.Kind == PlayRectKind.AssaultColumn, Formation = input.Kind == PlayRectKind.AssaultColumn ? RoadRoutePlanner.ColumnGroupFormation : 0,
             };
         }
 
-        // On arrival: face the perceived enemy line end on the rect's side (the play's enemy anchor with no extent).
-        private static ManeuverOrder TurnOrder(in ManeuverInput input)
+        // The Turn ends at first contact or after TurnHoldHours. BC14W: a column forms up for its assault first: besides at first contact, only when the
+        // group reads the March Column or ColumnWaitHours have passed since the Turn began (BC10's column wait), and never before the preparation floor.
+        private static bool TurnEnds(in ManeuverState state, in ManeuverInput input)
         {
-            LineEnd(in input, out float ex, out float ez);
+            if (input.Kind != PlayRectKind.AssaultColumn)
+                return input.ChildInContact || input.NowHours - state.PhaseSinceHours >= TurnHoldHours;
+            if (input.HasPreparationFloor && input.NowHours < input.PreparationFloorHours) return false;
+            return input.ChildInContact || input.GroupFormation == RoadRoutePlanner.ColumnGroupFormation ||
+                input.NowHours - state.PhaseSinceHours >= RoadRoutePlanner.ColumnWaitHours;
+        }
+
+        // On arrival: face the perceived enemy line end on the rect's side (the play's enemy anchor with no extent); a column faces its focal point.
+        private static ManeuverOrder TurnOrder(in ManeuverState state, in ManeuverInput input)
+        {
+            Target(in state, in input, out float ex, out float ez);
+            bool column = input.Kind == PlayRectKind.AssaultColumn;
             return new ManeuverOrder
             {
                 Phase = ManeuverPhase.Turn, Task = CommandTaskType.AdvanceToAssembly, TargetX = input.AnchorX, TargetZ = input.AnchorZ,
-                Heading = PostureSense.HeadingTo(input.ChildX, input.ChildZ, ex, ez), Reason = "turn-to-line-end",
+                Heading = PostureSense.HeadingTo(input.ChildX, input.ChildZ, ex, ez), Reason = column ? "turn-to-focal-point" : "turn-to-line-end",
+                HasFormation = column, Formation = column ? RoadRoutePlanner.ColumnGroupFormation : 0,
             };
         }
 
         private static ManeuverOrder AttackOrder(in ManeuverState state, in ManeuverInput input)
         {
-            LineEnd(in input, out float ex, out float ez);
-            // The attack keeps its target, the line end; the attack via only routes the move to it.
+            Target(in state, in input, out float ex, out float ez);
+            // The attack keeps its target, the line end (a column's focal point); the attack via only routes the move to it.
             bool via = state.HasAttackVia && !input.AttackViaPassed;
+            bool column = input.Kind == PlayRectKind.AssaultColumn;
             return new ManeuverOrder
             {
                 Phase = ManeuverPhase.Attack, Task = CommandTaskType.AttackObjective, TargetX = ex, TargetZ = ez, Heading = -1f,
-                Reason = "attack-line-end",
+                Reason = column ? "attack-focal-point" : "attack-line-end",
                 HasVia = via, ViaX = via ? state.AttackViaX : 0f, ViaZ = via ? state.AttackViaZ : 0f,
+                HasFormation = column, Formation = column ? RoadRoutePlanner.ColumnGroupFormation : 0,
             };
         }
 
@@ -452,6 +562,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             z = input.HasEnemyExtent ? input.EnemyEndZ : input.EnemyAnchorZ;
         }
 
+        // What the Turn faces and the Attack strikes: the focal point a column latched at its March, else the perceived enemy line end.
+        private static void Target(in ManeuverState state, in ManeuverInput input, out float x, out float z)
+        {
+            if (input.Kind == PlayRectKind.AssaultColumn && state.HasFocal)
+            {
+                x = state.FocalX;
+                z = state.FocalZ;
+                return;
+            }
+            LineEnd(in input, out x, out z);
+        }
+
         // FlankMove's two checks (116929-117108) plus the march leg: a river on either leg, or a perceived enemy on
         // the inward corridor standing at least heightdifferencetoenemyunitanchored above the anchor.
         private static string FlankMoveCheck(in ManeuverInput input)
@@ -461,7 +583,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             if ((input.MarchRouteKnown && input.MarchLegHitsRiver) || input.InwardLegHitsRiver) return "river-on-leg";
             Span<float> heights = stackalloc float[1];
             heights[0] = input.MaxCorridorEnemyHeight;
-            if (AnchoredHighGround(input.AnchorHeight, heights, input.CorridorEnemyCount > 0 ? 1 : 0, input.HeightDifferenceAnchored))
+            // BC14W: the works are a column's target and the model has priced them; an enemy above the form-up point is no reason to abandon it.
+            if (input.Kind != PlayRectKind.AssaultColumn &&
+                AnchoredHighGround(input.AnchorHeight, heights, input.CorridorEnemyCount > 0 ? 1 : 0, input.HeightDifferenceAnchored))
                 return "anchored-high-ground";
             return null;
         }
@@ -845,6 +969,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             var table = new ManeuverNodeTable();
             if (nodeIntents == null) return table;
             AddGuards(table, directChildIntents, nodeIntents);
+            AddScreens(table, directChildIntents, nodeIntents);
             if (maneuvers == null) return table;
             for (int m = 0; m < maneuvers.Count; m++)
             {
@@ -875,7 +1000,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         nodeIntents[i].NodeId, maneuver.Order.Phase, maneuver.Order.Task, !hold,
                         maneuver.Order.TargetX + maneuver.LateralX * offset, maneuver.Order.TargetZ + maneuver.LateralZ * offset,
                         maneuver.Order.Heading, maneuver.Order.Reason,
-                        maneuver.Order.HasVia, maneuver.Order.ViaX, maneuver.Order.ViaZ));
+                        maneuver.Order.HasVia, maneuver.Order.ViaX, maneuver.Order.ViaZ,
+                        hasFormation: maneuver.Order.HasFormation, formation: maneuver.Order.Formation));
                 }
             }
             return table;
@@ -883,7 +1009,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         // BC14 requirement-defender-crossing-release: a reserve released to a crossing stands at its guard point facing the crossing. Every node of
         // the child takes the guard point as its primary target (a guard has no lanes: the groups below follow their parent's formation) and the
-        // guard heading, through the same maneuver override the doctrine build already applies; the child's role gives the GuardFlank task.
+        // guard heading, through the same maneuver override the doctrine build already applies; the child's role gives the GuardFlank task. BC14W: a
+        // stationed Reserve child (a Defender's reserve behind its most threatened works focal point) is the same entry as ReserveWait, "station-works".
         private static void AddGuards(ManeuverNodeTable table, System.Collections.Generic.IReadOnlyList<DirectChildIntent> children,
             System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
         {
@@ -893,11 +1020,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 if (!children[c].HasGuardPoint) continue;
                 string source = NodeIdOfChild(children[c].ChildId);
                 if (source.Length == 0) continue;
+                // BC14W: a guard point on a child that is still a Reserve is the Defender's works station (a crossing guard has taken a Refuse role).
+                bool station = children[c].Role == DirectChildRole.Reserve;
                 for (int i = 0; i < nodeIntents.Count; i++)
                 {
                     if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
-                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, CommandTaskType.GuardFlank, true,
-                        children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, "guard-crossing", isGuard: true));
+                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, station ? CommandTaskType.ReserveWait : CommandTaskType.GuardFlank, true,
+                        children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, station ? "station-works" : "guard-crossing", isGuard: true));
+                }
+            }
+        }
+
+        // BC14O requirement-main-effort-objective: a Screen-role child drawn to screen a secondary objective stands at its screen target facing the
+        // enemy, task Screen, through the same maneuver override as a guard. A BC11 maneuver on the same node (added after) takes precedence.
+        private static void AddScreens(ManeuverNodeTable table, System.Collections.Generic.IReadOnlyList<DirectChildIntent> children,
+            System.Collections.Generic.IReadOnlyList<CommandNodeIntent> nodeIntents)
+        {
+            if (children == null) return;
+            for (int c = 0; c < children.Count; c++)
+            {
+                if (!children[c].HasScreenTarget) continue;
+                string source = NodeIdOfChild(children[c].ChildId);
+                if (source.Length == 0) continue;
+                for (int i = 0; i < nodeIntents.Count; i++)
+                {
+                    if (!string.Equals(nodeIntents[i].SourceNodeId, source, StringComparison.Ordinal)) continue;
+                    table.Add(new ManeuverNodeEntry(nodeIntents[i].NodeId, ManeuverPhase.March, CommandTaskType.Screen, true,
+                        children[c].ScreenX, children[c].ScreenZ, children[c].ScreenHeading, "screen-secondary", isGuard: true));
                 }
             }
         }
@@ -922,6 +1071,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         h = h * 31 + (int)(c.Order.TargetZ / 50f);
                     }
                     h = h * 31 + (int)(c.Order.Heading / 5f);
+                    // BC14W: a formation set or changed re-stores the orders (the column's March Column).
+                    h = h * 31 + (c.Order.HasFormation ? 1 + c.Order.Formation : 0);
                     // BC14: a via set, moved or cleared (it is dropped once the child has crossed) re-stores the orders.
                     h = h * 31 + (c.Order.HasVia ? 1 : 0);
                     if (c.Order.HasVia)

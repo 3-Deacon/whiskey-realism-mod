@@ -445,6 +445,13 @@ namespace WhiskeyRealism.Strategic
                 ReinforcementKey = s.ReinforcementKey,
                 ReinforcementDecision = s.ReinforcementDecision,
                 ScoutedDecision = s.ScoutedDecision,
+                ScoutedTargetX = float.IsNaN(s.ScoutedTargetX) ? (float?)null : s.ScoutedTargetX,
+                ScoutedTargetZ = float.IsNaN(s.ScoutedTargetZ) ? (float?)null : s.ScoutedTargetZ,
+                CurrentTargetX = float.IsNaN(s.CurrentTargetX) ? (float?)null : s.CurrentTargetX,
+                CurrentTargetZ = float.IsNaN(s.CurrentTargetZ) ? (float?)null : s.CurrentTargetZ,
+                RecordChallengerX = float.IsNaN(s.RecordChallengerX) ? (float?)null : s.RecordChallengerX,
+                RecordChallengerZ = float.IsNaN(s.RecordChallengerZ) ? (float?)null : s.RecordChallengerZ,
+                RecordChallengerDays = s.RecordChallengerDays,
                 UnreliableDays = p.UnreliableDays,
                 UnreliableLastDay = p.UnreliableLastDay
             };
@@ -458,7 +465,8 @@ namespace WhiskeyRealism.Strategic
                 {
                     UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                     LastSeenDay = b.LastSeenDay, Confidence = b.Confidence01, Radius = b.UncertaintyRadius,
-                    Source = (int)b.LastSource, Traits = (int)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
+                    Source = (int)b.LastSource, Traits = (int)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay,
+                    RifleQuality = b.RifleQuality, GunQuality = b.GunQuality
                 });
             }
             foreach (var a in p.Appointments)
@@ -485,6 +493,8 @@ namespace WhiskeyRealism.Strategic
                     StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
                 });
             }
+            foreach (var g in p.GarrisonPosts)
+                dto.GarrisonPosts.Add(new GarrisonPostDto { Kind = g.Kind.ToString(), X = g.X, Z = g.Z, UnitKey = g.AssignedUnitKeys != null && g.AssignedUnitKeys.Length > 0 ? g.AssignedUnitKeys[0] : null, UnitKeys = new List<string>(g.AssignedUnitKeys ?? new string[0]), QuietSinceDay = g.QuietSinceDay });
             return dto;
         }
 
@@ -495,7 +505,10 @@ namespace WhiskeyRealism.Strategic
             if (dto == null) return null;
             var p = new PlannerSnapshot { UnreliableDays = dto.UnreliableDays, UnreliableLastDay = dto.UnreliableLastDay };
             p.State.Restore(dto.CurrentMainObjective, dto.ChallengerObjective, dto.ChallengerDays, dto.DecisionSerial, dto.CampaignSeed,
-                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision, dto.ScoutedDecision);
+                dto.BelowOddsDays, dto.CapitalThreatLatched, dto.TempoReleasedDecision, dto.LastFullReviewDay, dto.ReinforcementKey, dto.ReinforcementDecision, dto.ScoutedDecision,
+                dto.ScoutedTargetX ?? float.NaN, dto.ScoutedTargetZ ?? float.NaN,
+                dto.CurrentTargetX ?? float.NaN, dto.CurrentTargetZ ?? float.NaN,
+                dto.RecordChallengerX ?? float.NaN, dto.RecordChallengerZ ?? float.NaN, dto.RecordChallengerDays);
             if (dto.Departments != null)
             {
                 var departments = new List<KeyValuePair<string, Theater>>();
@@ -514,7 +527,8 @@ namespace WhiskeyRealism.Strategic
                     {
                         InstanceId = -1, UnitKey = b.UnitKey, UnitTyp = b.UnitTyp, X = b.X, Z = b.Z, Strength = b.Strength,
                         LastSeenDay = b.LastSeenDay, Confidence01 = b.Confidence, UncertaintyRadius = b.Radius,
-                        LastSource = DetectionSources.FromSaved(b.Source), Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay
+                        LastSource = DetectionSources.FromSaved(b.Source), Traits = (EnemyTraits)b.Traits, LastEmbarkedDay = b.LastEmbarkedDay,
+                        RifleQuality = b.RifleQuality, GunQuality = b.GunQuality
                     });
                 }
             if (dto.Appointments != null)
@@ -551,7 +565,26 @@ namespace WhiskeyRealism.Strategic
                         StandDownDue = m.StandDownDue, ClearedDay = m.ClearedDay
                     });
                 }
+            if (dto.GarrisonPosts != null)
+                foreach (var g in dto.GarrisonPosts)
+                {
+                    if (g == null) continue;
+                    Enum.TryParse<GarrisonPostKind>(g.Kind, out var kind);
+                    p.GarrisonPosts.Add(new GarrisonPostRecord { Kind = kind, X = g.X, Z = g.Z, AssignedUnitKeys = KeysOf(g), QuietSinceDay = g.QuietSinceDay });
+                }
             return p;
+        }
+
+        // A post's members: "unitKeys" when the file has them, else the one "unitKey" an older file wrote; never more than a post may hold
+        // (GarrisonPlanner.MaxFormationsPerPost), whatever a hand-edited file lists.
+        private static string[] KeysOf(GarrisonPostDto g)
+        {
+            var keys = new List<string>();
+            if (g.UnitKeys != null)
+                foreach (string key in g.UnitKeys)
+                    if (!string.IsNullOrEmpty(key) && keys.Count < GarrisonPlanner.MaxFormationsPerPost) keys.Add(key);
+            if (keys.Count == 0 && !string.IsNullOrEmpty(g.UnitKey)) keys.Add(g.UnitKey);
+            return keys.ToArray();
         }
 
         private static void CopyList<T>(List<T> source, T[] target)

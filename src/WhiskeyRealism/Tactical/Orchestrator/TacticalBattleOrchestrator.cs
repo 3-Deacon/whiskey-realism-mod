@@ -83,7 +83,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     Army.CurrentCommandNodeIntents,
                     OperationsLedger.CurrentOperation,
                     OperationsLedger.CurrentObjectives,
-                    Army.CurrentBattleStance);
+                    Army.CurrentBattleStance,
+                    OperationsLedger.Ground);
                 commandOperations = TacticalNestedDivisionPlayPlanner.Apply(
                     effectiveCommandTree,
                     commandOperations);

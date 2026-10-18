@@ -74,7 +74,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                         if (!play.HasOrder) continue;
                         Child child = Find(children, play.NodeId);
                         if (child == null) continue;
-                        CommandNodeOperationalState state = PosturePipeline.WithRoleAndTask(child.State, child.State.Role, play.Task);
+                        // BC14W: a group the works hold guard holds is the posture producer's: the play must not turn it back into an attack.
+                        if (WorksHoldGuard.Holds(child.State.Task, child.State.Reason)) continue;
+                        CommandNodeOperationalState state = child.State.WithRoleAndTask(child.State.Role, play.Task);
                         CommandDoctrineOrder order = child.HasOrder ? child.Order.WithTask(play.Task, play.Reason) : child.Order;
                         PosturePipeline.Run(s, t, child.Index, state, child.HasOrder, order, side, sink,
                             IntentPriority.Play, IntentSource.DivisionPlay, PostureIntentPlan.DivisionPlayReason,

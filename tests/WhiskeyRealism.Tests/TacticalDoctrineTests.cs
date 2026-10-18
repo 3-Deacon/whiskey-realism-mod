@@ -35,9 +35,8 @@ internal static class TacticalDoctrineTests
             ("operation director matches normalized committed map objective ids", OperationDirectorMatchesNormalizedCommittedMapObjectiveIds),
             ("operation director prefers exposed enemy line over generic objective chain", OperationDirectorPrefersExposedEnemyLineOverGenericObjectiveChain),
             ("tactical SOP probe forbids major attack", TacticalSopProbeForbidsMajorAttack),
-            ("tactical SOP attack can require support before charge", TacticalSopAttackRequiresSupportBeforeCharge),
+            ("tactical SOP a thin attack is authorised as an attack and not an assault", TacticalSopAttackRequiresSupportBeforeCharge),
             ("doctrine assignment stamps SOP authority", DoctrineAssignmentStampsSopAuthority),
-            ("doctrine assignment waits for massing support", DoctrineAssignmentWaitsForMassingSupport),
             ("doctrine assignment wide formation preserves flank guard and depth slots", DoctrineAssignmentWideFormationPreservesFlankGuardAndDepthSlots),
             ("doctrine assignment unknown roles receive fallback doctrine", DoctrineAssignmentUnknownRolesReceiveFallbackDoctrine),
             ("doctrine fallback ladder maps live orders", DoctrineFallbackLadderMapsLiveOrders),
@@ -286,9 +285,7 @@ internal static class TacticalDoctrineTests
             reserveFraction: 0.2f);
 
         AssertEqual(TacticalSopAuthority.Probe, sop.Authority, "authority");
-        AssertFalse(sop.AllowsMajorAttack, "probe cannot authorize a major attack");
-        AssertTrue(sop.RequiresFallbackIfPressed, "probe should have a breakoff/fallback requirement");
-        AssertTrue(sop.ReacquireSeconds <= 45f, "probe should reacquire quickly");
+        AssertTrue(sop.Authority != TacticalSopAuthority.Attack && sop.Authority != TacticalSopAuthority.Assault, "probe cannot authorize a major attack");
     }
 
     private static void TacticalSopAttackRequiresSupportBeforeCharge()
@@ -307,8 +304,8 @@ internal static class TacticalDoctrineTests
             primary: DoctrineTargetPoint.From(300f, 450f)).WithSop(sop);
 
         AssertEqual(TacticalSopAuthority.Attack, sop.Authority, "authority");
-        AssertTrue(sop.RequiresSupportBeforeMajorAttack, "thin attack should require support");
-        AssertTrue(order.Sop.RequiresSupportBeforeMajorAttack, "order carries the support requirement");
+        AssertEqual("attack-support-required", sop.Reason, "thin attack says it wants support");
+        AssertEqual(TacticalSopAuthority.Attack, order.Sop.Authority, "the order carries the decision");
     }
 
     private static void DoctrineAssignmentStampsSopAuthority()
@@ -332,34 +329,6 @@ internal static class TacticalDoctrineTests
             reserveFraction: 0.2f);
 
         AssertEqual(TacticalSopAuthority.Assault, orders[0].Sop.Authority, "authority");
-        AssertTrue(orders[0].Sop.AllowsMajorAttack, "assault should allow major attack");
-        AssertTrue(orders[0].Sop.ReacquireSeconds <= 30f, "decisive assault should reacquire quickly");
-    }
-
-    private static void DoctrineAssignmentWaitsForMassingSupport()
-    {
-        CommandNodeOperationalState[] nodes =
-        {
-            CommandNodeOperationalState.Create("brigade-1", CommandEchelonKind.BrigadeLike, CommandNodeRole.MainEffort, CommandTaskType.FormUp, 0f, 0f, 0f)
-        };
-        OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Committed, "ridge-a", 900f);
-        BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]
-        {
-            new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 1000f, 0.85f, true, 0.8f, 100f, 250f, 0.2f, 0.2f)
-        });
-
-        CommandDoctrineOrder[] orders = CommandDoctrineAssignment.Build(
-            nodes,
-            operation,
-            picture,
-            ownStrength: 1500f,
-            nowSeconds: 100f,
-            reserveFraction: 0.2f);
-
-        AssertEqual(TacticalSopAuthority.Attack, orders[0].Sop.Authority, "authority");
-        AssertFalse(orders[0].Sop.AllowsMajorAttack, "attack should wait for support");
-        AssertTrue(orders[0].Sop.RequiresSupportBeforeMajorAttack, "support gate");
-        AssertContains(orders[0].Sop.Reason, "massing-support", "reason");
     }
 
     private static void DoctrineAssignmentWideFormationPreservesFlankGuardAndDepthSlots()
@@ -1037,9 +1006,10 @@ internal static class TacticalDoctrineTests
 
     private static void DoctrineAssignmentUnknownRoleHasNoLegalIdle()
     {
+        // A placed node (the zeros are its position): an unplaced one gets no target, whatever its role (DefenderGroundTests).
         CommandNodeOperationalState[] nodes =
         {
-            default(CommandNodeOperationalState)
+            CommandNodeOperationalState.Create("node-unknown", CommandEchelonKind.Unknown, CommandNodeRole.Unknown, CommandTaskType.None, 0f, 0f, 0f)
         };
         OperationRecord operation = new OperationRecord(TacticalOperationShape.SingleMainEffort, TacticalOperationPhase.Forming, "ridge-a", 900f);
         BattlefieldPictureSnapshot picture = new BattlefieldPictureSnapshot(new[]

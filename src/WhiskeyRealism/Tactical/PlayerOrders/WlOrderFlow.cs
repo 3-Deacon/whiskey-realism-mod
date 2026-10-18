@@ -62,6 +62,32 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         Lost,     // vanilla will not carry the move out: its courier is gone, or the entry is gone and the path with it
     }
 
+    // Why a move whose queue entry is gone counts as carried out (WlMoveState.BasisAfterGone), written on the
+    // flow row (`gate`): the unit stands at the target (Arrived), holds a path that ends at it (Path), or
+    // stopped in contact near it (Contact). None: it was not carried out.
+    internal enum MoveBasis
+    {
+        None,
+        Arrived,
+        Path,
+        Contact,
+    }
+
+    // The `gate` field of a flow row.
+    internal static class MoveBasisName
+    {
+        public static string Of(MoveBasis basis)
+        {
+            switch (basis)
+            {
+                case MoveBasis.Arrived: return "arrived";
+                case MoveBasis.Path: return "path";
+                case MoveBasis.Contact: return "contact";
+                default: return string.Empty;
+            }
+        }
+    }
+
     // What vanilla's own order queue says about a unit's move (decompile build 14703111). SetWaypoint with
     // an order delay does not give the unit its path at once: it queues the order on the unit's scene
     // parent (91461-91504) and the path waits for the courier (AddOrderCourierline 125009-125171). A move
@@ -82,11 +108,25 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // is in contact (vanilla's own CheckEnemyContact halts an AI group that meets the enemy, StopRegiment at
     // 117372-117383, and treats `combatstatussubordinates > 0` as a group busy with combat, 3593, 8090: a unit
     // that stopped to fight has done what the move was for), and as lost otherwise.
+    //
+    // Each of the three readings is tied to the TARGET (2026-10-17 smoke, order 6: a fall-back to a point 2 km
+    // to the rear was released because the brigade held a re-laid path and was later in contact, neither
+    // checked against the target). A held path counts when it ENDS at the target (the unit's last set
+    // waypoint, which vanilla stamps on every group move, 92067), a contact halt counts within ContactNearMeters
+    // of it, and standing within ArrivalMeters of it always counts.
     internal static class WlMoveState
     {
         // = OrderArbiter.DedupeMeters: the distance inside which the executor itself counts a unit as already
         // at a target (a waypoint 60 m from where it stands is not re-issued).
         public const float ArrivalMeters = 60f;
+
+        // A contact halt counts as the move carried out only this close to its target: a regiment's sight
+        // (unitprefs maximumlineofsight 200-250 m for the combat arms, docs/vanilla-vision-and-movement.md)
+        // plus the arrival distance. The unit halted where it met the enemy, so the enemy is within sight of
+        // the objective it was sent to; a halt farther off met the enemy somewhere else. Calibration, not a
+        // vanilla constant: smoke 2026-10-17 order 6 halted 2000 m short, a legitimate halt near the target
+        // is within a few hundred metres.
+        public const float ContactNearMeters = 310f;
 
         public static MoveState Classify(bool moveQueued, bool courierLost, bool carriedOutAfterGone)
         {
@@ -94,12 +134,54 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             return carriedOutAfterGone ? MoveState.Executed : MoveState.Lost;
         }
 
-        // The verdict for an entry that is gone: carried out when the unit still holds its path, has arrived
-        // at the target, or stopped in contact; lost otherwise.
-        public static bool CarriedOutAfterGone(bool pathHeld, float distanceToTargetMeters, bool inContact)
+        // The vanilla order types whose caller sets the called unit's waypoint just before the call, so the order says
+        // where the chain is going: the objective take (0) and the objective defend (12) of UpdateMovingTargets (6958-7002: one
+        // waypoint, then 0 for an enemy-held objective and 12 for an own-held one, both move the unit to it), march to the sound of
+        // guns (2, 3759-3766), an assault on an isolated target (3, 8185-8210) and an assault move (4, 3640-3646).
+        // The others describe no move of the called unit: engage (1, 117383) is the halt itself, reserve (11) only shows the
+        // zone (6813-6834), 13-15 are the player's contact state and retreat.
+        public static bool VanillaFollowsAWaypoint(int type)
         {
-            return pathHeld || inContact || distanceToTargetMeters <= ArrivalMeters;
+            return type == 0 || type == 2 || type == 3 || type == 4 || type == 12;
         }
+
+        // Whether a vanilla order is armed with its called unit (WlOrderFlowRuntime.TryPursuit). Type 12 has two callers and only
+        // one sets a waypoint: UpdateMovingTargets (6958-7002) moves the unit to the objective and orders 12 at it, so the order's
+        // point lies within VanillaWaypointSlackMeters of the unit's last waypoint; CheckGlobalAIStrategy (6463) orders 12 at the
+        // closest objective or the parent's centre, with no move, so a marching parent's waypoint is elsewhere and the order
+        // says nothing about where the chain is going. A 12 is armed only in the first shape; 0, 2, 3 and 4 are always the
+        // waypoint callers'. `lastWaypointToOrderMeters` is the distance from the unit's last set waypoint to the order's point.
+        public static bool ArmsVanillaOrder(int type, float lastWaypointToOrderMeters)
+        {
+            if (!VanillaFollowsAWaypoint(type)) return false;
+            return type != 12 || lastWaypointToOrderMeters <= VanillaWaypointSlackMeters;
+        }
+
+        // The unit is on a march: it holds a path, or its subordinate regiments do. A group's own path can be empty while its
+        // regiments walk (smoke14: the brigade read paths 0 on 6 of 18 marching rows). groupsubordinatesmoving is the share of
+        // the group's regiments (types up to 13) that hold a path, recomputed on every group-stat pass (120197-120677), so it
+        // stays set for the whole march; groupsubordinatesmovingnonai counts only regiments this group ordered itself.
+        public static bool IsMoving(int paths, float subordinatesMoving)
+        {
+            return paths > 0 || subordinatesMoving > 0f;
+        }
+
+        // The verdict for an entry that is gone: why the move counts as carried out, or None (lost).
+        // pathEndMeters is the distance from the end of the unit's held path to the target; it is read only
+        // while a path is held.
+        public static MoveBasis BasisAfterGone(bool pathHeld, float pathEndMeters, float distanceToTargetMeters, bool inContact, float slackMeters = 0f)
+        {
+            if (distanceToTargetMeters <= ArrivalMeters + slackMeters) return MoveBasis.Arrived;
+            if (pathHeld && pathEndMeters <= ArrivalMeters + slackMeters) return MoveBasis.Path;
+            if (inContact && distanceToTargetMeters <= ContactNearMeters + slackMeters) return MoveBasis.Contact;
+            return MoveBasis.None;
+        }
+
+        // How far a vanilla caller's waypoint can lie from the point of the order it then gives (WlOrderFlowRuntime.TryPursuit
+        // anchors a vanilla order on the order's position): UpdateMovingTargets moves a screen-stance group to a point 70 m
+        // beyond the objective (6941) and CheckForSimilarPositions moves a waypoint another distancetoenemytocancelinterruption
+        // (150 m, unitprefs 991) off a point another group occupies (8700-8705). The executor's carriers are exact: slack 0.
+        public const float VanillaWaypointSlackMeters = 220f;
 
         // Does a queue entry of the carrier unit carry the order? A move entry of the carrier's ordertype whose
         // creation stamp is not before the carrier's: the entry the dispatch recorded (its stamp only grows,
@@ -120,7 +202,7 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
     // group, or the children a fan-out around the player's command ordered), the one whose entry is carried
     // out last (processing time). The player is told one leg after that entry; the others are carried out
     // earlier or with it. Stamp and OrderType identify that entry (WlMoveState.Carries); X and Z are the
-    // target the unit was given, the arrival test of an entry that is gone (WlMoveState.CarriedOutAfterGone).
+    // target the unit was given, the arrival test of an entry that is gone (WlMoveState.BasisAfterGone).
     internal struct WlMoveCarrier
     {
         public int UnitId;
@@ -128,6 +210,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         public float Stamp;
         public int OrderType;
         public float X, Z;
+        // Added to every distance of the pursuit reading (WlMoveState.BasisAfterGone): the carrier's target is the order's
+        // position, which a vanilla caller's waypoint can be that far from. 0 for an executor carrier.
+        public float SlackMeters;
+
+        // OrderType of a carrier that waits for no queue entry (a vanilla order's called unit): WlMoveState.Carries
+        // matches none, so the unit's path, position and contact decide.
+        public const int NoQueueEntry = -1;
 
         public bool Has => UnitId != 0;
 
@@ -176,8 +265,13 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         bool UnitGone(in CourierEntry e);
         // Where the move of the entry's unit stands in vanilla's order queue; asked only of an entry
         // captured with AwaitsMove.
-        MoveState MoveOf(in CourierEntry e);
+        // `basis` is why an executed move counts as carried out (None otherwise).
+        MoveState MoveOf(in CourierEntry e, out MoveBasis basis);
         bool ReleaseStillDue(in CourierEntry e);
+        // An executor dispatch (DispatchTask != 0): is the ordered group still under the task the order was made
+        // for? `heldAtHours` is when that task has held for the task-hold time (<= now: it has). False when the
+        // group has been given another task since.
+        bool TaskHolds(in CourierEntry e, out double heldAtHours);
         void SetDelivering(bool on);
         void ClearSlot();
         void RestoreSlot(object saved);
@@ -319,12 +413,14 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             switch (reason)
             {
                 case WlCourierQueue.Superseded:
+                case WlCourierQueue.SupersededIntent:
+                case TaskChanged:
                 case WlCourierQueue.Overflow:
                 case "unit-gone":
                 case "cross-scope":
                 case "release-stale":
                 case "relay-took-slot":
-                case "eod-clear":
+                case EodClear:
                 case "command-change":
                 case "battle-end":
                     return true;
@@ -350,6 +446,10 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
 
         public const string MoveInFlight = "move-in-flight";
         public const string MoveLost = "move-lost";
+        // A vanilla order whose called unit no longer pursues the point its caller sent it to.
+        public const string ChainAbandoned = "chain-abandoned";
+        public const string TaskChanged = "task-changed";
+        public const string TaskHold = "task-hold";
 
         public static double DueAt(double issuedAt, double delayHours, bool couriersOn, double deferUntil)
         {
@@ -445,13 +545,24 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             _wasCic = isCic;
         }
 
+        public const string EodClear = "eod-clear";
+
+        // The coordinator saw the battle enter its end-of-day sequence (EndOfDayPhase.Suspended): vanilla clears the
+        // order slot there (47985), so every order still on the way is void. The delivery pass clears the queue too
+        // when it happens to run during the sequence, but vanilla's order pass is not guaranteed to (the 2026-10-17
+        // smoke saw no eod-clear row and an order captured on day one reached the panel after the night).
+        public void ClearForEndOfDay()
+        {
+            if (Queue.Count > 0) Queue.Clear(EodClear);
+        }
+
         // One delivery pass (D8a).
         public void RunPass()
         {
             // The end-of-day cycle clears the order (47985) and nothing is delivered meanwhile.
             if (_host.EodCycle)
             {
-                Queue.Clear("eod-clear");
+                Queue.Clear(EodClear);
                 return;
             }
 
@@ -521,6 +632,8 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             if (Queue.IsSuperseded(in e)) { Queue.Discard(in e, WlCourierQueue.Superseded); return false; }
             if (_host.UnitGone(in e)) { Queue.Discard(in e, "unit-gone"); return false; }
             if (e.AwaitsMove && !ReleaseOnMove(ref e, out requeue)) return requeue;
+            if (e.Pursuit && !StillPursued(ref e)) return false;
+            if (e.DispatchTask != 0 && !TaskStillHolds(ref e, out requeue)) return requeue;
             if (IsCrossScope(_host.SlotType)) { Queue.Discard(in e, "cross-scope"); return false; }
             if (e.Origin == OrderOrigin.Release && (_host.SlotType != 13 || !_host.ReleaseStillDue(in e)))
             {
@@ -595,7 +708,9 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
         private bool ReleaseOnMove(ref CourierEntry e, out bool requeue)
         {
             requeue = false;
-            switch (_host.MoveOf(in e))
+            MoveState state = _host.MoveOf(in e, out MoveBasis basis);
+            e.Gate = basis;
+            switch (state)
             {
                 case MoveState.Lost:
                     Queue.Discard(in e, MoveLost);
@@ -616,6 +731,39 @@ namespace WhiskeyRealism.Tactical.PlayerOrders
             e.AwaitsMove = false;
             e.DueAt = Math.Max(e.DueAt, now + e.LegHours);
             if (e.DueAt <= now) return true;
+            requeue = true;
+            return false;
+        }
+
+        // A vanilla order armed with its called unit (CourierEntry.Pursuit) is shown only if that unit still pursues the point
+        // its caller sent it to when the order is due: it holds a path that ends there, stands there, or halted in contact near it
+        // (WlMoveState.BasisAfterGone). Otherwise the chain abandoned the move (a contact halt far from the point, a retask) and
+        // the order would tell the player of a move nobody is making: chain-abandoned. A queue-only discard: vanilla's own call
+        // has already been made and is not skipped.
+        private bool StillPursued(ref CourierEntry e)
+        {
+            MoveState state = _host.MoveOf(in e, out MoveBasis basis);
+            e.Gate = basis;
+            if (state != MoveState.Lost) return true;
+            Queue.Discard(in e, ChainAbandoned);
+            return false;
+        }
+
+        // An executor dispatch is delivered only while the group is still under the task it was made for, and once that
+        // task has held for the task-hold time (a task that flips every few seconds announces nothing). False when the
+        // entry is finished (the task changed: reported) or waits for the hold (requeue: due when the hold is met).
+        private bool TaskStillHolds(ref CourierEntry e, out bool requeue)
+        {
+            requeue = false;
+            if (!_host.TaskHolds(in e, out double heldAt))
+            {
+                Queue.Discard(in e, TaskChanged);
+                return false;
+            }
+            double now = _host.NowHours;
+            if (heldAt <= now) return true;
+            e.DueAt = Math.Max(e.DueAt, heldAt);
+            _host.Row(in e, "defer", TaskHold);
             requeue = true;
             return false;
         }

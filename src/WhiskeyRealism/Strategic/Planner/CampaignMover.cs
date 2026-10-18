@@ -44,6 +44,10 @@ namespace WhiskeyRealism.Strategic.Planner
     internal sealed class MoverTally
     {
         public int Issued, Confirmed, Failed, Retried, GaveUp, Queued, SkippedPlayer, SkippedBusy, Deferred;
+        // Of Deferred, the main-effort gatherings at a staged start line that lies in enemy-held ground: they wait for a release that is
+        // only rolled once the objective is scouted (smoke 2026-10-17: 22 reviews of deferred=1 with no scout out), as against the
+        // scouted march that waits for the chapter roll. The [CampaignMover] row tells them apart.
+        public int DeferredStaged;
         // The tempo roll of this review, when one was evaluated (a new decision's launch).
         public LaunchVerdict Tempo;
         public bool TempoFirstRow, TempoReleaseRow;
@@ -60,7 +64,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!Any) return "";
             return "[CampaignMover] alliance=" + alliance + " issued=" + Issued + " confirmed=" + Confirmed + " failed=" + Failed + " retried=" + Retried
                 + " gaveUp=" + GaveUp + " queued=" + Queued + " skippedPlayer=" + SkippedPlayer
-                + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred;
+                + " skippedBusy=" + SkippedBusy + " deferred=" + Deferred + " deferredStaged=" + DeferredStaged;
         }
 
         // [CampaignTempo] undispatchable=true, once per decision per entry into the state.
@@ -321,6 +325,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!released && marches)
             {
                 tally.Deferred++;
+                if (a.Role == FormationRole.MainEffort && inputs.Plan.MainStaged) tally.DeferredStaged++;
                 return;
             }
             if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;

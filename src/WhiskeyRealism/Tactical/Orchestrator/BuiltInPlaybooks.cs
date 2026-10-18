@@ -1,7 +1,7 @@
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// Runtime-side seed catalog of all 18 historical + generic playbooks. Mirrors
+    /// Runtime-side seed catalog of all 19 historical + generic playbooks. Mirrors
     /// the test-private SeedCatalog in tests/WhiskeyRealism.Tests/Program.cs so the
     /// runtime never imports test code.
     ///
@@ -31,6 +31,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             c.Register(new CavalryRaidPlaybook());
             c.Register(new MeetingEngagementPlaybook());
             c.Register(new DelayingDefensePlaybook());
+            c.Register(new FocalAssaultPlaybook());
             return c;
         }
     }
