@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace WhiskeyRealism.Tactical.Orchestrator
 {
     /// <summary>
-    /// A direct child keeps its role until the plan changes, <see cref="HoldHours"/> of the doctrine clock have passed, or a crisis forces a change. The
+    /// A direct child keeps its role until the plan changes in a crisis, <see cref="HoldHours"/> of the doctrine clock have passed, or a crisis forces a change. The
     /// allocator is a pure function of bucketed evidence (contact flag, flank exposure, the positional band) that flickers from tick to tick, and only Main
     /// had a hysteresis, so one child went Screen, Main, RefuseRight, Reserve, Screen in seven allocations under one plan (smoke 2026-10-17). A division
     /// that is given a new role is sent somewhere else, often behind it: "walking backwards toward the enemy".
@@ -42,7 +42,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         /// <summary>
         /// The intents the army acts on this allocation: <paramref name="fresh"/> with every role the hold keeps replaced by the committed intent.
-        /// <paramref name="planKey"/> names the plan the allocation was made for (its id, side and main effort band): a different key accepts all of
+        /// <paramref name="planKey"/> names the organisation the allocation was made for (the side, the main effort band and the plans adopted in a crisis): a different key accepts all of
         /// <paramref name="fresh"/>.
         /// </summary>
         public IReadOnlyList<DirectChildIntent> Apply(IReadOnlyList<DirectChildIntent> fresh, int planKey, double nowHours)

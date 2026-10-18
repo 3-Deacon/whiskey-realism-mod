@@ -682,6 +682,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             CommandPhysicalState physical = PostureSense.Physical(rec, t.Moving[i]);
+            // A move that is not Whiskey's own is no proof the group does its task (smoke 2026-10-18: a brigade on FormUp, Screen and Probe tasks walked
+            // 580 m to the vanilla objective, every row "already-correct"). The executor's last move is the group's own; a group that walks because its
+            // parent does, a group in a fight and a group in vanilla's assault are left to what moves them.
+            if (recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentWalks(s, t, i) &&
+                IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical))
+            {
+                physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);
+            }
             TacticalIdleClassification idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
             CommandTaskType emergency = CommandFormationCorrection.TaskForLocalFlankEmergency(state.Task, closeEngaged, flankRisk);
             if (emergency != state.Task)
@@ -937,6 +945,25 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return submitted > worksStance;
         }
 
+        // The group's active move is not the one Whiskey last issued it, and the group is in a state where a stay task is Whiskey's to keep.
+        private static bool IsForeignStayMove(BattleSnapshot s, in UnitRecord rec, bool inFight, CommandTaskType task, in CommandPhysicalState physical)
+        {
+            OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
+            float issuedX = 0f, issuedZ = 0f;
+            double issuedHours = 0.0;
+            bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out issuedHours);
+            return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, hasIssued, rec.LastWaypointX, rec.LastWaypointZ, issuedX, issuedZ);
+        }
+
+        // An ancestor group is itself walking: the group walks because its parent's order re-lays it, and its own task is not what moves it.
+        private static bool ParentWalks(BattleSnapshot s, PostureTick.State t, int i)
+        {
+            int a = s.Own[i].ParentIndex;
+            for (int hops = 0; a >= 0 && a < s.OwnCount && hops < 4; hops++, a = s.Own[a].ParentIndex)
+                if (PostureSense.ActiveMove(s.Own[a], t.Moving[a])) return true;
+            return false;
+        }
+
         // BC14W: one group's turn of the works contest (MoveContest): the memory is asked every tick for a held group, a recon mission group is neither
         // contested nor counted, and the answer is turned into the executor's Stop or Move. Returns the intents submitted.
         private static int WorksContest(BattleSnapshot s, int i, in UnitRecord rec, in CommandDoctrineOrder order, bool hasOrder, bool worksHeld,
@@ -959,6 +986,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 X = rec.X, Z = rec.Z, WaypointX = rec.LastWaypointX, WaypointZ = rec.LastWaypointZ,
                 HasLane = worksLane && order.PrimaryTarget.HasValue, LaneX = order.PrimaryTarget.X, LaneZ = order.PrimaryTarget.Z,
                 Stance = rec.AiStance, Works = army?.Feasibility?.HeldWorks,
+                // A stay task is contested against vanilla's chain move: a form-up and a screen go back to their ledger point, a hold is stopped.
+                StayTask = MoveContest.IsStayTask(task),
+                HasStayPoint = hasOrder && order.PrimaryTarget.HasValue && (task == CommandTaskType.FormUp || task == CommandTaskType.Screen),
+                StayX = order.PrimaryTarget.X, StayZ = order.PrimaryTarget.Z,
                 PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,
             };
             return ContestTurn.Run(in facts, sink);

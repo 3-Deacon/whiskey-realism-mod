@@ -264,7 +264,7 @@ internal static class ReplanThrashWiringTests
     {
         string body = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         FlankResponseTests.AssertPinned(body, "_directChildIntents = _roleHold.Apply(_directChildIntents, RoleHoldPlanKey(), HoursSource());", "the allocation passes through the hold on the doctrine clock");
-        FlankResponseTests.AssertPinned(body, "=> unchecked((((int)_plan.PlanId * 31 + (_plan.Mirrored ? 1 : 0)) * 31 + (int)_plan.Phase) * 31 + _plan.MainEffortSector);", "keyed on plan, side, phase and band");
+        FlankResponseTests.AssertPinned(body, "=> unchecked(((_plan.Mirrored ? 1 : 0) * 31 + _plan.MainEffortSector) * 31 + _roleCrisisEpoch);", "keyed on side, band and the plans adopted in a crisis (not the plan id or the phase: TaskChurn role hold key)");
     }
 
     private static void LedgerHoldsTargets()

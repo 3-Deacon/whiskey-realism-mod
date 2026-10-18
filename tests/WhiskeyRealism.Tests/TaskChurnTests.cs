@@ -5,6 +5,8 @@ using WhiskeyRealism.Tactical;
 using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Operations;
 using WhiskeyRealism.Tactical.Orchestrator;
+using WhiskeyRealism;
+using WhiskeyRealism.Util;
 using static TestHarness;
 
 // Smoke 2026-10-18 (main a6b49fcf, DLL 11c2eae4): the Union's divisions swapped FixEnemy, ReserveWait, AttackObjective, FallBackToLine and FormUp every
@@ -29,6 +31,11 @@ internal static class TaskChurnTests
             ("task churn: an operation on a remembered line keeps its objective and its orders through the gap", OrdersStayThroughTheGap),
             ("task churn: the memory of the enemy line ends with the ledger", TheMemoryEndsWithTheLedger),
             ("task churn: the change row names the director's reason and the forces it weighed", TheChangeRowNamesTheReason),
+            ("task churn: a hold is stopped when vanilla's chain move walks it, a form-up or a screen goes back to its ledger point", AStayTaskIsContested),
+            ("task churn: the stay contest leaves Whiskey's own move, a fight, a non-chain move, a recon group and a group off the chain alone", TheStayContestLeavesWhatIsNotItsOwn),
+            ("task churn: the stay contest answers once per macro cycle and is off with the objective doctrine", TheStayContestIsBounded),
+            ("task churn: a move is foreign when it is not the executor's last move for a group that is not in a fight", ForeignMoveTruthTable),
+            ("task churn: the posture pipeline stops reading a foreign move as already correct", ThePipelineReadsForeignMoves),
             ("task churn: a group that saw the enemy within the horizon is still in contact", AGroupKeepsItsContact),
             ("task churn: the reconnaissance rule reads the group's remembered contact, not the tick's sight", ReconReadsRememberedContact),
         });
@@ -328,5 +335,167 @@ internal static class TaskChurnTests
         runtime.SetRuntimeClock(172f);
         runtime.Replace(TacticalCommanderMode.Active, new[] { Map("Island_Ford") }, Intent, force, personality);
         AssertEqual(1, runtime.CurrentObjectives.Count, "and the line it knew before it stopped does not come back with it");
+    }
+
+    // ---- the stay contest (smoke 2026-10-18: a brigade on FormUp, Screen and Probe tasks walked vanilla's march to Kernstown) ----
+
+    private sealed class Sink : IIntentSink
+    {
+        public readonly List<BattleOrderIntent> Intents = new List<BattleOrderIntent>();
+        public void Submit(in BattleOrderIntent intent) => Intents.Add(intent);
+    }
+
+    // A due chain's own group (61) at (90,90) whose head objective stands at (500,500), walking vanilla's move to (505,495); Whiskey issued it nothing.
+    private static ContestTurnFacts StayFacts(CommandTaskType task, long tick, double now, bool stayPoint = false)
+    {
+        return new ContestTurnFacts
+        {
+            Alliance = 0, GroupId = 61, Tick = tick, Task = task, Priority = IntentPriority.Executor, Source = IntentSource.PostureExecutor,
+            HasPath = true, HasLastIssued = false, NowHours = now, PlanStartHours = now - 2.0,
+            X = 90f, Z = 90f, WaypointX = 505f, WaypointZ = 495f,
+            StayTask = MoveContest.IsStayTask(task), HasStayPoint = stayPoint, StayX = 300f, StayZ = 300f,
+        };
+    }
+
+    private static void WithChain(Action body)
+    {
+        bool before = Plugin.ObjectiveDoctrine;
+        DueChainTable due = DueChainTable.ForAlliance(0);
+        try
+        {
+            BattleScope.ResetAll();
+            Plugin.ObjectiveDoctrine = true;
+            due.Clear();
+            due.Add(61, 500f, 500f);
+            body();
+        }
+        finally
+        {
+            Plugin.ObjectiveDoctrine = before;
+            due.Clear();
+            BattleScope.ResetAll();
+        }
+    }
+
+    private static void AStayTaskIsContested()
+    {
+        WithChain(() =>
+        {
+            var hold = new Sink();
+            ContestTurnFacts holdFacts = StayFacts(CommandTaskType.HoldObjective, 1, 10.0);
+            AssertEqual(1, ContestTurn.Run(in holdFacts, hold), "a hold walked by vanilla's chain move is contested, though Whiskey issued it no move");
+            AssertEqual(OrderChannel.Stop, hold.Intents[0].Channel, "with a Stop where it stands");
+            AssertTrue((hold.Intents[0].Flags & IntentFlags.Contest) != 0, "flagged Contest");
+
+            var screen = new Sink();
+            ContestTurnFacts screenFacts = StayFacts(CommandTaskType.Screen, 2, 11.0, stayPoint: true);
+            AssertEqual(1, ContestTurn.Run(in screenFacts, screen), "a screen is contested");
+            AssertEqual(OrderChannel.Move, screen.Intents[0].Channel, "with a move");
+            AssertTrue(screen.Intents[0].TargetX == 300f && screen.Intents[0].TargetZ == 300f, "back to its ledger point");
+            AssertEqual(CommandTaskType.HoldObjective, screen.Intents[0].Task, "as the contest's own halt");
+
+            var formUp = new Sink();
+            ContestTurnFacts near = StayFacts(CommandTaskType.FormUp, 3, 12.0, stayPoint: true);
+            near.StayX = 100f; near.StayZ = 100f;
+            AssertEqual(1, ContestTurn.Run(in near, formUp), "a form-up is contested");
+            AssertEqual(OrderChannel.Stop, formUp.Intents[0].Channel, "and stopped when it stands at its point (the executor drops a Move onto it)");
+        });
+    }
+
+    private static void TheStayContestLeavesWhatIsNotItsOwn()
+    {
+        WithChain(() =>
+        {
+            long tick = 0;
+            double now = 10.0;
+            int Answered(ContestTurnFacts f)
+            {
+                var sink = new Sink();
+                f.Tick = ++tick;
+                f.NowHours = now += 1.0;
+                return ContestTurn.Run(in f, sink);
+            }
+            ContestTurnFacts own = StayFacts(CommandTaskType.Screen, 0, 0.0, stayPoint: true);
+            own.HasLastIssued = true; own.IssuedX = 505f; own.IssuedZ = 495f; own.IssuedHours = 9.0;
+            AssertEqual(0, Answered(own), "the move Whiskey last issued is Whiskey's own, even when it ends at the head");
+
+            ContestTurnFacts fight = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
+            fight.CloseEngaged = true;
+            AssertEqual(0, Answered(fight), "a group in a fight is left to vanilla's reactions");
+
+            ContestTurnFacts elsewhere = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
+            elsewhere.WaypointX = 900f; elsewhere.WaypointZ = 900f;
+            AssertEqual(0, Answered(elsewhere), "a move that does not end at the chain's head is not the chain's");
+
+            ContestTurnFacts recon = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
+            recon.Recon = true;
+            AssertEqual(0, Answered(recon), "a recon group is not contested");
+
+            ContestTurnFacts stranger = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
+            stranger.GroupId = 77;
+            AssertEqual(0, Answered(stranger), "a group that is not a due chain's own is not contested");
+
+            ContestTurnFacts idle = StayFacts(CommandTaskType.HoldObjective, 0, 0.0);
+            idle.HasPath = false;
+            AssertEqual(0, Answered(idle), "a group that does not walk has nothing to contest");
+
+            ContestTurnFacts attack = StayFacts(CommandTaskType.AttackObjective, 0, 0.0);
+            AssertEqual(0, Answered(attack), "an attack with no Whiskey move recorded is not a stay (the BC14O re-issue needs the move it re-issues)");
+        });
+    }
+
+    private static void TheStayContestIsBounded()
+    {
+        WithChain(() =>
+        {
+            var sink = new Sink();
+            ContestTurnFacts first = StayFacts(CommandTaskType.HoldObjective, 1, 10.0);
+            AssertEqual(1, ContestTurn.Run(in first, sink), "the first count contests");
+            ContestTurnFacts soon = StayFacts(CommandTaskType.HoldObjective, 2, 10.0 + MoveContest.ReissueMinHours * 0.5);
+            AssertEqual(0, ContestTurn.Run(in soon, sink), "not again inside the macro cycle");
+            ContestTurnFacts later = StayFacts(CommandTaskType.HoldObjective, 3, 10.0 + MoveContest.ReissueMinHours + 0.001);
+            AssertEqual(1, ContestTurn.Run(in later, sink), "and again once it has passed, while vanilla's move is still being walked");
+            Plugin.ObjectiveDoctrine = false;
+            ContestTurnFacts off = StayFacts(CommandTaskType.HoldObjective, 4, 11.0);
+            AssertEqual(0, ContestTurn.Run(in off, sink), "with the objective doctrine off vanilla's chain is left alone");
+            AssertEqual(2, MoveContestState.ForAlliance(0).VanillaChainContests, "the contests are counted as moves the executor did not issue");
+        });
+    }
+
+    private static void ForeignMoveTruthTable()
+    {
+        const CommandTaskType Screen = CommandTaskType.Screen;
+        bool Foreign(bool active = true, bool fight = false, int stance = 3, CommandTaskType task = Screen, bool issued = true, float wx = 505f, float ix = 100f)
+            => MoveContest.IsForeignStayMove(active, fight, stance, task, issued, wx, 495f, ix, 495f);
+        AssertTrue(Foreign(), "a walking screen whose waypoint is not the executor's last move");
+        AssertFalse(Foreign(ix: 505f), "the executor's last move is the group's own");
+        AssertFalse(Foreign(ix: 530f), "within the contest's tolerance of it too");
+        AssertTrue(Foreign(issued: false), "a group Whiskey never moved walks someone else's move");
+        AssertFalse(Foreign(active: false), "a group that does not walk has no move to read");
+        AssertFalse(Foreign(fight: true), "a group in a fight is left to what moves it");
+        AssertFalse(Foreign(stance: MoveContest.AssaultStanceOf), "and a group in vanilla's assault stance");
+        AssertFalse(Foreign(task: CommandTaskType.AttackObjective), "an attack is not a stay task");
+        AssertTrue(Foreign(task: CommandTaskType.HoldObjective), "a hold is");
+        AssertTrue(Foreign(task: CommandTaskType.FormUp), "a form-up is");
+        AssertFalse(MoveContest.IsStayTask(CommandTaskType.FixEnemy) || MoveContest.IsStayTask(CommandTaskType.Probe) || MoveContest.IsStayTask(CommandTaskType.FallBackToLine),
+            "a fix, a probe and a fall back go somewhere");
+    }
+
+    private static void ThePipelineReadsForeignMoves()
+    {
+        string text = FlankResponseTests.SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
+        string run = FlankResponseTests.Between(text, "internal static bool Run(", "// #61 CanBypassStaleQueuedOrder");
+        FlankResponseTests.AssertPinned(run, "if (recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentWalks(s, t, i) && IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical))",
+            "a foreign move of a stay task, behind the BC14O flag, not a parent's march");
+        FlankResponseTests.AssertPinned(run, "physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);",
+            "is no active move for the posture decision");
+        AssertTrue(run.IndexOf("IsForeignStayMove(s, rec", StringComparison.Ordinal) < run.IndexOf("TacticalIdleClassification idle", StringComparison.Ordinal),
+            "before the idle classification and the eligibility read the move");
+        FlankResponseTests.AssertPinned(text, "bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out issuedHours);",
+            "the executor's last outcome for the group is what the move is compared with");
+        FlankResponseTests.AssertPinned(text, "if (PostureSense.ActiveMove(s.Own[a], t.Moving[a])) return true;", "a group that walks because its parent does is the parent's");
+        FlankResponseTests.AssertPinned(text, "StayTask = MoveContest.IsStayTask(task),", "the contest turn is told the task keeps the group where it is");
+        FlankResponseTests.AssertPinned(text, "HasStayPoint = hasOrder && order.PrimaryTarget.HasValue && (task == CommandTaskType.FormUp || task == CommandTaskType.Screen),",
+            "a form-up and a screen carry their ledger point, a hold none");
     }
 }
