@@ -66,6 +66,8 @@ namespace WhiskeyRealism.Tactical.Battle
         MissionEnded = 4,
         ProbeEnded = 8,
         ProbeHeld = 16,
+        /// <summary>A crossing look was requested and no mission started; <see cref="ReconTickResult.LookIdleReason"/> names why.</summary>
+        LookIdle = 32,
     }
 
     public struct ReconTickResult
@@ -73,6 +75,8 @@ namespace WhiskeyRealism.Tactical.Battle
         public ReconEvents Events;
         public ReconTargetKind StartedKind;
         public string EndReason; // static literal
+        /// <summary>With <see cref="ReconEvents.LookIdle"/>: the first thing in the way of the requested look (a static literal).</summary>
+        public string LookIdleReason;
         public int Intents;
     }
 
@@ -139,6 +143,11 @@ namespace WhiskeyRealism.Tactical.Battle
         // direction to look in while the snapshot front axis has no target yet.
         public bool HasObjective;
         public float ObjectiveX, ObjectiveZ;
+        /// <summary>
+        /// BC14W: the side's held enemy works (the feasibility ledger's picture), null with the works doctrine off or no works seen. A look point
+        /// on them or in their band is refused (<see cref="BattleRecon.LookPoint"/>), so no probe is nominated and no Scout looks into the works.
+        /// </summary>
+        public IWorksQuery Works;
         public bool[] AiPool = new bool[BattleSnapshot.InitialCapacity];
         public bool[] PostureMoved = new bool[BattleSnapshot.InitialCapacity];
         // The posture pipeline's task for the group this tick (PostureTick GroupPosture
@@ -171,6 +180,7 @@ namespace WhiskeyRealism.Tactical.Battle
             Array.Clear(PostureTask, 0, ownCount);
             EntryCount = 0;
             LookCount = 0;
+            Works = null;
             HasStaleBand = false;
             StaleBandRecency = 1f;
         }
@@ -658,8 +668,9 @@ namespace WhiskeyRealism.Tactical.Battle
         private static void TryStartMission(BattleSnapshot s, in ReconSettings st, ReconPicture p, ReconMemory m, IIntentSink sink,
             double now, ref ReconTickResult r)
         {
-            if ((r.Events & ReconEvents.MissionEnded) != 0 || !m.StartBudgetLeft(now)) return;
-            if (!CollectScouts(s, st, p, m)) return;
+            if ((r.Events & ReconEvents.MissionEnded) != 0) return;
+            if (!m.StartBudgetLeft(now)) { NoteLookIdle(p, ref r, "start-budget"); return; }
+            if (!CollectScouts(s, st, p, m)) { NoteLookIdle(p, ref r, "no-scout"); return; }
             if (!OwnLine(s, p.FrameHeading, out float centroidX, out float centroidZ, out float frameDepth, out float axisDepth)) return;
             CollectVisible(s, m);
 
@@ -706,6 +717,7 @@ namespace WhiskeyRealism.Tactical.Battle
                     scout = c; kind = ReconTargetKind.Crossing;
                     lookX = p.LookX(best); lookZ = p.LookZ(best); standX = sx; standZ = sz;
                 }
+                else NoteLookIdle(p, ref r, n == 0 ? "look-recent" : "no-stand-off");
             }
 
             // 4. Before any contact, below the action gate: straight ahead (along the
@@ -755,6 +767,14 @@ namespace WhiskeyRealism.Tactical.Battle
             r.Intents++;
             r.Events |= ReconEvents.MissionStarted;
             r.StartedKind = kind;
+        }
+
+        // A requested look that does not start a mission says why, once per tick (the first reason wins: the later ones are only reached past it).
+        private static void NoteLookIdle(ReconPicture p, ref ReconTickResult r, string reason)
+        {
+            if (p.LookCount <= 0 || r.LookIdleReason != null) return;
+            r.LookIdleReason = reason;
+            r.Events |= ReconEvents.LookIdle;
         }
 
         // This tick's scout candidates, ascending; false when there is none.
@@ -1105,6 +1125,8 @@ namespace WhiskeyRealism.Tactical.Battle
             x = rec.X + dx * advance;
             z = rec.Z + dz * advance;
             if (!PostureSense.IsMoveAway(rec, x, z)) return false;
+            // BC14W: a look never points into held works or the band in front of them (a probe nominated there would walk the group in).
+            if (p.Works != null && (p.Works.OnHeldWorks(x, z) || p.Works.InWorksBand(x, z))) return false;
             float strength = Math.Max(1f, Math.Max(rec.Strength, rec.GroupStrengthAiGroup));
             return StandPointSafe(s, rec.X, rec.Z, x, z, strength, st);
         }

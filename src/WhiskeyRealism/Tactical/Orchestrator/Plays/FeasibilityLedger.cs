@@ -1,4 +1,5 @@
 using System;
+using WhiskeyRealism.Tactical.Battle;
 using System.Collections.Generic;
 
 namespace WhiskeyRealism.Tactical.Orchestrator.Plays
@@ -15,6 +16,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// <summary><see cref="ManeuverFeasibility.MemberEnvelops"/>, <see cref="ManeuverFeasibility.MemberFix"/> or <see cref="ManeuverFeasibility.MemberOther"/>.</summary>
         public byte Kind;
         public bool InContact;
+        /// <summary>The member stands in a Reserve or ReserveLine rect (BC14O leaves it out of the objective table's main body).</summary>
+        public bool Reserve;
         public float TargetX, TargetZ;
         public float CourierHours, MarchHours, StrikeHours, DesiredStrikeHours, ReleaseHours;
         /// <summary>A release is published for the member (a fixing member in contact has none).</summary>
@@ -133,6 +136,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             SelectedMirrored = mirrored;
             HasSelection = plan != BattlePlanId.Unknown;
             _childFrontCount = HasSelection ? BuildChildTable(_front, _childFront) : 0;
+            RefreshWorks(_worksWorld);
             BeginMonitoring();
         }
 
@@ -152,7 +156,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             return false;
         }
 
-        /// <summary>The published candidate at <paramref name="rank"/> in the evaluation's candidate order (the catalog's score order).</summary>
+        /// <summary>The published candidate at <paramref name="rank"/> in the evaluation's candidate order: the catalog's score order, FocalAssault last (it is judged against the turns).</summary>
         public bool TryGetAt(int rank, out CandidateResult result)
         {
             if (rank >= 0 && rank < _front.ResultCount)
@@ -288,6 +292,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         internal void BeginBack()
         {
             _back.Clear();
+            ClearObjectivesBack();
+            ClearStationBack();
             _threatBackCount = 0;
             _threatBackChildren = 0;
             _lookBackCount = 0;
@@ -359,6 +365,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             _childFront = _childBack;
             _childBack = tmp;
             _childFrontCount = BuildChildTable(_front, _childFront);
+            PublishFocal();
+            PublishStation();
+            PublishObjectives();
+            RefreshWorks(_worksWorld);
             CrossingThreat[] swapThreats = _threatFront;
             _threatFront = _threatBack;
             _threatBack = swapThreats;

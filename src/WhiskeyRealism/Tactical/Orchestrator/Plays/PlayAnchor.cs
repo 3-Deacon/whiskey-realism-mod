@@ -44,6 +44,54 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             z = armyZ + (axis.IsValid ? axis.ForwardZ : 1f) * engagement;
         }
 
+        /// <summary>
+        /// The point a play is projected toward. Today every play faces the enemy anchor; BC14W's FocalAssault faces the focal point of the works it
+        /// assaults. The executor's zone assignment and the feasibility evaluation's layout both ask this one function.
+        /// </summary>
+        public static void PlayTarget(BattlePlanId plan, bool hasFocal, float focalX, float focalZ, float enemyX, float enemyZ, out float x, out float z)
+        {
+            bool focal = plan == BattlePlanId.FocalAssault && hasFocal;
+            x = focal ? focalX : enemyX;
+            z = focal ? focalZ : enemyZ;
+        }
+
+        /// <summary>
+        /// The frame a play is projected in: the point it faces (<see cref="PlayTarget"/>) and the frontage of the own line across the direction to it.
+        /// The executor's zone assignment and the feasibility evaluation's layout both take their frame from here, so the rects they project are one.
+        /// </summary>
+        public static void PlayFrame(BattlePlanId plan, bool hasFocal, float focalX, float focalZ, float enemyX, float enemyZ, float armyX, float armyZ,
+            IReadOnlyList<float> ownXs, IReadOnlyList<float> ownZs, out float targetX, out float targetZ, out float frontage)
+        {
+            PlayTarget(plan, hasFocal, focalX, focalZ, enemyX, enemyZ, out targetX, out targetZ);
+            float dx = targetX - armyX, dz = targetZ - armyZ;
+            float dist = (float)System.Math.Sqrt(dx * dx + dz * dz);
+            float forwardX = dist > 0.001f ? dx / dist : 0f;
+            float forwardZ = dist > 0.001f ? dz / dist : 1f;
+            frontage = PlayProjection.EstimateFrontage(ownXs, ownZs, forwardX, forwardZ);
+        }
+
+        /// <summary>
+        /// BC14W (requirement-focal-execution, "Never the player's column"): whether any unit under the direct child at <paramref name="childIndex"/>
+        /// carries the PlayerOwned flag, read from the snapshot's parent map (a unit at zero strength counts). The one source the executor's
+        /// <see cref="CollectOwn"/> and the evaluation's per-child table both fill <see cref="CorpsPosition.ContainsPlayerOwned"/> from.
+        /// </summary>
+        public static bool ContainsPlayerOwned(IBattleUnitView s, int childIndex)
+        {
+            if (s == null || childIndex < 0 || childIndex >= s.OwnCount) return false;
+            UnitRecord[] own = s.Own;
+            for (int i = 0; i < s.OwnCount; i++)
+            {
+                if ((own[i].Flags & UnitFlags.PlayerOwned) == 0) continue;
+                int cur = i;
+                for (int steps = 0; cur >= 0 && cur < s.OwnCount && steps < s.OwnCount; steps++)
+                {
+                    if (cur == childIndex) return true;
+                    cur = own[cur].ParentIndex;
+                }
+            }
+            return false;
+        }
+
         private static bool TryVisibleEnemyCentroid(IBattleUnitView s, out float x, out float z)
         {
             x = 0f;
@@ -87,7 +135,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 zs.Add(pz);
                 if (own[i].UnitTyp < commandMin) continue;
                 string childId = "child-" + own[i].InstanceId;
-                if (directChildIds.Contains(childId)) corps.Add(new CorpsPosition(childId, px, pz));
+                if (directChildIds.Contains(childId)) corps.Add(new CorpsPosition(childId, px, pz, ContainsPlayerOwned(s, i)));
             }
             return corps.Count;
         }

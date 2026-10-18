@@ -129,8 +129,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             bool hasCrestLine = false,
             Plays.IFeasibilityLookup feasibility = null,
             BattlePlanId hysteresisPlan = BattlePlanId.Unknown,
-            float hysteresisMargin = 0f)
+            float hysteresisMargin = 0f,
+            int focalSector = -1,
+            bool hasFocalPoint = false)
         {
+            FocalSector = focalSector;
+            HasFocalPoint = hasFocalPoint || (feasibility != null && feasibility.TryFocalPoint(out _));
             HysteresisPlan = hysteresisPlan;
             HysteresisMargin = hysteresisMargin;
             HasCrestLine = hasCrestLine;
@@ -215,6 +219,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// </summary>
         public BattlePlanId HysteresisPlan { get; }
         public float HysteresisMargin { get; }
+
+        /// <summary>
+        /// BC14W: the front-axis band of the ledger's focal point, or -1 with none. A FocalAssault plan's main effort is the focal point's band
+        /// (the shipped odds-based main-effort shift never moves it).
+        /// </summary>
+        public int FocalSector { get; }
+
+        /// <summary>
+        /// BC14W: the side's last published evaluation found a focal point in enemy works (the orchestrator sets it from the ledger even for the
+        /// candidate listing, which scores without the ledger). FocalAssault is offered only when it is set.
+        /// </summary>
+        public bool HasFocalPoint { get; }
 
         /// <summary>
         /// Commander's alliance (0=Union, 1=CSA in HistoricalFigureRegistry

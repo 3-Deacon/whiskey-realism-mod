@@ -10,12 +10,14 @@ namespace WhiskeyRealism.Tactical
             bool denialEnabled,
             bool orchestratorArmyOn,
             DoctrineConsumerAction doctrineAction,
-            bool legacyReactionDeniesCharge)
+            bool legacyReactionDeniesCharge,
+            bool fixEnemyTask = false)
         {
             DenialEnabled = denialEnabled;
             OrchestratorArmyOn = orchestratorArmyOn;
             DoctrineAction = doctrineAction;
             LegacyReactionDeniesCharge = legacyReactionDeniesCharge;
+            FixEnemyTask = fixEnemyTask;
         }
 
         // Enable Tactical Charge Denial.
@@ -28,6 +30,9 @@ namespace WhiskeyRealism.Tactical
         // The legacy B6c local-reaction producer marked the group DenyCharge
         // (and its producer flags are on).
         public bool LegacyReactionDeniesCharge { get; }
+        // The doctrine order's task is FixEnemy. Unit churn: a fixing force pins the enemy; the task maps to the attack stance (3) and never to the
+        // assault (4), which vanilla's own strength test escalates a strong line group to (AdjustGroupAIStance 4240).
+        public bool FixEnemyTask { get; }
     }
 
     public readonly struct ChargeDenialDecision
@@ -68,7 +73,11 @@ namespace WhiskeyRealism.Tactical
     // (reserve held, fallback to line) demotes to its own defend stance (2),
     // which also ends cavalry charge eligibility and the cover-skipping
     // assault approach. Doctrine Allow (attack) agrees with the escalation and
-    // keeps it, as TacticalStanceOwnership's assault yield does. The legacy
+    // keeps it, as TacticalStanceOwnership's assault yield does. A FixEnemy task
+    // (no doctrine opinion on its stance) is taken back to the stance it maps to,
+    // attack (3): a fixing force pins the enemy and does not close (unit churn,
+    // 2026-10-17: a halted fixing brigade at assault with nine thousand enemy
+    // near). The legacy
     // local-reaction DenyCharge (only produced with the orchestrator army off)
     // keeps its historical demotion to attack (3).
     public static class TacticalChargeDenial
@@ -84,6 +93,8 @@ namespace WhiskeyRealism.Tactical
                 return new ChargeDenialDecision(true, DoctrineDemoteStance, "charge-demote-doctrine");
             if (input.DoctrineAction == DoctrineConsumerAction.Allow)
                 return Preserve("doctrine-attack-agrees");
+            if (input.FixEnemyTask)
+                return new ChargeDenialDecision(true, TacticalCommandTaskToStanceMapper.Map(CommandTaskType.FixEnemy), "charge-demote-fix");
             if (!input.OrchestratorArmyOn && input.LegacyReactionDeniesCharge)
                 return new ChargeDenialDecision(true, LegacyDemoteStance, "charge-demote");
             return Preserve("vanilla-charge-preserved");
@@ -102,7 +113,7 @@ namespace WhiskeyRealism.Tactical
         internal static bool TryDemotionIntent(in UnitRecord group, in TacticalResolvedGroupDecision resolved, out BattleOrderIntent intent)
         {
             intent = default(BattleOrderIntent);
-            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(group.UnitTyp)) return false;
+            if ((group.Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsChargeDemotion(group.UnitTyp)) return false;
             if ((group.Flags & UnitFlags.PlayerOwned) != 0) return false;
             if (group.AiStanceOrdered != TacticalCommandTaskToStanceMapper.StanceAssault) return false;
             if (resolved.ChargeAction != ChargeOverrideAction.DemoteToHold) return false;

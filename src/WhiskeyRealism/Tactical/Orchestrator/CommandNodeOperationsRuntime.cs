@@ -21,7 +21,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             IReadOnlyList<CommandNodeIntent> intents,
             OperationRecord operation,
             IReadOnlyList<ObjectiveRecord> objectives,
-            BattleStance stance)
+            BattleStance stance,
+            ICommandGround ground = null)
         {
             if (intents == null || intents.Count == 0) return Array.Empty<CommandNodeOperationalState>();
 
@@ -31,9 +32,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             for (int i = 0; i < intents.Count; i++)
             {
                 var intent = intents[i];
-                var role = MapRole(intent.Role);
+                var role = MapRole(intent.Role, stance);
+                // A Defender's label is a label: its task is planned from the role the allocator meant (as before the label changed) and then held to
+                // Hold by the stance guard below, so relabelling Main, SupportMain and Fix as Defender moves no Defender.
                 var task = CommandNodeTaskPlanner.PlanTask(
-                    role,
+                    stance == BattleStance.Defender ? PlanningRole(intent.Role) : role,
                     operation.Shape,
                     contact,
                     atObjective);
@@ -49,6 +52,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     role,
                     task,
                     CommandTaskState.Planning);
+                // Smoke 2026-10-17: a state built from the intent alone has no position, and every node was planned from the map origin. The
+                // ground places it where the node stands; a node the ground does not know stays unplaced and is planned nowhere.
+                if (ground != null && ground.TryPlace(intent.NodeId, out float x, out float z, out float facing))
+                    states[i] = states[i].WithPosition(x, z, facing);
             }
 
             return states;
@@ -104,16 +111,37 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return objectives[0];
         }
 
-        private static CommandNodeRole MapRole(DirectChildRole role)
+        // The role the node task planner reads for a Defender's child: the pre-stance mapping (Main, SupportMain and Fix as the attack side's roles, a refused
+        // flank as Defender).
+        private static CommandNodeRole PlanningRole(DirectChildRole role)
         {
             switch (role)
             {
+                case DirectChildRole.Main: return CommandNodeRole.MainEffort;
+                case DirectChildRole.SupportMain: return CommandNodeRole.SupportingAttack;
+                case DirectChildRole.Fix: return CommandNodeRole.FixingForce;
+                default: return MapRole(role, BattleStance.Defender);
+            }
+        }
+
+        /// <summary>
+        /// The node role label for an allocated direct-child role on this side of the field. A Defender holds: its Main, SupportMain and Fix children are
+        /// Defender nodes, never MainEffort, SupportingAttack or FixingForce (smoke 2026-10-17: a CSA brigade labelled SupportingAttack; the task was already
+        /// held to Hold by <see cref="TacticalDecisionDoctrine.TaskForStance"/>, the label was not). BC13's Counterstroke is the one exception and does not come
+        /// through here: ExploitLifecycle writes its own nodes. A side that is not defending guards a refused flank as a flank guard (FlankMarch, whose
+        /// task is GuardFlank) and is never given the Defender role (smoke: Union nodes labelled Defender).
+        /// </summary>
+        internal static CommandNodeRole MapRole(DirectChildRole role, BattleStance stance)
+        {
+            bool defending = stance == BattleStance.Defender;
+            switch (role)
+            {
                 case DirectChildRole.Main:
-                    return CommandNodeRole.MainEffort;
+                    return defending ? CommandNodeRole.Defender : CommandNodeRole.MainEffort;
                 case DirectChildRole.SupportMain:
-                    return CommandNodeRole.SupportingAttack;
+                    return defending ? CommandNodeRole.Defender : CommandNodeRole.SupportingAttack;
                 case DirectChildRole.Fix:
-                    return CommandNodeRole.FixingForce;
+                    return defending ? CommandNodeRole.Defender : CommandNodeRole.FixingForce;
                 case DirectChildRole.Screen:
                     return CommandNodeRole.ScreeningForce;
                 case DirectChildRole.Reserve:
@@ -122,7 +150,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     return CommandNodeRole.FallbackGuard;
                 case DirectChildRole.RefuseLeft:
                 case DirectChildRole.RefuseRight:
-                    return CommandNodeRole.Defender;
+                    return defending ? CommandNodeRole.Defender : CommandNodeRole.FlankMarch;
                 case DirectChildRole.Unknown:
                 default:
                     return CommandNodeRole.Unknown;

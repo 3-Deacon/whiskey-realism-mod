@@ -16,9 +16,13 @@ namespace WhiskeyRealism.Tactical.Operations
             float reserveFraction = 0f,
             BattleStance stance = BattleStance.Meeting,
             ManeuverNodeTable maneuvers = null,
-            bool reverseSlope = false)
+            bool reverseSlope = false,
+            ICrossingPicture crossings = null,
+            int homeBank = -1,
+            DoctrineTargetHold targetHold = null)
         {
             if (nodes == null || nodes.Length == 0) return Array.Empty<CommandDoctrineOrder>();
+            targetHold?.BeginBuild();
 
             bool objectiveMatched;
             BattlefieldObjectiveEstimate objective = ResolveObjective(
@@ -27,22 +31,14 @@ namespace WhiskeyRealism.Tactical.Operations
                 out objectiveMatched);
             float odds = ResolveOdds(ownStrength, objective.EnemyStrength);
             TacticalBattlefrontSnapshot battlefront = TacticalBattlefrontGeometry.Build(nodes, objective);
-            TacticalMassingDecision massing = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
-                operation.Phase,
-                CountRole(nodes, CommandNodeRole.MainEffort),
-                CountRole(nodes, CommandNodeRole.SupportingAttack),
-                CountRole(nodes, CommandNodeRole.Reserve),
-                artilleryReady: true,
-                objectiveExposed: objective.MainLineExposed,
-                objectiveConfidence01: objective.Confidence01,
-                ownStrength: ownStrength,
-                enemyStrength: objective.EnemyStrength,
-                reserveFraction: reserveFraction));
             var orders = new List<CommandDoctrineOrder>(nodes.Length);
             // BC12: the line is planned once; an anchored end keeps the line task instead of guarding a flank.
             TacticalDefensiveLineAnchor anchor = objectiveMatched
                 ? TacticalDefensiveLineAnchorPlanner.Plan(objective, battlefront, nodes.Length, TerrainPicture.CurrentForPlanning(), reverseSlope)
                 : TacticalDefensiveLineAnchor.None("battle-line-no-objective");
+            // A Defender whose objective is the enemy line stands on its own front, never on a line laid relative to the enemy's (smoke 2026-10-17).
+            if (stance == BattleStance.Defender && objectiveMatched && objective.Type == TacticalObjectiveType.EnemyLine)
+                anchor = TacticalDefensiveLineAnchorPlanner.PlanOwnFront(objective, nodes, battlefront);
 
             for (int i = 0; i < nodes.Length; i++)
             {
@@ -67,6 +63,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     battlefront,
                     nodes.Length,
                     anchor);
+                // The points stand while the line they were planned on has not really moved (DoctrineTargetHold).
+                if (targetHold != null) linePlan = targetHold.Apply(node.NodeId, task, objective.ObjectiveId, linePlan);
                 TacticalSopDecision sop = TacticalSopDoctrine.Resolve(
                     node.Role,
                     task,
@@ -74,16 +72,22 @@ namespace WhiskeyRealism.Tactical.Operations
                     objective,
                     ownStrength,
                     reserveFraction);
-                sop = ApplyOperationalGates(sop, task, massing, battlefront);
 
+                // A position the ledger computes stays on a bank. A post (primary, support) keeps the home bank for a Defender (fixed for the
+                // battle, HomeBank) and the bank the node stands on for the rest, so an Attacker's bridgehead post stays where the plan put it; a
+                // task that goes to the enemy is the executor's crossing gate's, not the bank rule's. A fall back, for every stance, is the target as
+                // it would be without the clamp unless it lies off the home bank, and is never moved forward by the clamp (KeepFallBack). A
+                // maneuver's target replaces the primary below, after this.
+                bool keepBank = crossings != null && KeepsItsBank(task, stance);
+                int postBank = stance == BattleStance.Defender ? homeBank : -1;
                 CommandDoctrineOrder order = CommandDoctrineOrder.Create(
                     node.NodeId,
                     node.Role,
                     task,
                     objective.ObjectiveId,
-                    linePlan.PrimaryTarget,
-                    linePlan.SupportTarget,
-                    linePlan.FallbackTarget,
+                    keepBank ? KeepBank(crossings, postBank, nodes, node, linePlan.PrimaryTarget) : linePlan.PrimaryTarget,
+                    keepBank ? KeepBank(crossings, postBank, nodes, node, linePlan.SupportTarget) : linePlan.SupportTarget,
+                    crossings != null ? OwnBank.KeepFallBack(crossings, homeBank, nodes, node, linePlan.FallbackTarget, objective.X, objective.Z) : linePlan.FallbackTarget,
                     idle,
                     operation.MinimumCommitSeconds,
                     nowSeconds,
@@ -96,11 +100,41 @@ namespace WhiskeyRealism.Tactical.Operations
                         idle, maneuver.Heading, maneuver.Holds, "maneuver-" + maneuver.Reason);
                     // BC14: the maneuver's crossing via rides on the node's order (every lane node passes the same crossing).
                     if (maneuver.HasVia) order = order.WithVia(maneuver.ViaX, maneuver.ViaZ);
+                    // BC14W: the column's formation rides on the node's order too (requirement-focal-execution).
+                    if (maneuver.HasFormation) order = order.WithFormation(maneuver.Formation);
                 }
                 orders.Add(order);
             }
 
+            targetHold?.EndBuild();
             return orders.ToArray();
+        }
+
+        private static DoctrineTargetPoint KeepBank(ICrossingPicture crossings, int homeBank, CommandNodeOperationalState[] nodes,
+            in CommandNodeOperationalState node, DoctrineTargetPoint target)
+        {
+            return homeBank >= 0
+                ? OwnBank.KeepOnBank(crossings, homeBank, nodes, node, target)
+                : OwnBank.Keep(crossings, node, target);
+        }
+
+        // A Defender's every position stays on its bank. Any other side's tasks that go to the enemy (attack, support, fix, probe, scout, screen)
+        // are made by the executor behind the crossing gate, which routes them by a known crossing or refuses them and asks for a look.
+        internal static bool KeepsItsBank(CommandTaskType task, BattleStance stance)
+        {
+            if (stance == BattleStance.Defender) return true;
+            switch (task)
+            {
+                case CommandTaskType.AttackObjective:
+                case CommandTaskType.SupportAttack:
+                case CommandTaskType.FixEnemy:
+                case CommandTaskType.Probe:
+                case CommandTaskType.Scout:
+                case CommandTaskType.Screen:
+                    return false;
+                default:
+                    return true;
+            }
         }
 
         // anchoredLeft is the +L end (command index 0), anchoredRight the -L end (index n-1): an end resting on a river or crest keeps
@@ -133,62 +167,6 @@ namespace WhiskeyRealism.Tactical.Operations
             }
 
             return task;
-        }
-
-        private static TacticalSopDecision ApplyOperationalGates(
-            TacticalSopDecision sop,
-            CommandTaskType task,
-            TacticalMassingDecision massing,
-            TacticalBattlefrontSnapshot battlefront)
-        {
-            bool assaultTask = task == CommandTaskType.AttackObjective ||
-                task == CommandTaskType.SupportAttack;
-
-            if (!assaultTask) return sop;
-            if (sop.Authority == TacticalSopAuthority.Probe ||
-                sop.Authority == TacticalSopAuthority.Screen ||
-                sop.Authority == TacticalSopAuthority.Fallback)
-            {
-                return sop;
-            }
-
-            if (massing.Phase == TacticalMassingPhase.MassSupport && !massing.MayCommitAssault)
-            {
-                return new TacticalSopDecision(
-                    TacticalSopAuthority.Attack,
-                    false,
-                    true,
-                    true,
-                    Math.Min(sop.RiskBudget01, 0.45f),
-                    Math.Max(45f, sop.ReacquireSeconds),
-                    "massing-" + massing.Reason);
-            }
-
-            if (battlefront.Gap == TacticalBattlefrontGap.WideUnsupportedGap &&
-                sop.Authority == TacticalSopAuthority.Attack)
-            {
-                return new TacticalSopDecision(
-                    TacticalSopAuthority.Attack,
-                    false,
-                    true,
-                    true,
-                    Math.Min(sop.RiskBudget01, 0.40f),
-                    Math.Max(45f, sop.ReacquireSeconds),
-                    "battlefront-wide-gap");
-            }
-
-            return sop;
-        }
-
-        private static int CountRole(CommandNodeOperationalState[] nodes, CommandNodeRole role)
-        {
-            int count = 0;
-            for (int i = 0; i < nodes.Length; i++)
-            {
-                if (nodes[i].Role == role) count++;
-            }
-
-            return count;
         }
 
         private static CommandTaskType ResolveTask(

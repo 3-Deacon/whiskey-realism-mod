@@ -35,6 +35,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             public readonly bool[] Deployed = new bool[ManeuverFeasibility.MaxChildren];
             public readonly bool[] Moving = new bool[ManeuverFeasibility.MaxChildren];
             public readonly string[] BoundGuards = new string[ManeuverFeasibility.MaxChildren];
+            public readonly string[] ScreenChildren = new string[ManeuverFeasibility.MaxChildren];
             public readonly BattlePlanId[] Candidates = new BattlePlanId[FeasibilityLedger.MaxCandidates];
             public int ArmyCommanderIndex = -1;
             public double LastStartHours = double.NegativeInfinity;
@@ -69,6 +70,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ArmyCommanderIndex = -1;
                 Array.Clear(ChildIds, 0, ChildIds.Length);
                 Array.Clear(BoundGuards, 0, BoundGuards.Length);
+                Array.Clear(ScreenChildren, 0, ScreenChildren.Length);
             }
         }
 
@@ -165,6 +167,23 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 };
                 FeasibilityTick.Run(ref work);
 
+                // BC14W: the works hold follows BC11's phases every heavy tick, not only when the sliced monitor finishes a run.
+                st.World.Bind(snapshot, regions);
+                st.Ledger.RefreshWorksHold(st.World);
+                ExploitTable.ForAlliance(army.AllianceId).SetWorksView(st.Ledger.WorksHold(out _), st.Ledger.HeldWorks);
+                if (Plugin.EnemyWorksDoctrineEnabled())
+                {
+                    FeasibilityTelemetry.EnemyWorks(army.AllianceId, st.Ledger, FortificationPointsRuntime.TableOf(army.AllianceId), now);
+                    FeasibilityTelemetry.WorksHold(army.AllianceId, st.Ledger, army.WorksGuarded, now);
+                }
+                // BC14O: the victory clock's pressure and the main effort the director picked (the army's band and screens as the last allocation left them).
+                if (Plugin.ObjectiveDoctrineEnabled())
+                {
+                    FeasibilityTelemetry.ObjectivePressure(army.AllianceId, st.Ledger, now);
+                    if (!army.TryObjectiveSector(out int band)) band = -1;
+                    FeasibilityTelemetry.MainEffort(army.AllianceId, st.Ledger, army.CurrentObjectivePick, band, army.SecondaryScreens, now);
+                }
+
                 if (forced) return;
 
                 using (TelemetryPerf.Scope("tactical.feasibility.navmesh", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
@@ -211,9 +230,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private static void Classify(SideState st, BattleSnapshot snapshot, RiverRegions regions, double now)
         {
-            if (regions == null) return;
+            // BC14W: the works probes share the crossing probes' handle, scope and slice (spec § 7A): the side's works pieces, oldest first.
+            WorksPointTable works = FortificationPointsRuntime.TableOf(st.Alliance);
+            if (regions == null && works == null) return;
             using (PerceivedGroundRuntime.Handle ground = PerceivedGroundRuntime.Open(snapshot))
-                st.Crossings.Classify(snapshot, regions, BattleTerrainGridRuntime.Get(), ground.Oracle, _reach, now);
+            {
+                if (regions != null) st.Crossings.Classify(snapshot, regions, BattleTerrainGridRuntime.Get(), ground.Oracle, _reach, now);
+                works?.ProbeStep(ground.Oracle, WorksRules.MaxWorksProbesPerTick);
+            }
         }
 
         private static void Evaluate(SideState st, TacticalBattleOrchestrator side, ArmyOrchestrator army, BattleUnits bunits, BattleSnapshot snapshot, ArmyEvidence evidence,
@@ -353,6 +377,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int candidates = withCandidates ? army.EligiblePlans(evidence, st.Candidates) : 0;
             TacticalEnemyContactLedger contact = ArmyEvidenceBuilder.ContactLedgerFor(st.Alliance);
             bool assumed = DeploymentPlanRuntime.TryAssumedEnemyPoint(st.Alliance, axis.OriginX, axis.OriginZ, out float assumedX, out float assumedZ, out _);
+            // BC14W: the side's works pieces, re-read from the battle's ObstacleLines at each new evaluation (null with the flag off); the monitor's run
+            // reads the table as that evaluation left it.
+            WorksPointTable works = withCandidates
+                ? FortificationPointsRuntime.Refresh(bunits, st.Alliance, axis.OriginX, axis.OriginZ)
+                : FortificationPointsRuntime.TableOf(st.Alliance);
             input = new FeasibilityInput
             {
                 Snapshot = snapshot, Axis = axis, Stance = army.EffectiveStance, Grid = BattleTerrainGridRuntime.Get(), Picture = TerrainPictureRuntime.Get(),
@@ -364,8 +393,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 ChildIds = st.ChildIds, ChildCount = children, DeployedReserve = st.Deployed, ChildMoving = st.Moving,
                 BoundGuardChildIds = st.BoundGuards, BoundGuardCount = bound,
                 Candidates = st.Candidates, CandidateCount = candidates, Crest = evidence.CrestLine, ReachByUnitType = _reach,
-                HasAssumedEnemy = assumed, AssumedEnemyX = assumedX, AssumedEnemyZ = assumedZ, Cache = st.Cache,
+                HasAssumedEnemy = assumed, AssumedEnemyX = assumedX, AssumedEnemyZ = assumedZ, Cache = st.Cache, Works = works,
             };
+            // BC14O: the live objectives and the victory clock, once per evaluation (the monitor's one-candidate run prices no objectives).
+            if (withCandidates)
+            {
+                // The children that screen a secondary objective at the previous allocation are not in the main body the objectives are priced for.
+                var intents = army.CurrentDirectChildIntents;
+                input.ScreenChildIds = st.ScreenChildren;
+                input.ScreenChildCount = DirectChildAllocator.ScreenChildIds(intents, st.ScreenChildren);
+                ObjectiveRuntime.Fill(bunits, st.Alliance, snapshot, (float)input.DaylightHours, ref input);
+            }
         }
 
         // The direct children in the army's own order (the order the allocator, the threats' per-child times and the ledger's rows share).

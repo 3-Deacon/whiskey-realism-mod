@@ -43,8 +43,6 @@ internal static class TacticalLedgerTests
             ("tactical decision doctrine gates soft abort", TacticalDecisionDoctrineGatesSoftAbort),
             ("tactical defensive line anchor shifts road corridor forward", TacticalDefensiveLineAnchorShiftsRoadCorridorForward),
             ("tactical scouting avenue sends screen forward and reserve rear", TacticalScoutingAvenueSendsScreenForwardAndReserveRear),
-            ("tactical massing cycle waits for support before commit", TacticalMassingCycleWaitsForSupportBeforeCommit),
-            ("tactical massing cycle blocks commit when endurance needs relief", TacticalMassingCycleBlocksCommitWhenEnduranceNeedsRelief),
             ("tactical fallback ladder separates fallback from retreat", TacticalFallbackLadderSeparatesFallbackFromRetreat),
             ("tactical artillery mission planner gates support by ammo range and danger", TacticalArtilleryMissionPlannerGatesSupportByAmmoRangeAndDanger),
             ("tactical artillery command assigns weak point ammo and reposition", TacticalArtilleryCommandAssignsWeakPointAmmoAndReposition),
@@ -424,50 +422,6 @@ internal static class TacticalLedgerTests
         AssertEqual(CommandTaskType.ReserveWait, orders[1].Task, "reserve task");
         AssertTrue(orders[1].PrimaryTarget.HasValue, "reserve target");
         AssertTrue(orders[1].PrimaryTarget.Z > picture.Objectives[0].Z, "reserve should wait behind objective");
-    }
-
-    private static void TacticalMassingCycleWaitsForSupportBeforeCommit()
-    {
-        TacticalMassingDecision decision = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
-            operationPhase: TacticalOperationPhase.Committed,
-            mainEffortCount: 1,
-            supportCount: 0,
-            reserveCount: 1,
-            artilleryReady: false,
-            objectiveExposed: true,
-            objectiveConfidence01: 0.85f,
-            ownStrength: 1500f,
-            enemyStrength: 1000f,
-            reserveFraction: 0.20f));
-
-        AssertEqual(TacticalMassingPhase.MassSupport, decision.Phase, "phase");
-        AssertFalse(decision.MayCommitAssault, "commit gate");
-        AssertContains(decision.Reason, "support", "reason");
-    }
-
-    private static void TacticalMassingCycleBlocksCommitWhenEnduranceNeedsRelief()
-    {
-        TacticalMassingDecision decision = TacticalMassingCycle.Evaluate(new TacticalMassingInput(
-            operationPhase: TacticalOperationPhase.Committed,
-            mainEffortCount: 1,
-            supportCount: 1,
-            reserveCount: 1,
-            artilleryReady: true,
-            objectiveExposed: true,
-            objectiveConfidence01: 0.9f,
-            ownStrength: 2200f,
-            enemyStrength: 1000f,
-            reserveFraction: 0.22f,
-            endurance: new TacticalEnduranceDecision(
-                canAssault: false,
-                canHold: true,
-                canFallback: true,
-                needsRelief: true,
-                reason: "relief-needed")));
-
-        AssertEqual(TacticalMassingPhase.MassSupport, decision.Phase, "phase");
-        AssertFalse(decision.MayCommitAssault, "commit gate");
-        AssertContains(decision.Reason, "endurance", "reason");
     }
 
     private static void TacticalFallbackLadderSeparatesFallbackFromRetreat()

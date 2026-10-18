@@ -18,6 +18,19 @@ namespace WhiskeyRealism.Tactical.Operations
             DirectChildRole role,
             ReinforcementOpportunity opportunity,
             out string overrideReason)
+            => Override(originalTask, role, opportunity, worksHold: false, out overrideReason);
+
+        /// <summary>
+        /// BC14W: the same override with the works hold. A task the works hold guard turned into a hold (or a leaf it holds) is left a hold: an
+        /// <c>AttackNow</c> opportunity must not turn it back into an attack, which would undo the guard on the node path, the no-order path and
+        /// the leaf path alike. The other opportunities keep their rewrite (a withdrawal, a consolidation, which are not attacks).
+        /// </summary>
+        public static CommandTaskType Override(
+            CommandTaskType originalTask,
+            DirectChildRole role,
+            ReinforcementOpportunity opportunity,
+            bool worksHold,
+            out string overrideReason)
         {
             overrideReason = null;
             switch (opportunity)
@@ -54,7 +67,8 @@ namespace WhiskeyRealism.Tactical.Operations
                     return originalTask;
 
                 case ReinforcementOpportunity.AttackNow:
-                    if ((originalTask == CommandTaskType.HoldObjective ||
+                    if (!worksHold &&
+                        (originalTask == CommandTaskType.HoldObjective ||
                          originalTask == CommandTaskType.Consolidate) &&
                         (role == DirectChildRole.Main || role == DirectChildRole.SupportMain))
                     {

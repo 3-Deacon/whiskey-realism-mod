@@ -80,7 +80,10 @@ namespace WhiskeyRealism.Tactical
     // via MicroAICheckForCharges are effectively dead in vanilla (4910
     // compares the groupaiobject GameObject with the aigroup Regiment, never
     // equal). A vanilla assault is never replaced except by an explicit
-    // charge denial. The caller's steady-state short-circuit
+    // charge denial, or by a works-hold stance intent (IntentFlags.WorksHold,
+    // BC14W: stance 2 for a group under the works hold, which takes vanilla's
+    // attack stances 3 and 4 and still yields to its weak-group screen and the
+    // army retreat). The caller's steady-state short-circuit
     // re-checks the carve-out at most every HoldHours * 0.5, so a group that
     // turns weak may wait that long before Whiskey yields.
     //
@@ -112,18 +115,22 @@ namespace WhiskeyRealism.Tactical
 
     public readonly struct StanceHoldRecord
     {
-        public StanceHoldRecord(int stance, float writtenAtHours, StanceWriteSource source)
+        public StanceHoldRecord(int stance, float writtenAtHours, StanceWriteSource source, bool worksHold = false)
         {
             Stance = stance;
             WrittenAtHours = writtenAtHours;
             Source = source;
             HasValue = source != StanceWriteSource.None;
+            WorksHold = worksHold;
         }
 
         public int Stance { get; }
         public float WrittenAtHours { get; }
         public StanceWriteSource Source { get; }
         public bool HasValue { get; }
+        // BC14W: the stance was written as a works hold (IntentFlags.WorksHold). A renewal carries it, so the producer going quiet does not
+        // turn the hold into an ordinary defend stance.
+        public bool WorksHold { get; }
     }
 
     public readonly struct StanceWriteInput
@@ -137,8 +144,10 @@ namespace WhiskeyRealism.Tactical
             StanceHoldRecord record,
             StanceWriteSource source,
             int vanillaGroupStance = TacticalStanceOwnership.VanillaStanceUnknown,
-            float vanillaNowHours = float.NaN)
+            float vanillaNowHours = float.NaN,
+            bool worksHold = false)
         {
+            WorksHold = worksHold;
             IsAiGroup = isAiGroup;
             TargetStance = targetStance;
             CurrentOrderedStance = currentOrderedStance;
@@ -165,6 +174,9 @@ namespace WhiskeyRealism.Tactical
         // Vanilla's per-group stance for this group right now
         // (TacticalStanceOwnership.VanillaPerGroupStance), or VanillaStanceUnknown.
         public int VanillaGroupStance { get; }
+        // BC14W: the write is the works hold's stance (IntentFlags.WorksHold): defend in front of enemy works. Against vanilla's own attack
+        // stances (3, 4) it is applied with neither the yield step nor the vanilla-assault refusal.
+        public bool WorksHold { get; }
     }
 
     // Inputs of vanilla's per-group stance lines in AdjustGroupAIStance.
@@ -295,7 +307,10 @@ namespace WhiskeyRealism.Tactical
             // otherwise swallow the demotion.
             if (input.CurrentOrderedStance == 4 && input.Source == StanceWriteSource.ChargeDemotion)
                 return new StanceWriteDecision(StanceWriteAction.Write, "charge-demotion");
-            if (YieldsToVanilla(input.VanillaGroupStance, input.TargetStance))
+            // A works-hold stance (BC14W) takes vanilla's attack stances (3, 4) as they come: they are what it holds the group out of. Vanilla's
+            // weak-group screen (1) is still yielded to.
+            bool worksHoldOverAttack = input.WorksHold && (input.VanillaGroupStance == 3 || input.VanillaGroupStance == 4);
+            if (!worksHoldOverAttack && YieldsToVanilla(input.VanillaGroupStance, input.TargetStance))
             {
                 // A source may only give away a hold it owns or outranks.
                 if (input.Record.HasValue && IsInsideHold(input.Record, input.NowHours) &&
@@ -305,7 +320,7 @@ namespace WhiskeyRealism.Tactical
                     StanceWriteAction.Yield,
                     input.VanillaGroupStance == 4 ? "vanilla-assault-escalation" : "vanilla-weak-group");
             }
-            if (input.CurrentOrderedStance == 4) return Refuse("vanilla-assault");
+            if (input.CurrentOrderedStance == 4 && !input.WorksHold) return Refuse("vanilla-assault");
 
             StanceHoldRecord record = input.Record;
             if (record.HasValue && IsInsideHold(record, input.NowHours))
@@ -338,14 +353,14 @@ namespace WhiskeyRealism.Tactical
             switch (decision.Action)
             {
                 case StanceWriteAction.Write:
-                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source);
+                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source, input.WorksHold);
                 case StanceWriteAction.Claim:
                     if (record.HasValue &&
                         IsInsideHold(record, input.NowHours) &&
                         record.Stance == input.TargetStance &&
                         record.Source > input.Source)
                         return record;
-                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source);
+                    return new StanceHoldRecord(input.TargetStance, input.NowHours, input.Source, input.WorksHold);
                 case StanceWriteAction.Yield:
                     return default(StanceHoldRecord);
                 default:

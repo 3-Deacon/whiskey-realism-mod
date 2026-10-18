@@ -632,7 +632,8 @@ internal static partial class FlankResponseTests
         AssertEqual(CommandTaskType.GuardFlank, TacticalDecisionDoctrine.TaskForStance(CommandTaskType.GuardFlank, BattleStance.Defender),
             "a Defender keeps GuardFlank");
         string nodes = SourceText("Tactical", "Orchestrator", "CommandNodeOperationsRuntime.cs");
-        AssertPinned(nodes, "case DirectChildRole.RefuseLeft: case DirectChildRole.RefuseRight: return CommandNodeRole.Defender;", "the node role");
+        AssertPinned(nodes, "case DirectChildRole.RefuseLeft: case DirectChildRole.RefuseRight: return defending ? CommandNodeRole.Defender : CommandNodeRole.FlankMarch;",
+            "the node role: a Defender node on the defending side, a flank guard on every other (NodeRoleStanceTests)");
     }
 
     private static void NoFlankReleaseWithoutContact()

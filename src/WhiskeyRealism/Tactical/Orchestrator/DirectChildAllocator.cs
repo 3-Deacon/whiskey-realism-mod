@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using WhiskeyRealism.Strategic;
+using WhiskeyRealism.Tactical.Battle;
 using WhiskeyRealism.Tactical.Orchestrator.Plays;
 
 namespace WhiskeyRealism.Tactical.Orchestrator
@@ -31,8 +32,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public ReserveReleaseContext(float globalOdds, bool flankRelease, ReserveReleaseState state, bool[] exploiting,
             double nowHours, float agg01, float caution01, float casualtyTolerance01, bool? staggered = null,
             CrossingThreat[] crossingThreats = null, int threatCount = 0, float[] ownShiftByChild = null, int threatChildCount = 0,
-            ReleaseHysteresis hysteresis = null)
+            ReleaseHysteresis hysteresis = null, StationPoint station = default(StationPoint), float[] stationShiftByChild = null, int stationChildCount = 0)
         {
+            Station = station;
+            StationShiftByChild = stationShiftByChild;
+            StationChildCount = stationChildCount;
             Hysteresis = hysteresis;
             Staggered = staggered ?? state != null;
             CrossingThreats = crossingThreats;
@@ -84,6 +88,14 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// returned once the trigger has been gone for a margin. Null releases and returns on the raw picture each call, as before.
         /// </summary>
         public ReleaseHysteresis Hysteresis { get; }
+
+        /// <summary>
+        /// BC14W (requirement-defender-works-reserve): the station behind the Defender's most threatened own focal point and each allocation child's time to
+        /// it (<see cref="StationChildCount"/> entries, the allocation's child order; NaN for a child holding player-owned strength). <c>Station.Has</c> false is none.
+        /// </summary>
+        public StationPoint Station { get; }
+        public float[] StationShiftByChild { get; }
+        public int StationChildCount { get; }
     }
 
     /// <summary>Main-role hysteresis memory kept by the orchestrator (T16).</summary>
@@ -340,7 +352,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
 
             GuardPoint[] guards = GuardScratch(snapshots.Count);
-            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards);
+            // The base allocation's Reserve children: only these can be released. A child the evidence tiers already gave a committed role is not
+            // released by it (the reserve-release producer moves a released child only, TacticalReserveCommitGate.TryReleasedDirectChild). The one pooled
+            // array (ReserveFlags) is read again below for the intents and handed to the release for its hysteresis: valid until the next ReserveFlags call.
+            bool[] heldByBase = ReserveFlags(roles);
+            var axisOverride = ReleaseReserves(plan, evidence, roles, release, snapshots, guards, heldByBase);
 
             var intents = new DirectChildIntent[snapshots.Count];
             for (int i = 0; i < snapshots.Count; i++)
@@ -368,7 +384,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     perChildEnemyIntent[i],
                     fromZone[i] ? ManeuverOf(zoneOf[i]) : default(ManeuverSpec),
                     fromZone[i] ? zoneOf[i].RectKind : PlayRectKind.Unknown,
-                    guards[i]);
+                    guards[i],
+                    releasedFromReserve: heldByBase[i] && role != DirectChildRole.Reserve && role != DirectChildRole.Unknown);
             }
             return intents;
         }
@@ -406,10 +423,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             DirectChildRole[] roles,
             ReserveReleaseContext release,
             IReadOnlyList<DirectChildSnapshot> snapshots,
-            GuardPoint[] guards)
+            GuardPoint[] guards,
+            bool[] wasReserve = null)
         {
             var axisOverride = new int[roles.Length];
-            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride);
+            ReleaseReservesInto(plan, evidence, roles, release, snapshots, guards, axisOverride, wasReserve);
             return axisOverride;
         }
 
@@ -421,13 +439,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             ReserveReleaseContext release,
             IReadOnlyList<DirectChildSnapshot> snapshots,
             GuardPoint[] guards,
-            int[] axisOverride)
+            int[] axisOverride,
+            bool[] baseReserve = null)
         {
             for (int i = 0; i < roles.Length; i++) axisOverride[i] = -1;
 
             bool exploit = plan.Phase == BattlePhase.Exploit;
             bool oddsReached = plan.ReserveCommitTriggerOdds > 0f && release.GlobalOdds >= plan.ReserveCommitTriggerOdds;
-            bool[] wasReserve = release.Hysteresis != null ? ReserveFlags(roles) : null;
+            // baseReserve: the caller's flags of the roles as they stand now (ReserveFlags), else computed here when the hysteresis needs them.
+            bool[] wasReserve = release.Hysteresis != null ? (baseReserve ?? ReserveFlags(roles)) : null;
 
             if (release.Staggered)
             {
@@ -463,6 +483,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             if (release.FlankRelease) ReleaseReserveToThreatenedWing(evidence, roles, axisOverride);
             ReleaseReserveToCrossings(roles, axisOverride, guards, release, snapshots);
+            StationReserveBehindFocalPoint(roles, axisOverride, guards, release, snapshots);
             if (wasReserve != null) ApplyHysteresis(roles, wasReserve, axisOverride, guards, release, snapshots);
         }
 
@@ -729,6 +750,106 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
         }
 
+        /// <summary>
+        /// BC14W requirement-defender-works-reserve. After the crossing release, among the children still Reserve: the eligible one (not exploiting, no
+        /// player-owned strength) with the least time to the station behind the Defender's most threatened own focal point is given a guard point there,
+        /// facing it, and stays Reserve (a station, not a release: the floor is not consulted and the role stays for every later release). One child per side.
+        /// </summary>
+        internal static void StationReserveBehindFocalPoint(
+            DirectChildRole[] roles,
+            int[] axisOverride,
+            GuardPoint[] guards,
+            ReserveReleaseContext release,
+            IReadOnlyList<DirectChildSnapshot> snapshots)
+        {
+            ReserveReleaseState state = release.State;
+            if (state == null) return;
+            StationPoint station = release.Station;
+            if (!station.Has)
+            {
+                state.EndStation();
+                return;
+            }
+
+            // The standing station keeps its child while that child is still an eligible Reserve; it moves to another focal point only when the enemy
+            // reaches that one earlier by StationSwitchHours than it reached the standing one when it was chosen.
+            StationBinding bound = state.Station;
+            int boundChild = bound.Has ? IndexOfSnapshot(snapshots, bound.ChildId) : -1;
+            if (boundChild >= 0 && StationEligible(roles, release, boundChild))
+            {
+                bool sameFocal = bound.FocalX == station.FocalX && bound.FocalZ == station.FocalZ;
+                if (sameFocal || station.ArrivalHours > bound.ArrivalAtChoice - WhiskeyRealism.Tactical.Battle.WorksRules.StationSwitchHours)
+                {
+                    guards[boundChild] = new GuardPoint(bound.X, bound.Z, bound.Heading);
+                    return;
+                }
+            }
+
+            int pick = -1;
+            float pickShift = float.PositiveInfinity;
+            for (int c = 0; c < roles.Length; c++)
+            {
+                if (!StationEligible(roles, release, c)) continue;
+                float shift = StationShiftOf(release, c);
+                if (!(shift < pickShift)) continue;
+                pick = c;
+                pickShift = shift;
+            }
+            if (pick < 0)
+            {
+                state.EndStation();
+                return;
+            }
+            guards[pick] = new GuardPoint(station.X, station.Z, station.Heading);
+            state.BindStation(new StationBinding
+            {
+                ChildId = snapshots[pick].ChildId, FocalX = station.FocalX, FocalZ = station.FocalZ, X = station.X, Z = station.Z,
+                Heading = station.Heading, ArrivalAtChoice = station.ArrivalHours,
+            });
+        }
+
+        /// <summary>
+        /// A hash of the guard points and screen targets the allocation gave (child, role, the place to 50 units, the heading to 5 degrees). A station keeps its child's role,
+        /// so the command-node intents do not change when it appears, moves or ends: the operations ledger's change gate reads this as well.
+        /// </summary>
+        internal static int GuardHash(IReadOnlyList<DirectChildIntent> intents)
+        {
+            if (intents == null) return 0;
+            unchecked
+            {
+                int h = 17;
+                for (int i = 0; i < intents.Count; i++)
+                {
+                    // BC14O: a screen target is a place a child is sent to as a guard point is, and re-stores the orders the same way.
+                    if (intents[i].HasScreenTarget)
+                    {
+                        h = h * 31 + (intents[i].ChildId?.GetHashCode() ?? 0);
+                        h = h * 31 + (int)(intents[i].ScreenX / 50f);
+                        h = h * 31 + (int)(intents[i].ScreenZ / 50f);
+                    }
+                    if (!intents[i].HasGuardPoint) continue;
+                    h = h * 31 + (intents[i].ChildId?.GetHashCode() ?? 0);
+                    h = h * 31 + (int)intents[i].Role;
+                    h = h * 31 + (int)(intents[i].Guard.X / 50f);
+                    h = h * 31 + (int)(intents[i].Guard.Z / 50f);
+                    h = h * 31 + (int)(intents[i].Guard.Heading / 5f);
+                }
+                return h;
+            }
+        }
+
+        // A station goes to a child that is still a Reserve, is no exploit asset and holds no player-owned strength (its time to the station is NaN).
+        private static bool StationEligible(DirectChildRole[] roles, ReserveReleaseContext release, int child)
+        {
+            return roles[child] == DirectChildRole.Reserve && !IsExploiting(release, child) && !float.IsNaN(StationShiftOf(release, child));
+        }
+
+        private static float StationShiftOf(ReserveReleaseContext release, int child)
+        {
+            if (release.StationShiftByChild == null || child >= release.StationChildCount || child >= release.StationShiftByChild.Length) return float.NaN;
+            return release.StationShiftByChild[child];
+        }
+
         private static void GuardAt(DirectChildRole[] roles, int[] axisOverride, GuardPoint[] guards, int child, in CrossingThreat threat)
         {
             roles[child] = threat.Left ? DirectChildRole.RefuseLeft : DirectChildRole.RefuseRight;
@@ -820,6 +941,107 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return held;
         }
 
+        /// <summary>
+        /// BC14O requirement-main-effort-objective: economy of force. Each secondary objective, best score first and at most
+        /// <see cref="ObjectiveScoring.MaxSecondaryScreens"/>, is screened by the Screen-role child nearest to it laterally (by the middle of the child's
+        /// band), which gets a screen target: the objective itself when own-held, else the point <see cref="WorksRules.ReserveStationMeters"/> short of it
+        /// on the own side. One child per objective and one objective per child. Only a child the play already holds in the Screen role is drawn, never a
+        /// Main, Fix, Support or Reserve child, one holding player-owned strength, or a FocalAssault demonstration (it pins for the assault). A play with no
+        /// Screen child screens nothing.
+        /// </summary>
+        /// <summary>
+        /// The ids of the children the allocation set screening a secondary objective, in order, written to <paramref name="into"/> (at most its length):
+        /// the next evaluation leaves them out of the main body its objective table is priced for. Returns how many.
+        /// </summary>
+        internal static int ScreenChildIds(IReadOnlyList<DirectChildIntent> intents, string[] into)
+        {
+            int n = 0;
+            for (int c = 0; intents != null && c < intents.Count && n < into.Length; c++)
+                if (intents[c].HasScreenTarget) into[n++] = intents[c].ChildId;
+            return n;
+        }
+
+        internal static IReadOnlyList<DirectChildIntent> ScreenSecondaryObjectives(
+            IReadOnlyList<DirectChildIntent> intents,
+            SecondaryObjective[] secondaries,
+            int secondaryCount,
+            in TacticalFrontAxis axis,
+            BattlePlanId plan,
+            bool[] playerOwned)
+        {
+            if (intents == null || secondaries == null || secondaryCount <= 0 || !axis.IsValid) return intents;
+            DirectChildIntent[] result = null;
+            int screened = 0;
+            for (int s = 0; s < secondaryCount && screened < ObjectiveScoring.MaxSecondaryScreens; s++)
+            {
+                SecondaryObjective objective = secondaries[s];
+                float objectiveLateral = axis.LateralOf(objective.X, objective.Z);
+                int pick = -1;
+                float nearest = float.MaxValue;
+                for (int i = 0; i < intents.Count; i++)
+                {
+                    DirectChildIntent child = result != null ? result[i] : intents[i];
+                    if (child.Role != DirectChildRole.Screen || child.HasScreenTarget) continue;
+                    if (playerOwned != null && i < playerOwned.Length && playerOwned[i]) continue;
+                    if (plan == BattlePlanId.FocalAssault && child.ZoneRectKind == PlayRectKind.Demonstration) continue;
+                    float distance = Math.Abs(axis.CenterLateralOfSector(child.PrimarySector) - objectiveLateral);
+                    if (distance < nearest)
+                    {
+                        nearest = distance;
+                        pick = i;
+                    }
+                }
+                if (pick < 0) break;
+                float standoff = objective.OwnHeld ? 0f : WorksRules.ReserveStationMeters;
+                if (result == null)
+                {
+                    result = new DirectChildIntent[intents.Count];
+                    for (int i = 0; i < result.Length; i++) result[i] = intents[i];
+                }
+                result[pick] = result[pick].WithScreenTarget(objective.X - axis.ForwardX * standoff, objective.Z - axis.ForwardZ * standoff, axis.HeadingDegrees);
+                screened++;
+            }
+            return result ?? intents;
+        }
+
+        /// <summary>
+        /// The release marks of <paramref name="kept"/> (the intents the army acts on) re-derived from <paramref name="fresh"/>, this tick's allocation:
+        /// a child is marked when the fresh allocation released it from its base Reserve and the intent it keeps is a committed role. A mark is a fact about
+        /// the allocation that just ran, so it is never carried by an intent kept from an earlier tick: a pass that keeps an old intent (a role hold; the
+        /// main-role hysteresis) would otherwise keep its old mark after the release was taken back, and the reserve-release producer and #59 would
+        /// read a release that no longer exists. Returns <paramref name="kept"/> itself when no mark changes.
+        /// </summary>
+        public static IReadOnlyList<DirectChildIntent> RestampReleases(IReadOnlyList<DirectChildIntent> kept, IReadOnlyList<DirectChildIntent> fresh)
+        {
+            if (kept == null || fresh == null) return kept;
+            DirectChildIntent[] result = null;
+            for (int i = 0; i < kept.Count; i++)
+            {
+                DirectChildIntent k = kept[i];
+                bool mark = false;
+                if (k.Role != DirectChildRole.Reserve && k.Role != DirectChildRole.Unknown)
+                {
+                    int at = i < fresh.Count && string.Equals(fresh[i].ChildId, k.ChildId, StringComparison.Ordinal) ? i : IndexOfChild(fresh, k.ChildId);
+                    mark = at >= 0 && fresh[at].ReleasedFromReserve;
+                }
+                if (mark == k.ReleasedFromReserve) continue;
+                if (result == null)
+                {
+                    result = new DirectChildIntent[kept.Count];
+                    for (int j = 0; j < kept.Count; j++) result[j] = kept[j];
+                }
+                result[i] = k.WithReleasedFromReserve(mark);
+            }
+            return result ?? kept;
+        }
+
+        private static int IndexOfChild(IReadOnlyList<DirectChildIntent> intents, string childId)
+        {
+            for (int i = 0; i < intents.Count; i++)
+                if (string.Equals(intents[i].ChildId, childId, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
         private static void Accept(MainRoleHysteresisState state, string mainId)
         {
             state.IncumbentMainId = mainId ?? string.Empty;
@@ -829,7 +1051,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private static DirectChildIntent With(DirectChildIntent x, DirectChildRole role, DirectChildAxis axis, int axisSector, float support)
             => new DirectChildIntent(x.ChildId, x.RawUnitTyp, x.EffectiveCommandLevel, x.DisplayName, x.PrimarySector,
-                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard);
+                role, axis, axisSector, support, x.EnemyIntent, x.Maneuver, x.ZoneRectKind, x.Guard, x.Screen, x.ReleasedFromReserve);
 
         /// <summary>
         /// BC11 decision 4. An enveloping rect carries a full maneuver; a plain wing rect (LeftWing / RightWing, not enveloping)
@@ -847,7 +1069,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                     zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ);
             // BC14 requirement-synchronized-release: in a template with an enveloping rect the Center and the Demonstration fix, and a fix
             // goes in when the common plan says (a start-delay spec with no offset of its own and the ledger's release as its gate).
-            bool fixes = zone.RectKind == PlayRectKind.Center || zone.RectKind == PlayRectKind.Demonstration;
+            // BC14W: the focal assault's support is the same kind of spec; it is released behind the column's strike (EchelonDelayHours),
+            // not at a published hour, and the play executor sets that gate.
+            bool fixes = zone.RectKind == PlayRectKind.Center || zone.RectKind == PlayRectKind.Demonstration || zone.RectKind == PlayRectKind.AssaultSupport;
             return fixes && zone.TemplateEnvelops
                 ? new ManeuverSpec(zone.RectKind, zone.RectAnchorX, zone.RectAnchorZ, zone.StartTimeOffsetSeconds, envelops: false,
                     zone.ProjectedMirrored, zone.AuthoredAnchorX, zone.AuthoredAnchorZ, holdsForRelease: true)
@@ -976,7 +1200,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return best;
         }
 
-        private static bool AllowsProvisionalAttackAxis(TacticalBattlePlan plan)
+        internal static bool AllowsProvisionalAttackAxis(TacticalBattlePlan plan)
         {
             if (plan.Phase == BattlePhase.Withdraw || plan.Phase == BattlePhase.Consolidate) return false;
             switch (plan.PlanId)
@@ -986,6 +1210,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 case BattlePlanId.GenericAggressive:
                 case BattlePlanId.GenericDesperate:
                 case BattlePlanId.CavalryRaid:
+                case BattlePlanId.FocalAssault:
                     return true;
                 default:
                     return false;

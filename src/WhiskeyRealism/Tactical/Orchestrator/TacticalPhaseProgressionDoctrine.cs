@@ -56,6 +56,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // Consolidate exit threshold for "odds recovered, resume attack."
         // Matches the legacy 1.4 hysteresis used elsewhere.
         public const float ResumeFromConsolidateOddsFloor = 1.4f;
+
+        /// <summary>
+        /// Odds at which a consolidating army attacks again whatever share of its reserves reads committed. That share is 1 minus the designated reserve
+        /// groups' strength over the army's, so an army with one reserve group of five reads 0.85 from its first minute, and the 0.6 gate never let the
+        /// Union (4 to 5.5 : 1 in the smoke) resume. At decisive odds the share says nothing about whether to attack.
+        /// </summary>
+        public const float ResumeDecisiveOdds = 2.5f;
         public const float ExploitTriggerOddsRatio = 1.35f;
         public const float ExploitTriggerAbsoluteOdds = 1.8f;
         public const float ConsolidateOddsFloor = 0.9f;
@@ -86,7 +93,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 float reservesCommittedFraction,
                 float commanderAggression01,
                 TacticalSectorReadinessDoctrine.Result mainEffortReadiness = TacticalSectorReadinessDoctrine.Result.PushReady,
-                float intelConfidence01 = 1f)
+                float intelConfidence01 = 1f,
+                bool worksHold = false)
             {
                 CurrentPhase = currentPhase;
                 IntelConfidence01 = float.IsNaN(intelConfidence01) ? 0f : Clamp01(intelConfidence01);
@@ -100,6 +108,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 ReservesCommittedFraction = reservesCommittedFraction;
                 CommanderAggression01 = Clamp01(commanderAggression01);
                 MainEffortReadiness = mainEffortReadiness;
+                WorksHold = worksHold;
             }
 
             public BattlePhase CurrentPhase { get; }
@@ -120,6 +129,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             /// transition is blocked even with favorable odds.
             /// </summary>
             public TacticalSectorReadinessDoctrine.Result MainEffortReadiness { get; }
+
+            /// <summary>
+            /// BC14W: the side's works hold is on (a hopeless assault of entrenched works). No transition into MainEffort is recommended while it is.
+            /// </summary>
+            public bool WorksHold { get; }
 
             /// <summary>Contact-ledger confidence behind the odds (1 for callers without a ledger).</summary>
             public float IntelConfidence01 { get; }
@@ -164,18 +178,30 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             switch (input.CurrentPhase)
             {
                 case BattlePhase.Probe:
-                    return DecideFromProbe(input);
+                    return HoldAgainstWorks(input, DecideFromProbe(input));
                 case BattlePhase.MainEffort:
                     return DecideFromMainEffort(input);
                 case BattlePhase.Exploit:
                     return DecideFromExploit(input);
                 case BattlePhase.Consolidate:
-                    return DecideFromConsolidate(input);
+                    return HoldAgainstWorks(input, DecideFromConsolidate(input));
                 case BattlePhase.Withdraw:
                 default:
                     // Withdraw is absorbing — never advance back to attack.
                     return new Decision(BattlePhase.Withdraw, "withdraw-absorbing");
             }
+        }
+
+        /// <summary>
+        /// BC14W (requirement-works-hold): while the works hold is on, no transition into MainEffort is recommended: a probe stays a probe,
+        /// past its budget too, and a consolidating army does not resume. It never steps a plan back out of MainEffort or Exploit, and every
+        /// other move (to Consolidate, to Withdraw) is the shipped rule's. The army closes, fixes and probes; it does not commit its main
+        /// effort against the works.
+        /// </summary>
+        private static Decision HoldAgainstWorks(Input input, Decision shipped)
+        {
+            if (!input.WorksHold || shipped.NextPhase != BattlePhase.MainEffort) return shipped;
+            return new Decision(input.CurrentPhase, "works-hold");
         }
 
         private static Decision DecideFromProbe(Input input)
@@ -307,6 +333,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             if (input.GlobalOddsCurrent >= ResumeFromConsolidateOddsFloor &&
                 (!input.IsReservesCommitKnown || input.ReservesCommittedFraction < 0.6f))
                 return new Decision(BattlePhase.MainEffort, "odds-recovered-resume-attack");
+            if (input.GlobalOddsCurrent >= ResumeDecisiveOdds)
+                return new Decision(BattlePhase.MainEffort, "decisive-odds-resume-attack");
 
             return new Decision(BattlePhase.Consolidate, "consolidate-continuing");
         }

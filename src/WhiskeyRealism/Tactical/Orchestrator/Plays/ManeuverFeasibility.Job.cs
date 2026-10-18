@@ -22,6 +22,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool Moving;
         /// <summary>The child holds player-owned strength: it is never released to a crossing and its time to one is not offered.</summary>
         public bool HasPlayerOwned;
+        /// <summary>BC14W: some unit under the child is player-owned, at any strength (<c>PlayAnchor.ContainsPlayerOwned</c>); never given the column or the support.</summary>
+        public bool ContainsPlayerOwned;
         /// <summary>The child is bound to guard a crossing (requirement-defender-crossing-release): its regiments are left out of the crossing cover test.</summary>
         public bool BoundGuard;
         /// <summary>The hours an order from the army HQ takes to reach the child and everything below it, whether or not it is engaged.</summary>
@@ -77,6 +79,20 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         private bool[] _ownExcluded = new bool[256];
         internal readonly CrossingGraphView Graph = new CrossingGraphView();
         internal readonly EnemyPicture Enemy = new EnemyPicture();
+        /// <summary>
+        /// BC14W: the works picture of this evaluation (the enemy's works for an Attacker or a Meeting side), built once in <see cref="Begin"/> under
+        /// Enable Enemy Works Doctrine; null with the flag off, so every works term reads "no works" and the core prices as before.
+        /// </summary>
+        internal readonly WorksPicture Works = new WorksPicture();
+        internal bool WorksActive;
+        /// <summary>
+        /// BC14W: the focal point FocalAssault faces, from this evaluation's works picture or, while FocalAssault is the selected plan and the works
+        /// are gone from view, the ledger's last published one (the column then strikes an empty point, an outcome the assault wanted).
+        /// </summary>
+        internal bool HasFocal;
+        internal FocalPoint Focal;
+        /// <summary>BC14O: the objective table of this evaluation (the rows, the main body they are priced for, the pressure of the clock).</summary>
+        internal readonly ObjectiveWork Objectives = new ObjectiveWork();
         private readonly LegCostCache _ownCache = new LegCostCache();
 
         internal readonly ChildFact[] Children = new ChildFact[ManeuverFeasibility.MaxChildren];
@@ -148,7 +164,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             Input = input;
             Target = ledger;
             PlanCount = Math.Min(Math.Max(input.CandidateCount, 0), FeasibilityLedger.MaxCandidates);
-            for (int i = 0; i < PlanCount; i++) Plans[i] = input.Candidates[i];
+            // BC14W: FocalAssault is judged against the turns, so it is evaluated after them (the others keep their order).
+            int placed = 0;
+            for (int i = 0; i < PlanCount; i++) if (input.Candidates[i] != BattlePlanId.FocalAssault) Plans[placed++] = input.Candidates[i];
+            for (int i = 0; i < PlanCount; i++) if (input.Candidates[i] == BattlePlanId.FocalAssault) Plans[placed++] = input.Candidates[i];
             Array.Clear(SidesEvaluated, 0, SidesEvaluated.Length);
             MaxSearchesPerSide = 0;
             NextCandidate = 0;
@@ -171,6 +190,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Input.AssumedEnemyZ, EnemyX, EnemyZ);
             PrepareChildren();
             ManeuverFeasibility.BeginDefender(this);
+            ManeuverFeasibility.BuildWorks(this);
+            ManeuverFeasibility.BeginObjectives(this);
             WorkUnits = 0;
             MaxUnitCost = 0;
             ledger.BeginBack();
@@ -203,7 +224,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 NextCandidate++;
                 doneThisCall++;
             }
+            // BC14O: the objective table, after the candidates (the selected plan's reserve rect is known), one row at a time.
+            ManeuverFeasibility.PrepareObjectiveBody(this);
+            while (!Objectives.Done)
+            {
+                if (doneThisCall > 0 && clock != null && clock() >= deadlineTicks) return false;
+                ManeuverFeasibility.StepObjective(this);
+                doneThisCall++;
+            }
+            ledger.SetObjectivesBack(Objectives.Table, Objectives.Count, in Objectives.Pressure);
+            ledger.SetFocalBack(HasFocal, in Focal);
             ledger.SetLooksBack(Defender.LookLinks, Defender.LookCount);     // the picture is candidate-independent: published with every evaluation
+            ledger.SetStationBack(Defender.HasStation, in Defender.Station, Defender.StationShift, Defender.StationChildCount, Input.ChildIds);
             ledger.Publish(Input.NowHours);
             Running = false;
             return true;
@@ -230,13 +262,25 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             PlayProjection.ComputeCentroid(_xs, _zs, out ArmyX, out ArmyZ, out int n);
             if (n == 0) return;
             PlayAnchor.EnemyAnchor(s, Input.Axis, ArmyX, ArmyZ, out EnemyX, out EnemyZ);
-            float dx = EnemyX - ArmyX, dz = EnemyZ - ArmyZ;
-            float dist = (float)Math.Sqrt(dx * dx + dz * dz);
-            float forwardX = dist > 0.001f ? dx / dist : 0f;
-            float forwardZ = dist > 0.001f ? dz / dist : 1f;
-            Frontage = PlayProjection.EstimateFrontage(_xs, _zs, forwardX, forwardZ);
+            PlayAnchor.PlayFrame(BattlePlanId.Unknown, false, 0f, 0f, EnemyX, EnemyZ, ArmyX, ArmyZ, _xs, _zs, out _, out _, out Frontage);
             EnvelopmentManeuver.EnemyPressureSplit(s, Input.Axis, out PressureLeft, out PressureRight);
             FrameValid = true;
+        }
+
+        /// <summary>
+        /// The frame a play is projected in, as the executor's zone assignment takes it: the point the play faces and the frontage across the line to
+        /// it. Every play but FocalAssault faces the enemy anchor, whose frontage <see cref="PrepareFrame"/> took once.
+        /// </summary>
+        internal void FrameFor(BattlePlanId plan, out float targetX, out float targetZ, out float frontage)
+        {
+            if (plan != BattlePlanId.FocalAssault)
+            {
+                targetX = EnemyX;
+                targetZ = EnemyZ;
+                frontage = Frontage;
+                return;
+            }
+            PlayAnchor.PlayFrame(plan, HasFocal, Focal.X, Focal.Z, EnemyX, EnemyZ, ArmyX, ArmyZ, _xs, _zs, out targetX, out targetZ, out frontage);
         }
 
         private void PrepareChildren()
@@ -314,6 +358,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             {
                 ChildFact fact = Children[c];
                 fact.HasPlayerOwned = _strengthPlayer[c] > 0f;
+                // BC14W: the one source the executor's table fills it from too (a player unit at zero strength counts here, not in HasPlayerOwned).
+                fact.ContainsPlayerOwned = fact.OwnIndex >= 0 && PlayAnchor.ContainsPlayerOwned(s, fact.OwnIndex);
                 float counted = _strengthAll[c] - _strengthPlayer[c];
                 fact.Strength = counted;
                 fact.Morale = counted > 0f ? _moraleSum[c] / counted : 0f;
@@ -331,7 +377,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Children[c] = fact;
                 if (!fact.Offered) continue;
                 OfferedCount++;
-                Offered.Add(new CorpsPosition(fact.Id, fact.X, fact.Z));
+                Offered.Add(new CorpsPosition(fact.Id, fact.X, fact.Z, fact.ContainsPlayerOwned));
             }
         }
 

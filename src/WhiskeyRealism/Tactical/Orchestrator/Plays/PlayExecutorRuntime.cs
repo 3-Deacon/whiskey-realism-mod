@@ -79,12 +79,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int childCount,
             TacticalFrontAxis frontAxis,
             IReadOnlyList<string> directChildIds,
-            bool mirrored)
+            bool mirrored,
+            IFeasibilityLookup feasibility = null)
         {
             using (TelemetryPerf.Scope("tactical.play-executor.zone-assignments",
                 TelemetryLayer.Tactical, TelemetryCategory.Performance, 5.0))
             {
-                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds, mirrored);
+                return ComputeZoneAssignmentsCore(allianceId, planId, commandHierarchyShift, childCount, frontAxis, directChildIds, mirrored, feasibility);
             }
         }
 
@@ -95,7 +96,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             int childCount,
             TacticalFrontAxis frontAxis,
             IReadOnlyList<string> directChildIds,
-            bool mirrored)
+            bool mirrored,
+            IFeasibilityLookup feasibility)
         {
             try
             {
@@ -131,12 +133,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 PlayProjection.ComputeCentroid(ownXs, ownZs, out float armyX, out float armyZ, out int ownN);
                 if (ownN == 0) return null;
                 PlayAnchor.EnemyAnchor(snapshot, frontAxis, armyX, armyZ, out float enemyX, out float enemyZ);
+                // BC14W: a play faces its target (FocalAssault: the focal point of the works), through the frame the evaluation's layout takes.
+                FocalPoint focal = default(FocalPoint);
+                bool hasFocal = planId == BattlePlanId.FocalAssault && feasibility != null && feasibility.TryFocalPoint(out focal);
+                PlayAnchor.PlayFrame(planId, hasFocal, focal.X, focal.Z, enemyX, enemyZ, armyX, armyZ, ownXs, ownZs, out float targetX, out float targetZ,
+                    out float frontage);
 
                 // ---- Signature-skip ----
                 // Build a per-side signature from plan + bucketed centroids +
                 // bucketed corps positions. If unchanged since last call, return
                 // the cached result without recomputing projection/assignment.
-                string sig = BuildSignature(planId, mirrored, armyX, armyZ, enemyX, enemyZ, corpsPositions);
+                string sig = BuildSignature(planId, mirrored, armyX, armyZ, targetX, targetZ, corpsPositions);
                 string lastSig = _lastSignature[allianceId];
                 var cached = _lastResult[allianceId];
                 if (cached != null && string.Equals(sig, lastSig, StringComparison.Ordinal))
@@ -144,26 +151,21 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     return cached;
                 }
 
-                float dx = enemyX - armyX;
-                float dz = enemyZ - armyZ;
-                float dist = (float)Math.Sqrt(dx * dx + dz * dz);
-                float forwardX = dist > 0.001f ? dx / dist : 0f;
-                float forwardZ = dist > 0.001f ? dz / dist : 1f;
-
-                float frontage = PlayProjection.EstimateFrontage(ownXs, ownZs, forwardX, forwardZ);
-
                 // BC12: ReverseSlopeDefense is anchored to the crest the terrain picture found across the front.
                 TerrainLine crest = planId == BattlePlanId.ReverseSlopeDefense
                     ? ArmyEvidenceBuilder.CrestLineAcrossFront(TerrainPicture.CurrentForPlanning(), frontAxis)
                     : default(TerrainLine);
-                var worldRects = PlayProjection.Project(template, armyX, armyZ, enemyX, enemyZ, frontage, in crest, mirrored);
+                var worldRects = PlayProjection.Project(template, armyX, armyZ, targetX, targetZ, frontage, in crest, mirrored);
 
                 // Objectives are not currently surfaced to this layer; pass
                 // empty so PlayCorpsAssignment falls back to closest-corps.
                 // Stage 2.1 follow-up: thread BattlefieldObjectiveEstimate +
                 // ObjectivePosition for VP-override behavior.
                 var objectives = Array.Empty<ObjectivePosition>();
-                var assignments = PlayCorpsAssignment.Assign(worldRects, corpsPositions, objectives);
+                // A corps keeps the rect it held while the plan and its side stand: the closest-corps rule alone re-paired them every few seconds.
+                // A new plan (or side) is a new layout and pairs by distance alone.
+                IReadOnlyList<CorpsAssignment> held = _lastComputePlan[allianceId] == planId && _lastComputeMirrored[allianceId] == mirrored ? cached : null;
+                var assignments = PlayCorpsAssignment.Assign(worldRects, corpsPositions, objectives, held);
 
                 _lastSignature[allianceId] = sig;
                 _lastResult[allianceId] = assignments;
@@ -283,6 +285,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
 
         private sealed class SideManeuvers
         {
+            public SideManeuvers(int alliance) { Alliance = alliance; }
+
+            public readonly int Alliance;
+            // BC14W: the child that runs the focal assault's AssaultColumn this plan (null with none), whose state the followers' release reads.
+            public string ColumnChildId;
             public BattlePlanId Plan = BattlePlanId.Unknown;
             public double ActivatedHours = -1.0;
             public double CenterContactHours = -1.0;
@@ -310,11 +317,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 Orders.Clear();
                 MarchChecks.Clear();
                 PlanChildId = null;
+                ColumnChildId = null;
             }
         }
 
         // Plan-scoped state per side (BattleScope "play-executor" clears it with the zone-assignment cache).
-        private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(), new SideManeuvers() };
+        private static readonly SideManeuvers[] _maneuvers = { new SideManeuvers(0), new SideManeuvers(1) };
         private static readonly int[] _riverSamples = new int[4096];
         // The march-leg route: the NavMesh corners of the planned path, copied to flat arrays for the grid sampling.
         private static float[] _routeX = new float[64];
@@ -372,12 +380,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     }
 
                     bool templateHasCenterRect = false;
-                    int envelopRects = 0;
                     for (int r = 0; r < template.Rects.Count; r++)
-                    {
                         if (template.Rects[r].Kind == PlayRectKind.Center) templateHasCenterRect = true;
-                        if (template.Rects[r].Envelops) envelopRects++;
-                    }
                     // Wait for the Center child's contact only when a child really acts as the Center (see CenterChildId).
                     string centerChildId = templateHasCenterRect ? EnvelopmentManeuver.CenterChildId(_lastResult[allianceId], intents) : null;
                     bool templateHasCenter = centerChildId != null;
@@ -389,6 +393,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     ExploitTable exploits = ExploitTable.ForAlliance(allianceId);
                     // One route plan per side and step, served fairly (see PickRoutePlanChild).
                     side.PlanChildId = PickRoutePlanChild(side, snapshot, grid, intents, axis, stance, now, planId, feasibility);
+                    side.ColumnChildId = null;
+                    for (int c = 0; c < intents.Count && side.ColumnChildId == null; c++)
+                        if (intents[c].Maneuver.HasValue && intents[c].Maneuver.Kind == PlayRectKind.AssaultColumn) side.ColumnChildId = intents[c].ChildId;
                     for (int i = 0; i < intents.Count; i++)
                     {
                         ManeuverSpec spec = intents[i].Maneuver;
@@ -403,11 +410,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         bool wasMirrored = state.Mirrored;
 
                         ManeuverInput input = BuildInput(snapshot, grid, axis, spec, intents[i].ChildId, index, i < evidence.Count ? evidence[i].OwnStrengthBucket : 1,
-                            state.Mirrored, state.OutflankReached, templateHasCenter, envelopRects == 1, side, enemyX, enemyZ, stance, now,
+                            state.Mirrored, state.OutflankReached, templateHasCenter, PlayExecutorRules.CanMirror(template), side, enemyX, enemyZ, stance, now,
                             planId, feasibility, in state);
                         ManeuverOrder order = EnvelopmentManeuver.Step(ref state, in input);
                         side.States[intents[i].ChildId] = state;
-                        side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ));
+                        side.Orders.Add(new ChildManeuver(intents[i].ChildId, order, axis.RightX, axis.RightZ, spec.Kind));
                         if (state.Phase == ManeuverPhase.Abandoned && before != ManeuverPhase.Abandoned && spec.Envelops) side.Abandoned.Add(intents[i].ChildId);
                         if (state.Phase == ManeuverPhase.March && before != ManeuverPhase.March)
                         {
@@ -446,6 +453,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             return n;
         }
+
+        /// <summary>BC14W: the doctrine hour the side's current play was activated (the preparation table's key), -1 with none.</summary>
+        internal static double ActivatedHours(int allianceId)
+            => allianceId >= 0 && allianceId < SideCount ? _maneuvers[allianceId].ActivatedHours : -1.0;
 
         /// <summary>BC14: BC11's phase for the side's direct child (None before its maneuver starts), the monitor's read of how far each wing has got.</summary>
         internal static ManeuverPhase PhaseOf(int allianceId, string childId)
@@ -524,6 +535,33 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             input.HasEnemyExtent = EnvelopmentManeuver.EnemyLineEnd(in axis, enemyX, enemyZ, right, out float endX, out float endZ);
             input.EnemyEndX = endX;
             input.EnemyEndZ = endZ;
+            input.GroupFormation = child.Formation;
+
+            // BC14W (requirement-focal-execution): the focal assault's column strikes the focal point (latched at its March, until then each evaluation's):
+            // the inward target of the corridor and river checks, the row's line end, and the Turn's heading and Attack's target in BC11.
+            if (spec.Kind == PlayRectKind.AssaultColumn)
+            {
+                FocalPoint focalPoint = default(FocalPoint);
+                bool latched = state.HasFocal;
+                if (latched) { focalPoint.X = state.FocalX; focalPoint.Z = state.FocalZ; focalPoint.Kind = (FocalKind)state.FocalKind; }
+                if (latched || (feasibility != null && feasibility.TryFocalPoint(out focalPoint)))
+                {
+                    input.HasFocal = true;
+                    input.FocalX = focalPoint.X;
+                    input.FocalZ = focalPoint.Z;
+                    input.FocalKind = (byte)focalPoint.Kind;
+                    input.HasEnemyExtent = true;
+                    input.EnemyEndX = focalPoint.X;
+                    input.EnemyEndZ = focalPoint.Z;
+                    // The first battery's bombardment plus PreparationHours is the earliest the column goes in (no battery passed: no floor).
+                    PreparationTable preparation = PreparationTable.ForAlliance(side.Alliance);
+                    if (preparation != null && preparation.TryFloor(planId, side.ActivatedHours, focalPoint.X, focalPoint.Z, out double floor))
+                    {
+                        input.HasPreparationFloor = true;
+                        input.PreparationFloorHours = floor;
+                    }
+                }
+            }
 
             if (spec.Kind == PlayRectKind.DeepRaid)
             {
@@ -541,10 +579,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 }
             }
 
+            // BC14W (requirement-works-hold): a hopeless works assault is never launched, whichever plan carries it. The body that assaults works
+            // and every start delay of the plan stay in Hold, with no planned release published for them (the ledger's release below).
+            if (feasibility != null && Plugin.EnemyWorksDoctrineEnabled() && feasibility.WorksHold(out string worksReason))
+                input.HoldForWorks = EnvelopmentManeuver.HoldForWorksFor(worksReason, feasibility.AssaultsWorks(childId), !spec.Envelops);
+
             // BC14: the ledger's release, time budget and vias, for a child of the plan the ledger selected and still on the ledger's side
             // (BC11's own mirrored try, or a plan the ledger does not know, leaves BC11's rule as it is).
             LedgerPlan(feasibility, planId, childId, mirrored, in state, in input, out PlannedLeg planned);
-            if (planned.HasRelease)
+            if (planned.HasRelease && !input.HoldForWorks)
             {
                 input.HasPlannedRelease = true;
                 input.PlannedReleaseHours = planned.ReleaseHours;
@@ -559,9 +602,22 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             }
             input.ViaPassed = planned.ViaPassed;
             input.AttackViaPassed = planned.AttackViaPassed;
+            // BC14W: the focal assault's support and demonstrations follow the column, not a published hour: the support goes at its strike plus the
+            // echelon delay, the demonstrations at it, and both wait while the column does (the preparation floor, the formation wait and the works hold
+            // move them with it). A follower in contact is not held.
+            if (planId == BattlePlanId.FocalAssault && spec.HoldsForRelease && (spec.Kind == PlayRectKind.AssaultSupport || spec.Kind == PlayRectKind.Demonstration))
+            {
+                ManeuverState columnState = default(ManeuverState);
+                if (side.ColumnChildId != null) side.States.TryGetValue(side.ColumnChildId, out columnState);
+                bool beforeMarch = state.Phase == ManeuverPhase.None || state.Phase == ManeuverPhase.Hold;
+                input.HasPlannedRelease = beforeMarch && !input.ChildInContact;
+                input.PlannedReleaseHours = EnvelopmentManeuver.FollowerReleaseHours(spec.Kind, side.ColumnChildId != null, columnState.Phase,
+                    columnState.PhaseSinceHours, now);
+            }
 
             // FlankMove's checks (116929-117108) on the inward leg (anchor to the line end) and the march leg.
-            float inwardX = input.HasEnemyExtent ? endX : enemyX, inwardZ = input.HasEnemyExtent ? endZ : enemyZ;
+            float inwardX = input.HasFocal ? input.FocalX : (input.HasEnemyExtent ? endX : enemyX);
+            float inwardZ = input.HasFocal ? input.FocalZ : (input.HasEnemyExtent ? endZ : enemyZ);
             input.AnchorHeight = HeightAt(anchorX, anchorZ);
             input.CorridorEnemyCount = EnvelopmentManeuver.CorridorEnemies(snapshot, anchorX, anchorZ, inwardX, inwardZ, TerrainHeightAt, out float maxHeight);
             input.MaxCorridorEnemyHeight = maxHeight;
@@ -809,6 +865,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                     predictedArrival = predicted.arrival;
                     predictedMarch = predicted.march;
                 }
+                // BC14W: the focal assault's column row names the focal point's kind, the preparation its bombardment buys (the floor's hours, 0 with none
+                // passed; preparationFloorHours is the doctrine hour the Attack waits for, -1 with none) and the formation it marches in (-1: the posture's).
+                bool column = input.Kind == PlayRectKind.AssaultColumn;
+                string focalKind = column && state.HasFocal ? ((FocalKind)state.FocalKind).ToString() : string.Empty;
+                double preparationHours = column && input.HasPreparationFloor ? WorksRules.PreparationHours : 0.0;
+                double preparationFloor = column && input.HasPreparationFloor ? input.PreparationFloorHours : -1.0;
+                int formation = order.HasFormation ? order.Formation : -1;
                 TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalEnvelopment", TelemetrySeverity.Info,
                     ev => ev
                         .WithSide(allianceId)
@@ -835,7 +898,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                         .WithField("attackViaZ", attackViaZ)
                         .WithField("arrivedHours", turn ? now : -1.0)
                         .WithField("predictedArrivalHours", predictedArrival)
-                        .WithField("predictedMarchHours", predictedMarch));
+                        .WithField("predictedMarchHours", predictedMarch)
+                        .WithField("focalKind", focalKind)
+                        .WithField("preparationHours", preparationHours)
+                        .WithField("preparationFloorHours", preparationFloor)
+                        .WithField("formation", formation));
             }
             catch { }
         }

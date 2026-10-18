@@ -100,7 +100,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
                 {
                     // The inward leg BC11 attacks along: the anchor to the enemy line end (a DeepRaid: its outflank point).
                     float sx, sz;
-                    if (deepRaid) { sx = outflankX; sz = outflankZ; }
+                    // BC14W: an assault column strikes the focal point of the works, not a line end.
+                    if (body.Kind == PlayRectKind.AssaultColumn) { sx = job.Focal.X; sz = job.Focal.Z; }
+                    else if (deepRaid) { sx = outflankX; sz = outflankZ; }
                     else
                     {
                         bool right = EnvelopmentManeuver.RectIsRight(in axis, ax, az);
@@ -242,7 +244,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
             string reason = null;
             float largest = ReasonThreshold;
             if (b.Daylight > largest) { largest = b.Daylight; reason = "after-dark"; }
-            if (b.Detail > largest) { largest = b.Detail; reason = "detail"; }
+            if (b.Detail > largest) { largest = b.Detail; reason = b.AssaultsWorks ? "works" : "detail"; }
             if (0.6f * b.Contested > largest) { largest = 0.6f * b.Contested; reason = b.NoStrikePath && b.Contested >= b.StrikeContested ? "no-strike-crossing" : "contested"; }
             if (0.5f * b.Approach > largest) { largest = 0.5f * b.Approach; reason = "approach"; }
             if (0.4f * b.Exposure > largest) { reason = "exposure"; }

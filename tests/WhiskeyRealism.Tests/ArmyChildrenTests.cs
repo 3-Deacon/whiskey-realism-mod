@@ -43,6 +43,7 @@ internal static class ArmyChildrenTests
             ("army children the orchestrator releases a Defender's leaf reserve on a perceived crisis", TheOrchestratorReleasesALeafReserveOnAPerceivedCrisis),
             ("army children a new plan drops the leaf releases", ANewPlanDropsTheLeafReleases),
             ("army children the Defender reserve row throttle is battle-scoped state", TheDefenderReserveThrottleResetsWithTheBattle),
+            ("army children bc14w DEF-WORKS-STATION-LEAF a stationed Reserve child holds no leaf reserve of its own and is never released by the producer: one reserve, one placement", AStationedReserveHasOnePlacement),
             ("army children an attacking division keeps no cascade reserve", AnAttackingDivisionKeepsNoCascadeReserve),
             ("army children the orchestrator's defender leaf map keeps a reserve and rebuilds on a stance change", TheOrchestratorDefenderLeafMapKeepsAReserve),
             ("army children a division in no army is a direct child beside the army's divisions", ALooseDivisionIsADirectChildBesideTheArmysDivisions),
@@ -409,6 +410,28 @@ internal static class ArmyChildrenTests
             CascadeEnvelopmentMode.None, FacingPlusZ(), null, defender, report);
     }
 
+    // BC14W requirement-defender-works-reserve vs the leaf reserve (LeafReservePlanner, LeafReserveRelease): a Reserve-role command holds back no
+    // reserve inside itself (the cascade's hold-back is for holding commands), so the stationed child has no leaf slot of its own; the producer sends a
+    // reserve only when the allocator re-roled it out of Reserve, which a station never does. The station's guard point is the child's one placement.
+    private static void AStationedReserveHasOnePlacement()
+    {
+        var report = new List<DefenderReserveRecord>();
+        var map = HoldingMap(6, defender: true, report, parentRole: DirectChildRole.Reserve);
+        AssertEqual(0, report.Count, "a Reserve-role division is not a holding command: no leaf hold-back record");
+        AssertTrue(map.Values.All(a => a.LeafRole == DirectChildRole.Reserve && a.LeafTask == CommandTaskType.ReserveWait), "all its brigades wait with it");
+        var held = new List<DefenderReserveRecord>();
+        HoldingMap(6, defender: true, held);
+        AssertTrue(held.Count == 1, "control: a Main-role division holds a leaf reserve back");
+
+        var station = new DirectChildIntent("child-12", 15, 15, "Corps12", 1, DirectChildRole.Reserve, DirectChildAxis.SectorAxis, -1, 0f, default(TacticalIntentModel),
+            guardPoint: new GuardPoint(250f, 150f, 45f));
+        var crossing = new DirectChildIntent("child-13", 15, 15, "Corps13", 2, DirectChildRole.RefuseLeft, DirectChildAxis.SectorAxis, 2, 0f, default(TacticalIntentModel),
+            guardPoint: new GuardPoint(-250f, 150f, 315f), releasedFromReserve: true);
+        var intents = new[] { station, crossing };
+        AssertFalse(TacticalReserveCommitGate.TryReleasedDirectChild(intents, 12, false, out _, out _, out _), "the stationed child is no release: the producer plans no move for it");
+        AssertTrue(TacticalReserveCommitGate.TryReleasedDirectChild(intents, 13, false, out _, out _, out _), "control: a crossing guard is a release");
+    }
+
     private static void AHoldingDivisionKeepsAThirdInReserve()
     {
         foreach (var (n, reserves) in new[] { (3, 1), (4, 1), (5, 1), (6, 2), (9, 3) })
@@ -684,7 +707,12 @@ internal static class ArmyChildrenTests
         for (int k = 0; k < 4; k++) { h.Cascade(army); clock += 0.02; }
         AssertEqual(1, army.LeafRelease.Released.Count, "a reserve is out");
 
+        // A re-pick that lands on the plan already held changes nothing (PlanCommitmentTests); a different plan starts the releases over.
         army.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1));
+        AssertEqual(1, army.LeafRelease.Released.Count, "the same plan re-picked keeps the releases");
+        army.SetPlanForTesting(new TacticalBattlePlan(BattlePlanId.DelayingDefense, BattlePhase.MainEffort, 0, null, null, 1.4f, 0f, 7));
+        army.Replan(new ArmyEvidence(0.8f, TerrainKind.Open, 1));
+        AssertTrue(army.CurrentPlan.PlanId != BattlePlanId.DelayingDefense, "the catalog picked another plan");
         AssertEqual(0, army.LeafRelease.Released.Count, "a new plan starts the releases over");
     }
 

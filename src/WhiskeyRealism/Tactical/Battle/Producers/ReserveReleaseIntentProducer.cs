@@ -29,6 +29,16 @@ namespace WhiskeyRealism.Tactical.Battle
     // while deploying); a reserve LeafReserveRelease has sent out goes to its trigger point (the crisis band's line, the exposed wing's end, the main
     // effort's band) and returns to its slot when the release ends. Source ReserveRelease, so the crossing gate sees every one of these moves.
     //
+    // A release is real, held and not repeated (smoke 2026-10-17: 18 queued orders for one brigade the allocator re-roled every few seconds):
+    //   - the child's intent is a release the allocation made out of Reserve (DirectChildIntent.ReleasedFromReserve); a role the evidence
+    //     tiers gave a child the ledger still holds is a disagreement the ledger resolves, not a release; on a Defender side Main and
+    //     SupportMain never release a held reserve (TacticalReserveCommitGate.TryReleasedDirectChild);
+    //   - the release stands ReserveReleasePacing.HoldMinutes of doctrine time as a release (whatever the release role; the move is for the role standing
+    //     when the hold completes) before its move goes out (a crisis Fix and a crossing guard are not held);
+    //   - no new move while the last one is queued for its courier, or, while the same release stands, to a target within the executor's dedupe radius of
+    //     the last release target; the record is confirmed only by the executor's last move when it is this producer's and went to that target.
+    // Every submitted, held or withheld move writes one TacticalReserveReleaseMove row (bounded: throttled on a numeric key before anything is built).
+    //
     // Built by BattleCoreTick's producer registry; runs inside the arbiter tick.
     // Rollback: Enable Tactical Orchestrator Reserve Commit Gate = false (the gate
     // and its release are one feature).
@@ -37,12 +47,22 @@ namespace WhiskeyRealism.Tactical.Battle
         public string Name => "ReserveRelease";
 
         private const float LeafRowSeconds = 30f;
+        private const float MoveRowSeconds = 30f;
         private static readonly Dictionary<string, float> _lastLeafRowAt = new Dictionary<string, float>();
+        private static readonly RowThrottle _moveRows = new RowThrottle(MoveRowSeconds);
         private static readonly List<LeafReserveMove> _moves = new List<LeafReserveMove>(8);
+        // One per alliance (0 and 1): the hold and dead-band records of the side's direct-child releases.
+        private static readonly ReserveReleasePacing[] _pacing = { new ReserveReleasePacing(), new ReserveReleasePacing() };
 
         static ReserveReleaseIntentProducer()
         {
-            BattleScope.Register("reserve-release-producer", () => { _lastLeafRowAt.Clear(); _moves.Clear(); });
+            BattleScope.Register("reserve-release-producer", () =>
+            {
+                _lastLeafRowAt.Clear();
+                _moveRows.Clear();
+                _moves.Clear();
+                for (int i = 0; i < _pacing.Length; i++) _pacing[i].Clear();
+            });
         }
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)
@@ -55,6 +75,10 @@ namespace WhiskeyRealism.Tactical.Battle
                 ProduceLeafReserves(snapshot, army, sink);
                 var operations = army.CurrentCommandOperations;
                 if (operations == null) return;
+                if (snapshot.Alliance < 0 || snapshot.Alliance >= _pacing.Length) return;
+                ReserveReleasePacing pacing = _pacing[snapshot.Alliance];
+                bool defender = army.CurrentBattleStance == BattleStance.Defender;
+                OrderExecutor executor = OrderExecutor.ForAlliance(snapshot.Alliance);
 
                 for (int i = 0; i < operations.Count; i++)
                 {
@@ -65,14 +89,71 @@ namespace WhiskeyRealism.Tactical.Battle
                     if (index < 0) continue;
 
                     // No per-tick strings: the direct child's intent is matched by id in place.
-                    if (!TacticalReserveCommitGate.TryReleasedDirectChild(army.CurrentDirectChildIntents, id, out int sector)) continue;
-                    if (TacticalReserveCommitGate.TryPlanRelease(snapshot, index, sector, out BattleOrderIntent move))
+                    bool released = TacticalReserveCommitGate.TryReleasedDirectChild(army.CurrentDirectChildIntents, id, defender, out int sector, out DirectChildRole role, out bool guardPoint);
+                    if (!pacing.HoldElapsed(id, released, role, guardPoint, snapshot.DoctrineHours))
                     {
-                        PostureRoutes.AttachIfInColumn(snapshot, index, ref move);
-                        sink.Submit(move);
+                        if (released) EmitMoveRow(snapshot.Alliance, id, "hold", role, sector, 0f, 0f, pacing.HeldFor(id, snapshot.DoctrineHours));
+                        continue;
                     }
+                    if (!TacticalReserveCommitGate.TryPlanRelease(snapshot, index, sector, out BattleOrderIntent move)) continue;
+
+                    ReserveReleasePacing.Admission admission = pacing.Admit(id, move.TargetX, move.TargetZ, snapshot.DoctrineHours,
+                        snapshot.Own[index].QueuedOrders, ExecutorMoveOf(executor, id));
+                    if (admission != ReserveReleasePacing.Admission.Go)
+                    {
+                        EmitMoveRow(snapshot.Alliance, id, admission == ReserveReleasePacing.Admission.CourierWait ? "courier-wait" : "dead-band", role, sector,
+                            move.TargetX, move.TargetZ, pacing.HeldFor(id, snapshot.DoctrineHours));
+                        continue;
+                    }
+                    PostureRoutes.AttachIfInColumn(snapshot, index, ref move);
+                    sink.Submit(move);
+                    pacing.NoteSubmitted(id, move.TargetX, move.TargetZ, snapshot.DoctrineHours);
+                    EmitMoveRow(snapshot.Alliance, id, "issued", role, sector, move.TargetX, move.TargetZ, pacing.HeldFor(id, snapshot.DoctrineHours));
                 }
             }
+        }
+
+        // The executor's last Move for the group, read back for the pacing: its hour and target (LastIssuedMove) and whether the order was this
+        // producer's (the last Move outcome's source is ReserveRelease and the move was issued, taken or retried, not failed, skipped or superseded).
+        private static ExecutorMove ExecutorMoveOf(OrderExecutor executor, int groupId)
+        {
+            if (executor == null || !executor.LastIssuedMove(groupId, out float x, out float z, out double hours)) return ExecutorMove.None;
+            bool fromRelease = executor.TryGetLastOutcome(groupId, OrderChannel.Move, out OrderOutcome outcome)
+                && outcome.Source == IntentSource.ReserveRelease
+                && (outcome.Kind == OrderOutcomeKind.Issued || outcome.Kind == OrderOutcomeKind.Moved || outcome.Kind == OrderOutcomeKind.Retried);
+            return new ExecutorMove(fromRelease, hours, x, z);
+        }
+
+        // One TacticalReserveReleaseMove row per child and outcome (issued, hold, courier-wait, dead-band): the target rounded to 50 m, a 30 s throttle on
+        // an unchanged identity. The throttle is decided on a numeric key before any string or closure is built (RowThrottle), so a tick that writes
+        // nothing allocates nothing. A hold reports how long the release has stood; the others the target they would have sent.
+        private static void EmitMoveRow(int alliance, int groupId, string outcome, DirectChildRole role, int sector, float x, float z, double heldHours)
+        {
+            try
+            {
+                long key = RowThrottle.Key(alliance, groupId, outcome.Length * 31 + outcome[0], (int)role * 64 + sector, (int)(x / 50f) * 4099 + (int)(z / 50f));
+                if (!_moveRows.Due(key, Environment.TickCount * 0.001f)) return;
+                WriteMoveRow(alliance, groupId, outcome, role, sector, x, z, heldHours);
+            }
+            catch (Exception ex)
+            {
+                OnceLog.Warning("tactical-battle-core:reserve-release-move-row", "[ReserveRelease] move row failed: " + ex.GetType().Name);
+            }
+        }
+
+        private static void WriteMoveRow(int alliance, int groupId, string outcome, DirectChildRole role, int sector, float x, float z, double heldHours)
+        {
+            TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalReserveReleaseMove", TelemetrySeverity.Info,
+                ev => ev
+                    .WithSide(alliance)
+                    .WithDecision("TacticalReserveReleaseMove", outcome, "side=" + alliance + "|child=" + groupId)
+                    .WithField("child", "child-" + groupId)
+                    .WithField("outcome", outcome)
+                    .WithField("role", role.ToString())
+                    .WithField("sector", sector)
+                    .WithField("x", x)
+                    .WithField("z", z)
+                    .WithField("heldMinutes", heldHours * 60.0));
         }
 
         // The Defender's holding commands' reserves: slots and releases, then one throttled TacticalLeafReserve row per new order.

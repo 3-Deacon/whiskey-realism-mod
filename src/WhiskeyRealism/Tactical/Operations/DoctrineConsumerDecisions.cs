@@ -52,11 +52,16 @@ namespace WhiskeyRealism.Tactical.Operations
         private const float FreshExposureConfidenceFloor = 0.75f;
         private const float TargetMatchTolerance = 100f;
 
+        /// <summary>The reason of #45's decision for a group the works hold guard holds (BC14W): a Deny that feeds only the charge demotion, never a stance intent.</summary>
+        public const string WorksHoldReason = WorksHoldGuard.Reason;
+
         public static DoctrineStanceDecision DecideStance(
             CommandDoctrineOrder order,
             bool enemyMainLineExposed,
             float localOdds)
         {
+            if (WorksHoldGuard.Holds(order.Task, order.Reason))
+                return new DoctrineStanceDecision(DoctrineConsumerAction.Deny, WorksHoldReason);
             if (order.Task == CommandTaskType.ReserveWait)
                 return new DoctrineStanceDecision(DoctrineConsumerAction.Deny, "reserve-held");
             if (order.Task == CommandTaskType.AttackObjective &&

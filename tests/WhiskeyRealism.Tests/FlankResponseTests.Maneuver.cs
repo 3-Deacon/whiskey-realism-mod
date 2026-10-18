@@ -16,7 +16,7 @@ internal static partial class FlankResponseTests
         {
             ("bc11 NonEnvelopmentWingNeverManeuvers", NonEnvelopmentWingNeverManeuvers),
             ("bc11 StartDelayWingHoldsThenReleases", StartDelayWingHoldsThenReleases),
-            ("bc11 EnvelopsSetOnExactlySixRects", EnvelopsSetOnExactlySixRects),
+            ("bc11 EnvelopsSetOnExactlySevenRects", EnvelopsSetOnExactlySevenRects),
             ("bc11 HoldUntilOffsetAfterCenterContact", HoldUntilOffsetAfterCenterContact),
             ("bc11 MarchTargetsRectAnchorOnLanes", MarchTargetsRectAnchorOnLanes),
             ("bc11 DeepRaidMarchesAroundLessPressuredEnd", DeepRaidMarchesAroundLessPressuredEnd),
@@ -135,7 +135,7 @@ internal static partial class FlankResponseTests
         }
     }
 
-    private static void EnvelopsSetOnExactlySixRects()
+    private static void EnvelopsSetOnExactlySevenRects()
     {
         var found = new List<string>();
         foreach (BattlePlanId id in Enum.GetValues(typeof(BattlePlanId)))
@@ -148,7 +148,7 @@ internal static partial class FlankResponseTests
         found.Sort(StringComparer.Ordinal);
         string[] expected =
         {
-            "CavalryRaid:DeepRaid", "DoubleEnvelopment:LeftWing", "DoubleEnvelopment:RightWing", "ManeuverAndFix:RightWing",
+            "CavalryRaid:DeepRaid", "DoubleEnvelopment:LeftWing", "DoubleEnvelopment:RightWing", "FocalAssault:AssaultColumn", "ManeuverAndFix:RightWing",
             "MobileFlankMarch:FlankMarch", "WideFlankApproach:FlankMarch",
         };
         AssertEqual(string.Join(",", expected), string.Join(",", found), "the enveloping rects");
@@ -689,10 +689,11 @@ internal static partial class FlankResponseTests
     private static void ManeuverPlumbingIsWired()
     {
         string coordinator = SourceText("Tactical", "Orchestrator", "TacticalBattleCoordinatorRuntime.cs");
-        AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored);", "the direct children reach CollectOwn");
+        AssertPinned(coordinator, ".ComputeZoneAssignments(side.AllianceId, planId, shift, childCount, axis, childIds, side.Army.CurrentPlan.Mirrored, side.Army.Feasibility);", "the direct children reach CollectOwn");
         AssertPinned(coordinator, "PlayExecutorRuntime.StepManeuvers(", "the coordinator steps the maneuvers each direct-child cycle");
         AssertPinned(coordinator, "side.Army.CurrentDirectChildIntents, evidence, axis, side.Army.CurrentBattleStance", "from the side's evidence and stance");
-        AssertPinned(coordinator, "unchecked(CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash)", "a phase change ticks the ledger gate");
+        AssertPinned(coordinator, "unchecked(((CommandNodeIntentsHash(side.Army.CurrentCommandNodeIntents) * 31 + side.Army.ManeuverHash) * 31 + worksHoldHash) * 31 + side.Army.GuardHash)", "a phase change, a works hold change or a moved guard point ticks the ledger gate");
+        AssertPinned(coordinator, "side.Army.Feasibility.WorksHoldHash", "the works hold hash is read from the side's ledger");
         string runtime = SourceText("Tactical", "Orchestrator", "Plays", "PlayExecutorRuntime.cs");
         AssertPinned(runtime, "if (!Plugin.FlankResponseEnabled() || planId == BattlePlanId.Unknown", "the maneuver is behind Enable Flank Response And Envelopment");
         AssertPinned(runtime, "EnvelopmentManeuver.InwardLegHitsRiver(grid, anchorX, anchorZ,", "the river checks read the terrain grid");
@@ -701,7 +702,7 @@ internal static partial class FlankResponseTests
         string army = SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents)", "the army expands the orders to nodes");
         string ledger = SourceText("Tactical", "Orchestrator", "TacticalOperationsLedgerRuntime.cs");
-        AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers, reverseSlope);", "the ledger hands the table to the doctrine build");
+        AssertPinned(ledger, "_currentForce.ReserveFraction, stance, maneuvers, reverseSlope,", "the ledger hands the table to the doctrine build");
         string producers = SourceText("Tactical", "Battle", "Producers", "PostureIntentProducer.cs");
         AssertPinned(producers, "if (kind == PostureExecutionTarget.DoctrinePrimaryTarget && order.ManeuverHold) return false;", "a hold burns no nav plan");
         AssertPinned(producers, "if (hasOrder && order.ManeuverHeading >= 0f && rec.UnitTyp > TacticalUnitType.MaxCombat && !physical.ActiveMove &&", "a Turn faces the group");

@@ -59,6 +59,18 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public int Held, Floor;
     }
 
+    /// <summary>
+    /// BC14W (requirement-defender-works-reserve): the Reserve child stationed behind a focal point of the Defender's own works, the focal point it
+    /// answers, the station and its heading, and the enemy's arrival at the focal point when the choice was made (the hysteresis compares with it).
+    /// </summary>
+    public struct StationBinding
+    {
+        public string ChildId;
+        public float FocalX, FocalZ, X, Z, Heading;
+        public double ArrivalAtChoice;
+        public bool Has => ChildId != null;
+    }
+
     public sealed class ReserveReleaseState
     {
         public const int MaxCrossingGuards = 8;
@@ -119,6 +131,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             return true;
         }
 
+        private StationBinding _station;
+
+        /// <summary>The stationed child's binding (Has false: none). A station is not a release: it is cleared by <see cref="Clear"/> and the allocator, not by <see cref="ClearTrigger"/>.</summary>
+        public StationBinding Station => _station;
+
+        public void BindStation(in StationBinding binding) => _station = binding;
+
+        public void EndStation() => _station = default(StationBinding);
+
         public bool TryCrossingOf(string childId, out CrossingBinding binding)
         {
             for (int i = 0; i < _boundCount; i++)
@@ -171,6 +192,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public void Clear()
         {
             ClearTrigger();
+            EndStation();
             Array.Clear(_bound, 0, _boundCount);
             _boundCount = 0;
             _crisis.Clear();

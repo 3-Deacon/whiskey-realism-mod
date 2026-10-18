@@ -138,6 +138,27 @@ namespace WhiskeyRealism.Tactical.Orchestrator
     }
 
     /// <summary>
+    /// BC14O requirement-main-effort-objective: where a Screen-role child stands to screen a secondary objective (the objective itself when own-held,
+    /// else the point short of it on the own side). HasValue false is none.
+    /// </summary>
+    public readonly struct ScreenTarget
+    {
+        public ScreenTarget(float x, float z, float heading = 0f)
+        {
+            HasValue = true;
+            X = x;
+            Z = z;
+            Heading = heading;
+        }
+
+        public bool HasValue { get; }
+        public float X { get; }
+        public float Z { get; }
+        /// <summary>The heading the child faces there, degrees: toward the enemy along the own front axis.</summary>
+        public float Heading { get; }
+    }
+
+    /// <summary>
     /// Per-direct-child intent produced by DirectChildAllocator (ArmyOrchestrator.CurrentDirectChildIntents).
     /// Cascaded to consumers (#42 gate, future O4 division attach).
     /// </summary>
@@ -156,8 +177,12 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             TacticalIntentModel enemyIntent,
             WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec maneuver = default(WhiskeyRealism.Tactical.Orchestrator.Plays.ManeuverSpec),
             WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind zoneRectKind = WhiskeyRealism.Tactical.Orchestrator.Plays.PlayRectKind.Unknown,
-            GuardPoint guardPoint = default(GuardPoint))
+            GuardPoint guardPoint = default(GuardPoint),
+            ScreenTarget screenTarget = default(ScreenTarget),
+            bool releasedFromReserve = false)
         {
+            ReleasedFromReserve = releasedFromReserve;
+            Screen = screenTarget;
             Guard = guardPoint;
             Maneuver = maneuver;
             ZoneRectKind = zoneRectKind;
@@ -185,6 +210,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public TacticalIntentModel EnemyIntent { get; }
 
         /// <summary>
+        /// The allocation's own release: the base allocation held the child in Reserve and a release (crisis, stagger or odds, flank, crossing guard,
+        /// after the release hysteresis) took it out. A child whose base role was already a committed one (the evidence tiers gave it Main, SupportMain
+        /// or a refuse role) is not released from anything and reads false: the reserve-release producer moves only a released child.
+        /// </summary>
+        public bool ReleasedFromReserve { get; }
+
+        /// <summary>
         /// BC11 decision 4: the maneuver the child's zone assignment carries (an enveloping rect, or a wing rect with a
         /// start delay); HasValue is false for every other child. The roles stay as the rect kind maps them.
         /// </summary>
@@ -203,6 +235,24 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float GuardX => Guard.X;
         public float GuardZ => Guard.Z;
         public float GuardHeading => Guard.Heading;
+
+        /// <summary>BC14O: the secondary objective this Screen-role child screens (none for every other child).</summary>
+        public ScreenTarget Screen { get; }
+
+        public bool HasScreenTarget => Screen.HasValue;
+        public float ScreenX => Screen.X;
+        public float ScreenZ => Screen.Z;
+        public float ScreenHeading => Screen.Heading;
+
+        /// <summary>The same intent screening a secondary objective at (<paramref name="x"/>, <paramref name="z"/>); every other field is carried.</summary>
+        public DirectChildIntent WithScreenTarget(float x, float z, float heading = 0f)
+            => new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector, SupportPriority01, EnemyIntent,
+                Maneuver, ZoneRectKind, Guard, new ScreenTarget(x, z, heading), ReleasedFromReserve);
+
+        /// <summary>The same intent with its release mark set to <paramref name="released"/>; every other field is carried.</summary>
+        public DirectChildIntent WithReleasedFromReserve(bool released)
+            => new DirectChildIntent(ChildId, RawUnitTyp, EffectiveCommandLevel, DisplayName, PrimarySector, Role, Axis, AxisSector, SupportPriority01, EnemyIntent,
+                Maneuver, ZoneRectKind, Guard, Screen, released);
 
         private static float Clamp01(float v)
         {

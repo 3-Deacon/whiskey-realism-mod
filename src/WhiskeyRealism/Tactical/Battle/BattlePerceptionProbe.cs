@@ -71,6 +71,8 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             internal EnemyObservation[] Memory = new EnemyObservation[InitialCapacity];
             internal int MemoryCount;
+            // BC15 decision 2(a): where blocking observations left memory since the tier pass last read the latches.
+            internal readonly ObservationDropLog Drops = new ObservationDropLog();
             internal PerceptionProbeResult Result = PerceptionProbeResult.Create(InitialCapacity);
             internal bool HasMode;
             internal PerceptionMode LastMode;
@@ -102,6 +104,7 @@ namespace WhiskeyRealism.Tactical.Battle
             for (int i = 0; i < _sides.Length; i++)
             {
                 _sides[i].MemoryCount = 0;
+                _sides[i].Drops.Clear();
                 _sides[i].Result.Count = 0;
                 _sides[i].HasMode = false;
             }
@@ -109,6 +112,17 @@ namespace WhiskeyRealism.Tactical.Battle
             _battleStartHours = double.NaN;
             _geometryRead = false;
             _paintedGrids.Reset();
+        }
+
+        /// <summary>
+        /// BC15: the battle-AI tier pass has read the side's observation changes; clears the latches and the drop log
+        /// (BattlePerception.ClearChangeLatch). Called once per arbiter tick, after the pass.
+        /// </summary>
+        internal static void ConsumeChangeLatch(int alliance)
+        {
+            if (alliance < 0 || alliance >= _sides.Length) return;
+            SideState side = _sides[alliance];
+            BattlePerception.ClearChangeLatch(side.Memory, side.MemoryCount, side.Drops);
         }
 
         /// <summary>
@@ -158,9 +172,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
             int needed = side.MemoryCount + side.Result.Count;
             if (side.Memory.Length < needed) Array.Resize(ref side.Memory, Math.Max(needed, side.Memory.Length * 2));
-            BattlePerception.Update(side.Memory, ref side.MemoryCount, in side.Result, nowHours);
+            BattlePerception.Update(side.Memory, ref side.MemoryCount, in side.Result, nowHours, side.Drops);
 
-            BattlePerception.Publish(s, mode, reason, side.Memory, side.MemoryCount, in side.Result);
+            BattlePerception.Publish(s, mode, reason, side.Memory, side.MemoryCount, in side.Result, side.Drops);
             SlicePressureBuilder.Build(s, in _geometry);
             using (TelemetryPerf.Scope("tactical.perceived-flanking", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
                 PerceivedFlanking.Apply(s, in _flank);

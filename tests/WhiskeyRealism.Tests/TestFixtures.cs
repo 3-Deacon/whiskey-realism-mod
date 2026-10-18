@@ -284,6 +284,7 @@ internal static class TestFixtures
             c.Register(new CavalryRaidPlaybook());
             c.Register(new MeetingEngagementPlaybook());
             c.Register(new DelayingDefensePlaybook());
+            c.Register(new FocalAssaultPlaybook());
             return c;
         }
     }

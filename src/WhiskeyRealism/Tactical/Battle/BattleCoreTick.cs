@@ -41,7 +41,7 @@ namespace WhiskeyRealism.Tactical.Battle
     internal static class BattleCoreTick
     {
         private const float TelemetryIntervalRealSeconds = 30f;
-        private const int SkipReasonCount = (int)SkipReason.NoKnownCrossing + 1;
+        private const int SkipReasonCount = (int)SkipReason.StandingClaim + 1;
 
         private static readonly BattleProducerRegistry Producers = new BattleProducerRegistry(CreateProducer);
 
@@ -57,6 +57,9 @@ namespace WhiskeyRealism.Tactical.Battle
 
         private static readonly int[] _macroAi = new int[2];
         private static BattleOrderIntent[] _winners = new BattleOrderIntent[256];
+        private static BattleOrderIntent[] _carried = new BattleOrderIntent[256];
+        // BC15 decision 14: the intent count after each producer's first-pass block, where its second-pass intents are inserted.
+        private static readonly int[] _producerEnds = new int[32];
         private static readonly BattleOrderIntent[] _retries = new BattleOrderIntent[32];
         private static readonly OrderOutcome[] _outcomes = new OrderOutcome[256];
         private static readonly ArbiterStats[] _stats = { new ArbiterStats(), new ArbiterStats() };
@@ -134,6 +137,8 @@ namespace WhiskeyRealism.Tactical.Battle
         {
             OrderArbiter arbiter = OrderArbiter.ForAlliance(alliance);
             if (arbiter != null) arbiter.ClearClaims();
+            // BC15: the claims are gone, so every group is Full again for the minimum hold and no posture record is kept for a carried group.
+            BattleLodRuntime.StandDown(alliance);
             // BC13: a gated-off side ends every live exploit (stand-down) and the posture producer finds an empty table; the
             // staggered reserve release starts over.
             OpportunityIntentProducer.StandDown(alliance);
@@ -175,6 +180,8 @@ namespace WhiskeyRealism.Tactical.Battle
             _macroAi[alliance] = battle.macroai;
 
             arbiter.BeginTick();
+            // BC15: the tier pass and the carry run after BeginTick (which clears the working table) and before the first producer.
+            BattleLodRuntime.BeginTick(snapshot, arbiter, executor, now);
             for (int p = 0; p < Producers.Count; p++)
             {
                 IBattleIntentProducer producer = Producers[p];
@@ -187,9 +194,47 @@ namespace WhiskeyRealism.Tactical.Battle
                     OnceLog.Warning(Producers.ThrewKey(p),
                         "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
                 }
+                if (p < _producerEnds.Length) _producerEnds[p] = arbiter.IntentCount;
+            }
+
+            // BC15 decision 14: a Full-only producer's claim on a Distant group's cell that was not renewed hid the group's own intent at full rate; the
+            // group is woken now and the tiered producers run once more for it alone, before Resolve.
+            if (BattleLodRuntime.WakeLapsedClaims(snapshot, arbiter, now) > 0)
+            {
+                BattleLodRuntime.BeginWakePass();
+                try
+                {
+                    // Each second-pass block goes in where its producer's first-pass block ended, so a tie in priority between two sources is won by
+                    // the one that submitted first at full rate, where the tiered producers come before the Full-only ones after them.
+                    int shift = 0;
+                    for (int p = 0; p < Producers.Count; p++)
+                    {
+                        IBattleIntentProducer producer = Producers[p];
+                        if (!BattleLodRuntime.IsTieredProducer(producer.Name) || p >= _producerEnds.Length) continue;
+                        arbiter.BeginInsert(_producerEnds[p] + shift);
+                        try
+                        {
+                            producer.Produce(snapshot, arbiter);
+                        }
+                        catch (Exception ex)
+                        {
+                            OnceLog.Warning(Producers.ThrewKey(p),
+                                "[OrderArbiter] producer " + producer.Name + " threw: " + ex.GetType().Name + " " + ex.Message);
+                        }
+                        finally
+                        {
+                            shift += arbiter.EndInsert();
+                        }
+                    }
+                }
+                finally
+                {
+                    BattleLodRuntime.EndWakePass();
+                }
             }
 
             int intents = arbiter.IntentCount;
+            if (_carried.Length < snapshot.OwnCount * OrderChannels.Count) _carried = new BattleOrderIntent[snapshot.OwnCount * OrderChannels.Count];
             if (_winners.Length < intents) _winners = new BattleOrderIntent[Math.Max(intents, _winners.Length * 2)];
             int winners;
             using (TelemetryPerf.Scope("tactical.arbiter.resolve", TelemetryLayer.Tactical, TelemetryCategory.Performance, 0.5))
@@ -202,7 +247,8 @@ namespace WhiskeyRealism.Tactical.Battle
             using (TelemetryPerf.Scope("tactical.arbiter.execute", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 OrderExecutorRuntime.BindForTick(executor);
-                executor.BeginTickClaims(snapshot, _winners, winners);
+                int carriedCount = arbiter.CarriedWinners(_carried);
+                executor.BeginTickClaims(snapshot, _winners, winners, _carried, carriedCount);
                 try
                 {
                     executor.ObserveOutcomes(snapshot, now, _outcomes, out int outcomeCount);
@@ -218,7 +264,11 @@ namespace WhiskeyRealism.Tactical.Battle
                         }
                         ExecutionPlan retryPlan = executor.PlanRetry(snapshot, _retries[r], now);
                         if (retryPlan.Execute) stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _retries[r], retryPlan, now));
-                        else stats.Skip(retryPlan.Skip);
+                        else
+                        {
+                            stats.Skip(retryPlan.Skip);
+                            executor.NoteRefusal(_retries[r].GroupId, retryPlan.Skip);
+                        }
                     }
 
                     for (int w = 0; w < winners; w++)
@@ -229,6 +279,7 @@ namespace WhiskeyRealism.Tactical.Battle
                         if (!plan.Execute)
                         {
                             stats.Skip(plan.Skip);
+                            executor.NoteRefusal(_winners[w].GroupId, plan.Skip);
                             continue;
                         }
                         stats.Issued += Math.Min(1, OrderExecutorRuntime.Execute(bunits, snapshot, executor, _winners[w], plan, now));
@@ -330,7 +381,7 @@ namespace WhiskeyRealism.Tactical.Battle
 
             public void Skip(SkipReason reason)
             {
-                if (reason == SkipReason.Duplicate) Deduped++;
+                if (reason == SkipReason.Duplicate || reason == SkipReason.StandingClaim) Deduped++;
                 else Skipped++;
                 int r = (int)reason;
                 if (r >= 0 && r < _skips.Length) _skips[r]++;

@@ -85,7 +85,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float buildBattleHours,
             ArmyEvidence ownEvidence,
             EnemyVisibleState enemyVisible,
-            float ownMainEffortStrength,
+            float ownActiveForce,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
             float ownReinforcementsArriving,
@@ -93,7 +93,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             CommandTreeSnapshot commandTree,
             IReadOnlyList<DirectChildSnapshot> directChildSnapshots)
             : this(signatureAtBuild, buildBattleHours, ownEvidence, enemyVisible,
-                   ownMainEffortStrength, ownArmyMorale, ownReservesCommittedFraction,
+                   ownActiveForce, ownArmyMorale, ownReservesCommittedFraction,
                    ownReinforcementsArriving, objectives, commandTree, directChildSnapshots,
                    ownAvgFatigue01: 0.2f, ownAvgAmmo01: 0.9f,
                    nearestReinforcementHours: 0f, nearestReinforcementStrength: 0f)
@@ -104,7 +104,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float buildBattleHours,
             ArmyEvidence ownEvidence,
             EnemyVisibleState enemyVisible,
-            float ownMainEffortStrength,
+            float ownActiveForce,
             float ownArmyMorale,
             float ownReservesCommittedFraction,
             float ownReinforcementsArriving,
@@ -120,7 +120,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             BuildBattleHours = buildBattleHours < 0f || float.IsNaN(buildBattleHours) || float.IsInfinity(buildBattleHours) ? 0f : buildBattleHours;
             OwnEvidence = ownEvidence;
             EnemyVisible = enemyVisible; // EnemyVisibleState performs its own defensive sector array copy
-            OwnMainEffortStrength = SanitizeNonNegative(ownMainEffortStrength);
+            OwnActiveForce = SanitizeNonNegative(ownActiveForce);
             OwnArmyMorale = Clamp01(ownArmyMorale);
             OwnReservesCommittedFraction = Clamp01(ownReservesCommittedFraction);
             OwnReinforcementsArriving = SanitizeNonNegative(ownReinforcementsArriving);
@@ -137,7 +137,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         public float BuildBattleHours { get; }
         public ArmyEvidence OwnEvidence { get; }
         public EnemyVisibleState EnemyVisible { get; }
-        public float OwnMainEffortStrength { get; }
+        public float OwnActiveForce { get; }
         public float OwnArmyMorale { get; }
         public float OwnReservesCommittedFraction { get; }
         /// <summary>

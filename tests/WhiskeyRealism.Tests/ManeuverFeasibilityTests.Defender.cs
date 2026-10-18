@@ -584,11 +584,12 @@ internal static partial class ManeuverFeasibilityTests
     {
         string army = FlankResponseTests.SourceText("Tactical", "Orchestrator", "ArmyOrchestrator.cs");
         FlankResponseTests.AssertPinned(army, "if (!staggered && !feasible) return new ReserveReleaseContext(_lastGlobalOdds, flank);", "the shipped context stays when both flags are off");
-        FlankResponseTests.AssertPinned(army, "staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis);", "the threats reach the context");
+        FlankResponseTests.AssertPinned(army, "staggered, _threatBuffer, threats, _threatShiftBuffer, threatChildren, _armyReleaseHysteresis, station, _stationShiftBuffer, stationChildren);",
+            "the threats and the works station reach the context");
         FlankResponseTests.AssertPinned(army, "string reason = released.HasGuardPoint ? \"crossing-threat\" : \"flank-threat\";", "the release row names the crossing");
         FlankResponseTests.AssertPinned(army, "EnvelopmentManeuver.ExpandToNodes(_maneuvers, _commandNodeIntents, _directChildIntents)", "the guard point reaches the doctrine order");
         string maneuver = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "EnvelopmentManeuver.cs");
-        FlankResponseTests.AssertPinned(maneuver, "children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, \"guard-crossing\", isGuard: true", "as a GuardFlank node entry");
+        FlankResponseTests.AssertPinned(maneuver, "children[c].Guard.X, children[c].Guard.Z, children[c].Guard.Heading, station ? \"station-works\" : \"guard-crossing\", isGuard: true", "as a GuardFlank node entry (a stationed Reserve's is ReserveWait)");
         string doctrine = FlankResponseTests.SourceText("Tactical", "Operations", "CommandDoctrineAssignment.cs");
         FlankResponseTests.AssertPinned(doctrine, "(stance != BattleStance.Defender || maneuver.IsGuard)", "a Defender's guard is applied, its maneuvers are not");
         string candidates = FlankResponseTests.SourceText("Tactical", "Orchestrator", "Plays", "ManeuverFeasibility.Candidates.cs");

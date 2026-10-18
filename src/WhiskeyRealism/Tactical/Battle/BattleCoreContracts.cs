@@ -167,6 +167,10 @@ namespace WhiskeyRealism.Tactical.Battle
         public float CoverValue;
         public int CoverObject;
         public bool Standing;
+        // BC15 decision 2(a): the observation appeared, turned Visible or turned Remembered since the battle-AI tier pass last read it.
+        // BattlePerception.Update sets it on every build (including deployment, battle-start and gated-off builds) and only
+        // BattlePerception.ClearChangeLatch clears it, so a change seen between two arbiter ticks is not lost.
+        public bool ChangedSinceLastTier;
     }
 
     public enum OrderChannel
@@ -191,7 +195,12 @@ namespace WhiskeyRealism.Tactical.Battle
         Support = 2,
         Play = 3,
         Executor = 4,
-        Safety = 5,
+        /// <summary>
+        /// A posted flank guard's claim (MainFlankGuard): above the posture executor, so its parent's posture move fans out around the guard instead of
+        /// re-pathing it (SetWaypoint with groupmoveonly false re-paths every attached unit), and below Safety, so a withdrawal still moves it.
+        /// </summary>
+        Post = 5,
+        Safety = 6,
     }
 
     public enum IntentSource
@@ -242,6 +251,32 @@ namespace WhiskeyRealism.Tactical.Battle
         // BC10, Move only: the intent's two vias are a road route (RoadRoutePlanner: the first road entry and the last road exit). The leg between
         // them follows the road, which takes its own crossing: the crossing gate inserts no via there and only checks the crossing the leg passes.
         RoadRoute = 2048,
+        // BC14W, CombatBehavior only (behavior 9): the artillery doctrine starts a bombardment of the focal assault's focal point as vanilla's
+        // CheckAIBombardment does (3897-3900): the behavior, then the battery's bombardposition (the intent's target) and bombardrange. The executor's
+        // OrderExecutorRuntime.StartBombard is its one writer.
+        BombardStart = 4096,
+        // BC14W, Stance only: the stance is the works hold's (HoldObjective, 2) for a group the guard holds in front of enemy works. The stance
+        // ownership applies it after the army retreat and the charge demotion, yields to vanilla's weak-group screen, and against vanilla's own
+        // attack stances (3, 4) takes neither the yield step nor the vanilla-assault refusal. (2048 is RoadRoute; the BC14W bombard start, 4096, is task 8's.)
+        WorksHold = 8192,
+        // BC14W, Move and Stop: the works hold's contest (MoveContest) re-issuing the hold of a group a move outside the stored orders is walking into
+        // the works band. Exempt from the executor's recent-order window and courier cadence (InCooldown), so it lands at once; a failed-write backoff
+        // still applies. (4096 is the BC14W bombard start's.)
+        Contest = 16384,
+        // Unit churn, Formation on an infantry regiment: stop its march, then re-form it to line facing the intent's heading
+        // (OrderExecutorRuntime.IssueDeploy; ColumnDeployment). Vanilla re-columns a regiment that still has a path, so the stop comes first.
+        Deploy = 32768,
+        // Unit churn, CombatBehavior 7 only: the artillery doctrine's cancel of a vanilla bombardment (9). It is the one write the restart memory
+        // (BattleWriterPolicy.RestartedAfterOwnCancel) reads back from the executor's outcome; the counter-battery release (8 to 7) and the ammo-conserving
+        // cease-fire are also behavior 7 from the same source and are not a cancel of a bombardment.
+        CancelsBombard = 65536,
+        // Unit churn, Formation + Deploy: deploy the column regiment in march, as vanilla's own deploy near an enemy does (CheckFormationChange 127676-127682:
+        // ChangeRegimentFormation with a manual line, no stop), so its path survives and it keeps advancing in line. Without it the deploy stops the regiment.
+        DeployInMarch = 131072,
+        // Move only: a standing claim and nothing more. It raises the unit's Move claim for the tick, so a lower-priority move of an ancestor fans out around
+        // the unit (OrderExecutor.BeginTickClaims), and the executor writes nothing for it (SkipReason.StandingClaim). A posted flank guard holds one for as
+        // long as it is posted.
+        StandingClaim = 262144,
     }
 
     // Refused flank of a group's formation or facing order (BC5a, additive).
@@ -328,6 +363,10 @@ namespace WhiskeyRealism.Tactical.Battle
         LowerPriorityThanClaim,
         /// <summary>A move across a river with no crossing the side knows (RiverCrossingRule).</summary>
         NoKnownCrossing,
+        /// <summary>A move the river map has not been built for yet: it waits (CrossingPictureWait) rather than passing unchecked.</summary>
+        CrossingPending,
+        /// <summary>A standing claim (IntentFlags.StandingClaim): raised for the tick, nothing to write.</summary>
+        StandingClaim,
     }
 
     public struct OrderOutcome
@@ -339,5 +378,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public IntentSource Source;
         public double AtHours;
         public int Retries;
+        // The intent's Value when an issued write is recorded (a combat behavior, a stance, a formation index); 0 for the other outcomes.
+        public int Value;
+        // The intent's flags when an issued write is recorded; None for the other outcomes.
+        public IntentFlags Flags;
     }
 }

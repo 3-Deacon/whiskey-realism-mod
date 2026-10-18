@@ -29,13 +29,15 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
         public void Produce(BattleSnapshot snapshot, IIntentSink sink)
         {
-            using (TelemetryPerf.Scope("tactical.producer.group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
+            using (TelemetryPerf.Scope(BattleLodRuntime.InWakePass ? "tactical.producer.group-stance.wake" : "tactical.producer.group-stance", TelemetryLayer.Tactical, TelemetryCategory.Performance, 2.0))
             {
                 if (snapshot == null || sink == null || !PluginEnabled()) return;
                 UnitRecord[] own = snapshot.Own;
                 for (int i = 0; i < snapshot.OwnCount; i++)
                 {
                     if ((own[i].Flags & UnitFlags.IsGroup) == 0 || !TacticalDoctrineScorer.AllowsLocalGroupStanceWriter(own[i].UnitTyp)) continue;
+                    // BC15: a Distant group that is not due keeps the stance claim it published; its hold is renewed on its due tick.
+                    if (!BattleLodRuntime.IsDue(snapshot, i)) continue;
                     if (!TryResolvedDecision(snapshot, i, out TacticalResolvedGroupDecision resolved)) continue;
                     if (BattleWriterPolicy.TryGroupStanceIntent(own[i], resolved, out BattleOrderIntent intent)) sink.Submit(intent);
                 }

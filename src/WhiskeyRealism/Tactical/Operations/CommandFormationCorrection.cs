@@ -143,6 +143,15 @@ namespace WhiskeyRealism.Tactical.Operations
             }
         }
 
+        /// <summary>
+        /// BC14W (requirement-focal-execution): the formation a node's doctrine order carries (the focal assault's March Column) is the target when it is
+        /// set, in place of the line the task would give. A caller with no order formation to read (the facing pulse) keeps the two-argument form.
+        /// </summary>
+        public static int TargetFormationForTask(CommandTaskType task, int currentGroupFormation, bool hasOrderFormation, int orderFormation)
+            => hasOrderFormation && orderFormation >= 0 && orderFormation <= 4
+                ? orderFormation
+                : TargetFormationForTask(task, currentGroupFormation);
+
         public static int TargetFormationForTask(CommandTaskType task, int currentGroupFormation)
         {
             int current = currentGroupFormation >= 0 && currentGroupFormation <= 4

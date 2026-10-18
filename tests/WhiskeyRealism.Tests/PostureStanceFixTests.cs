@@ -693,12 +693,12 @@ internal static class PostureStanceFixTests
         AssertTrue(budget.TryConsume(), "first");
         AssertTrue(budget.TryConsume(), "second");
         AssertFalse(budget.TryConsume(), "third deferred");
-        budget.NextApply(5);
+        budget.NextApply();
         AssertTrue(budget.TryConsume(), "refilled next apply");
-        AssertEqual(2, budget.StartIndex(5), "start rotates by the work done");
-        budget.NextApply(5);
-        AssertEqual(3, budget.StartIndex(5), "rotates again");
-        AssertEqual(0, budget.StartIndex(0), "empty list");
+        // The walk rotates by instance id, not by an index (BC15 decision 7; BattleLodTests covers the cursor).
+        budget.TryConsume(14);
+        budget.NextApply();
+        AssertEqual(2, budget.StartIndex(new[] { 3, 9, 20, 41 }, 4), "start is the first id above the last planned one");
     }
 
     private static void StanceOwnerRespectsVanillaAssault()

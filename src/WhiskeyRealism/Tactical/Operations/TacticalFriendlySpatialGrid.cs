@@ -101,6 +101,56 @@ namespace WhiskeyRealism.Tactical.Operations
             return Math.Min(1f, worst);
         }
 
+        // BC15 decision 2(e): which friendly units stand in a group's path corridor, as a count and an order-free hash of their ids, so the tier
+        // pass can tell that the set changed. The corridor runs from (x0, z0) toward (x1, z1), widthMeters wide, over at most MaxCorridorMeters
+        // (the longest move the posture pipeline orders), and skips what stands within CorridorMinForward of the start (the group's own line).
+        // Allocation-free; the hash is a sum, so it does not depend on the order the grid was filled in.
+        public const float MaxCorridorMeters = 2500f;
+
+        public int CorridorSignature(int selfId, float x0, float z0, float x1, float z1, float widthMeters, out int count)
+        {
+            count = 0;
+            float ax = x1 - x0;
+            float az = z1 - z0;
+            float length = (float)Math.Sqrt(ax * ax + az * az);
+            if (length < 1f || Count == 0) return 0;
+            ax /= length;
+            az /= length;
+            if (length > MaxCorridorMeters)
+            {
+                length = MaxCorridorMeters;
+                x1 = x0 + ax * length;
+                z1 = z0 + az * length;
+            }
+            float half = widthMeters * 0.5f;
+            int minCx = Cell(Math.Min(x0, x1) - half);
+            int maxCx = Cell(Math.Max(x0, x1) + half);
+            int minCz = Cell(Math.Min(z0, z1) - half);
+            int maxCz = Cell(Math.Max(z0, z1) + half);
+
+            int hash = 0;
+            for (int cx = minCx; cx <= maxCx; cx++)
+            {
+                for (int cz = minCz; cz <= maxCz; cz++)
+                {
+                    if (!_cells.TryGetValue(Key(cx, cz), out List<Entry> list)) continue;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        Entry e = list[i];
+                        if (e.Id == selfId) continue;
+                        float rx = e.X - x0;
+                        float rz = e.Z - z0;
+                        float forward = rx * ax + rz * az;
+                        if (forward < CorridorMinForward || forward > length) continue;
+                        if (Math.Abs(rx * az - rz * ax) > half) continue;
+                        count++;
+                        hash = unchecked(hash + (int)((uint)e.Id * 2654435761u));
+                    }
+                }
+            }
+            return hash;
+        }
+
         private static int Cell(float v)
         {
             return (int)Math.Floor(v / CellSize);
@@ -118,19 +168,25 @@ namespace WhiskeyRealism.Tactical.Operations
     }
 
     // #61 perf: NavMesh path-quality sampling (3 CalculatePath per plan) is
-    // budgeted per Postfix. Groups past the budget defer to the next call; the
-    // start index rotates by the work done so every group is eventually served.
+    // budgeted per Postfix. Groups past the budget defer to the next call.
+    //
+    // BC15 decision 7: the walk is by instance id. The caller keeps the groups sorted by ascending instance id and starts each tick at
+    // StartIndex, the first id above the last one that got a plan, so a roster that changes between ticks neither skips nor repeats a group
+    // (an index cursor modulo the walked count shifted with every death and arrival). With D groups waiting and a budget of B, every waiting
+    // group is planned within ceil(D / B) ticks; a group that is not due is not walked and takes no plan.
     public sealed class NavPlanBudget
     {
         private readonly int _perApply;
         private int _consumed;
-        private int _cursor;
+        private int _lastPlannedId;
+        private bool _hasLastPlanned;
 
         public NavPlanBudget(int perApply)
         {
             _perApply = Math.Max(1, perApply);
         }
 
+        /// <summary>A plan for no particular group (the road-route budget): spends the budget, moves no cursor.</summary>
         public bool TryConsume()
         {
             if (_consumed >= _perApply) return false;
@@ -138,15 +194,35 @@ namespace WhiskeyRealism.Tactical.Operations
             return true;
         }
 
-        public void NextApply(int count)
+        /// <summary>A plan for group <paramref name="groupId"/>: spends the budget and moves the cursor to the group.</summary>
+        public bool TryConsume(int groupId)
         {
-            _cursor = count > 0 ? (_cursor + _consumed) % count : 0;
+            if (!TryConsume()) return false;
+            _lastPlannedId = groupId;
+            _hasLastPlanned = true;
+            return true;
+        }
+
+        public void NextApply()
+        {
             _consumed = 0;
         }
 
-        public int StartIndex(int count)
+        /// <summary>
+        /// The index in <paramref name="sortedIds"/> (ascending, <paramref name="count"/> entries) to start the walk at: the first id above
+        /// the last planned one, or 0 with no plan yet or when every id is at or below it.
+        /// </summary>
+        public int StartIndex(int[] sortedIds, int count)
         {
-            return count > 0 ? _cursor % count : 0;
+            if (!_hasLastPlanned || sortedIds == null || count <= 0) return 0;
+            int low = 0, high = count;
+            while (low < high)
+            {
+                int mid = (low + high) >> 1;
+                if (sortedIds[mid] <= _lastPlannedId) low = mid + 1;
+                else high = mid;
+            }
+            return low < count ? low : 0;
         }
     }
 }

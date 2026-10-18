@@ -41,6 +41,8 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // CommandTaskType.Delay + WithdrawalDoctrine for ordered withdrawal
         // rather than Fallback (panic) or GenericDesperate (last stand).
         DelayingDefense,            // disciplined yielding defense (was JohnstonFabianDelay)
+        // BC14W: a frontal assault on the focal point of perceived enemy works, offered only when no turn will do and the commander is willing.
+        FocalAssault,
     }
 
     public enum BattlePhase

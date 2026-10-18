@@ -52,6 +52,16 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float Daylight, Detail, Contested, Approach, Exposure, Turn, Penalty;
         /// <summary>The reason literal when this body's penalty is largest (set with the verdict).</summary>
         public string Reason;
+        /// <summary>
+        /// BC14W (requirement-works-pricing): the body's strike point lies on held works. <see cref="AssaultsWorks"/> when the body attacks them
+        /// (an enveloping body, a single-body plan's main body, a focal assault's assault body): it is held to <see cref="BarUsed"/>, three times the
+        /// commander's bar. A fixing main body whose strike point lies on works holds there and assaults nothing (requirement-turn-first).
+        /// </summary>
+        public bool StrikeOnWorks, AssaultsWorks;
+        /// <summary>The bar the detail term was measured against (the commander's, or three times it for a works assault).</summary>
+        public float BarUsed;
+        /// <summary>A holding fix's enemy outside works (requirement-turn-first): the enemy against it counts only that; 0 for every other body.</summary>
+        public float EnemyOpen;
     }
 
     /// <summary>One candidate play with its evaluated side and verdict; its bodies are <c>BodyStart..BodyStart+BodyCount</c> in the ledger's body array.</summary>
@@ -103,6 +113,17 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public float CandidateOwnShift;
         /// <summary>The earliest enemy body already stands in the own bank's region: contact, answered by BC13's crisis release, not a crossing threat.</summary>
         public bool EnemyAcross;
+    }
+
+    /// <summary>
+    /// BC14W (requirement-defender-works-reserve): where a Defender's reserve stations behind its most threatened focal point of its own works: the focal
+    /// point, the station <see cref="ManeuverFeasibility"/> picked <see cref="WorksRules.ReserveStationMeters"/> behind it along the own front axis (on own
+    /// land), the heading that faces it, and the hours the earliest enemy body needs to reach the focal point. <see cref="Has"/> false is none.
+    /// </summary>
+    public struct StationPoint
+    {
+        public bool Has;
+        public float FocalX, FocalZ, X, Z, Heading, ArrivalHours;
     }
 
     /// <summary>What the army, the allocator and BC11's runtime read of the published ledger.</summary>
@@ -162,6 +183,55 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         /// (requirement-crossing-look), most pressing first; the count written. A request ends when the crossing turns Clear, Watched or Held.
         /// </summary>
         int LookRequests(Span<float> xs, Span<float> zs);
+
+        /// <summary>BC14W: the focal point of the enemy works the published evaluation found (the point FocalAssault faces); false with none.</summary>
+        bool TryFocalPoint(out FocalPoint focal);
+
+        /// <summary>BC14W: the works hold of the selected plan (<c>hopeless-assault</c> or <c>turn-not-struck</c>); false, reason null, with none.</summary>
+        bool WorksHold(out string reason);
+
+        /// <summary>BC14W: the child is a member of a works-assaulting body of the selected plan.</summary>
+        bool AssaultsWorks(string childId);
+
+        /// <summary>BC14W: the child assaults works or, as a holding fix, faces them (requirement-turn-first).</summary>
+        bool FacesWorks(string childId);
+
+        /// <summary>
+        /// BC14W (requirement-works-pin): the child is a holding fix facing works that are not broken in. It holds at stance 2, demonstrating, and is
+        /// not given the attack stance vanilla would escalate to an assault, until the strike it pins for has broken in.
+        /// </summary>
+        bool PinsWorks(string childId);
+
+        /// <summary>BC14W: a hash of the works hold, its reason and the set of children that face works; a change forces a store of the stored orders.</summary>
+        int WorksHoldHash { get; }
+
+        /// <summary>BC14W: the army commander's willingness to assault works as of the last evaluation (<see cref="WorksRules.Willingness"/>); -1 with the flag off or before one.</summary>
+        float Willingness { get; }
+
+        /// <summary>BC14W: the held works of the latest built evaluation (the exploit guard, the probe nomination and the lane check ask it); null with none.</summary>
+        IWorksQuery HeldWorks { get; }
+
+        /// <summary>
+        /// BC14W (requirement-defender-works-reserve): the station behind the Defender's most threatened own focal point, with each direct child's time to it
+        /// (courier plus march; NaN for a child holding player-owned strength) written to <paramref name="ownShiftByChild"/> in the column order of
+        /// <see cref="StationChildId"/>. False with none.
+        /// </summary>
+        bool TryStation(out StationPoint station, float[] ownShiftByChild, out int childCount);
+
+        /// <summary>BC14W: the child id of a column of the station's time vector; null past the last.</summary>
+        string StationChildId(int column);
+
+        /// <summary>BC14O: the pressure of the victory clock at the published evaluation (U and H are the selection's urgency and hold bias).</summary>
+        ObjectivePressure Pressure { get; }
+
+        /// <summary>BC14O: the child holds player-owned strength at the published evaluation (it is never drawn to screen a secondary objective).</summary>
+        bool HoldsPlayerOwned(string childId);
+
+        /// <summary>BC14O: the rows of the objective table.</summary>
+        int ObjectiveCount { get; }
+
+        /// <summary>BC14O: the i-th row of the objective table; false past the last.</summary>
+        bool TryObjective(int index, out ObjectiveEstimate estimate);
     }
 
     /// <summary>
@@ -213,5 +283,19 @@ namespace WhiskeyRealism.Tactical.Orchestrator.Plays
         public bool HasAssumedEnemy;
         public float AssumedEnemyX, AssumedEnemyZ;
         public LegCostCache Cache;
+        /// <summary>BC14W: the works points the side has perceived (the runtime's ObstacleLine pieces); null reads the works samples alone.</summary>
+        public IFortificationPoints Works;
+        /// <summary>BC14O: the live objectives (gameObject.activeInHierarchy), at most <see cref="ManeuverFeasibility.MaxObjectives"/>; the runtime's pooled array.</summary>
+        public ObjectiveFact[] Objectives;
+        public int ObjectiveCount;
+        /// <summary>BC14O: the victory clock; <see cref="HasClock"/> false means no pressure (U = H = 0).</summary>
+        public VictoryClock Clock;
+        public bool HasClock;
+        /// <summary>BC14O: each due designer chain's next objective (the capture's id), de-duplicated: the historical prior.</summary>
+        public string[] DueChainObjectiveIds;
+        public int DueChainCount;
+        /// <summary>BC14O: the children that had a screen target at the previous allocation (their strength screens a secondary objective, not the main effort's).</summary>
+        public string[] ScreenChildIds;
+        public int ScreenChildCount;
     }
 }
