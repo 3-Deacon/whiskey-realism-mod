@@ -248,7 +248,7 @@ namespace WhiskeyRealism.Strategic
         // Safe name accessor — guards against MissingReferenceException on destroyed objects.
         private static string SafeName(Regiment unit, int fallbackId)
         {
-            try { return ((UnityEngine.Object)unit).name; }
+            try { return TelemetryLegacyParser.Quote(((UnityEngine.Object)unit).name); }   // a row value: quoted when the name has a space
             catch { return fallbackId.ToString(); }
         }
 

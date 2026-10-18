@@ -21,30 +21,30 @@ namespace WhiskeyRealism.Strategic.Planner
         // Returns true when vanilla took the move now (not queued, not refused). `outcome` is one of Issued, Retried, Queued,
         // Failed: Retried also covers a refused retry.
         internal static bool Issue(IMoveHost host, MoveTracker tracker, in FormationRecord f, float tx, float tz, int objectiveId,
-                                   int daySerial, bool raiseTransportModes, MoveBudget budget, out MoveOutcome outcome)
+                                   int daySerial, bool raiseTransportModes, MoveBudget budget, string role, out MoveOutcome outcome)
         {
             bool queued = (f.Flags & FormationFlags.MoveQueued) != 0;
             bool retry = tracker.IssueOutcome(f.InstanceId, tx, tz, queued) == MoveOutcome.Retried;
             if (host.TargetRestricted(tx, tz))
             {
-                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId, budget);
+                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId, budget, role);
                 outcome = retry ? MoveOutcome.Retried : MoveOutcome.Failed;
                 return false;
             }
             if (raiseTransportModes && (!f.UseRails || !f.UseRivers)) host.RaiseTransportModes(f.InstanceId);
             if (queued)
             {
-                tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, daySerial, queued: true, unitKey: f.UnitKey, objectiveId: objectiveId, budget: budget);
+                tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, daySerial, queued: true, unitKey: f.UnitKey, objectiveId: objectiveId, budget: budget, role: role);
                 outcome = MoveOutcome.Queued;
                 return false;
             }
             if (!host.Move(f.InstanceId, tx, tz))
             {
-                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId, budget);
+                tracker.RecordRefused(f.InstanceId, tx, tz, daySerial, f.UnitKey, objectiveId, budget, role);
                 outcome = retry ? MoveOutcome.Retried : MoveOutcome.Failed;
                 return false;
             }
-            tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, daySerial, queued: false, unitKey: f.UnitKey, objectiveId: objectiveId, budget: budget);
+            tracker.RecordIssued(f.InstanceId, f.X, f.Z, tx, tz, daySerial, queued: false, unitKey: f.UnitKey, objectiveId: objectiveId, budget: budget, role: role);
             outcome = retry ? MoveOutcome.Retried : MoveOutcome.Issued;
             return true;
         }

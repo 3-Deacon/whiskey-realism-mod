@@ -44,6 +44,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         // The assigned points of this side's nodes, held while the line they were planned on has not really moved (DoctrineTargetHold).
         private readonly DoctrineTargetHold _targetHold = new DoctrineTargetHold();
 
+        // The enemy line the side last saw, kept through a count without a glimpse of it (EnemyLineMemory).
+        private readonly EnemyLineMemory _enemyLineMemory = new EnemyLineMemory();
+
+        // The operation the director decided at the last count (the reference of the TacticalOperationChange row).
+        private OperationRecord _lastDecidedOperation = NoOpOperation();
+
+        // The doctrine second the committed force first stood below the abort line, -1 while it does not.
+        private float _collapseSinceSeconds = -1f;
+
         public TacticalCommanderMode CommanderMode => _commanderMode;
         public bool RunsLedger => TacticalCommanderModePolicy.RunsLedger(_commanderMode);
         public IReadOnlyList<ObjectiveRecord> CurrentObjectives => _currentObjectives;
@@ -97,6 +106,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 _currentForce = new ForceAvailabilitySnapshot(0f, 0f);
                 _currentPersonality = default(PersonalityVector);
                 _operationAssignedStrength = 0f;
+                _enemyLineMemory.Clear();
+                _collapseSinceSeconds = -1f;
+                _lastDecidedOperation = NoOpOperation();
                 StoreDoctrine(new BattlefieldPictureSnapshot(Array.Empty<BattlefieldObjectiveEstimate>()), Array.Empty<CommandDoctrineOrder>());
                 return;
             }
@@ -106,7 +118,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             var effectiveObjectives = (snapshot.Objectives != null && snapshot.HasData)
                 ? snapshot.Objectives
                 : objectives;
-            _currentObjectives = CopyObjectives(effectiveObjectives);
+            _currentObjectives = CopyObjectives(_enemyLineMemory.Apply(effectiveObjectives, _currentTimeSeconds));
             _currentStrategicBattleIntent = strategicBattleIntent;
             _currentForce = force;
             _currentPersonality = personality;
@@ -176,7 +188,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             var picture = BuildBattlefieldPicture(_currentObjectives);
             ObjectiveLatch latch = feasibility != null && Plugin.ObjectiveDoctrineEnabled() ? ObjectiveLatch.ForAlliance(allianceId) : null;
-            var decision = TacticalOperationDirector.Decide(TacticalOperationDirectorInput.ForTest(
+            TacticalOperationDirectorInput input = TacticalOperationDirectorInput.ForTest(
                 _currentOperation,
                 _currentTimeSeconds,
                 _currentForce.AvailableStrength,
@@ -184,8 +196,13 @@ namespace WhiskeyRealism.Tactical.Orchestrator
                 Clamp01((_currentPersonality.Aggression + 1f) * 0.5f),
                 Clamp01((_currentPersonality.Caution + 1f) * 0.5f),
                 picture.Objectives).WithOperationAssignedStrength(_operationAssignedStrength).WithStance(stance)
-                .WithObjectiveDoctrine(latch != null ? feasibility : null, latch?.Id));
+                .WithObjectiveDoctrine(latch != null ? feasibility : null, latch?.Id);
+            var decision = TacticalOperationDirector.Decide(input.WithOddsCollapseSeconds(TrackOddsCollapse(input)));
 
+            // The row compares with what the director decided last, not with _currentOperation: the update resets an operation that is not held to
+            // Planning before every decision, which would make every count a change.
+            EmitOperationChange(allianceId, _lastDecidedOperation, decision, input);
+            _lastDecidedOperation = decision.Operation;
             _currentOperation = decision.Operation;
             CurrentObjectivePick = decision.Pick;
             // BC14O: the latch follows the pick; nothing feasible (or an objective gone from the map) clears it, and the next pick starts with no margin.
@@ -214,6 +231,55 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             NoteFirstTerrainLine(orders);
             StoreDoctrine(picture, orders);
+        }
+
+        // One row per change of the operation (its phase, shape or primary objective), with what the director decided it on: the reason, and the forces and
+        // the enemy it weighed. Rows that were silent about this left a smoke unable to tell a lost contact from a collapsed force (2026-10-18).
+        private static void EmitOperationChange(int side, OperationRecord before, TacticalOperationDirectorDecision decision, TacticalOperationDirectorInput input)
+        {
+            OperationRecord after = decision.Operation;
+            if (after.Phase == before.Phase && after.Shape == before.Shape && string.Equals(after.PrimaryObjectiveId, before.PrimaryObjectiveId, StringComparison.Ordinal))
+                return;
+            try
+            {
+                float enemy = 0f;
+                for (int i = 0; i < input.Objectives.Length; i++)
+                {
+                    if (!string.Equals(input.Objectives[i].ObjectiveId, after.PrimaryObjectiveId, StringComparison.Ordinal)) continue;
+                    enemy = input.Objectives[i].EnemyStrength;
+                    break;
+                }
+                TelemetryRouter.Emit(TelemetryLayer.Tactical, TelemetryCategory.Decision, "TacticalOperationChange", TelemetrySeverity.Info,
+                    ev => ev
+                        .WithDecision("TacticalOperationChange", after.Phase.ToString(), decision.Reason)
+                        .WithField("side", side)
+                        .WithField("fromPhase", before.Phase.ToString())
+                        .WithField("toPhase", after.Phase.ToString())
+                        .WithField("fromShape", before.Shape.ToString())
+                        .WithField("toShape", after.Shape.ToString())
+                        .WithField("fromPrimary", before.PrimaryObjectiveId)
+                        .WithField("toPrimary", after.PrimaryObjectiveId)
+                        .WithField("ownStrength", input.OwnStrength)
+                        .WithField("assignedStrength", input.OperationAssignedStrength)
+                        .WithField("enemyStrength", enemy)
+                        .WithField("collapseSeconds", input.OddsCollapseSeconds)
+                        .WithField("holdUntil", after.MinimumCommitSeconds)
+                        .WithField("seconds", input.CurrentTimeSeconds));
+            }
+            catch { /* telemetry never changes a decision */ }
+        }
+
+        // How long the committed force has stood below the abort line, on the doctrine clock: the director aborts on a collapse that lasts, not on one count.
+        private float TrackOddsCollapse(TacticalOperationDirectorInput input)
+        {
+            if (!TacticalOperationDirector.OddsCollapsed(input))
+            {
+                _collapseSinceSeconds = -1f;
+                return 0f;
+            }
+            // A clock that ran backwards (a reload to an earlier save) starts the collapse again.
+            if (_collapseSinceSeconds < 0f || _currentTimeSeconds < _collapseSinceSeconds) _collapseSinceSeconds = _currentTimeSeconds;
+            return _currentTimeSeconds - _collapseSinceSeconds;
         }
 
         // First-fire marker for BC12's terrain lines (smoke item 2.31): the first order whose line reason names a terrain line.

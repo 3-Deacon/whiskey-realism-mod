@@ -34,7 +34,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (string.Equals(Last[slot], signature, StringComparison.Ordinal)) return;
             Last[slot] = signature;
             TelemetryRouter.LegacyInfo(
-                "[ReplacementFlow] alliance=" + alliance.ToString(CultureInfo.InvariantCulture) + " kind=" + kind + " to=" + to + " from=" + from,
+                "[ReplacementFlow] alliance=" + alliance.ToString(CultureInfo.InvariantCulture) + " kind=" + kind + " to=" + TelemetryLegacyParser.Quote(to) + " from=" + TelemetryLegacyParser.Quote(from),
                 TelemetryLayer.Campaign);
         }
 

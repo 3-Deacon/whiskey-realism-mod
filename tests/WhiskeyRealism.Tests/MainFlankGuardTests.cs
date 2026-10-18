@@ -681,6 +681,7 @@ internal static class MainFlankGuardTests
         public CommandTaskType[] Task; public bool[] Has; public bool[] Recent;
         public bool HasPosture(int index) => Has[index];
         public CommandTaskType TaskOf(int index) => Task[index];
+        public CommandTaskType EffectiveTaskOf(int index) => Task[index];
         public bool WithdrawalRecent(int index) => Recent[index];
     }
 

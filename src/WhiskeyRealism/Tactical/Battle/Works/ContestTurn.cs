@@ -8,6 +8,9 @@ namespace WhiskeyRealism.Tactical.Battle
         public int Alliance, GroupId, Stance;
         public long Tick;
         public bool Held, Recon, HasPath, HasLane, CloseEngaged, HasLastIssued;
+        /// <summary>The group is on a stay task and walks a move that is not Whiskey's own (<see cref="MoveContest.IsForeignStayMove"/> and not a parent's march); a form-up or a screen carries its ledger point (<see cref="StayX"/>, <see cref="StayZ"/>).</summary>
+        public bool ForeignStayMove, HasStayPoint;
+        public float StayX, StayZ;
         public float X, Z, WaypointX, WaypointZ, LaneX, LaneZ, IssuedX, IssuedZ;
         public double IssuedHours, PlanStartHours, NowHours;
         public CommandTaskType Task;
@@ -48,6 +51,7 @@ namespace WhiskeyRealism.Tactical.Battle
                 HasLane = f.HasLane, LaneX = f.LaneX, LaneZ = f.LaneZ,
                 Stance = f.Stance, Works = f.Works,
                 Chain = chain, HoldTask = MoveContest.IsHoldTask(f.Task),
+                ForeignStayMove = f.ForeignStayMove, HasStayPoint = f.HasStayPoint, StayX = f.StayX, StayZ = f.StayZ,
                 HasChainObjective = hasObjective, ChainObjectiveX = objectiveX, ChainObjectiveZ = objectiveZ,
                 LastIssuedHours = f.IssuedHours, PlanStartHours = f.PlanStartHours, NowHours = f.NowHours,
             };

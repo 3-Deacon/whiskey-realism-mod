@@ -63,6 +63,7 @@ Use this area when the goal is to correct a concrete vanilla failure mode, crash
 | `BUG-WL-010` | In progress | Whiskey #3 telemetry | `transfer-queued` logged in careers where `MoveUnit` refuses (93099), counts taken before vanilla's purge (17255-17262). | `TransferOfUnitsPatch` Postfix classification (fix/wl-economy-bugs). |
 | `BUG-WL-011` | In progress | W&L staff scope | Medical/training/readiness/camp 11 (115107-115279) and morale effect 16 (127874) key on the campaign group's flag: inert for a player below the map group. | `WlUnitStatsScopePatch`, `WlMoraleScopePatch` (fix/wl-economy-bugs). |
 | `BUG-WL-012` | In progress | W&L army panel | `CampaignArmyPanel.UpdateStats` lists the player's staff effects 9/10/11/14/16/17 on any group (173699-173702, 173742-173747). | `WlStaffPanelScopePatch` (fix/wl-economy-bugs). |
+| `BUG-WL-024` | Confirmed (observer built) | W&L skirmisher company | Unit-level skirmisher routines (`CheckFallbackDueToEnemyClose` 128924, `CheckNewTargetsOfSkirmishers` 128847, `UpdateUnitLink` 124394) run on a W&L player's detached company with no `dlcw_isundercommander` test, and call `RegimentSetPath` directly, so the player's company falls back toward his regiment and re-paths over his clicks. | `PlayerUnitRepathObserverPatch` (record only, `TacticalPlayerUnitRepath`); the stop follows the rows. See `vanilla-wl-career.md`. |
 
 ## Rules
 

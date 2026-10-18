@@ -179,7 +179,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var t = transitions[k];
                 TelemetryRouter.LegacyInfo("[DepotTask] alliance=" + alliance + " site=" + Mathf.RoundToInt(t.X) + "," + Mathf.RoundToInt(t.Z)
-                    + " builder=" + (t.BuilderUnitKey ?? "none") + " state=" + t.State + " reason=" + t.Reason, TelemetryLayer.Campaign);
+                    + " builder=" + TelemetryLegacyParser.Quote(t.BuilderUnitKey ?? "none") + " state=" + t.State + " reason=" + t.Reason, TelemetryLayer.Campaign);
             }
             ledger.ClearTransitions();
         }

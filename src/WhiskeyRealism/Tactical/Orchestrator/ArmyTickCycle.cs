@@ -427,7 +427,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
             bool brokenAssumption = trigger == ReplanTrigger.ManeuverAssumptionBroken;
             // The challenger must beat the plan held by the score margin unless this is a crisis (a broken assumption has its own margin).
-            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption || !crisis, trigger.ToString(), restartAgeIfKept: !brokenAssumption);
+            bool kept = orchestrator.Replan(ownEvidence, intent, hysteresis: brokenAssumption || !crisis, trigger.ToString(), restartAgeIfKept: !brokenAssumption, crisis: crisis);
             // The band's baseline is the band's own strength: an empty main band records none (the next sighting seeds it), never the army total.
             orchestrator.RecordReplanBaseline(new ReplanBaseline(
                 ownArmyMorale,

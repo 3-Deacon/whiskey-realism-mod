@@ -47,6 +47,7 @@ namespace WhiskeyRealism.Telemetry
             AddTactical("TacticalCommandPosture", TelemetryCategory.Decision);
             AddTactical("TacticalPostureSummary", TelemetryCategory.State);
             AddTactical("TacticalOpsLedger", TelemetryCategory.State);
+            AddTactical("TacticalOperationChange", TelemetryCategory.Decision);
             AddTactical("TacticalCommandTree", TelemetryCategory.State);
             AddTactical("TacticalCommanderRoster", TelemetryCategory.State);
             AddTactical("TacticalCommanderUnknown", TelemetryCategory.Failure, TelemetrySeverity.Warning);
@@ -116,6 +117,9 @@ namespace WhiskeyRealism.Telemetry
             // and these rows decide whether A4 is built (plan decision 9).
             AddTactical("TacticalLayoutMirror", TelemetryCategory.State);
             AddTactical("TacticalFormationFlip", TelemetryCategory.State);
+            // BUG-WL-024 (record only): which vanilla routine re-paths or changes the movement mode of a W&L player-owned unit. State, not Trace:
+            // Trace sheds first and these rows decide whether the vanilla gap is stopped (A) or left (C).
+            AddTactical("TacticalPlayerUnitRepath", TelemetryCategory.State);
             // Scope B alignment (2026-05-22): canonical stance-write event +
             // newer telemetry tags that emit but were not yet registered.
             // Unregistered tags fall through to default routing which can
@@ -173,6 +177,7 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Appointment", TelemetryCategory.Write);
             AddCampaign("Allocation", TelemetryCategory.Decision);
             AddCampaign("CampaignMover", TelemetryCategory.Write);
+            AddCampaign("CampaignMoverMiss", TelemetryCategory.Write);
             AddCampaign("CampaignSteer", TelemetryCategory.Write);
             AddCampaign("CampaignTempo", TelemetryCategory.Decision);
             AddCampaign("DepotTask", TelemetryCategory.Write);

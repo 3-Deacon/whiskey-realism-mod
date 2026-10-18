@@ -128,11 +128,11 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             TelemetryRouter.LegacyInfo(
                 "[Appointment] alliance=" + alliance +
-                " commander=" + NameOf(s, intent.CommanderId) +
-                " unit=" + unitName +
+                " commander=" + TelemetryLegacyParser.Quote(NameOf(s, intent.CommanderId)) +
+                " unit=" + TelemetryLegacyParser.Quote(unitName) +
                 " reason=" + intent.Reason +
-                " displaced=" + NameOf(s, intent.DisplacedId) +
-                (reseated != null ? " reseated=" + reseated : "") +
+                " displaced=" + TelemetryLegacyParser.Quote(NameOf(s, intent.DisplacedId)) +
+                (reseated != null ? " reseated=" + TelemetryLegacyParser.Quote(reseated) : "") +
                 " outcome=" + outcome,
                 TelemetryLayer.Campaign);
         }

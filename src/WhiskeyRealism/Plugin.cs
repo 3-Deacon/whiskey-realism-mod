@@ -469,7 +469,9 @@ namespace WhiskeyRealism
                 "Default ON. Emits tactical observer summaries, decision-matrix rows, ops-ledger/posture rows and the commander-intent/reserve-drift rows to the tactical tuning sidecar, deduped per signature (Tactical Observer Min Seconds Between Summaries). " +
                 "It is also a prerequisite of the legacy local-reaction producer that feeds Enable Tactical Charge Denial while Enable Tactical Orchestrator Army is off; with the orchestrator army on the observer changes no battle state. " +
                 "It also gates the BC16 record-only formation observers (LayoutObserverPatch): TacticalLayoutMirror rows (how each group order laid its brigades' regiments out, left to right or mirrored), TacticalFormationFlip rows " +
-                "(a group whose formation changed twice within 0.1 battle-hours) and the once-per-battle [FormationProbe] line. They write nothing into the battle.");
+                "(a group whose formation changed twice within 0.1 battle-hours) and the once-per-battle [FormationProbe] line. They write nothing into the battle. " +
+                "It also gates the BUG-WL-024 record-only PlayerUnitRepathObserverPatch: TacticalPlayerUnitRepath rows naming the vanilla routine (fallback, skirmisher target, unit link, reattach, contact interruption, or the player's own click) " +
+                "that re-paths or changes the movement mode of a unit the W&L player owns (a W&L career only), and origin=player-ui on a queued order that came from the player's click.");
             TacticalObserverVerboseLogging = Config.Bind(
                 "Tactical",
                 "Tactical Observer Verbose Logging",
@@ -1117,7 +1119,8 @@ namespace WhiskeyRealism
                 "enemy within 100 m) and that is fired on, shot in the flank, outflanked or in close contact with its brigade stops its march (the game's " +
                 "own manual stop restores its line) and turns to face the pressure, instead of marching on in column until an enemy is within 100 m " +
                 "(vanilla deploys it there, facing the way it was walking). A regiment on a bridge or crossing, of a withdrawing group, routed or mounted " +
-                "is left alone. A regiment marked for the approach in line (Enable Approach Line Advance) is deployed where it stands and keeps marching. " +
+                "is left alone. A regiment marked for the approach in line (Enable Approach Line Advance), one whose only cause is its brigade's perceived flank risk, and one with no bearing to turn to are deployed where they stand and keep marching, facing the way they walk, but only while marked for the approach in line: an unmarked " +
+                "regiment would be columned again by the game within a second, so it is left in the game's column. " +
                 "Needs Enable Tactical Contact Facing Pulse. Disable for rollback without turning off Tactical Commander Mode.");
             EnableApproachLineAdvance = Config.Bind(
                 "Tactical",
@@ -1127,7 +1130,9 @@ namespace WhiskeyRealism
                 "(Commander Mode Active, never a player's unit, never the W&L feud instance) in a group whose current intent is a line advance or hold (not a " +
                 "road route or a march column) and whose closest perceived enemy is inside 500 m, the game's re-column step is skipped, so the regiment keeps " +
                 "its line and advances in line instead of falling back into march column. Independent of Enable Column Deployment and of the contact " +
-                "facing pulse: only this switch, Commander Mode Active and the battle core's posture record decide which regiments are marked. With " +
+                "facing pulse: only this switch, Commander Mode Active and the battle core's posture record decide which regiments are marked. The " +
+                "mark reads the task the operations ledger committed to the group and the closest enemy the side perceives (seen or remembered), which change " +
+                "only when something really changes, and is rebuilt every pass; a withdrawal, a road route or a lost ownership unmarks at once. With " +
                 "Enable Column Deployment on, a column regiment inside 500 m also deploys to line first, where it stands, and keeps marching. Every other regiment runs the game's method " +
                 "unchanged. Disable for rollback: vanilla's formation change runs for every regiment.");
             EnableTacticalReinforcementOpportunityDoctrine = Config.Bind(

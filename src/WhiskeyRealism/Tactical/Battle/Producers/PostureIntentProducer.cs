@@ -357,7 +357,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
             // Unit churn: the brigade's posture row, so the facing pulse and fire control (which read only rows with Has set) reach a leaf brigade as they
             // reach a pool group. Recorded before the move decision: a reserve or a hold, the usual leaf tasks, submits no move and still needs them.
-            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, id, closeEngaged, flankRisk, army.CurrentBattleStance);
+            t.Groups[i] = LeafPosture.Record(leaf.LeafRole, task, leaf.LeafTask, id, closeEngaged, flankRisk, army.CurrentBattleStance);
             bool activeMove = PostureSense.ActiveMove(rec, t.Moving[i]);
             bool pending = PostureSense.PendingOrder(rec, activeMove, allowStaleQueuedBypass: false);
 
@@ -583,6 +583,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
         internal const string ProbeReason = "probe-nomination";
         internal const string ManeuverFacingReason = "envelopment-turn";
 
+        // When each group last had an enemy in sight (per battle; reset with the posture producer).
+        private static readonly GroupContactMemory _contact = new GroupContactMemory();
+
+        static PosturePipeline()
+        {
+            BattleScope.Register("posture-contact", _contact.Clear);
+        }
+
         internal static bool Run(
             BattleSnapshot s,
             PostureTick.State t,
@@ -607,6 +615,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
 
             if (hasOrder && order.Task != state.Task)
                 state = state.WithRoleAndTask(order.Role, order.Task);
+            // The ledger's committed task, before any rewrite below (GroupPosture.LedgerTask).
+            CommandTaskType ledgerTask = state.Task;
 
             bool closeEngaged = PostureSense.CloseEngaged(s, i, descendants);
             bool flankRisk = BattleWriterPolicy.PerceivedFlankRisk(s, i, t.FlankThreatMean);
@@ -621,6 +631,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     ref GroupPosture followed = ref t.Groups[i];
                     followed.Has = true;
                     followed.State = state;
+                    followed.LedgerTask = ledgerTask;
                     followed.CloseEngaged = closeEngaged;
                     followed.FlankRisk = flankRisk;
                 }
@@ -638,7 +649,9 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // follow rewrite and the army opportunity override do not apply to it. The local flank emergency stays.
             bool exploit = exploitKind == ExploitOverrideKind.Exploit;
             bool hasCavalry = ((rec.Flags | descendants) & UnitFlags.IsCavalry) != 0;
-            bool visibleEnemy = s.ClosestVisibleEnemy(i, out _) >= 0;
+            // The reconnaissance rule below sends a group that has the enemy neither in sight nor on it to screen or probe. A group that lost him behind
+            // a rise for one count has not lost him (GroupContactMemory); its own sight is the sighting.
+            bool visibleEnemy = _contact.InContact(rec.InstanceId, s.ClosestVisibleEnemy(i, out _) >= 0, s.DoctrineHours);
             BattleStance stance = army != null ? army.CurrentBattleStance : BattleStance.Meeting;
             bool defender = stance == BattleStance.Defender;
 
@@ -672,6 +685,16 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             CommandPhysicalState physical = PostureSense.Physical(rec, t.Moving[i]);
+            // A move that is not Whiskey's own is no proof the group does its task (smoke 2026-10-18: a brigade on FormUp, Screen and Probe tasks walked
+            // 580 m to the vanilla objective, every row "already-correct"). The executor's last move is the group's own; a group that walks because its
+            // parent does, a group in a fight and a group in vanilla's assault are left to what moves them.
+            CommandPhysicalState observed = physical;
+            bool foreignStay = recordTick && !exploit && !probe && physical.ActiveMove && Plugin.ObjectiveDoctrineEnabled() && !ParentMarches(s, i) &&
+                IsForeignStayMove(s, rec, closeEngaged || flankRisk, state.Task, physical, ReleasedFromReserve(army, rec.InstanceId));
+            if (foreignStay)
+            {
+                physical = new CommandPhysicalState(physical.Routed, physical.PlayerProtected, physical.PathInterrupted, physical.Paths, false, physical.Formation);
+            }
             TacticalIdleClassification idle = TacticalCommandMonitor.ClassifyIdle(state, physical);
             CommandTaskType emergency = CommandFormationCorrection.TaskForLocalFlankEmergency(state.Task, closeEngaged, flankRisk);
             if (emergency != state.Task)
@@ -735,7 +758,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             // BC14O: the same turn answers vanilla's chain move against a move Whiskey gave a group under the current plan (a re-issue, never in a hold).
             if (recordTick && (Plugin.EnemyWorksDoctrineEnabled() || Plugin.ObjectiveDoctrineEnabled()))
             {
-                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, closeEngaged, state.Task, army, physical, priority, source, sink);
+                int contested = WorksContest(s, i, rec, order, hasOrder, worksHeld, worksLane, closeEngaged, foreignStay, state.Task, army, observed, priority, source, sink);
                 if (contested > 0)
                 {
                     // Like every early exit, the group's posture is recorded for the producers that read it this tick (recon's ledger-task test, the
@@ -743,6 +766,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     ref GroupPosture contestedGroup = ref t.Groups[i];
                     contestedGroup.Has = true;
                     contestedGroup.State = state;
+                    contestedGroup.LedgerTask = ledgerTask;
                     contestedGroup.CloseEngaged = closeEngaged;
                     contestedGroup.FlankRisk = flankRisk;
                     PostureTelemetry.Group(s, i, reason, state, new PostureExecutionDecision(PostureExecutionAction.NoWrite, PostureIntentPlan.ContestReason),
@@ -785,6 +809,7 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 ref GroupPosture g = ref t.Groups[i];
                 g.Has = true;
                 g.State = state;
+                g.LedgerTask = ledgerTask;
                 g.CloseEngaged = closeEngaged;
                 g.FlankRisk = flankRisk;
                 g.RouteColumn = false;
@@ -927,10 +952,60 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             return submitted > worksStance;
         }
 
+        // The group's active move is not the one Whiskey last issued it, and the group is in a state where a stay task is Whiskey's to keep.
+        private static bool IsForeignStayMove(BattleSnapshot s, in UnitRecord rec, bool inFight, CommandTaskType task, in CommandPhysicalState physical, bool releasedFromReserve)
+        {
+            OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
+            float issuedX = 0f, issuedZ = 0f;
+            double issuedHours = 0.0;
+            bool hasIssued = executor != null && executor.LastIssuedMove(rec.InstanceId, out issuedX, out issuedZ, out issuedHours);
+            return MoveContest.IsForeignStayMove(physical.ActiveMove, inFight, rec.AiStance, task, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ),
+                hasIssued, rec.LastWaypointX, rec.LastWaypointZ, issuedX, issuedZ, releasedFromReserve);
+        }
+
+        // The allocator released the group out of Reserve (CommandNodeIntent.ReleasedFromReserve, inherited by its descendants): vanilla's regiment-level
+        // reserve commit that #59 allows for a real release moves its subordinates, and a group-wide Stop would undo it.
+        private static bool ReleasedFromReserve(ArmyOrchestrator army, int instanceId)
+        {
+            try
+            {
+                CommandIntentResolution resolution = army?.ResolveCommandIntentForGroup(0, instanceId) ?? default(CommandIntentResolution);
+                return resolution.Found && resolution.Intent.ReleasedFromReserve;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // The group walks its parent's march (MoveContest.FollowsParentMarch): an ancestor has a path of its own that is a move Whiskey issued it, the group has
+        // had no Whiskey move of its own since, and it has no waypoint (vanilla writes none for a group its parent re-lays) or one on the parent's slot. The
+        // parent's own order is not what the group is contested for; a move of the group's own is.
+        private static bool ParentMarches(BattleSnapshot s, int i)
+        {
+            OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
+            if (executor == null) return false;
+            ref UnitRecord rec = ref s.Own[i];
+            bool childHasMove = executor.LastIssuedMove(rec.InstanceId, out _, out _, out double childHours);
+            int a = rec.ParentIndex;
+            for (int hops = 0; a >= 0 && a < s.OwnCount && hops < 4; hops++, a = s.Own[a].ParentIndex)
+            {
+                ref UnitRecord parent = ref s.Own[a];
+                bool hasPath = parent.RegimentPaths > 0 || parent.MovementMode > 0;
+                if (!hasPath || !executor.LastIssuedMove(parent.InstanceId, out float issuedX, out float issuedZ, out double parentHours)) continue;
+                bool parentHasWaypoint = PostureSense.HasPoint(parent.LastWaypointX, parent.LastWaypointZ);
+                bool own = !parentHasWaypoint || MoveContest.IsOwnMove(true, parent.LastWaypointX, parent.LastWaypointZ, issuedX, issuedZ);
+                bool childMovedSince = childHasMove && childHours >= parentHours;
+                if (MoveContest.FollowsParentMarch(hasPath, own, childMovedSince, PostureSense.HasPoint(rec.LastWaypointX, rec.LastWaypointZ), rec.LastWaypointX,
+                        rec.LastWaypointZ, parentHasWaypoint, parent.LastWaypointX, parent.LastWaypointZ)) return true;
+            }
+            return false;
+        }
+
         // BC14W: one group's turn of the works contest (MoveContest): the memory is asked every tick for a held group, a recon mission group is neither
         // contested nor counted, and the answer is turned into the executor's Stop or Move. Returns the intents submitted.
         private static int WorksContest(BattleSnapshot s, int i, in UnitRecord rec, in CommandDoctrineOrder order, bool hasOrder, bool worksHeld,
-            bool worksLane, bool closeEngaged, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
+            bool worksLane, bool closeEngaged, bool foreignStay, CommandTaskType task, ArmyOrchestrator army, in CommandPhysicalState physical, IntentPriority priority, IntentSource source,
             IIntentSink sink)
         {
             OrderExecutor executor = OrderExecutor.ForAlliance(s.Alliance);
@@ -949,6 +1024,10 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 X = rec.X, Z = rec.Z, WaypointX = rec.LastWaypointX, WaypointZ = rec.LastWaypointZ,
                 HasLane = worksLane && order.PrimaryTarget.HasValue, LaneX = order.PrimaryTarget.X, LaneZ = order.PrimaryTarget.Z,
                 Stance = rec.AiStance, Works = army?.Feasibility?.HeldWorks,
+                // A stay task is contested against vanilla's chain move: a form-up and a screen go back to their ledger point, a hold is stopped.
+                ForeignStayMove = foreignStay,
+                HasStayPoint = hasOrder && order.PrimaryTarget.HasValue && (task == CommandTaskType.FormUp || task == CommandTaskType.Screen),
+                StayX = order.PrimaryTarget.X, StayZ = order.PrimaryTarget.Z,
                 PlanStartHours = army != null ? nowHours - army.PlanAgeSeconds / 3600.0 : nowHours, NowHours = nowHours,
             };
             return ContestTurn.Run(in facts, sink);
@@ -2008,13 +2087,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             UnitRecord[] own = s.Own;
             int submitted = 0;
             // The approach in line (user-approved Prefix-skip, ApproachLineAdvancePatch): the table is rebuilt on every pass while its flag is on. With the
-            // flag off nothing marks, the marks expire, and the Prefix reads the flag itself.
+            // flag off nothing marks, the table goes stale, and the Prefix reads the flag itself.
             if (approachOn) ApproachLineTable.Shared.Begin(s.Alliance, s.DoctrineHours);
             for (int u = 0; u < s.OwnCount; u++)
             {
                 ref UnitRecord rec = ref own[u];
                 UnitFlags f = rec.Flags;
-                // The cheap rejects first: this loop visits every own unit every tick.
+                // The cheap rejects first: this loop visits every own unit every tick. A unit the pass does not look at is not marked: the table was
+                // cleared at the top of the pass.
                 if ((f & UnitFlags.IsInfantry) == 0 || (f & UnitFlags.IsGroup) != 0) continue;
                 if ((f & (UnitFlags.Alive | UnitFlags.Active)) != (UnitFlags.Alive | UnitFlags.Active)) continue;
                 if ((f & (UnitFlags.PlayerOwned | UnitFlags.PermanentlyDetached | UnitFlags.Feud | UnitFlags.Mounted)) != 0) continue;
@@ -2030,18 +2110,21 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                 int groupFormation = -1;
                 if (recorded)
                 {
-                    groupTask = t.Groups[group].State.Task;
+                    groupTask = t.Groups[group].LedgerTask;
                     groupFormation = own[group].Formation;
                     routeColumn = t.Groups[group].RouteColumn;
                     closeEngaged = t.Groups[group].CloseEngaged;
                     flankRisk = t.Groups[group].FlankRisk;
                 }
 
+                // The mark: the ledger's committed task is a line task, the side perceives an enemy (seen or remembered) within the assault range of the
+                // group, and the group is not marching on purpose or withdrawing. Every input holds still until something really changes.
                 bool approaching = false;
-                if (approachOn && recorded)
+                if (approachOn)
                 {
-                    int enemy = s.ClosestVisibleEnemy(group, out float enemyDistance);
-                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, true));
+                    float enemyDistance = 0f;
+                    int enemy = recorded ? ApproachLine.ClosestPerceivedEnemy(s, group, out enemyDistance) : -1;
+                    approaching = ApproachLine.Marks(new ApproachLineInput(f, groupTask, routeColumn, groupFormation, withdrawing, enemy >= 0, enemyDistance, recorded));
                     if (approaching) ApproachLineTable.Shared.Mark(s.Alliance, rec.InstanceId);
                 }
                 if (!deployOn || !inColumn || submitted >= MaxDeploymentsPerTick) continue;
@@ -2061,6 +2144,8 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
                     if (k >= 0 && distance <= (reason == ColumnDeployReason.Approaching ? ApproachLine.AssaultRangeMeters : DeployBearingReachMeters))
                         heading = PostureSense.HeadingTo(rec.X, rec.Z, s.Observations[k].X, s.Observations[k].Z);
                 }
+                // A deploy that keeps marching holds only for a marked regiment; an unmarked one is left in vanilla's column, not stopped.
+                if (!ColumnDeployment.MayDeploy(reason, heading, approachOn && ApproachLineTable.Shared.Contains(s.Alliance, rec.InstanceId, s.DoctrineHours))) continue;
                 sink.Submit(ColumnDeployment.Intent(rec.InstanceId, heading, reason));
                 submitted++;
             }
@@ -2083,15 +2168,14 @@ namespace WhiskeyRealism.Tactical.Battle.Producers
             }
 
             public bool HasPosture(int index) => _groups[index].Has;
-            public CommandTaskType TaskOf(int index) => _groups[index].State.Task;
+            public CommandTaskType TaskOf(int index) => _groups[index].LedgerTask;
+            public CommandTaskType EffectiveTaskOf(int index) => _groups[index].State.Task;
             public bool WithdrawalRecent(int index) => FacingPulseIntentProducer.WithdrawalRecent(_executor, _own[index].InstanceId, _nowHours);
         }
 
         internal static bool WithdrawalRecent(OrderExecutor executor, int unitId, double nowHours)
         {
-            return executor != null && executor.TryGetLastOutcome(unitId, OrderChannel.Move, out OrderOutcome last) &&
-                last.Source == IntentSource.Withdrawal && last.Kind != OrderOutcomeKind.Skipped && nowHours - last.AtHours >= 0.0 &&
-                nowHours - last.AtHours < WithdrawalWindowHours;
+            return executor != null && executor.WithdrewRecently(unitId, nowHours, WithdrawalWindowHours);
         }
 
         // Smoke item 2.27, telemetry facingSource: where the pulse's threat bearing came from (pressure, closest, entry or none).
