@@ -21,6 +21,8 @@ internal static class TaskChurnTests
             ("task churn: a chosen operation is held for the plan's commitment, not a quarter hour", AChosenOperationIsHeldForThePlanCommitment),
             ("task churn: the committed force must stand below the abort line for a dwell before the operation aborts", AbortNeedsTheCollapseToLast),
             ("task churn: the ledger runtime times the collapse from its first count", TheRuntimeTimesTheCollapse),
+            ("task churn: a collapse that ended starts again from its next count", ACollapseThatEndedStartsAgain),
+            ("task churn: a clock that ran backwards starts the collapse again", ABackwardsClockRestartsTheCollapse),
             ("task churn: a soft abort rests before the side commits again", ASoftAbortRests),
             ("task churn: the enemy line is remembered through a count without a glimpse of it", TheEnemyLineIsRemembered),
             ("task churn: the remembered enemy line ends with its horizon, a re-sighting or a clock that ran backwards", TheMemoryEnds),
@@ -43,6 +45,17 @@ internal static class TaskChurnTests
         AssertTrue(ok, "the line is seen");
         AssertEqual(300f, enemyStrength, "one enemy regiment of 300 is 300, not once per own unit that sees it");
         AssertNear(110f, point.X, 0.01f, "and it stands where the enemy stands");
+
+        // The set of enemies counted is the call's own: a second call, and a line of two enemies seen by the same three units, are counted afresh.
+        ok = TacticalVisionRuntimeAdapter.TryVisibleEnemyLineFromAggregate_ForTest(snapshot, 0, out _, out enemyStrength, out _);
+        AssertTrue(ok, "the next count sees it");
+        AssertEqual(300f, enemyStrength, "the next count does not remember the last");
+        var two = BattlePerceptionTests.ConsumerSnapshot(10.0,
+            new[] { BattlePerceptionTests.OwnUnit(1, 100f, -50f, aiGroupStrength: 100), BattlePerceptionTests.OwnUnit(2, 400f, -50f, aiGroupStrength: 100),
+                BattlePerceptionTests.OwnUnit(3, 420f, -50f, aiGroupStrength: 100) },
+            BattlePerceptionTests.Seen(11, 100f, 0f, 300f), BattlePerceptionTests.Seen(12, 400f, 0f, 200f));
+        TacticalVisionRuntimeAdapter.TryVisibleEnemyLineFromAggregate_ForTest(two, 0, out _, out enemyStrength, out _);
+        AssertEqual(500f, enemyStrength, "two enemy regiments are 300 and 200, each once however many own units see it");
     }
 
     // ---- the operation's ledger, driven as the coordinator drives it ----
@@ -125,6 +138,9 @@ internal static class TaskChurnTests
         AssertEqual(600f + TacticalOperationDirector.SoftAbortRestSeconds, aborted.Operation.MinimumCommitSeconds, "and the abort rests");
         AssertFalse(TacticalOperationDirector.OddsCollapsed(TacticalOperationDirectorInput.ForTest(committed, 600f, 5000f, 0.3f, 0.5f, 0.5f, new[] { Line(900f) })),
             "with nothing assigned yet the army's odds are the odds: no collapse");
+        var forming = new OperationRecord(TacticalOperationShape.DefensiveNetwork, TacticalOperationPhase.Forming, "line", 4000f);
+        AssertFalse(TacticalOperationDirector.OddsCollapsed(TacticalOperationDirectorInput.ForTest(forming, 600f, 100f, 0.3f, 0.5f, 0.5f, new[] { Line(900f) })),
+            "an operation that is not committed has no committed force to collapse (a weak army is why it forms, not a collapse)");
     }
 
     private static void ASoftAbortRests()
@@ -160,6 +176,46 @@ internal static class TaskChurnTests
             "not before it has lasted the dwell: first counted at " + firstCollapse + ", aborted at " + abortedAt);
         AssertTrue(abortedAt - firstCollapse < TacticalOperationDirector.OddsCollapseDwellSeconds + 40f,
             "and on the first count after it: first counted at " + firstCollapse + ", aborted at " + abortedAt);
+    }
+
+    // The assigned strength the runtime is given after each tick is the previous tick's choice: `assigned[k]` is measured after tick k and read by tick k+1.
+    private static float FirstAbort(TacticalOperationsLedgerRuntime runtime, float startAt, float[] assigned, float[] times = null)
+    {
+        for (int k = 0; k < assigned.Length; k++)
+        {
+            float now = times != null ? times[k] : startAt + 36f * k;
+            if (Tick(runtime, now, assigned[k], Map("Island_Ford"), EnemyLine(1500f)).Phase == TacticalOperationPhase.SoftAbort) return now;
+        }
+        return -1f;
+    }
+
+    private static void ACollapseThatEndedStartsAgain()
+    {
+        // Tick 0 commits; 1 to 8 are counted against 600; tick 8 measures the whole army again (3000) so tick 9 is not a collapse; from tick 9 on 600 again.
+        var assigned = new float[80];
+        for (int k = 0; k < assigned.Length; k++) assigned[k] = 600f;
+        assigned[8] = 3000f;
+        float abortedAt = FirstAbort(new TacticalOperationsLedgerRuntime(), 100f, assigned);
+        float restart = 100f + 36f * 10f;   // tick 10 is the first count below the line after the recovery
+        AssertTrue(abortedAt >= restart + TacticalOperationDirector.OddsCollapseDwellSeconds,
+            "the dwell counts from the count after the recovery (" + restart + "), not from the first collapse: aborted at " + abortedAt);
+        AssertTrue(abortedAt < restart + TacticalOperationDirector.OddsCollapseDwellSeconds + 40f, "and acts on it: aborted at " + abortedAt);
+    }
+
+    private static void ABackwardsClockRestartsTheCollapse()
+    {
+        var runtime = new TacticalOperationsLedgerRuntime();
+        // Collapse counted from t=136; at t=712 the dwell is 576 s; the clock then runs back to 50 (a reload) and walks forward in 36 s steps.
+        var times = new System.Collections.Generic.List<float>();
+        for (float t = 100f; t <= 712f; t += 36f) times.Add(t);
+        int backAt = times.Count;
+        for (float t = 50f; t <= 900f; t += 36f) times.Add(t);
+        var assigned = new float[times.Count];
+        for (int k = 0; k < assigned.Length; k++) assigned[k] = 600f;
+        float abortedAt = FirstAbort(runtime, 0f, assigned, times.ToArray());
+        AssertTrue(abortedAt > 0f && abortedAt < 50f + 36f * 2f + TacticalOperationDirector.OddsCollapseDwellSeconds + 40f && abortedAt > 50f + TacticalOperationDirector.OddsCollapseDwellSeconds,
+            "the collapse is timed from the first count after the clock ran back (aborted at " + abortedAt + ")");
+        AssertTrue(backAt > 10, "the run reached the jump back");
     }
 
     // ---- the enemy line's memory ----
