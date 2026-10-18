@@ -1298,10 +1298,13 @@ internal static class CampaignExecutorTests
             "allocation = ForceAllocator.Allocate(plan, snapshot, sectors,",
             "SyncRecon(snapshot, allocation);",
             "GarrisonRuntime.Sync(snapshot, plan, allocation);",
+            "CampaignPlanStore.TryGetAllocation(alliance, out var yesterdaysAllocation);",
+            "CampaignPlanStore.TryGetPlan(alliance, out var yesterdaysPlan);",
             "CampaignPlanStore.Publish(alliance, plan, allocation, sectors);",
             "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "EmitPlan(plan, trace, day, month, year);",
-            "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);");
+            "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);",
+            "EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);");
 
         AssertInOrder(BodyOf(runtime, "internal static void ReviewExecute("), "ReviewExecute",
             "if (!ExecutorsEnabled()) return;",

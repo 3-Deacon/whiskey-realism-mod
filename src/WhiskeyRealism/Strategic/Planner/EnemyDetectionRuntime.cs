@@ -232,7 +232,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 " contact=" + contact;
             if (string.Equals(LastSignature[side], line, StringComparison.Ordinal)) return;
             LastSignature[side] = line;
-            TelemetryRouter.LegacyInfo(line, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(line, s.DaySerial), TelemetryLayer.Campaign);
         }
 
         private static void CollectUnits(CampaignSnapshot s, int side)

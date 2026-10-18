@@ -118,6 +118,9 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonHoldReserve = "hold-reserve";
         internal const string ReasonRecover = "recover";
         internal const string ReasonDepotTask = "depot-task";
+        // A Wished task's pinned builder (AssignPinnedBuilders), apart from the builder AssignDepotBuilders picks: the [CampaignMoverIssue]
+        // row's pick= tells the two apart, which a smoke must do to count builders the planner chose (criterion-builders-fit).
+        internal const string ReasonPinnedBuilder = "depot-task-pinned";
         internal const string ReasonMass = "mass";
         internal const string ReasonReserve = "reserve-surplus";
         internal const string ReasonReinforcement = "reinforcement";
@@ -235,6 +238,55 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (g.InstanceIds.Count > 1) sb.Append('+').Append(g.InstanceIds.Count - 1);
             }
             return sb.Length == 0 ? "none" : sb.ToString();
+        }
+
+        // The [CampaignMoverIssue] row's pick=: how a depot builder came to be one. A builder AssignPinnedBuilders pinned is "pinned", one
+        // AssignDepotBuilders picked is "new", every other role "-". Kept here so the mover reads no depot state.
+        internal static string PickOf(in Assignment a)
+        {
+            if (a.Role != FormationRole.DepotBuilder) return "-";
+            return string.Equals(a.Reason, ReasonPinnedBuilder, StringComparison.Ordinal) ? "pinned" : "new";
+        }
+
+        // The strength of the formations that have `role` in a finished allocation (floored at 0, whoever the formation is). The one
+        // definition of "the capital guards' strength": the pass's shortfall test and the [Reserves] row's capital= both read it.
+        internal static float RoleStrength(CampaignSnapshot s, Allocation a, FormationRole role)
+        {
+            float sum = 0f;
+            for (int k = 0; k < a.Assignments.Count; k++)
+            {
+                if (a.Assignments[k].Role != role) continue;
+                int i = OwnIndexOf(s, a, k);
+                if (i >= 0) sum += Math.Max(0f, s.Own[i].Strength);
+            }
+            return sum;
+        }
+
+        // The hold a sector has by the roles assigned, in a finished allocation: its Hold formations, and the capital guards that stand in
+        // the capital's own sector (a guard elsewhere is on the march and holds nothing where it stands), the way ReserveRules.Hold counts
+        // them. A formation counts when the sector is both where it stands (ReserveRules.HoldSectorOf, the map-group player's last waypoint)
+        // and its role's sector, at WlChainRules.CountsTowardCoverage, ReserveRules.HoldStrength. The pass's shortfall test and the
+        // [Reserves] row's hold= both read it.
+        internal static float CountedHold(CampaignSnapshot s, SectorModel sectors, Allocation a, int sector)
+        {
+            float sum = 0f;
+            for (int k = 0; k < a.Assignments.Count; k++)
+            {
+                var x = a.Assignments[k];
+                if ((x.Role != FormationRole.Hold && x.Role != FormationRole.CapitalGuard) || x.SectorId != sector) continue;
+                int i = OwnIndexOf(s, a, k);
+                if (i < 0 || ReserveRules.HoldSectorOf(sectors, s.Own[i]) != sector || !WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) continue;
+                sum += ReserveRules.HoldStrength(s.Own[i]);
+            }
+            return sum;
+        }
+
+        // The snapshot index of assignment k's formation. The pass writes one assignment per own formation in snapshot order, so the
+        // index is k itself; any other allocation (a test's, a stale one) is looked up by instance id.
+        private static int OwnIndexOf(CampaignSnapshot s, Allocation a, int k)
+        {
+            int id = a.Assignments[k].InstanceId;
+            return k < s.Own.Count && s.Own[k].InstanceId == id ? k : s.IndexOfOwn(id);
         }
 
         private static bool IsImmobileReason(string reason)
@@ -443,7 +495,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     int i = _s.IndexOfOwn(_pinned[k].InstanceId);
                     if (i < 0 || !mask[i] || _done[i]) continue;
-                    Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);
+                    Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonPinnedBuilder, true);
                 }
                 return mask;
             }
@@ -990,17 +1042,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 return Math.Max(_need[sector], MinGarrisonStrength);
             }
 
-            // The hold a sector has by the roles assigned: its Hold formations, and the capital guards that stand in the capital's own sector
-            // (a guard elsewhere is on the march and holds nothing where it stands), the way ReserveRules.Hold counts them.
-            private float Counted(int sector)
-            {
-                float sum = 0f;
-                for (int i = 0; i < _n; i++)
-                    if ((_role[i] == FormationRole.Hold || _role[i] == FormationRole.CapitalGuard) && _sector[i] == sector && _roleSector[i] == sector)
-                        sum += Counts(i);
-                return sum;
-            }
-
             // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardCoverage (the player's own
             // command and a CIC side hold nothing), else ReserveRules.HoldStrength.
             private float Counts(int i)
@@ -1075,7 +1116,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 if (_s.HasCapital && _plan.CapitalFloorStrength > 0f)
                 {
-                    float guards = SumOf(FormationRole.CapitalGuard);
+                    float guards = RoleStrength(_s, allocation, FormationRole.CapitalGuard);
                     int guard = NearestWith(FormationRole.CapitalGuard, _s.CapitalX, _s.CapitalZ);
                     if (guard >= 0 && guards < _plan.CapitalFloorStrength)
                         carriers.Add(new KeyValuePair<int, float>(_s.Own[guard].InstanceId, (_plan.CapitalFloorStrength - guards) / _plan.CapitalFloorStrength));
@@ -1087,7 +1128,7 @@ namespace WhiskeyRealism.Strategic.Planner
                         if (_role[i] == FormationRole.Hold && _sector[i] == k && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
                             && !IsImmobileReason(_reason[i])) holds.Add(i);
                     float target = Target(k);
-                    float counted = Counted(k);
+                    float counted = CountedHold(_s, _sectors, allocation, k);
                     if (counted >= target) continue;
                     if (holds.Count == 0)
                     {
@@ -1131,14 +1172,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int i = 0; i < _n; i++)
                     if (_role[i] == FormationRole.Hold && _sector[i] == sector && _s.Own[i].Chain == WlChainClass.PlayerMapGroup) return i;
                 return -1;
-            }
-
-            private float SumOf(FormationRole role)
-            {
-                float sum = 0f;
-                for (int i = 0; i < _n; i++)
-                    if (_role[i] == role) sum += Math.Max(0f, _s.Own[i].Strength);
-                return sum;
             }
 
             private int NearestWith(FormationRole role, float x, float z)

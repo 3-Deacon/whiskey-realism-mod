@@ -1204,7 +1204,7 @@ internal static class ConstructionSteeringTests
         string theater = Src("Strategic/Planner/TheaterPlanner.cs");
         AssertTrue(HasLine(BodyOf(theater, "internal static float MassFor("), "if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;"), "G3 counts a held builder in no mass");
         AssertTrue(HasLine(BodyOf(theater, "private static void Reserve("), "ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));"), "and raises no capital guard from a Wished one, as the allocator");
-        AssertTrue(HasLine(pin, "Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonDepotTask, true);"), "as DepotBuilder at the pinned position, withheld");
+        AssertTrue(HasLine(pin, "Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonPinnedBuilder, true);"), "as DepotBuilder at the pinned position, withheld, with the pinned reason (foresight F1: the issue row's pick=pinned)");
         string mover = Src("Strategic/Planner/CampaignMover.cs");
         AssertFalse(mover.Contains("DepotTask") || mover.Contains("HeldBuilder"), "the mover reads no depot state: the allocator's assignment is the one rule");
     }

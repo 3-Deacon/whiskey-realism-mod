@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace WhiskeyRealism.Strategic
 {
     /// <summary>
@@ -34,8 +36,9 @@ namespace WhiskeyRealism.Strategic
             return era * 146097 + dayOfEra - FromMarchEpoch;
         }
 
-        // The day of the month of a DaySerial (the inverse of the civil-date arithmetic above).
-        internal static int DayOfMonth(int serial)
+        // The calendar date of a DaySerial: the inverse of the civil-date arithmetic above (Hinnant's civil_from_days over the March-based
+        // year), so a month end and a leap day invert exactly. month is 1-12, as vanilla's monthCounter.
+        public static void DateOf(int serial, out int year, out int month, out int day)
         {
             int z = serial + FromMarchEpoch;
             int era = (z >= 0 ? z : z - 146096) / 146097;
@@ -43,7 +46,31 @@ namespace WhiskeyRealism.Strategic
             int yearOfEra = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096) / 365;
             int dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
             int monthFromMarch = (5 * dayOfYear + 2) / 153;
-            return dayOfYear - (153 * monthFromMarch + 2) / 5 + 1;
+            day = dayOfYear - (153 * monthFromMarch + 2) / 5 + 1;
+            month = monthFromMarch < 10 ? monthFromMarch + 3 : monthFromMarch - 9;
+            year = yearOfEra + era * 400 + (month <= 2 ? 1 : 0);
+        }
+
+        // The day of the month of a DaySerial.
+        internal static int DayOfMonth(int serial)
+        {
+            DateOf(serial, out _, out _, out int day);
+            return day;
+        }
+
+        // "yyyy-MM-dd": the date= field of the planner's telemetry rows (the legacy parser lifts it into campaignDate).
+        internal static string FormatDate(int serial)
+        {
+            DateOf(serial, out int year, out int month, out int day);
+            return year.ToString("D4", CultureInfo.InvariantCulture) + "-" + month.ToString("D2", CultureInfo.InvariantCulture)
+                + "-" + day.ToString("D2", CultureInfo.InvariantCulture);
+        }
+
+        // A row with the review date appended. The planner's deduped rows compare their undated text and call this on the line they write,
+        // so a row that did not change is not written again just because the day did.
+        internal static string Dated(string row, int serial)
+        {
+            return row + " date=" + FormatDate(serial);
         }
 
         // 1 March of year 0 -> 1 January of year 1.

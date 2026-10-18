@@ -162,21 +162,25 @@ namespace WhiskeyRealism.Patches
                 // Filter the live ownunits in place — remove forbidden references
                 // for the duration of vanilla's call. Walk in reverse to keep
                 // index stable while removing.
+                bool verbose = Plugin.Instance.DefenseIntentVerboseLogging.Value;
+                var removedIds = verbose ? new List<int>() : null;   // only the verbose row names its reasons
                 int removed = 0;
                 for (int i = ownUnits.Count - 1; i >= 0; i--)
                 {
                     var unityObj = ownUnits[i] as UnityEngine.Object;
                     if (unityObj == null) continue;
-                    if (forbidden.Contains(unityObj.GetInstanceID()))
+                    int id = unityObj.GetInstanceID();
+                    if (forbidden.Contains(id))
                     {
                         ownUnits.RemoveAt(i);
                         removed++;
+                        removedIds?.Add(id);
                     }
                 }
 
-                if (removed > 0 && Plugin.Instance.DefenseIntentVerboseLogging.Value)
+                if (removed > 0 && verbose)
                 {
-                    EmitDefenseIntentFilter(allianceId, removed, forbidden.Count);
+                    EmitDefenseIntentFilter(allianceId, removed, forbidden.Count, DefenseFilterTally.Reasons(reasonByUnitId, removedIds));
                 }
             }
             catch (Exception ex)
@@ -392,14 +396,16 @@ namespace WhiskeyRealism.Patches
                 .WithField("patch", 25));
         }
 
-        private static void EmitDefenseIntentFilter(int allianceId, int removed, int forbidden)
+        // reasons: DefenseFilterTally.Reasons over the removed ids, "reason:n,..." (foresight F1: the smoke could only read removed=forbidden).
+        private static void EmitDefenseIntentFilter(int allianceId, int removed, int forbidden, string reasons)
         {
-            string signature = "alliance=" + allianceId + "|removed=" + removed + "|forbidden=" + forbidden;
+            string signature = "alliance=" + allianceId + "|removed=" + removed + "|forbidden=" + forbidden + "|reasons=" + reasons;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Gate, "DefenseIntent", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(allianceId)
                 .WithDecision("filter-candidates", "forbidden-defense-package", signature)
                 .WithField("removed", removed)
-                .WithField("forbidden", forbidden));
+                .WithField("forbidden", forbidden)
+                .WithField("reasons", reasons));
         }
 
         private static void EmitDefenseIntentSkipRevert(int allianceId, int unitId, string candidateName, string threatSignature, string reason)

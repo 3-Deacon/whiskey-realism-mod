@@ -154,11 +154,16 @@ namespace WhiskeyRealism.Strategic.Planner
                     }
                     SyncRecon(snapshot, allocation);
                     GarrisonRuntime.Sync(snapshot, plan, allocation);
+                    // Yesterday's allocation and plan are still the working copy; Publish overwrites them, and the defence counts of [Reserves]
+                    // judge today's snapshot against them (as AgeRecon reads the allocation).
+                    CampaignPlanStore.TryGetAllocation(alliance, out var yesterdaysAllocation);
+                    CampaignPlanStore.TryGetPlan(alliance, out var yesterdaysPlan);
                     CampaignPlanStore.Publish(alliance, plan, allocation, sectors);
                     CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));
                     LogFirstReview(snapshot, sectors);
                     EmitPlan(plan, trace, day, month, year);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
+                    EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
                 catch (Exception ex)
                 {
@@ -400,7 +405,7 @@ namespace WhiskeyRealism.Strategic.Planner
             int a = plan.Alliance;
             if (a < 0 || a >= LastPlanRow.Length || string.Equals(LastPlanRow[a], row, StringComparison.Ordinal)) return;
             LastPlanRow[a] = row;
-            TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
             if (!PlannerSettings.PlanTrace) return;
             TelemetryRouter.Emit(TelemetryLayer.Campaign, TelemetryCategory.Trace, "CampaignPlan:trace", TelemetrySeverity.Info, ev => ev
                 .WithAlliance(a)
@@ -426,7 +431,14 @@ namespace WhiskeyRealism.Strategic.Planner
             string row = ForceAllocator.Summary(allocation, plan, player, reliability, unreliableDays);
             if (string.Equals(LastAllocationRow[a], row, StringComparison.Ordinal)) return;
             LastAllocationRow[a] = row;
-            TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
+        // [Reserves] every Full review, with no signature compare: the review is the clock the foresight criteria count on (ReservesRow).
+        private static void EmitReserves(CampaignSnapshot snapshot, SectorModel sectors, TheaterPlan plan, Allocation allocation, PlannerState state,
+                                         Allocation yesterdaysAllocation, TheaterPlan yesterdaysPlan)
+        {
+            TelemetryRouter.LegacyInfo(ReservesRow.Build(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan), TelemetryLayer.Campaign);
         }
 
         // DLC_WL reads as WlChainContext.Capture does: dlc_scenarioactive, IsCommanderInChief

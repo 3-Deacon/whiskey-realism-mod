@@ -1473,6 +1473,7 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 var x = cands[order[k]];
                 sb.Append(" | ").Append(x.ObjectiveId).Append('@').Append(x.SectorId)
+                  .Append(" at=").Append(x.X.ToString("0", CultureInfo.InvariantCulture)).Append(',').Append(x.Z.ToString("0", CultureInfo.InvariantCulture))
                   .Append(" s=").Append(x.Score.ToString("0.000", CultureInfo.InvariantCulture))
                   .Append(" v=").Append(x.Value.ToString("0.00", CultureInfo.InvariantCulture))
                   .Append(" b=").Append(x.Balance.ToString("0.00", CultureInfo.InvariantCulture))

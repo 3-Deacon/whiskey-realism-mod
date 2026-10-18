@@ -1800,7 +1800,7 @@ internal static class ForceAllocatorTests
         AssertContains(reset, "NonCompliance[a].Reset();", "the unreliable-day run is per campaign");
         AssertContains(BodyOf(src, "private static bool HasMapGroupFormation("), "if (s.Own[i].Chain == WlChainClass.PlayerMapGroup) return true;", "the run belongs to the side that carries a map-group player");
         string emitBody = BodyOf(src, "private static void EmitAllocation(");
-        AssertContains(emitBody, "TelemetryRouter.LegacyInfo(row, TelemetryLayer.Campaign);", "the [Allocation] row, on change");
+        AssertContains(emitBody, "TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);", "the [Allocation] row, on change, with the review date (foresight F1: appended after the compare)");
     }
 
     // The allocation travels with its plan through the atomic daily publish: a reader between slices gets
