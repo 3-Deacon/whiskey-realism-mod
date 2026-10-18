@@ -16,6 +16,12 @@ namespace WhiskeyRealism.Strategic.Planner
         public float DistanceVariation0, DistanceVariation1;   // GamePrefs.intelligencedistancevariationfactor
         public bool HasClosestEnemy, Active, Garrison, Fleet;
         public float ClosestEnemyX, ClosestEnemyZ;
+        // Foresight F4b (D11 requirement-marks-ai-side, the symmetric channel): with the timing fixed vanilla rolls the chance many times a game
+        // day (once per frame the group's turn comes round), so the AI side draws each review's mark with the chance those rolls give over
+        // the interval since its last review. IntervalYears is that interval, Ticks vanilla's evaluations of this group in it. False on the
+        // first review, and with the fix off (the bug keeps the chance at the cap, so one roll a review is the same rate).
+        public bool UseInterval;
+        public float IntervalYears, Ticks;
     }
 
     // Vanilla's spotting-mark arithmetic as pure functions (SpottedEnemy, 142530-143122): the creation chance, the offset, the radius, the
@@ -72,6 +78,77 @@ namespace WhiskeyRealism.Strategic.Planner
             if (chance > cap) chance = cap;
             if (chance < 0f) chance = 0f;
             return chance;
+        }
+
+        // The (intelligence 0, intelligence 1) time-constant pair the chance reads (foresight F4b, BUG-INTEL-001): 142819 reads the concealment
+        // array spottingfactor (-50, -60) where timefactorspottings (0.1, 0.006 game years) is meant. With the fix on and a usable
+        // timefactorspottings that is the pair (true); otherwise vanilla's own (false). The player's side takes it through the patch that
+        // swaps the array for the call, the AI side through ReadMarkInputs: one formula for both.
+        internal static bool TimingPair(bool fix, float[] spottingFactor, float[] timeFactorSpottings, out float s0, out float s1)
+        {
+            s0 = spottingFactor != null && spottingFactor.Length > 0 ? spottingFactor[0] : 0f;
+            s1 = spottingFactor != null && spottingFactor.Length > 1 ? spottingFactor[1] : 0f;
+            if (!fix || timeFactorSpottings == null || timeFactorSpottings.Length < 2) return false;
+            float low = timeFactorSpottings[0], high = timeFactorSpottings[1];
+            if (float.IsNaN(low) || float.IsInfinity(low) || float.IsNaN(high) || float.IsInfinity(high) || low <= 0f || high <= 0f) return false;
+            s0 = low;
+            s1 = high;
+            return true;
+        }
+
+        // The chance that vanilla's rolls make at least one mark over a review's interval, 1 - exp(sum of ln(1 - p) over the ticks), with
+        // p(e) = min(cap, perks x e / timeConstant) for e game years since the newest mark (e0 at the start of the interval). The ticks are
+        // vanilla's evaluations of the group, spread evenly over the interval (the midpoint rule: the phase of the round-robin is unknown) and
+        // counted only from the fraction gateFraction on, where the group first lies the minimum distance from its newest mark. The sum is
+        // the integral of ln(1 - p) over the linear ramp up to the cap, then ln(1 - cap) for the ticks left at the cap. The variation draw is
+        // taken at its mean, so timeConstant is the mean one. 0 for no interval, no ticks or nothing past the gate.
+        internal static float IntervalChance(float e0, float intervalYears, float ticks, float timeConstant, float perks, float cap, float gateFraction)
+        {
+            if (!(intervalYears > 0f) || !(ticks > 0f) || !(cap > 0f) || !(perks > 0f)) return 0f;
+            double gate = Math.Max(0.0, Math.Min(1.0, gateFraction));
+            if (gate >= 1.0) return 0f;
+            double rate = perks / (double)Math.Max(MinTimeConstantYears, timeConstant);   // p per game year since the newest mark
+            double density = ticks / (double)intervalYears;                               // ticks per game year of the interval
+            double start = Math.Max(0.0, e0) + gate * intervalYears, end = Math.Max(0.0, e0) + intervalYears;
+            double capAge = cap / rate;
+            double sum = 0.0;
+            if (start < capAge)
+            {
+                double rampEnd = Math.Min(end, capAge);
+                sum += density * (RampIntegral(rate, rampEnd) - RampIntegral(rate, start));
+            }
+            double atCap = end - Math.Max(start, capAge);
+            if (atCap > 0.0)
+            {
+                if (cap >= 1f) return 1f;
+                sum += density * atCap * Math.Log(1.0 - cap);
+            }
+            double chance = 1.0 - Math.Exp(sum);
+            return (float)Math.Max(0.0, Math.Min(1.0, chance));
+        }
+
+        // The antiderivative of ln(1 - rate x e) in e: -(u ln u - u) / rate with u = 1 - rate x e (u ln u is 0 at u = 0).
+        private static double RampIntegral(double rate, double age)
+        {
+            double u = 1.0 - rate * age;
+            double uLogU = u <= 0.0 ? 0.0 : u * Math.Log(u);
+            return -(uLogU - Math.Max(0.0, u)) / rate;
+        }
+
+        // The fraction of the straight path from the group's position at the last review (lastX, lastZ) to its position now (x, z) at which it
+        // first lies minDistance from the newest mark (markX, markZ): 0 when it started that far out, 1 when it never gets there.
+        internal static float GateFraction(float lastX, float lastZ, float x, float z, float markX, float markZ, float minDistance)
+        {
+            double wx = lastX - markX, wz = lastZ - markZ;
+            double ww = wx * wx + wz * wz, rr = (double)minDistance * minDistance;
+            if (ww >= rr) return 0f;
+            double dx = x - lastX, dz = z - lastZ;
+            double dd = dx * dx + dz * dz;
+            if (dd <= 0.0) return 1f;   // it did not move, and it is inside
+            double wd = wx * dx + wz * dz;
+            // The path's exit from the circle; a root beyond the end (the group ends inside, never gets there) clamps to 1.
+            double root = (-wd + Math.Sqrt(Math.Max(0.0, wd * wd - dd * (ww - rr)))) / dd;
+            return (float)Math.Max(0.0, Math.Min(1.0, root));
         }
 
         // Random.Range(1 - v, 1 + v) from the seeded stream (142819).

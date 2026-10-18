@@ -846,6 +846,7 @@ internal static class CensusRows
         "Flag:EnableCampaignPlannerExecutors | P/CampaignPlannerRuntime.cs | G0 CampaignPlannerRuntime.ExecutorsEnabled / ReviewExecute; the G5 planner patches",
         "Flag:EnableVanillaDefensiveInterception | X/CheckForDefensiveOperationsCandidateFilterPatch.cs | Foresight F2 #25 telemetry-only while the planner runs (DefenseInterceptionGate.ModeFor)",
         "Flag:EnableSpottingMarkBeliefs | P/EnemyDetectionRuntime.cs | Foresight F4 EnemyDetectionRuntime.ProbeMarks (no mark detection on either side with it off)",
+        "Flag:FixSpottingMarkTiming | X/SpottingMarkTimingFixPatch.cs, P/EnemyDetectionRuntime.cs | Foresight F4b BUG-INTEL-001: the patch swaps the right time-factor pair into vanilla's UpdateMarks and the AI side's mark inputs take the same pair (MarkRules.TimingPair)",
         "Flag:EnableStrategicForesightPicture | S/StrategicCoordinator.cs | Foresight F3 the daily review copies it to PlannerSettings.ForesightPicture (TheaterPlanner, ForceAllocator, ReserveRules read the setting; the rollback to D2/P7)",
         "Flag:EnableCampaignReconnaissance | P/CampaignPlannerRuntime.cs | G1b recon step; G5d executor",
         "Flag:EnableCampaignFogHonestBeliefs | P/EnemyDetectionRuntime.cs | G1 EnemyDetectionRuntime.Detect / BeliefsFor",

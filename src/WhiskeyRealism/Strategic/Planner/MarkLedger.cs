@@ -18,6 +18,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public float DateYears;          // GameVars.GetCampaignFloatingDate when it was made
             public int Day;                  // the review day it was made
             public float Intel;              // the intelligence at its position (the radius reads this, not today's)
+            public float LastX, LastZ;        // the group's true position at the last evaluation (the path the interval's gate is measured on)
             public int MissedReviews;
         }
 
@@ -25,6 +26,16 @@ namespace WhiskeyRealism.Strategic.Planner
         private readonly List<string> _scratch = new List<string>();
 
         internal int Count => _entries.Count;
+
+        // Foresight F4b: the marks made and the hidden groups judged since BeginReview, for the [EnemyBeliefs] marksNew= / hiddenGroups= counts.
+        internal int Created { get; private set; }
+        internal int Judged { get; private set; }
+
+        internal void BeginReview()
+        {
+            Created = 0;
+            Judged = 0;
+        }
 
         // One hidden enemy group, once per review. True while a newest mark is held, new or old; mark then carries position, day, radius and
         // the date's day (the runtime fills strength, type, id and traits). gridHidden is the masked one-argument UnitIsHidden of the side's
@@ -37,6 +48,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             mark = default(EnemyDetection);
             if (unitKey == null) return false;
+            Judged++;
             _entries.TryGetValue(unitKey, out Entry entry);
             if (entry != null && gridHidden != null && !gridHidden(entry.X, entry.Z))
             {
@@ -47,12 +59,26 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 float draw = MarkRules.VariationDraw(rng, inputs.SpottingVariation);
                 float elapsed = dateYears - (entry != null ? entry.DateYears : 0f);
-                float chance = MarkRules.CreationChance(elapsed, inputs.Intel, inputs.Spotting0, inputs.Spotting1, draw, inputs.PerkFactor, inputs.Cap);
-                if (!inputs.Active || inputs.Garrison || inputs.Fleet || !inputs.HasClosestEnemy) chance = 0f;
-                double roll = rng.NextDouble();
                 float fromX = entry != null ? entry.X : 0f, fromZ = entry != null ? entry.Z : 0f;   // vanilla's default(Vector3) before the first mark
                 float moved = (float)Math.Sqrt((x - fromX) * (x - fromX) + (z - fromZ) * (z - fromZ));
-                if (chance > roll && moved >= inputs.MinDistance)
+                float chance;
+                bool pastGate;
+                if (inputs.UseInterval)
+                {
+                    // The variation draw is taken at its mean (1); it is still consumed above so a group's stream is the same either way.
+                    float gate = entry != null ? MarkRules.GateFraction(entry.LastX, entry.LastZ, x, z, entry.X, entry.Z, inputs.MinDistance) : 0f;
+                    float timeConstant = inputs.Intel * inputs.Spotting1 + (1f - inputs.Intel) * inputs.Spotting0;
+                    chance = MarkRules.IntervalChance(elapsed - inputs.IntervalYears, inputs.IntervalYears, inputs.Ticks, timeConstant, inputs.PerkFactor, inputs.Cap, gate);
+                    pastGate = true;   // the ticks past the gate are already in the chance
+                }
+                else
+                {
+                    chance = MarkRules.CreationChance(elapsed, inputs.Intel, inputs.Spotting0, inputs.Spotting1, draw, inputs.PerkFactor, inputs.Cap);
+                    pastGate = moved >= inputs.MinDistance;
+                }
+                if (!inputs.Active || inputs.Garrison || inputs.Fleet || !inputs.HasClosestEnemy) chance = 0f;
+                double roll = rng.NextDouble();
+                if (chance > roll && pastGate)
                 {
                     float angle = inputs.HasClosestEnemy ? MarkRules.ReverseBearing(x, z, inputs.ClosestEnemyX, inputs.ClosestEnemyZ) : 0f;
                     MarkRules.Offset(rng, inputs.Intel, new[] { inputs.DistanceVariation0, inputs.DistanceVariation1 }, inputs.HasClosestEnemy, angle,
@@ -68,10 +94,13 @@ namespace WhiskeyRealism.Strategic.Planner
                         entry.DateYears = dateYears;
                         entry.Day = daySerial;
                         entry.Intel = inputs.Intel;
+                        Created++;
                     }
                 }
             }
             if (entry == null) return false;
+            entry.LastX = x;
+            entry.LastZ = z;
             entry.MissedReviews = 0;
             mark = new EnemyDetection
             {

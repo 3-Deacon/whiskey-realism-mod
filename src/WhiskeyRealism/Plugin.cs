@@ -285,6 +285,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableVanillaDefensiveInterception;
         internal static ConfigEntry<bool> EnableStrategicForesightPicture;
         internal static ConfigEntry<bool> EnableSpottingMarkBeliefs;
+        internal static ConfigEntry<bool> FixSpottingMarkTiming;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1427,6 +1428,13 @@ namespace WhiskeyRealism
                 "group off the campaign map, and an AI side draws its own marks with vanilla's formula on its own fog grid (seeded, never Unity's random). " +
                 "A mark is a belief that counts in every strength sum and the picture's accounting, widens from its radius, and never scouts a target, " +
                 "lands a group, raises a raid or counts as contact. OFF = no mark detections on either side. Needs Enable Campaign Planner.");
+            FixSpottingMarkTiming = Config.Bind(
+                "Campaign Planner", "Fix Spotting Mark Timing", true,
+                "Default ON. Vanilla's spotting marks (the enemy symbols on the W&L player's campaign map) read the unit concealment array where the " +
+                "time-factor pref is meant (BUG-INTEL-001), so a hidden enemy group gets a new mark every time it moves 50 map units. With this on " +
+                "vanilla's mark timer reads the time-factor pref (0.1 and 0.006 game years), so marks appear over days; the AI side's own marks " +
+                "follow the same rate. It changes the player's own map, whether or not the campaign planner runs. OFF = vanilla's timing on both " +
+                "sides. Needs fog of war.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

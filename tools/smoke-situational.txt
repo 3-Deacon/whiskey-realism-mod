@@ -22,6 +22,9 @@ campaign.patch.save-load.save                      # AICampaign.Save: only when 
 campaign.patch.save-load.load                      # AICampaign.Load: only when a save is loaded
 campaign.patch.daily-review-save-drain             # SceneManagement.SaveAll: only when the game saves (manual, autosave or before a battle)
 
+# Fog of war only (foresight F4b, BUG-INTEL-001).
+campaign.patch.spotting-mark-timing.*              # SpottedEnemy.UpdateMarks runs only with GameVars.usefow on and an initialized mark manager; the Prefix returns before the swap otherwise
+
 # W&L career (DLC_WL) only.
 tactical.patch.good-ground-cover-cap               # Regiment.CheckCoyCovers: marks only for a W&L player's unit in battle
 tactical.patch.player-unit-repath.*                 # BUG-WL-024: every entry returns before its scope unless a W&L career owns the unit (Tracked), and the set-waypoint pair needs a player click (BattleUnits.SetWaypoint with showmovementoptions, 166134/166165)
