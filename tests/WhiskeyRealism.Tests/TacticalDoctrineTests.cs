@@ -170,7 +170,8 @@ internal static class TacticalDoctrineTests
                 new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 2200f, 0.9f, true, 0.8f, 100f, 100f, 0.5f, 0.6f)
             });
 
-        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+        // The collapse has stood for the dwell the ledger runtime keeps: one count below the line is no collapse (TaskChurnTests).
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input.WithOddsCollapseSeconds(TacticalOperationDirector.OddsCollapseDwellSeconds));
         AssertEqual(TacticalOperationPhase.SoftAbort, decision.Operation.Phase, "soft abort phase");
         AssertEqual("odds-collapse", decision.Reason, "reason");
     }
@@ -190,7 +191,7 @@ internal static class TacticalDoctrineTests
                 new BattlefieldObjectiveEstimate("ridge-a", TacticalObjectiveType.Ridge, 2200f, 0.9f, true, 0.8f, 100f, 100f, 0.5f, 0.6f)
             });
 
-        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input);
+        TacticalOperationDirectorDecision decision = TacticalOperationDirector.Decide(input.WithOddsCollapseSeconds(TacticalOperationDirector.OddsCollapseDwellSeconds));
         AssertEqual(TacticalOperationPhase.SoftAbort, decision.Operation.Phase, "soft abort inside commit");
         AssertEqual("odds-collapse", decision.Reason, "reason");
     }

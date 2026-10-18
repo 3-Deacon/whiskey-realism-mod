@@ -519,9 +519,11 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         /// on the plan already held (same plan, same side), with or without the margin, is a kept plan: it keeps its side, phase and age, wipes none
         /// of the release memory (the staggered release, the objective latch, the leaf releases: the old re-pick of the same plan cleared them and
         /// every role they held reverted) and only refreshes the baselines the edge triggers compare with; it keeps its age unless <paramref name="restartAgeIfKept"/>
-        /// (a review of the plan, as against the maneuver monitor's finding). Returns true when the plan was kept.
+        /// (a review of the plan, as against the maneuver monitor's finding). Returns true when the plan was kept. A plan adopted in a
+        /// <paramref name="crisis"/> (or by a re-pick without the hysteresis, which only a crisis makes) releases the roles the army holds
+        /// (<see cref="RoleHoldKey"/>); a plan adopted otherwise does not.
         /// </summary>
-        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null, bool restartAgeIfKept = false)
+        public bool Replan(ArmyEvidence evidence, TacticalIntentModel enemyIntent, bool hysteresis, string trigger = null, bool restartAgeIfKept = false, bool crisis = false)
         {
             if (!TryPickPlan(evidence, OpposingCommanderHintFromIntent(enemyIntent), hysteresis, trigger ?? "replan", out var nextPlan))
             {
@@ -552,6 +554,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             }
             _plan = nextPlan;
             HasPlan = true;
+            if (hadPlan && (crisis || !hysteresis)) _roleCrisisEpoch++;
             // BC14O: a new plan starts the main-effort objective's hysteresis over.
             ObjectiveLatch.ForAlliance(AllianceId)?.Clear();
             // BC13: a re-picked plan starts the staggered release over (released reserves revert as the allocator reruns).
@@ -752,9 +755,15 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
         private readonly DirectChildRoleHold _roleHold = new DirectChildRoleHold();
 
-        // What the roles were allocated for: a different plan, side, phase or main effort band is a new organisation of the line.
+        // What the roles were allocated for: a different side or main effort band is a new organisation of the line, and so is a plan adopted in a crisis.
+        // A plan re-picked without one (a flickering opportunity, a phase that moved on) is not: it neither changes the line's organisation nor releases
+        // the roles held (smoke 2026-10-18: re-picks of HesitatedCommit and ContinuousAttrition a minute or two apart released every role each time).
+        private int _roleCrisisEpoch;
+
+        internal int RoleHoldKey => RoleHoldPlanKey();
+
         private int RoleHoldPlanKey()
-            => unchecked((((int)_plan.PlanId * 31 + (_plan.Mirrored ? 1 : 0)) * 31 + (int)_plan.Phase) * 31 + _plan.MainEffortSector);
+            => unchecked(((_plan.Mirrored ? 1 : 0) * 31 + _plan.MainEffortSector) * 31 + _roleCrisisEpoch);
 
         // ---- BC14O economy of force ----
 

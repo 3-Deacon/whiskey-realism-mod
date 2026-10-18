@@ -918,6 +918,9 @@ namespace WhiskeyRealism.Tactical.Orchestrator
         //   usable point, adds its position weighted by max(1, strength) to the centroid and
         //   its strength to enemyStrength.
         // A per-own-unit closest-visible linkage, never every enemy on the map.
+        // The observation indices already in the visible enemy line (main thread only; cleared per call).
+        private static readonly HashSet<int> _lineCounted = new HashSet<int>();
+
         private static bool TryVisibleEnemyLineFromAggregate(
             IObservationSource source,
             int allianceId,
@@ -934,6 +937,7 @@ namespace WhiskeyRealism.Tactical.Orchestrator
             float weightTotal = 0f;
             UnitRecord[] own = source.Own;
             EnemyObservation[] observations = source.Observations;
+            _lineCounted.Clear();
             for (int i = 0; i < source.OwnCount; i++)
             {
                 if (!IsUsableOwnUnit(in own[i])) continue;
@@ -941,6 +945,10 @@ namespace WhiskeyRealism.Tactical.Orchestrator
 
                 int k = source.ClosestVisibleEnemy(i, out _);
                 if (k < 0) continue;
+                // An enemy is in the line once, however many own units see it: every regiment of a brigade has the same enemy regiment as its
+                // closest, and the line's strength is what the operation's odds divide by (smoke 2026-10-18: the more own units in sight, the
+                // stronger the enemy, and an attack committed on the whole army collapsed into a soft abort on the next count).
+                if (!_lineCounted.Add(k)) continue;
                 ref EnemyObservation enemy = ref observations[k];
                 if (!IsUsableMapPoint(new TacticalMapPoint(enemy.X, enemy.Z))) continue;
 
