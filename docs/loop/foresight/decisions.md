@@ -88,3 +88,12 @@ The user may override this.
 4. Phase 2 gap 20: `F6aReproducesTheShippedRoles` scenario 1 pins the new output, with the Marching-builder cascade spelled out, because that cascade is F9's intended change.
 
 The user may override each of these.
+
+## Integrator decisions, 2026-10-18 (phase 2 build, F7)
+
+1. Gap 36: the last mass is kept by unit key, as the covering force keeps its members, not by session instance id. The behaviour is the same and the key survives a load.
+2. Gap 37: the F7 flag gates what F7 adds (the stop, the de-list of an ended push, the `CapitalGuard` de-list, the readiness skip). The `Redeploy` and covering de-lists F6 shipped stay under their own flags.
+3. Gap 38: `committed=` counts the committed corps of a continuing push and the corps waiting out an ended push. A corps of an ended push that the new mass took counts as mass, not committed. That reads truer than D11's "after rows 1-7"; F10b's as-built note records it.
+4. Gap 41: `G3AndG4ReadOneOwnershipTable` falls back to a capital guard or a waiting corps when a world has no plain hold reserve, the same shape of change as F6b-2's gap 26. Accepted.
+
+The user may override each of these.
