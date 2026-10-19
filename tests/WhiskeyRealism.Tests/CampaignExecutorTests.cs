@@ -348,7 +348,12 @@ internal static class CampaignExecutorTests
     private static void GaveUpCapitalGuardBecomesAnUnwithheldHold()
     {
         var s = ExecutorFixtures.Wide();
-        s.Own.Add(ExecutorFixtures.Corps(30, 50f, 8000f));
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): a guard within the relocation range now stays where it stands unless it is on
+        // its way to the capital, and only a guard sent there can give up on it. This one is marching (its waypoint is the capital).
+        var marching = ExecutorFixtures.Corps(30, 50f, 8000f);
+        marching.WaypointX = s.CapitalX;
+        marching.WaypointZ = s.CapitalZ;
+        s.Own.Add(marching);
         var busy = ExecutorFixtures.Corps(31, 60f, 9000f);   // busy: it holds the sector's garrison alone, so the garrison prefix withholds no Hold formation
         busy.Flags |= FormationFlags.InBattle;
         s.Own.Add(busy);

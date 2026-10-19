@@ -156,24 +156,67 @@ namespace WhiskeyRealism.Strategic.Planner
             return mask;
         }
 
-        // The capital reserve (row 6 of the ownership table): the massable formations nearest the own capital until their strength reaches
-        // the capital floor (P7), taken from the formations nobody else owns and, home defence first, from a committed or department-moving one.
-        // A pinned builder is another owner's (row 1), so the reserve takes no guard from one.
+        // The capital reserve (row 6 of the ownership table): vanilla's own capital defence (AssignUnitToDefendCapital 11725 and 11731-11741) counts
+        // and draws only within GamePrefs.aimaximumdistancetosearchforunitrelocations (CampaignSnapshot.RelocationRange) of the capital, and so does
+        // this reserve; nothing beyond that range is ever counted or drawn, and a floor the range cannot meet stays short (the [Reserves]
+        // capital=held/floor row shows the shortfall) rather than pulling a formation across the map (the capital-floor pump, 2026-10-19).
+        //   1. What already stands within the range (the map-group player's group at its last waypoint, HoldPoint) counts first, ready or not: every formation that counts toward coverage, is not leaving for
+        //      supply (Recovers), and is no other owner's (a committed formation, a department move and a pinned builder are not counted; a
+        //      busy one is, and so is a formation nobody owns). Nearest first, the ones the planner may move (WlChainRules.MayMove) are claimed
+        //      Capital until the floor is met, so a guard that has lost readiness on arriving stays a guard. A claimed formation stays where it
+        //      stands (the claim's target is its own place), except one on its way to the capital (its last waypoint is there), which goes on.
+        //   2. Only if that falls short of the floor are more drawn: the massable formations within the range, nearest first, from the claimants
+        //      row 6 may take from (ClaimTable.Takes: no owner, committed, department move; home defence first), marching to the capital.
+        // A formation the player commands is counted nowhere here (CountsTowardCoverage) and claimed never.
         internal static void Capital(CampaignSnapshot s, float capitalFloor, Claim[] claims)
         {
             if (!s.HasCapital || capitalFloor <= 0f) return;
-            var order = new List<int>();
+            float reachSq = s.RelocationRange * s.RelocationRange;
+            var standing = new List<int>();
+            var drawable = new List<int>();
             for (int i = 0; i < s.Own.Count; i++)
-                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement) && ClaimTable.Takes(ClaimTable.RowCapital, claims[i].Claimant)) order.Add(i);
-            SortByDistance(s, order, s.CapitalX, s.CapitalZ);
-            float held = 0f;
-            for (int k = 0; k < order.Count && held < capitalFloor; k++)
             {
-                claims[order[k]].Claimant = Claimant.Capital;
-                claims[order[k]].TargetX = s.CapitalX;
-                claims[order[k]].TargetZ = s.CapitalZ;
-                held += System.Math.Max(0f, s.Own[order[k]].Strength);
+                var f = s.Own[i];
+                HoldPoint(f, out float hx, out float hz);
+                if (DistanceSq(hx, hz, s.CapitalX, s.CapitalZ) > reachSq) continue;
+                Claimant owner = claims[i].Claimant;
+                if ((owner == Claimant.None || owner == Claimant.Immobile) && WlChainRules.CountsTowardCoverage(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
+                    standing.Add(i);
+                if (TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) && ClaimTable.Takes(ClaimTable.RowCapital, owner)) drawable.Add(i);
             }
+            SortByDistance(s, standing, s.CapitalX, s.CapitalZ);
+            float held = 0f;
+            for (int k = 0; k < standing.Count && held < capitalFloor; k++)
+            {
+                int i = standing[k];
+                held += HoldStrength(s.Own[i]);
+                if (claims[i].Claimant != Claimant.None || !TheaterPlanner.Movable(s.Own[i]) || !WlChainRules.MayMove(s.Own[i].Chain)) continue;
+                claims[i].Claimant = Claimant.Capital;
+                if (MarchingToCapital(s, s.Own[i]))
+                {
+                    claims[i].TargetX = s.CapitalX;
+                    claims[i].TargetZ = s.CapitalZ;
+                }
+            }
+            if (held >= capitalFloor) return;
+            SortByDistance(s, drawable, s.CapitalX, s.CapitalZ);
+            for (int k = 0; k < drawable.Count && held < capitalFloor; k++)
+            {
+                int i = drawable[k];
+                if (claims[i].Claimant == Claimant.Capital) continue;
+                claims[i].Claimant = Claimant.Capital;
+                claims[i].TargetX = s.CapitalX;
+                claims[i].TargetZ = s.CapitalZ;
+                held += System.Math.Max(0f, s.Own[i].Strength);
+            }
+        }
+
+        // Whether the formation's last waypoint is the capital (within the mover's arrival radius): a guard drawn on an earlier review and still on
+        // its way, which the reserve leaves on its march rather than halting it where it has got to.
+        internal static bool MarchingToCapital(CampaignSnapshot s, in FormationRecord f)
+        {
+            return IsFinite(f.WaypointX) && IsFinite(f.WaypointZ)
+                && DistanceSq(f.WaypointX, f.WaypointZ, s.CapitalX, s.CapitalZ) <= CampaignMover.ArrivalRadius * CampaignMover.ArrivalRadius;
         }
 
         // Each threatened sector's hold reserve (row 7 of the ownership table): what holds there anyway counts first, then the massable

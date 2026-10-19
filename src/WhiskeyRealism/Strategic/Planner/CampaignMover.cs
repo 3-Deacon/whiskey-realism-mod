@@ -181,6 +181,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
             JudgeLastReview(s, allocation, tracker, tally);
             ReleaseFromOffense(s, plan, allocation, host);
+            var exGuards = StopGuardsTheReserveNoLongerHolds(s, allocation, host, tracker, tally);
             bool released = state.TempoReleasedDecision == state.DecisionSerial;
             bool dispatchable = plan.MainObjectiveId >= 0 && HasDispatchableMainEffort(s, allocation, host);
             NoteUndispatchable(inputs, state, tally, dispatchable);
@@ -189,8 +190,9 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!released && dispatchable && !plan.MainStaged) released = EvaluateLaunch(inputs, host, state, tally);
             foreach (var step in Priority)
                 for (int k = 0; k < allocation.Assignments.Count; k++)
-                    if (Serves(in step, allocation.Assignments[k]))
-                        Dispatch(inputs, host, tracker, released, allocation.Assignments[k], tally);
+                    if (Serves(in step, allocation.Assignments[k]) && Dispatch(inputs, host, tracker, released, allocation.Assignments[k], tally))
+                        exGuards.Remove(allocation.Assignments[k].InstanceId);
+            StopExGuardsLeftMarching(s, allocation, host, tracker, tally, exGuards);
             state.LastFullReviewDay = s.DaySerial;
             return tally;
         }
@@ -266,6 +268,64 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (i < 0 || !WlChainRules.MayMove(s.Own[i].Chain)) continue;
                 if ((s.Own[i].Flags & FormationFlags.InOffensiveOps) != 0) host.ListOffensive(a.InstanceId, false);
             }
+        }
+
+        // The capital-floor pump's other half (2026-10-19): a formation on its march to the capital as a CapitalGuard (IsMarchingExGuard) whose role
+        // today is no longer the guard's, would march on to the capital for a role it has lost. One whose new role sends it nowhere (a hold reserve,
+        // a reserve, the stop of an ended push) is stopped where it stands now, by vanilla's own campaign stop as an ended push's corps is, and
+        // taken off vanilla's offensive list (its role is no longer a guard's, so ReleaseFromOffense no longer names it, and vanilla's job 6 would
+        // re-send it the same day). One whose new role has a post is re-targeted by the ordinary dispatch (Priority); its id is returned, read from
+        // the tracker here because the dispatch overwrites the record, and StopExGuardsLeftMarching stops any the dispatch did not order. A scout is
+        // the recon executor's, and is left alone.
+        private static List<int> StopGuardsTheReserveNoLongerHolds(CampaignSnapshot s, Allocation allocation, IMoverHost host, MoveTracker tracker, MoverTally tally)
+        {
+            var retargeted = new List<int>();
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                var f = s.Own[i];
+                if (!IsMarchingExGuard(s, allocation, tracker, in f, out Assignment a)) continue;
+                if (MovesRole(a.Role)) retargeted.Add(f.InstanceId);
+                else StopExGuard(s, host, tracker, in a, in f, tally, recordStop: true);
+            }
+            return retargeted;
+        }
+
+        // A marching formation that is on its way to the capital for a guard's role it no longer has: the tracker sent it as a CapitalGuard; or the
+        // record carries no role (a move restored from the sidecar, which keeps none; a save made before this rule had guards on the march) or
+        // there is none, and the record's target is the capital point or the formation's live waypoint is there. A record with another role is a
+        // march for that role (a Redeploy to the capital's town, say), and is left alone. The formation must still have a path or an order waiting.
+        private static bool IsMarchingExGuard(CampaignSnapshot s, Allocation allocation, MoveTracker tracker, in FormationRecord f, out Assignment a)
+        {
+            a = default;
+            if ((f.Flags & (FormationFlags.HasPath | FormationFlags.MoveQueued)) == 0 || !WlChainRules.MayMove(f.Chain) || !TheaterPlanner.Movable(f)) return false;
+            bool recorded = tracker.TryGetMove(f.InstanceId, out _, out _, out float targetX, out float targetZ, out _, out _, out _, out string sentFor);
+            bool sentAsGuard = recorded && string.Equals(sentFor, nameof(FormationRole.CapitalGuard), StringComparison.Ordinal);
+            bool unnamed = !recorded || sentFor == null;
+            bool towardCapital = sentAsGuard
+                || (unnamed && s.HasCapital && ((recorded && MoveTracker.SameTarget(targetX, targetZ, s.CapitalX, s.CapitalZ)) || ReserveRules.MarchingToCapital(s, in f)));
+            return towardCapital && allocation.TryGet(f.InstanceId, out a) && a.Role != FormationRole.CapitalGuard && a.Role != FormationRole.Recon;
+        }
+
+        // The ex-guards whose new role sends them but whose dispatch ordered nothing this review (vanilla refused the target or it is restricted,
+        // the order waits in the queue, the day's cap or a gate held it): the old march to the capital is stopped all the same. A record the
+        // dispatch overwrote (a refusal's, a queued move's) is kept, so the refusal still counts toward the give-up; an untouched one is the stop's.
+        private static void StopExGuardsLeftMarching(CampaignSnapshot s, Allocation allocation, IMoverHost host, MoveTracker tracker, MoverTally tally, List<int> pending)
+        {
+            for (int k = 0; k < pending.Count; k++)
+            {
+                int i = s.IndexOfOwn(pending[k]);
+                if (i < 0 || !allocation.TryGet(pending[k], out var a)) continue;
+                var f = s.Own[i];
+                bool overwritten = tracker.TryGetMove(f.InstanceId, out _, out _, out _, out _, out _, out _, out _, out string role)
+                    && role != null && !string.Equals(role, nameof(FormationRole.CapitalGuard), StringComparison.Ordinal);
+                StopExGuard(s, host, tracker, in a, in f, tally, recordStop: !overwritten);
+            }
+        }
+
+        private static void StopExGuard(CampaignSnapshot s, IMoverHost host, MoveTracker tracker, in Assignment a, in FormationRecord f, MoverTally tally, bool recordStop)
+        {
+            if (!StopWhereItStands(s, host, tracker, in a, in f, tally, recordStop)) return;
+            if ((f.Flags & FormationFlags.InOffensiveOps) != 0) host.ListOffensive(f.InstanceId, false);
         }
 
         private static bool EndedAndNotPushingAgain(TheaterPlan plan, in Assignment a)
@@ -376,11 +436,12 @@ namespace WhiskeyRealism.Strategic.Planner
             z = bz;
         }
 
-        private static void Dispatch(MoverInputs inputs, IMoverHost host, MoveTracker tracker, bool released, Assignment a, MoverTally tally)
+        // Returns whether the formation is ordered for its role this review: sent, or already underway to the target (the stop and every skip are not).
+        private static bool Dispatch(MoverInputs inputs, IMoverHost host, MoveTracker tracker, bool released, Assignment a, MoverTally tally)
         {
             var s = inputs.Snapshot;
             int i = s.IndexOfOwn(a.InstanceId);
-            if (i < 0) return;
+            if (i < 0) return false;
             var f = s.Own[i];
             float tx = a.TargetX, tz = a.TargetZ;
 
@@ -388,28 +449,28 @@ namespace WhiskeyRealism.Strategic.Planner
             if (!WlChainRules.MayMove(f.Chain))
             {
                 tally.SkippedPlayer++;
-                return;
+                return false;
             }
             if (!TheaterPlanner.Movable(f))
             {
                 tally.SkippedBusy++;
-                return;
+                return false;
             }
             // The stop of an ended push's corps (Hold, committed-wait): not a march, so neither the arrival test, the readiness skip, the tempo gate
             // nor the tracker's ShouldIssue and the day's cap apply to it.
             if (a.Role == FormationRole.Hold)
             {
                 StopWhereItStands(s, host, tracker, in a, in f, tally);
-                return;
+                return false;
             }
-            if (Distance(f.WaypointX, f.WaypointZ, tx, tz) <= ArrivalRadius) return;
+            if (Distance(f.WaypointX, f.WaypointZ, tx, tz) <= ArrivalRadius) return true;
             // Vanilla refuses the march of a formation at readiness step 0 or 1 onto enemy ground, in silence (SetWaypoint 91336-91350), so a
             // new march or a retry there would be a wasted one that the tracker counts as a miss. It is held; the record keeps its retry for the
             // formation's return to step 2, and low readiness alone never gives up (D11 requirement-commitment-mover).
             if (PlannerSettings.MainEffortCommitment && RefusedForReadiness(host, in a, in f, tx, tz))
             {
                 tally.HeldReadiness++;
-                return;
+                return false;
             }
             // The launch gates a march into enemy-held ground. The main effort's gathering at a staged start line is not one while
             // the line is in own or neutral ground; a start line that happens to lie in enemy ground still waits for the release.
@@ -419,15 +480,16 @@ namespace WhiskeyRealism.Strategic.Planner
             {
                 tally.Deferred++;
                 if (a.Role == FormationRole.MainEffort && inputs.Plan.MainStaged) tally.DeferredStaged++;
-                return;
+                return false;
             }
-            if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return;
+            if (!tracker.ShouldIssue(f.InstanceId, tx, tz, s.DaySerial)) return false;
 
             int objective = ObjectiveOf(inputs.Plan, a);
             bool moved = MoveIssue.Issue(host, tracker, in f, tx, tz, objective, s.DaySerial, inputs.WlPlayerAlliance, MoveBudget.Planner, a.Role.ToString(), out var outcome);
             Count(tally, outcome);
             if (moved) tally.IssueRows.Add(IssueRow(s, in f, a, tx, tz, objective));
             if (moved && (a.Role == FormationRole.MainEffort || a.Role == FormationRole.Support)) host.ListOffensive(f.InstanceId, true);
+            return moved;
         }
 
         // Whether vanilla would refuse this march in silence: a MainEffort, Support or Redeploy formation below readiness step 2, the target on
@@ -453,18 +515,20 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // Vanilla's campaign stop, sent only to a formation the snapshot shows still marching or with an order waiting (vanilla's
-        // GetLastTransmittedPath() >= 0 and DefensiveMovingOrder.OrderRunning), so it cannot be sent twice: it clears both. It passes through
+        // GetLastTransmittedPath() >= 0 and DefensiveMovingOrder.OrderRunning), so it cannot be sent twice: it clears both (and a stop already recorded and in transit this review is not repeated, the snapshot still showing the march). It passes through
         // neither MoveIssue.Issue (there is no target to restrict, and its queued branch records a queued move and calls no host) nor
         // MoveTracker.ShouldIssue (it is not a MoveUnitTo call, which is what the day's cap bounds): the tracker records it at the formation's
         // own position as a stop, judged at the next review by whether the formation still moves.
-        private static void StopWhereItStands(CampaignSnapshot s, IMoverHost host, MoveTracker tracker, in Assignment a, in FormationRecord f, MoverTally tally)
+        private static bool StopWhereItStands(CampaignSnapshot s, IMoverHost host, MoveTracker tracker, in Assignment a, in FormationRecord f, MoverTally tally, bool recordStop = true)
         {
-            if (!PlannerSettings.MainEffortCommitment) return;
-            if ((f.Flags & (FormationFlags.HasPath | FormationFlags.MoveQueued)) == 0) return;
-            if (!host.Stop(f.InstanceId)) return;
-            tracker.RecordStop(f.InstanceId, f.X, f.Z, s.DaySerial, f.UnitKey);
+            if (!PlannerSettings.MainEffortCommitment) return false;
+            if ((f.Flags & (FormationFlags.HasPath | FormationFlags.MoveQueued)) == 0) return false;
+            if (tracker.IsStop(f.InstanceId) && tracker.InTransit(f.InstanceId)) return false;   // stopped earlier in this review: the snapshot still shows the march
+            if (!host.Stop(f.InstanceId)) return false;
+            if (recordStop) tracker.RecordStop(f.InstanceId, f.X, f.Z, s.DaySerial, f.UnitKey);
             tally.Stopped++;
             tally.IssueRows.Add(IssueRow(s, in f, a, f.X, f.Z, -1));
+            return true;
         }
 
         // [CampaignMoverIssue]: the field names and number formats of [CampaignMoverMiss] (the unit key quoted, coordinates whole numbers).
