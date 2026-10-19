@@ -1623,7 +1623,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // The capital floor and threat from one computation. P7: floor = CapitalFloorRatio x vanilla's weight (see the header). Foresight
         // (D11 requirement-capital-floor, as amended by the capital-floor pump hotfix 2026-10-19): the weight is taken over the picture's
-        // elements inside the relocation range of the capital, vanilla's own count; the capital-window race (CapitalRace) is still run and
+        // elements inside the relocation range of the capital, vanilla's own enemy weighting (11725); the capital-window race (CapitalRace) is still run and
         // reported (CapitalReach, relief, corpsPerDay, the [CapitalThreat] row) but no longer sets the weight. The floor is the minimum strength
         // plus that weight, never below #4's VanillaNeed on this snapshot; the threat that trips the 0.6 capital trigger excludes the baseline, so it never fires on an empty map.
         // Picture off: P7's numbers over the relocation range.
@@ -1643,7 +1643,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (PlannerSettings.ForesightPicture)
             {
                 CapitalRace(c, out c.CapitalReliefDays, out c.CapitalCorpsPerDay, out c.CapitalReach);
-                // The count is vanilla's own (AssignUnitToDefendCapital 11712-11729: the enemies within the relocation range): the race above only
+                // The count is vanilla's own enemy weighting (AssignUnitToDefendCapital 11725: the enemies within the relocation range): the race above only
                 // reports (CapitalReach, relief, corpsPerDay). The floor must not read the reach, or the plan's own output (where its draw put the
                 // department's formations) sets how many guards it wants; the threat beyond the range is answered forward, by the covering force
                 // and the sector holds (capital-floor pump hotfix, 2026-10-19, user direction).

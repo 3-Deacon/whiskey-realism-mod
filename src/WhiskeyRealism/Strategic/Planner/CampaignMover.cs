@@ -456,6 +456,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 tally.SkippedBusy++;
                 return false;
             }
+            // A capital guard in vanilla's groupstodefendcapital (FormationFlags.CapitalDefense) was pledged by #4 and is marched to its slot by
+            // vanilla's AssignUnitToDefendCapital (11829): that march is vanilla's. The guard's claim holds it where it stands, so a dispatch
+            // would send it back to its own place every review.
+            if (a.Role == FormationRole.CapitalGuard && (f.Flags & FormationFlags.CapitalDefense) != 0) return true;
             // The stop of an ended push's corps (Hold, committed-wait): not a march, so neither the arrival test, the readiness skip, the tempo gate
             // nor the tracker's ShouldIssue and the day's cap apply to it.
             if (a.Role == FormationRole.Hold)

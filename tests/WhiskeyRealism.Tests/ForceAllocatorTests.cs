@@ -710,9 +710,9 @@ internal static class ForceAllocatorTests
         AssertFalse(plan.MassInstanceIds.Contains(1), "the planner never masses the map-group player");
         var x = Of(a, 1);
         AssertTrue(x.Role != FormationRole.CapitalGuard && x.Role != FormationRole.MainEffort, "never a capital guard or main effort on his own");
-        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the capital reserve counts what stands within the relocation range first, as
-        // vanilla's capital defence does (AssignUnitToDefendCapital counts the map-group player there too: CountsTowardCoverage), and draws only from
-        // inside the range. The player's 30000 at x 50 meets the floor of 9142; the AI corps at x 250 is beyond the range (150) and is not drawn.
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the capital reserve counts what stands within the relocation range first (the
+        // map-group player's group included, as vanilla weighs and counts it: CountsTowardCoverage) and draws only from inside the range, a
+        // Whiskey limit (vanilla's own draw reaches maxdistancedefensiveoperations, 11791). The player's 30000 at x 50 meets the floor of 9142; the AI corps at x 250 is beyond the range (150) and is not drawn.
         AssertEqual(FormationRole.MainEffort, Of(a, 2).Role, "the player standing at the capital meets the floor, and the AI corps beyond the range is not pulled in: it masses");
         AssertFalse(x.Withheld, "he is never withheld");
         AssertFalse(a.Surpluses.Contains(1), "never a surplus");

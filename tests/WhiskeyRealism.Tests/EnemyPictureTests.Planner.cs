@@ -462,7 +462,7 @@ internal static partial class EnemyPictureTests
     }
 
     // At the 002/A start the CSA's 5,017 men within 200 of Richmond: the trigger fires above 0.6 of them and not below. Re-pinned for the
-    // capital-floor pump hotfix (2026-10-19): the weight is vanilla's count within the relocation range, so the Union army that weighs on
+    // capital-floor pump hotfix (2026-10-19): the weight is vanilla's enemy weighting within the relocation range (11725), so the Union army that weighs on
     // Richmond stands within 200 of it (at Bowling Green); Washington's presumed men, 389 away, no longer do.
     private static CampaignSnapshot UnionNearRichmond(float men)
     {
@@ -489,7 +489,7 @@ internal static partial class EnemyPictureTests
     }
 
     // Capital-floor pump hotfix (2026-10-19, user direction; was WashingtonCountsTowardRichmondsFloor): the floor counts the enemy within the
-    // relocation range of the capital, vanilla's own count (11712-11729), and never the relief race's reach. The race is still run and reported
+    // relocation range of the capital, vanilla's own enemy weighting (11725), and never the relief race's reach. The race is still run and reported
     // (CapitalReach, relief): Washington (389 from Richmond) lies inside it and outside the floor.
     private static void WashingtonBeyondTheRangeDoesNotCountTowardRichmondsFloor()
     {

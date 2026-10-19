@@ -7,10 +7,12 @@ using static TestHarness;
 
 // Hotfix 2026-10-19, the capital-floor pump (smoke17: "All of the CSA is just moving to Richmond"). The capital reserve counted only massable
 // formations and started from nothing each review, so a guard that arrived and lost readiness stopped counting and the rule pulled the next
-// nearest massable formation from anywhere, alternating with the covering force. It now counts first what stands within vanilla's relocation
-// range of the capital (AssignUnitToDefendCapital counts and draws only inside GamePrefs.aimaximumdistancetosearchforunitrelocations, 11725 and
-// 11731-11741), keeps an incumbent a guard, draws only inside that range, and the mover stops a guard still marching that the reserve no longer
-// holds (D11 requirement-capital-window, as-built).
+// nearest massable formation from anywhere, alternating with the covering force. It now counts first what stands within the relocation range of
+// the capital, keeps an incumbent a guard where it stands, draws only inside that range, and the mover stops a guard still marching that the
+// reserve no longer holds. The 200 limit is Whiskey's, on the user's forward-defence direction ("a large portion of Richmond defense .. is by
+// keeping them from marching toward richmond but intelligently holding the front", user message 2026-10-19): vanilla weighs the enemy within the
+// relocation range (AssignUnitToDefendCapital 11725), takes the own units nearer than the nearest enemy off its need (11735-11736) and draws within
+// maxdistancedefensiveoperations (11791; 350 in 002/A), and its own capital defence still runs beside this rule.
 internal static class CapitalPumpTests
 {
     public static void Run()
@@ -36,6 +38,10 @@ internal static class CapitalPumpTests
             ("AMarchWithNoPlannerRecordIsVanillasAndIsNeverStopped", AMarchWithNoPlannerRecordIsVanillasAndIsNeverStopped),
             ("AFormationInVanillasCapitalDefenceListIsNeverStopped", AFormationInVanillasCapitalDefenceListIsNeverStopped),
             ("AMarchForAnotherRoleOrAnotherPlaceIsLeftAlone", AMarchForAnotherRoleOrAnotherPlaceIsLeftAlone),
+            ("AGuardInVanillasCapitalDefenceListIsNotDispatchedByTheMover", AGuardInVanillasCapitalDefenceListIsNotDispatchedByTheMover),
+            ("ThePlayersFormationsAreNeverStoppedAsExGuards", ThePlayersFormationsAreNeverStoppedAsExGuards),
+            ("ABusyFormationIsNeverStoppedAsAnExGuard", ABusyFormationIsNeverStoppedAsAnExGuard),
+            ("TheReservesRowAndTheShortfallCountWhatTheRuleCounts", TheReservesRowAndTheShortfallCountWhatTheRuleCounts),
         });
     }
 
@@ -421,5 +427,65 @@ internal static class CapitalPumpTests
         var host = new FakeMoverHost();
         Review(s, allocation, host, tracker);
         AssertEqual(0, host.Stops.Count, "neither is a march to the capital for a guard's role");
+    }
+
+    // #4 (DefensiveOpsPatch) pledges the allocation's nearest CapitalGuard into vanilla's groupstodefendcapital, and vanilla marches it to its slot
+    // (AssignUnitToDefendCapital 11829). The guard's claim holds it where it stands, so the mover must leave a pledged guard to vanilla, or it
+    // would send it back to its own place every review.
+    private static void AGuardInVanillasCapitalDefenceListIsNotDispatchedByTheMover()
+    {
+        var guard = new Assignment { InstanceId = 1, Role = FormationRole.CapitalGuard, SectorId = 0, TargetX = 90f, TargetZ = 0f, Reason = "capital-floor", Withheld = true };
+        var pledged = Marching(1, 90f);   // its waypoint is the capital: vanilla is marching it
+        pledged.Flags |= FormationFlags.CapitalDefense;
+        var host = new FakeMoverHost();
+        Review(World(pledged), Only(guard), host, new MoveTracker());
+        AssertEqual(0, host.Moves.Count, "a pledged guard is vanilla's to march: no move to its own place");
+        var free = new FakeMoverHost();
+        Review(World(Marching(1, 90f)), Only(guard), free, new MoveTracker());
+        AssertEqual("1:90", string.Join(",", free.Moves.Select(m => m.id + ":" + (int)m.x)), "the control: an unpledged guard is sent to its place");
+    }
+
+    // The W&L player's own command and map group are never moved or stopped (WlChainRules.MayMove), whatever a restored record says.
+    private static void ThePlayersFormationsAreNeverStoppedAsExGuards()
+    {
+        foreach (var chain in new[] { WlChainClass.PlayerCommand, WlChainClass.PlayerMapGroup })
+        {
+            var mine = Marching(1, 90f);
+            mine.Chain = chain;
+            var s = World(mine);
+            var tracker = new MoveTracker();
+            tracker.Restore(new[] { new MoveRecord { InstanceId = 1, UnitKey = "corps1:1", TargetX = s.CapitalX, TargetZ = s.CapitalZ, IssuedDay = s.DaySerial - 3, ObjectiveId = -1 } });
+            var host = new FakeMoverHost();
+            Review(s, Only(Holds(1, ForceAllocator.ReasonHoldReserve)), host, tracker);
+            AssertEqual(0, host.Stops.Count, chain + ": never stopped");
+            AssertEqual(0, host.Moves.Count, chain + ": nor moved");
+        }
+    }
+
+    // A formation in battle is not the mover's to stop (TheaterPlanner.Movable).
+    private static void ABusyFormationIsNeverStoppedAsAnExGuard()
+    {
+        var busy = Marching(1, 90f);
+        busy.Flags |= FormationFlags.InBattle;
+        var s = World(busy);
+        var host = new FakeMoverHost();
+        Review(s, Only(Holds(1, ForceAllocator.ReasonHoldReserve)), host, GuardOnItsWay(s, 1, 150f));
+        AssertEqual(0, host.Stops.Count, "in battle: not stopped");
+    }
+
+    // [Reserves] capital= and the allocator's capital shortfall read what row 6 counted (the claims it made and the immobile bodies standing in
+    // the range), not the CapitalGuard roles alone: a busy corps at the capital that meets the floor leaves no shortfall.
+    private static void TheReservesRowAndTheShortfallCountWhatTheRuleCounts()
+    {
+        var busy = ExecutorFixtures.Corps(1, 20f, 7000f);
+        busy.Flags |= FormationFlags.InBattle;
+        var s = World(busy, ExecutorFixtures.Corps(2, 60f, 2000f));
+        var claims = ClaimTable.Fresh(s);
+        claims[0].Claimant = Claimant.Immobile;
+        ReserveRules.Capital(s, 6000f, claims);
+        AssertEqual(Claimant.None, claims[1].Claimant, "the busy corps meets the floor alone: nothing more is claimed");
+        AssertNear(7000f, ReserveRules.CapitalHeld(s, claims), 0.01f, "and the held figure is its strength, though no formation is a CapitalGuard");
+        claims[1].Claimant = Claimant.Capital;
+        AssertNear(9000f, ReserveRules.CapitalHeld(s, claims), 0.01f, "a Capital claim adds its own");
     }
 }
