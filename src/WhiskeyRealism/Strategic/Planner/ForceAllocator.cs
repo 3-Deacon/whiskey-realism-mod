@@ -1260,7 +1260,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 if (_s.HasCapital && _plan.CapitalFloorStrength > 0f)
                 {
-                    float guards = RoleStrength(_s, allocation, FormationRole.CapitalGuard);
+                    float guards = _claim.Length == _s.Own.Count ? ReserveRules.CapitalHeld(_s, _claim) : RoleStrength(_s, allocation, FormationRole.CapitalGuard);
                     int guard = NearestWith(FormationRole.CapitalGuard, _s.CapitalX, _s.CapitalZ);
                     if (guard >= 0 && guards < _plan.CapitalFloorStrength)
                         carriers.Add(new KeyValuePair<int, float>(_s.Own[guard].InstanceId, (_plan.CapitalFloorStrength - guards) / _plan.CapitalFloorStrength));

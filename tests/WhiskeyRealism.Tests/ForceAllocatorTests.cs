@@ -246,8 +246,10 @@ internal static class ForceAllocatorTests
             var x = Of(a, id);
             AssertEqual(FormationRole.CapitalGuard, x.Role, "corps " + id + " guards the capital");
             AssertTrue(x.Withheld, "capital guards are withheld");
-            AssertNear(0f, x.TargetX, 0.01f, "held at the capital (x)");
-            AssertNear(0f, x.TargetZ, 0.01f, "held at the capital (z)");
+            // Re-pinned for the capital-floor pump hotfix (2026-10-19): both corps stand within the relocation range (150) of the capital, so each
+            // is held where it stands (vanilla's capital defence counts it there) and is not walked into the capital.
+            AssertNear(s.Own[s.IndexOfOwn(id)].X, x.TargetX, 0.01f, "held where it stands within the range (x)");
+            AssertNear(0f, x.TargetZ, 0.01f, "held where it stands within the range (z)");
             AssertEqual(ForceAllocator.ReasonCapitalFloor, x.Reason, "reason");
         }
         AssertEqual(FormationRole.MainEffort, Of(a, 1).Role, "the rest masses");
@@ -708,7 +710,10 @@ internal static class ForceAllocatorTests
         AssertFalse(plan.MassInstanceIds.Contains(1), "the planner never masses the map-group player");
         var x = Of(a, 1);
         AssertTrue(x.Role != FormationRole.CapitalGuard && x.Role != FormationRole.MainEffort, "never a capital guard or main effort on his own");
-        AssertEqual(FormationRole.CapitalGuard, Of(a, 2).Role, "the AI corps guards the capital: the floor does not depend on the player");
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the capital reserve counts what stands within the relocation range first (the
+        // map-group player's group included, as vanilla weighs and counts it: CountsTowardCoverage) and draws only from inside the range, a
+        // Whiskey limit (vanilla's own draw reaches maxdistancedefensiveoperations, 11791). The player's 30000 at x 50 meets the floor of 9142; the AI corps at x 250 is beyond the range (150) and is not drawn.
+        AssertEqual(FormationRole.MainEffort, Of(a, 2).Role, "the player standing at the capital meets the floor, and the AI corps beyond the range is not pulled in: it masses");
         AssertFalse(x.Withheld, "he is never withheld");
         AssertFalse(a.Surpluses.Contains(1), "never a surplus");
     }

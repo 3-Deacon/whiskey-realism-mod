@@ -11,7 +11,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // ("a review day is a Full-mode review, a [Reserves] row of the alliance"), and the smoke reads the covering force's and the
     // departments' shortfalls from it. Pure over the review's snapshot, plan and allocation; the runtime writes it (CampaignPlannerRuntime).
     //
-    //   capital=<held>/<floor>   the CapitalGuard formations' strength against the plan's capital floor
+    //   capital=<held>/<floor>   what the capital reserve holds against the plan's capital floor: the Capital claims and the immobile formations it
+    //                            counted standing within the relocation range (ReserveRules.CapitalHeld; the CapitalGuard roles alone with no table)
     //   covering=<held>/<need>   the covering force's counted strength against the strength it is sized to (0/0 with no force; foresight F6b-2)
     //   hold=<sector:held/need>  at most MaxHoldSectors sectors, largest need first (the lower id on a tie): the hold each has by the roles
     //                            assigned against max(HoldNeed, the garrison minimum), the allocator's own sums
@@ -47,7 +48,7 @@ namespace WhiskeyRealism.Strategic.Planner
             var inv = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
             sb.Append("[Reserves] alliance=").Append(s.Alliance).Append(" date=").Append(ReviewCadenceCatchUp.FormatDate(s.DaySerial))
-              .Append(" capital=").Append(ForceAllocator.RoleStrength(s, a, FormationRole.CapitalGuard).ToString("0", inv))
+              .Append(" capital=").Append((plan.Claims.Count == s.Own.Count ? ReserveRules.CapitalHeld(s, plan.Claims) : ForceAllocator.RoleStrength(s, a, FormationRole.CapitalGuard)).ToString("0", inv))
               .Append('/').Append(plan.CapitalFloorStrength.ToString("0", inv))
               .Append(" covering=").Append(plan.Covering.Held.ToString("0", inv)).Append('/').Append(plan.Covering.Need.ToString("0", inv))
               .Append(" hold=").Append(HoldShares(s, sectors, plan, a, inv))

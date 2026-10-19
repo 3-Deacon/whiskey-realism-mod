@@ -383,8 +383,14 @@ internal static class DepotBuilderRuleTests
     // it stands (the Counted rule, role sector equal to standing sector), so the one other formation there is no surplus.
     private static void ACapitalGuardMarchingElsewhereDoesNotHoldTheTasksSector()
     {
-        var s = ExecutorFixtures.Wide();   // the capital is at x 0, in the west sector; the task's sector is {300, 400}
-        s.Own.Add(Formation(20, 310f, 3000f));   // the formation nearest the capital: raised as its guard
+        var s = ExecutorFixtures.Wide();   // the task's sector is {300, 400}
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the reserve draws only within the relocation range (150), so the capital moves
+        // to x 200 (110 from the guard, 180 from the other formation, in the west sector) and the guard is on its way there (its waypoint).
+        s.CapitalX = 200f;
+        var guard = Formation(20, 310f, 3000f);   // the formation nearest the capital: raised as its guard
+        guard.WaypointX = s.CapitalX;
+        guard.WaypointZ = s.CapitalZ;
+        s.Own.Add(guard);
         s.Own.Add(Formation(21, 380f, 4000f));
         var plan = QuietPlan(s);
         plan.CapitalFloorStrength = 3000f;

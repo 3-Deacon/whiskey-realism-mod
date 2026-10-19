@@ -60,11 +60,16 @@ internal static class OwnershipTableTests
     }
 
     // The golden roles, frozen as literals from the build before F6a (main 507c08ee, run on the Roster below): "id role reason sector withheld target".
+    // Re-pinned for the capital-floor pump hotfix (2026-10-19), formations 3, 4 and 7 only. The capital floor counts the enemy within the
+    // relocation range (vanilla's count), not the relief race's reach, and Washington's presumed men, outside the range, no longer weigh on
+    // Richmond: the floor falls to the baseline and needs one guard where it needed two, so the one the floor no longer needs is freed to the
+    // role each scenario's rows now give it. Every guard that remains is held where it stands (its target is its own place, not the capital's
+    // 1263,-1010). Every other formation is as frozen.
     private static readonly string[] Golden =
     {
         // 0 no depot ledger
-        "1 Hold hold-reserve 2 True 1245,-680;2 Hold garrison 1 True 1247,-802;3 MainEffort mass 3 False 1285,-874;4 CapitalGuard capital-floor 0 True 1263,-1010;"
-        + "5 Hold busy 0 False 1340,-1130;6 Recover recover 0 True 1263,-1010;7 CapitalGuard capital-floor 0 True 1263,-1010;8 Hold player-map-group 2 False 1245,-690;"
+        "1 Hold hold-reserve 2 True 1245,-680;2 Hold garrison 1 True 1247,-802;3 DepotBuilder depot-task 1 True 1285,-874;4 MainEffort mass 3 False 1285,-874;"
+        + "5 Hold busy 0 False 1340,-1130;6 Recover recover 0 True 1263,-1010;7 CapitalGuard capital-floor 0 True 1260,-990;8 Hold player-map-group 2 False 1245,-690;"
         + "9 Hold non-combat 1 False 1250,-820;10 Hold hold-reserve 2 True 1300,-700",
         // 1 the unready Army of Virginia is a Marching held builder (its task not yet at the site). THE ONE INTENDED DIFFERENCE from the build
         // before F6a: "a Marching builder is neither a hold candidate nor counted, and the bodies the hold reserves in its place". The old build
@@ -72,11 +77,11 @@ internal static class OwnershipTableTests
         // ("3 MainEffort mass 3 False" and "2 Hold garrison 1 True"); now the sector is short without it, the Army of Northern Virginia is
         // reserved in its place (a Hold reserve of the sector, withheld), the Army of Virginia is a remainder Hold the allocator's depot step
         // can find (not withheld), and the mass has lost its body. Every other formation is as before.
-        "1 Hold hold-reserve 2 True 1245,-680;2 Hold garrison 1 False 1247,-802;3 Hold hold-reserve 1 True 1285,-874;4 CapitalGuard capital-floor 0 True 1263,-1010;"
-        + "5 Hold busy 0 False 1340,-1130;6 Recover recover 0 True 1263,-1010;7 CapitalGuard capital-floor 0 True 1263,-1010;8 Hold player-map-group 2 False 1245,-690;"
+        "1 Hold hold-reserve 2 True 1245,-680;2 Hold garrison 1 False 1247,-802;3 Hold hold-reserve 1 True 1285,-874;4 Hold garrison 0 True 1330,-1060;"
+        + "5 Hold busy 0 False 1340,-1130;6 Recover recover 0 True 1263,-1010;7 CapitalGuard capital-floor 0 True 1260,-990;8 Hold player-map-group 2 False 1245,-690;"
         + "9 Hold non-combat 1 False 1250,-820;10 Hold hold-reserve 2 True 1300,-700",
         // 2 the Reserve Corps is a Wished builder (pinned), and the planner has no main effort
-        "1 Hold hold-reserve 2 True 1245,-680;2 Hold garrison 1 True 1247,-802;3 CapitalGuard capital-floor 0 True 1263,-1010;4 CapitalGuard capital-floor 0 True 1263,-1010;"
+        "1 Hold hold-reserve 2 True 1245,-680;2 Hold garrison 1 True 1247,-802;3 MainEffort mass 3 False 1285,-874;4 CapitalGuard capital-floor 0 True 1330,-1060;"
         + "5 Hold busy 0 False 1340,-1130;6 Recover recover 0 True 1263,-1010;7 DepotBuilder depot-task-pinned 1 True 1101,-553;8 Hold player-map-group 2 False 1245,-690;"
         + "9 Hold non-combat 1 False 1250,-820;10 Hold hold-reserve 2 True 1300,-700"
     };
@@ -458,7 +463,7 @@ internal static class OwnershipTableTests
         ReserveRules.Capital(s, 6000f, claims);
         AssertEqual(Claimant.Capital, claims[0].Claimant, "home defence comes first: a committed formation near the capital is a guard");
         AssertEqual(Claimant.Capital, claims[1].Claimant, "so is one on a department move");
-        AssertNear(s.CapitalX, claims[0].TargetX, 0.01f, "marching to the capital");
+        AssertNear(10f, claims[0].TargetX, 0.01f, "held where it stands (re-pinned for the capital-floor pump hotfix: nothing is marched into the city)");
     }
 
     private static void CapitalOverClaimsTakesOnlyItsListedClaimants()
@@ -1112,13 +1117,18 @@ internal static class OwnershipTableTests
     }
 
     // The same rule's other side (the same decision, "the rule F9's StandingHold uses"): a guard that marches to a capital in another sector holds
-    // nothing where it stands, so it is not credited. The capital is in the East (x 900); the nearest formation to it is corps 1 at x 240, the
+    // nothing where it stands, so it is not credited. The capital is in the East; corps 1, in the West and within range of it, is the
     // guard, and the corps at x 100 is the West's reserve: 27000 - 9000 - 4000.
     private static void HoldFacingCreditsNoGuardMarchingToACapitalElsewhere()
     {
-        var s = PostWorld(900f, 45000f, Body(1, 240f, 9000f), Body(2, 100f, 9000f));
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the reserve draws only within the relocation range (150), so the capital is at
+        // x 720 (the East begins at 700; the West ends at 650) and corps 1, in the West at x 620, is within range and on its way there.
+        var guard = Body(1, 620f, 9000f);
+        guard.WaypointX = 720f;
+        guard.WaypointZ = 0f;
+        var s = PostWorld(720f, 45000f, guard, Body(2, 100f, 9000f));
         var plan = TheaterPlanner.Plan(s, ExecutorFixtures.Sectors(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
-        AssertEqual(Claimant.Capital, plan.Claims[s.IndexOfOwn(1)].Claimant, "corps 1, nearest the capital, is its guard");
+        AssertEqual(Claimant.Capital, plan.Claims[s.IndexOfOwn(1)].Claimant, "corps 1, within range of the capital, is its guard");
         AssertEqual(-1, plan.Claims[s.IndexOfOwn(1)].SectorId, "marching to the capital, it is counted in no sector");
         AssertNear(14000f, plan.Garrisons[0].Need, 1f, "27000 - 9000 (corps 2 alone) - 4000 garrison");
     }

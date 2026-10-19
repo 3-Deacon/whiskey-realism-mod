@@ -461,41 +461,55 @@ internal static partial class EnemyPictureTests
         AssertFalse(threat.Contains("RailLeg") || threat.Contains("TrainCovers"), "and the threat reads no train");
     }
 
-    // At the 002/A start the CSA's 5,017 men within 200 of Richmond: the trigger fires above 0.6 of them and not below.
-    private static void CapitalTriggerAt002AStart()
+    // At the 002/A start the CSA's 5,017 men within 200 of Richmond: the trigger fires above 0.6 of them and not below. Re-pinned for the
+    // capital-floor pump hotfix (2026-10-19): the weight is vanilla's enemy weighting within the relocation range (11725), so the Union army that weighs on
+    // Richmond stands within 200 of it (at Bowling Green); Washington's presumed men, 389 away, no longer do.
+    private static CampaignSnapshot UnionNearRichmond(float men)
     {
-        var s = Csa(100000f);
+        var s = Csa(float.NaN);
         s.Own.Add(Corps(1, RichmondX, RichmondZ, 5017f));
         s.Own.Add(Corps(2, ManassasX, ManassasZ, 9000f));
-        var probe = InputsFor(s);
+        s.Beliefs.Add(Belief(BowlingGreenX, BowlingGreenZ, men));
+        return s;
+    }
+
+    private static void CapitalTriggerAt002AStart()
+    {
+        var probe = InputsFor(UnionNearRichmond(100000f));
         TheaterPlanner.CapitalThreat(probe, out _, out float reference);
-        AssertTrue(probe.CapitalWeighted > 0f && reference > 0f, "Washington's presumed men weigh on Richmond: " + probe.CapitalWeighted);
+        AssertTrue(probe.CapitalWeighted > 0f && reference > 0f, "an army within the range weighs on Richmond: " + probe.CapitalWeighted);
         float weightedPerMan = probe.CapitalWeighted / 100000f;
         foreach (var (target, fires) in new[] { (0.7f, true), (0.5f, false) })
         {
-            var t = Csa(target * 5017f / weightedPerMan);
-            t.Own.Add(Corps(1, RichmondX, RichmondZ, 5017f));
-            t.Own.Add(Corps(2, ManassasX, ManassasZ, 9000f));
-            var c = InputsFor(t);
+            var c = InputsFor(UnionNearRichmond(target * 5017f / weightedPerMan));
             TheaterPlanner.CapitalThreat(c, out _, out float threat);
             AssertNear(target, threat, 0.02f, "threat01 is the weight over the own men within the relocation range of the capital");
             AssertEqual(fires, threat >= TheaterPlanner.CapitalThreatTrigger, "the 0.6 trigger at " + target);
         }
     }
 
-    private static void WashingtonCountsTowardRichmondsFloor()
+    // Capital-floor pump hotfix (2026-10-19, user direction; was WashingtonCountsTowardRichmondsFloor): the floor counts the enemy within the
+    // relocation range of the capital, vanilla's own enemy weighting (11725), and never the relief race's reach. The race is still run and reported
+    // (CapitalReach, relief): Washington (389 from Richmond) lies inside it and outside the floor.
+    private static void WashingtonBeyondTheRangeDoesNotCountTowardRichmondsFloor()
     {
         var s = CsaWithEast(100000f);
         var c = InputsFor(s);
         TheaterPlanner.CapitalThreat(c, out float floor, out _);
-        AssertTrue(c.CapitalWeighted > 0f, "Washington's presumed men are inside the reach and weighed");
-        AssertTrue(floor >= TheaterPlanner.MinStrength(c) + TheaterPlanner.CapitalFloorRatio * c.CapitalWeighted - 0.01f, "the floor carries them above the minimum");
-        // The race decides it: with the capital's department empty the reach is the relocation range and Washington (389) is outside it.
+        AssertTrue(c.CapitalReach > RiverLinesDistance(RichmondX, RichmondZ, WashingtonX, WashingtonZ), "fixture: the reported race reach takes in Washington (" + c.CapitalReach + ")");
+        AssertEqual(0f, c.CapitalWeighted, "but the floor reads the relocation range: Washington's presumed men are outside it and weigh nothing");
+        AssertNear(TheaterPlanner.MinStrength(c), floor, 0.01f, "the floor is the baseline alone, whatever the reach");
+        // The control: the same world with an army inside the range does weigh.
+        var near = CsaWithEast(100000f);
+        near.Beliefs.Add(Belief(BowlingGreenX, BowlingGreenZ, 20000f));
+        var d = InputsFor(near);
+        TheaterPlanner.CapitalThreat(d, out float withArmy, out _);
+        AssertTrue(d.CapitalWeighted > 0f && withArmy > TheaterPlanner.MinStrength(d), "an army within the range does: " + d.CapitalWeighted);
         var alone = Csa(100000f);
-        var d = InputsFor(alone);
-        TheaterPlanner.CapitalThreat(d, out float bare, out _);
-        AssertEqual(0f, d.CapitalWeighted, "no formation to race: the reach is 200 and nothing is inside it");
-        AssertNear(TheaterPlanner.MinStrength(d), bare, 0.01f, "the floor is the baseline alone");
+        var e = InputsFor(alone);
+        TheaterPlanner.CapitalThreat(e, out float bare, out _);
+        AssertEqual(0f, e.CapitalWeighted, "no formation to race: nothing is inside the range");
+        AssertNear(TheaterPlanner.MinStrength(e), bare, 0.01f, "the floor is the baseline alone");
     }
 
     private static void FloorHasVanillasBaseline()
@@ -837,7 +851,7 @@ internal static partial class EnemyPictureTests
             ("RailsNotCreditedInTheReach", RailsNotCreditedInTheReach),
             ("ReliefRaceCreditsNoRailForEitherSide", ReliefRaceCreditsNoRailForEitherSide),
             ("CapitalTriggerAt002AStart", CapitalTriggerAt002AStart),
-            ("WashingtonCountsTowardRichmondsFloor", WashingtonCountsTowardRichmondsFloor),
+            ("WashingtonBeyondTheRangeDoesNotCountTowardRichmondsFloor", WashingtonBeyondTheRangeDoesNotCountTowardRichmondsFloor),
             ("FloorHasVanillasBaseline", FloorHasVanillasBaseline),
             ("ThreatExcludesTheBaseline", ThreatExcludesTheBaseline),
             ("FloorIsNeverBelowFourVanillaNeed", FloorIsNeverBelowFourVanillaNeed),

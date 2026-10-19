@@ -896,8 +896,12 @@ internal static class ReconNeverTasksTests
         s.Objectives.Clear();
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 400f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceFirst });
         s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 40, X = 700f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = importanceSecond });
-        s.Own.Add(CapitalGuard());
-        for (int i = 0; i < 8; i++) s.Own.Add(Corps(i + 1, 450f + 30f * i, 7000f));
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the capital reserve no longer pulls the nearest corps (x 450, 7000) from beyond
+        // the relocation range (200) to top the guard up, so the guard stands at the strength both made (5600 + 7000) and the corps is not here.
+        var guard = CapitalGuard();
+        guard.Strength = 12600f;
+        s.Own.Add(guard);
+        for (int i = 1; i < 8; i++) s.Own.Add(Corps(i + 1, 450f + 30f * i, 7000f));
         if (beliefAtFirst > 0f) s.Beliefs.Add(ExecutorFixtures.Belief(410f, 0f, beliefAtFirst));
         return s;
     }

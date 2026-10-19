@@ -322,21 +322,25 @@ internal static class ScoutFirstTests
     private static void HomeDepartmentIsTheSectorsTheaterAtFirstReviewAndStaysUntilATransfer()
     {
         var west = Corps(1, 300f, 9000f);
-        var east = Corps(2, 800f, 9000f);
-        var s = Fronts(west, east);
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): the capital reserve used to pull corps 1 (x 300) in from beyond the relocation
+        // range as the capital guard, which kept it out of every department move; it no longer does, so a guard stands at the capital and the East
+        // corps is strong enough (20000 against the 11000 it needs) that no department reinforcement is made: the test is about a home department
+        // surviving a formation's change of ground, not about a transfer.
+        var east = Corps(2, 800f, 20000f);
+        var s = Guarded(Fronts(west, east));
         var state = new PlannerState();
         Plan(s, state);
         AssertEqual(Theater.West, state.DepartmentOf(west.UnitKey), "corps 1 stands in the West sector at the first review");
         AssertEqual(Theater.East, state.DepartmentOf(east.UnitKey), "corps 2 in the East sector");
 
         // Corps 1 later stands in the East sector: its department is still West (a department is not where a formation happens to be).
-        var later = Fronts(Corps(1, 800f, 9000f), east);
+        var later = Guarded(Fronts(Corps(1, 800f, 9000f), east));
         Plan(later, state);
         AssertEqual(Theater.West, state.DepartmentOf(west.UnitKey), "kept until a deliberate transfer");
 
         // A formation first seen late takes the sector it stands in then.
         var third = Corps(3, 300f, 9000f);
-        var joined = Fronts(Corps(1, 800f, 9000f), east, third);
+        var joined = Guarded(Fronts(Corps(1, 800f, 9000f), east, third));
         Plan(joined, state);
         AssertEqual(Theater.West, state.DepartmentOf(third.UnitKey), "first seen at x 300");
     }
@@ -512,6 +516,9 @@ internal static class ScoutFirstTests
     private static void PlanRowNamesDepartmentsAndTheCrossDepartmentMove()
     {
         var s = Fronts(Corps(1, 800f, 8000f), Corps(2, 480f, 20000f), Corps(3, 300f, 6000f));
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): corps 3 was the capital guard because the reserve pulled the formation nearest the
+        // capital in from any distance; the reserve now draws within the relocation range only, so the capital is where corps 3 stands.
+        s.CapitalX = 300f;
         var plan = Plan(s, new PlannerState());
         string row = TheaterPlanner.Summary(plan);
         AssertContains(row, "depts=East:1,West:2", "the home departments");
