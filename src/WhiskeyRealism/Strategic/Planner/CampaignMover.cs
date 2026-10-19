@@ -233,13 +233,15 @@ namespace WhiskeyRealism.Strategic.Planner
         // Vanilla never checks supply before or during an offensive (14080-14158 has no supply term, job 6's gate is dead,
         // 14009-14019): a Recover formation leaves unitsinoffensiveoperations as RelieveUnitsInOperations does for a retreating
         // or low-morale one (14068-14078), and is then moved toward supply. A Redeploy formation leaves it too: it is marching to a hold
-        // point, and vanilla's offensive must not gather it on the way (D11 requirement-redeploy-role). Only a formation the planner may move.
+        // point, and vanilla's offensive must not gather it on the way (D11 requirement-redeploy-role); so does a covering member holding its
+        // post (a Hold, reason covering-force: it covers the road and is no push's, D11 requirement-covering-hold). Only a formation the planner
+        // may move.
         private static void ReleaseFromOffense(CampaignSnapshot s, Allocation allocation, IMoverHost host)
         {
             for (int k = 0; k < allocation.Assignments.Count; k++)
             {
                 var a = allocation.Assignments[k];
-                if (a.Role != FormationRole.Recover && a.Role != FormationRole.Redeploy) continue;
+                if (a.Role != FormationRole.Recover && a.Role != FormationRole.Redeploy && !ForceAllocator.IsCoveringMember(in a)) continue;
                 int i = s.IndexOfOwn(a.InstanceId);
                 if (i < 0 || !WlChainRules.MayMove(s.Own[i].Chain)) continue;
                 if ((s.Own[i].Flags & FormationFlags.InOffensiveOps) != 0) host.ListOffensive(a.InstanceId, false);

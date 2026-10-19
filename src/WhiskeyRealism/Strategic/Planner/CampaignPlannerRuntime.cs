@@ -45,6 +45,8 @@ namespace WhiskeyRealism.Strategic.Planner
         private static readonly string[] LastCapitalThreatRow = new string[2];
         // Foresight F6b-1: the [CoveringCorridor] row's last signature (rows on the first review and on change). Per campaign.
         private static readonly string[] LastCorridorRow = new string[2];
+        // Foresight F6b-2: the [CoveringForce] row's last signature (rows on change). Per campaign.
+        private static readonly string[] LastCoveringRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
         // G1b: each alliance's recon missions and this review's tasks (pooled), the last [Recon] row's counts
@@ -81,6 +83,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 LastPictureRow[a] = null;
                 LastCapitalThreatRow[a] = null;
                 LastCorridorRow[a] = null;
+                LastCoveringRow[a] = null;
                 NonCompliance[a].Reset();
                 Recon[a] = new ReconMissionLedger();
                 ReconTasks[a].Clear();
@@ -183,6 +186,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     EmitPicture(snapshot, plan, picture);
                     EmitCorridor(snapshot, sectors, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
+                    EmitCovering(snapshot, plan, state);
                     EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
                 catch (Exception ex)
@@ -446,6 +450,19 @@ namespace WhiskeyRealism.Strategic.Planner
             string row = CoveringForce.CorridorRow(snapshot, sectors, picture, plan, null);
             if (row == null || string.Equals(LastCorridorRow[a], row, StringComparison.Ordinal)) return;
             LastCorridorRow[a] = row;
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
+        // Foresight F6b-2: the covering force of the review (its post, kind or the reason there is none, need, held, members, the defence flag
+        // and the verdict's count), on the first review and on change of its text, dated after the compare. Written after the plan has written
+        // the covering state, so verdictDays is the count the review stored.
+        private static void EmitCovering(CampaignSnapshot snapshot, TheaterPlan plan, PlannerState state)
+        {
+            int a = plan.Alliance;
+            if (a < 0 || a >= LastCoveringRow.Length) return;
+            string row = CoveringForce.Row(plan.Covering, snapshot, state);
+            if (string.Equals(LastCoveringRow[a], row, StringComparison.Ordinal)) return;
+            LastCoveringRow[a] = row;
             TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
         }
 

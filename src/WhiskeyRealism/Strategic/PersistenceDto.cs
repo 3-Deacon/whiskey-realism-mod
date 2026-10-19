@@ -112,6 +112,14 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("recordChallengerZ")] public float? RecordChallengerZ;
         [JsonProperty("recordChallengerDays")] public int RecordChallengerDays;
         [JsonProperty("departments")] public List<DepartmentDto> Departments = new List<DepartmentDto>();
+        // Foresight F6b-2: the covering force's members (unit key and the aiarea they stood in when first claimed, mapped to today's sector on
+        // load), the stored verdict, the reviews the other verdict has led and the post key it was stored for. Additive: an older file reads
+        // none, no verdict known.
+        [JsonProperty("coveringKeys")] public List<CoveringKeyDto> CoveringKeys = new List<CoveringKeyDto>();
+        [JsonProperty("coveringForward")] public bool CoveringForward;
+        [JsonProperty("coveringVerdictDays")] public int CoveringVerdictDays;
+        [JsonProperty("coveringVerdictKnown")] public bool CoveringVerdictKnown;
+        [JsonProperty("coveringPostKey")] public string CoveringPostKey;
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;
         [JsonProperty("beliefs")] public List<EnemyBeliefDto> Beliefs = new List<EnemyBeliefDto>();
@@ -133,6 +141,12 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("unitKey")] public string UnitKey;
         [JsonProperty("unitKeys")] public List<string> UnitKeys = new List<string>();
         [JsonProperty("quietSinceDay")] public int QuietSinceDay = -1;
+    }
+
+    internal class CoveringKeyDto
+    {
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("areaIndex")] public int AreaIndex = -1;
     }
 
     internal class DepartmentDto

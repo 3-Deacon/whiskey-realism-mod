@@ -203,6 +203,23 @@ internal static class OwnershipTableTests
                 need[sectors.SectorAt(350f, 0f)] = 4000f;
                 ReserveRules.Hold(s, sectors, need, new float[sectors.Count], new float[sectors.Count], c, null, null, new float[sectors.Count]);
             } },
+        // F6b-2's fixture: the same hold pass with a covering input, whose members are chosen from the reserve (row 7 takes only None, covering or not).
+        new RowCase { Row = 7, Produces = Claimant.Hold, World = () => OneCorps(350f, 5000f),
+            Apply = (s, c) =>
+            {
+                var sectors = ExecutorFixtures.Sectors(s);
+                int k = sectors.SectorAt(350f, 0f);
+                var need = new float[sectors.Count];
+                need[k] = 4000f;
+                var share = new float[sectors.Count];
+                share[k] = 4000f;
+                var covering = new CoveringInput
+                {
+                    OrderX = 350f, ForwardX = 350f, Radius = s.RelocationRange, Need = 4000f, AxisShare = share, OnePost = true, PostKey = "P|P",
+                    IncumbentSector = new[] { -1 }, IncumbentArea = new[] { -1 }, Department = new Theater[1]
+                };
+                ReserveRules.Hold(s, sectors, need, new float[sectors.Count], new float[sectors.Count], c, covering, null, new float[sectors.Count]);
+            } },
         new RowCase { Row = 8, Produces = Claimant.Mass, World = () => OneCorps(350f, 5000f),
             Apply = (s, c) => ClaimTable.TakeMass(c, s, new[] { 1 }) },
     };
@@ -225,7 +242,7 @@ internal static class OwnershipTableTests
     private static void TheFixtureRegistryDrivesEveryRowCase()
     {
         for (int row = 1; row <= 8; row++)
-            AssertEqual(1, RowCases.Count(rc => rc.Row == row), "row " + row + " has its case");
+            AssertTrue(RowCases.Count(rc => rc.Row == row) >= 1, "row " + row + " has its case");
         foreach (var rc in RowCases)
             AssertTrue(SpecTakes.ContainsKey(rc.Row), "a case's row is a row of the table: " + rc.Row);
     }

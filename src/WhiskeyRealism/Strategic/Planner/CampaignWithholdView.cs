@@ -116,7 +116,7 @@ namespace WhiskeyRealism.Strategic.Planner
         // decision 1, BUG-WL-024). It is the clause that #25 used to carry as the ledger's player-controlled suppression.
         public static bool WithheldFromOffense(int alliance, int instanceId, bool mayMove = true)
         {
-            if (!Read(alliance, out var allocation, out _, out var ctx)) return false;
+            if (!Read(alliance, out var allocation, out _, out var ctx, out _)) return false;
             if (!mayMove) return true;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
             if (HeldBuilder(alliance, instanceId)) return true;
@@ -130,13 +130,18 @@ namespace WhiskeyRealism.Strategic.Planner
         // allocation withholds it, it is in transit or it builds an active depot task; never the mass or the deferred-Support clause, and a Hold formation withheld
         // at its sector's need stays available when the enemy vanilla asks about stands in that sector (vanilla passes
         // enemyunits[j]'s position, 13610).
+        // A covering-force member (Hold at the post or Redeploy on the way, D11 requirement-covering-hold) is decided by one fact alone: the
+        // plan's ThreatNear, an advance onto the side's own soil near the post at plan time, the case vanilla's defence answers (13600-13602). The
+        // clause sits before the same-sector exception and never reads enemyX/enemyZ, which is the position of the unsorted enemy list at the
+        // index of the sorted one (BUG-AI-002, 13610: omniscient and often another army); the exception below is left as shipped.
         public static bool WithheldFromDefense(int alliance, int instanceId, float enemyX, float enemyZ, bool mayMove = true)
         {
-            if (!Read(alliance, out var allocation, out var sectors, out _)) return false;
+            if (!Read(alliance, out var allocation, out var sectors, out _, out var plan)) return false;
             if (!mayMove) return true;
             if (MoveTrackers.For(alliance).InTransit(instanceId)) return true;
             if (HeldBuilder(alliance, instanceId)) return true;
             if (!TryFind(allocation, instanceId, out var a) || !a.Withheld) return false;
+            if (ForceAllocator.IsCoveringMember(in a)) return plan.Covering == null || !plan.Covering.ThreatNear;
             if (a.Role == FormationRole.Hold && a.SectorId >= 0 && sectors != null && sectors.SectorAt(enemyX, enemyZ) == a.SectorId) return false;
             return true;
         }
@@ -149,7 +154,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             plan = null;
             sectors = null;
-            if (!Read(alliance, out _, out var model, out var ctx) || !ctx.Released) return false;
+            if (!Read(alliance, out _, out var model, out var ctx, out _) || !ctx.Released) return false;
             if (!CampaignPlanStore.TryGetPlan(alliance, out var published) || model == null) return false;
             plan = published;
             sectors = model;
@@ -161,14 +166,14 @@ namespace WhiskeyRealism.Strategic.Planner
         // so a stale plan or a paused review never holds a builder (plan G5c, verify r2 F6c).
         internal static bool HoldsDepotBuilder(int alliance, int instanceId)
         {
-            return Read(alliance, out _, out _, out _) && HeldBuilder(alliance, instanceId);
+            return Read(alliance, out _, out _, out _, out _) && HeldBuilder(alliance, instanceId);
         }
 
         // The published allocation when the picture is fresh (Read's test: a plan and allocation published, executors allowed, the plan
         // within PlanFreshness.MaxAgeDays), else false with no allocation: the ordnance patches' one question of the plan.
         internal static bool TryFreshAllocation(int alliance, out Allocation allocation)
         {
-            if (Read(alliance, out allocation, out _, out _)) return true;
+            if (Read(alliance, out allocation, out _, out _, out _)) return true;
             allocation = null;
             return false;
         }
@@ -178,16 +183,18 @@ namespace WhiskeyRealism.Strategic.Planner
             return DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId);
         }
 
-        private static bool Read(int alliance, out Allocation allocation, out SectorModel sectors, out ExecutorContext context)
+        private static bool Read(int alliance, out Allocation allocation, out SectorModel sectors, out ExecutorContext context, out TheaterPlan published)
         {
             allocation = null;
             sectors = null;
             context = default(ExecutorContext);
+            published = null;
             if (MoveTrackers.For(alliance) == null) return false;
             if (!CampaignPlanStore.TryGetPlan(alliance, out var plan) || !CampaignPlanStore.TryGetAllocation(alliance, out allocation)) return false;
             if (!CampaignPlanStore.TryGetExecutorContext(alliance, out context) || !context.ExecutorsAllowed) return false;
             if (!PlanFreshness.IsFresh(plan.DaySerial)) return false;
             CampaignPlanStore.TryGetSectors(alliance, out sectors);
+            published = plan;
             return true;
         }
     }

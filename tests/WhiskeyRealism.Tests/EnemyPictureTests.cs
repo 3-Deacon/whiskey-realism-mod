@@ -41,10 +41,10 @@ internal static partial class EnemyPictureTests
 
     // The CSA (alliance 1) on 002/A: area and objective indexes 0 Richmond, 1 Bowling Green, 2 Fredericksburg, 3 Manassas, 4 Washington,
     // 5 Winchester, 6 Romney. `total` is the Union's troopsfielded (NaN: unknown).
-    internal static CampaignSnapshot Csa(float total = float.NaN)
+    internal static CampaignSnapshot Csa(float total = float.NaN, PlayerCommandClass player = PlayerCommandClass.NotCareer)
     {
         var s = new CampaignSnapshot();
-        s.Reset(1, 1, ExecutorFixtures.Day, PlayerCommandClass.NotCareer, -1, null);
+        s.Reset(1, 1, ExecutorFixtures.Day, player, -1, null);
         s.RelocationRange = 200f;
         s.OffensiveDominance = 1.1f;
         s.MinStrengthForMovement = 2000f;

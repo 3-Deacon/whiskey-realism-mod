@@ -286,6 +286,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableStrategicForesightPicture;
         internal static ConfigEntry<bool> EnableSpottingMarkBeliefs;
         internal static ConfigEntry<bool> FixSpottingMarkTiming;
+        internal static ConfigEntry<bool> EnableCoveringForce;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1435,6 +1436,15 @@ namespace WhiskeyRealism
                 "vanilla's mark timer reads the time-factor pref (0.1 and 0.006 game years), so marks appear over days; the AI side's own marks " +
                 "follow the same rate. It changes the player's own map, whether or not the campaign planner runs. OFF = vanilla's timing on both " +
                 "sides. Needs fog of war.");
+            EnableCoveringForce = Config.Bind(
+                "Campaign Planner", "Enable Covering Force", true,
+                "Default ON. Each AI side keeps a covering force between the enemy capital and its own: the hold reserves of the sectors that face " +
+                "enemy armies on the road between the two capitals are posted, as one force, at the own-held town nearest the point one relocation " +
+                "range from the enemy capital (forward) or from its own capital (rear), forward when the force's strength there reaches the strength " +
+                "the enemy capital's neighbourhood calls for and rear otherwise, and are not drawn into a main effort unless it is aimed at the " +
+                "enemy capital itself. A member counts toward its own sector's hold wherever it stands, and vanilla's defence may use it while an " +
+                "enemy stands on the side's soil near the post. OFF = no covering force: the axis sectors hold where they stand, as the other sectors " +
+                "do. Needs Enable Campaign Planner.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

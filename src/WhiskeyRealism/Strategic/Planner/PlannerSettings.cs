@@ -11,5 +11,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // scouted, holds against them, and races the capital reach. Off restores D2's presumption, P7's floor and the relocation-range
         // capital threat, the nearest-belief hold release and D6's department sum. All-on: true until the coordinator refreshes it.
         internal static bool ForesightPicture = true;
+        // Enable Covering Force (foresight F6b-2): the axis sectors' own hold reserves are posted between the two capitals as a covering
+        // force. Off: no covering force, the axis sectors hold where they stand as the other sectors do.
+        internal static bool CoveringForce = true;
     }
 }

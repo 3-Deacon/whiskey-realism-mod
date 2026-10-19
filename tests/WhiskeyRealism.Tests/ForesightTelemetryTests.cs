@@ -363,7 +363,7 @@ internal static class ForesightTelemetryTests
     {
         var d = Day();
         string row = Row(d);
-        AssertTrue(row.StartsWith("[Reserves] alliance=0 date=1861-06-15 capital=9000/12000 hold=", StringComparison.Ordinal), "the capital's held and floor, after the alliance and date: " + row);
+        AssertTrue(row.StartsWith("[Reserves] alliance=0 date=1861-06-15 capital=9000/12000 covering=0/0 hold=", StringComparison.Ordinal), "the capital's held and floor, then the covering force's (none), after the alliance and date: " + row);
         var parts = Field(row, "hold").Split(',');
         AssertEqual(d.East + ":7000/9000", parts[0], "the sector with the largest need first: its held against max(HoldNeed, the garrison minimum)");
         string capital = d.Capital + ":9000/" + ((int)TheaterPlanner.MinStrengthFallback);

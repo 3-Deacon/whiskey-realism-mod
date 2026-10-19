@@ -440,6 +440,10 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<Claim> Claims = new List<Claim>();
         public float[] SectorHeld = new float[0];
 
+        // Foresight F6b-2 (D11 requirement-covering-lifecycle): the covering force between the two capitals, rebuilt each review and never null
+        // after Plan. Kind None carries the Reason it is unbound.
+        public CoveringPlan Covering = new CoveringPlan();
+
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
         {
@@ -448,6 +452,34 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
             return null;
         }
+    }
+
+    // Where the covering force stands (D11 requirement-covering-post-choice): the forward post, at the relocation range from the enemy
+    // capital, or the rear post, at the relocation range from the own capital. With one post the kind is the raw verdict of the review.
+    public enum CoveringKind
+    {
+        None = 0,
+        Forward = 1,
+        Rear = 2
+    }
+
+    // The covering force of one review (foresight F6b-2): the post it stands at, the men the axis sectors' hold reserves give it against the
+    // men it needs, and the defence flag the withhold view reads. Published with the plan; the allocator reads the members from the ownership
+    // table (reason covering-force), the withhold view reads ThreatNear and the telemetry row everything.
+    public sealed class CoveringPlan
+    {
+        public string PostName;
+        public float PostX, PostZ;
+        public CoveringKind Kind;
+        // Radius is the relocation range the post and the threat test are measured in. Held is the counted strength (the members plus the
+        // formations that stand at the post and cannot be massed); Need the strength the force is sized to.
+        public float Need, Held, Radius;
+        // A live land belief of the side's own, of any source, lies on own soil within Radius of the post at plan time (the case vanilla's
+        // own defence answers): the covering members are then available to it.
+        public bool ThreatNear;
+        public List<int> InstanceIds = new List<int>();
+        // Why Kind is None: no-capital, no-corridor-place, no-axis-sector, flag-off, cic-side, main-effort-enemy-capital. Null when posted.
+        public string Reason;
     }
 
     // What a garrison post guards. Secession is D8's (a state the CSA could win); the others are G8's posts beyond the capital.

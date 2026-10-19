@@ -23,10 +23,11 @@ using static TestFixtures;
 // ASSUMED (the save holds them on the live Town objects): the CSA holds Richmond, Fredericksburg and Petersburg, the Union the rest. Fort
 // Monroe is not in the file as such: it is placed 269 from Richmond on the bearing of the file's Hampton (1499.32,-1154.33), the distance
 // D11 states for the Peninsula.
-internal static class CoveringForceTests
+internal static partial class CoveringForceTests
 {
     public static void Run()
     {
+        TestHarness.RunAll(ForceCases());
         TestHarness.RunAll(new (string name, Action run)[]
         {
             ("PointsAreAtTheRelocationRangeFromEachCapital", PointsAreAtTheRelocationRangeFromEachCapital),

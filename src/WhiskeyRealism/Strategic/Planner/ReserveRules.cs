@@ -190,21 +190,32 @@ namespace WhiskeyRealism.Strategic.Planner
         // depot builder (held): it is leaving for its site, and its claim stays None so the allocator's depot step finds it.
         // A reserve body is a Hold claim (a pinned builder keeps its claim and is counted); every formation the pass counts has its sector and
         // share written into its claim, the measure ForceAllocator tests a scout draw against. sectorHeld[k] receives, per sector with a need,
-        // the sum of what holds there anyway plus the reserved formations. covering is F6b-2's input, null until then.
+        // the sum of what holds there anyway plus the reserved formations.
+        // covering is the covering force's input (foresight F6b-2, D11 requirement-covering-members), null when there is no force: the pass is then
+        // the shipped one. With it the members are chosen here, in the same pass as the sector holds, from the axis sectors' own reserves:
+        //   - the incumbents that are still claimable are taken first (CoveringForce.TakeIncumbents) and counted in their RECORDED sector wherever
+        //     they stand, in no other: a sector that holds one stands short of the strength it lent and reserves another body in its place;
+        //   - each axis sector (a share above 0) orders its other candidates by distance to the force's post, a formation of the post sector's
+        //     home department closer by the allocator's discount, in place of the distance to the army it faces;
+        //   - once every sector has its reserve, the members are taken across the axis sectors' bodies in one order, each sector lending at most its
+        //     share (CoveringForce.PickMembers). A member stays claimed Hold by the sector that reserved it (reason covering-force), so no other
+        //     front lost a formation to it and no sector is stripped.
         internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ, Claim[] claims,
                                   CoveringInput covering, IReadOnlyList<HeldBuilder> held, float[] sectorHeld)
         {
             int n = s.Own.Count;
             var order = new List<int>();
             int capitalSector = s.HasCapital ? sectors.SectorAt(s.CapitalX, s.CapitalZ) : -1;
+            bool[] taken = covering != null ? CoveringForce.TakeIncumbents(s, claims, covering, held) : null;
             for (int sector = 0; sector < sectors.Count; sector++)
             {
                 if (need[sector] <= 0f) continue;
-                float total = 0f;
+                float total = covering != null && sector < covering.Seeded.Length ? covering.Seeded[sector] : 0f;
                 order.Clear();
                 for (int i = 0; i < n; i++)
                 {
                     var f = s.Own[i];
+                    if (taken != null && taken[i]) continue;
                     if (HoldSectorOf(sectors, f) != sector || IsMarchingBuilder(held, f.InstanceId)) continue;
                     Claimant owner = claims[i].Claimant;
                     if (TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) && (owner == Claimant.None || owner == Claimant.PinnedBuilder))
@@ -221,7 +232,8 @@ namespace WhiskeyRealism.Strategic.Planner
                         Count(ref claims[i], sector, share);
                     }
                 }
-                SortByDistance(s, order, nearX[sector], nearZ[sector]);
+                if (covering != null && sector < covering.AxisShare.Length && covering.AxisShare[sector] > 0f) CoveringForce.SortByPost(s, covering, order);
+                else SortByDistance(s, order, nearX[sector], nearZ[sector]);
                 for (int k = 0; k < order.Count && total < need[sector]; k++)
                 {
                     float share = System.Math.Max(0f, s.Own[order[k]].Strength);
@@ -231,6 +243,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 sectorHeld[sector] = total;
             }
+            if (covering != null) CoveringForce.PickMembers(s, claims, covering, held);
         }
 
         private static void Count(ref Claim claim, int sector, float share)
@@ -240,7 +253,7 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // Whether the depot ledger holds the formation as a builder still on its way (Wished false): the hold counts it nowhere.
-        private static bool IsMarchingBuilder(IReadOnlyList<HeldBuilder> held, int instanceId)
+        internal static bool IsMarchingBuilder(IReadOnlyList<HeldBuilder> held, int instanceId)
         {
             if (held == null) return false;
             for (int k = 0; k < held.Count; k++)

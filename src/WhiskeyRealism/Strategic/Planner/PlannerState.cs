@@ -75,6 +75,39 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public IReadOnlyDictionary<string, Theater> Departments => _departments;
 
+        // Foresight F6b-2 (D11 requirement-covering-members, -post-choice): the covering force's memory. CoveringKeys is the unit key of each
+        // member (and of an incumbent briefly unavailable) -> the aiarea index it stood in when first claimed; the sector it belongs to today is
+        // SectorModel.SectorOfArea of it, because sector ids renumber when an objective is accomplished. CoveringForward is the stored verdict
+        // (the forward post is the verdict until one is known), CoveringVerdictDays the reviews the other verdict has led, CoveringVerdictKnown
+        // whether a verdict was ever stored for CoveringPostKey (the forward and rear town names with their rounded positions, "none" for a missing
+        // post; "none|none" while the force is unbound). Written once in TheaterPlanner.Plan after Decide; persisted (PlannerStateDto.coveringKeys).
+        private readonly Dictionary<string, int> _coveringKeys = new Dictionary<string, int>(StringComparer.Ordinal);
+        public bool CoveringForward;
+        public int CoveringVerdictDays;
+        public bool CoveringVerdictKnown;
+        public string CoveringPostKey;
+
+        public IReadOnlyDictionary<string, int> CoveringKeys => _coveringKeys;
+
+        // The covering force of this review: exactly these members, each with the area it stands in.
+        public void SetCoveringKeys(IEnumerable<KeyValuePair<string, int>> keys)
+        {
+            _coveringKeys.Clear();
+            if (keys == null) return;
+            foreach (var pair in keys)
+                if (!string.IsNullOrEmpty(pair.Key) && pair.Value >= 0) _coveringKeys[pair.Key] = pair.Value;
+        }
+
+        // Dedicated restore (never the positional Restore): a record with no key or no area is skipped.
+        public void RestoreCovering(IEnumerable<KeyValuePair<string, int>> keys, bool forward, int verdictDays, bool verdictKnown, string postKey)
+        {
+            SetCoveringKeys(keys);
+            CoveringForward = forward;
+            CoveringVerdictDays = verdictDays < 0 ? 0 : verdictDays;
+            CoveringVerdictKnown = verdictKnown;
+            CoveringPostKey = postKey;
+        }
+
         // A review's observation pass: BeginObservation, one Observe per own formation, then PruneUnobserved.
         public void BeginObservation()
         {
@@ -116,6 +149,7 @@ namespace WhiskeyRealism.Strategic.Planner
             _keyOfInstance[instanceId] = newKey;
             if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
             if (string.Equals(ReinforcementKey, oldKey, StringComparison.Ordinal)) ReinforcementKey = newKey;
+            CarryCovering(oldKey, newKey);
             if (_departments.TryGetValue(oldKey, out var carried))
             {
                 _departments.Remove(oldKey);
@@ -132,11 +166,21 @@ namespace WhiskeyRealism.Strategic.Planner
             foreach (var pair in live) RekeyInstance(pair.Key, pair.Value);
         }
 
+        // A commander change re-keys a formation (name:commander): its place in the covering force moves with it.
+        private void CarryCovering(string oldKey, string newKey)
+        {
+            if (!_coveringKeys.TryGetValue(oldKey, out int area)) return;
+            _coveringKeys.Remove(oldKey);
+            _coveringKeys[newKey] = area;
+        }
+
         // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.
         public Theater Observe(int instanceId, string unitKey, Theater standing)
         {
             if (string.IsNullOrEmpty(unitKey)) return standing;
             _observed.Add(unitKey);
+            if (_keyOfInstance.TryGetValue(instanceId, out var carriedFrom) && !string.Equals(carriedFrom, unitKey, StringComparison.Ordinal))
+                CarryCovering(carriedFrom, unitKey);
             if (_departments.TryGetValue(unitKey, out var known))
             {
                 _keyOfInstance[instanceId] = unitKey;

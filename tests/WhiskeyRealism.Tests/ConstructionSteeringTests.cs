@@ -1217,7 +1217,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(HasLine(rule, "if (!held[k].Wished) continue;"), "only a Wished builder is pinned");
         string theater = Src("Strategic/Planner/TheaterPlanner.cs");
         AssertTrue(HasLine(BodyOf(theater, "internal static float MassFor("), "if (!MassEligible(f, s.MinMoraleForMovement) || c.Claims[i].Claimant == Claimant.Capital || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;"), "G3 counts a held builder in no mass");
-        AssertTrue(HasLine(BodyOf(theater, "private static void Reserve("), "c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, null,"), "and the plan's table is the one ClaimTable.Build makes, which raises no capital guard from a Wished builder, as the allocator");
+        AssertTrue(HasLine(BodyOf(theater, "private static void Reserve("), "c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, c.Covering,"), "and the plan's table is the one ClaimTable.Build makes, which raises no capital guard from a Wished builder, as the allocator");
         var pinRole = RoleOfFor(Claimant.PinnedBuilder);
         AssertEqual(FormationRole.DepotBuilder, pinRole.Role, "a pinned claim is a DepotBuilder");
         AssertEqual(ForceAllocator.ReasonPinnedBuilder, pinRole.Reason, "with the pinned reason (foresight F1: the issue row's pick=pinned)");
@@ -1506,7 +1506,7 @@ internal static class ConstructionSteeringTests
         AssertFalse(CampaignWithholdView.HoldsDepotBuilder(0, 4242), "no plan published: nothing");
 
         string view = Src("Strategic/Planner/CampaignWithholdView.cs");
-        AssertTrue(HasLine(BodyOf(view, "internal static bool HoldsDepotBuilder("), "return Read(alliance, out _, out _, out _) && HeldBuilder(alliance, instanceId);"), "the fort job's hold goes through the one picture test (Read)");
+        AssertTrue(HasLine(BodyOf(view, "internal static bool HoldsDepotBuilder("), "return Read(alliance, out _, out _, out _, out _) && HeldBuilder(alliance, instanceId);"), "the fort job's hold goes through the one picture test (Read)");
         AssertEqual(2, CountOccurrences(view, "if (HeldBuilder(alliance, instanceId)) return true;"), "offense and defense hold through the same helper");
         AssertEqual(1, CountOccurrences(view, "DepotTaskLedgers.For(alliance).HoldsBuilder(instanceId)"), "one ledger test in the view, no copy");
         AssertTrue(HasLine(BodyOf(Src("Patches/FortConstructionGovernorPatch.cs"), "internal static void Prefix("), "bool heldBuilder = holdBuilders && CampaignWithholdView.HoldsDepotBuilder(alliance, unit.GetInstanceID());"), "the fort patch asks the view, not the ledger");

@@ -160,6 +160,9 @@ namespace WhiskeyRealism.Strategic.Planner
             // per own formation in snapshot order, and the hold the reserves were sized on per sector.
             internal Claim[] Claims;
             internal float[] SectorHeld;
+            // Foresight F6b-2: the covering force's input to the hold pass of this pass (null when there is none, with CoveringReason why).
+            internal CoveringInput Covering;
+            internal string CoveringReason;
             internal float[] RoadPerDay;
             internal HashSet<int> OwnIips;
             internal readonly List<int> Scratch = new List<int>();
@@ -302,10 +305,16 @@ namespace WhiskeyRealism.Strategic.Planner
                     LogisticsGate.AddDepotTasks(s, plan, sectors, mainX, mainZ, m.X, m.Z, force.CommandRange, profile.SupplySlack);
                 }
             }
+            // The push on the enemy capital is the one that may take the covering force (D11 requirement-covering-hold): a main effort whose
+            // target lies at the enemy capital leaves the members it did not take as ordinary hold reserves, before the garrison picks its men.
+            bool enemyCapitalPush = main >= 0 && s.HasEnemyCapital && SamePoint(candidates[main].X, candidates[main].Z, s.EnemyCapitalX, s.EnemyCapitalZ);
+            CoveringForce.LeaveBehind(inputs, enemyCapitalPush);
             PostFromOutside(inputs, plan);   // after the mass: the garrison takes only what the mass does not
             plan.Claims.AddRange(inputs.Claims);
             plan.SectorHeld = inputs.SectorHeld;
             for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
+            plan.Covering = CoveringForce.Publish(inputs, enemyCapitalPush);
+            CoveringForce.WriteState(inputs, enemyCapitalPush, state);   // the covering state is written once, after Decide
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
             return plan;
@@ -885,9 +894,17 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             var p = c.Picture;
             if (p == null || !p.HasEnemyCapital) return;
+            p.EnemyCapitalEstProp = EnemyCapitalEstimate(c);
+        }
+
+        // The estimate at the enemy capital within the relocation range: the army believed there plus the men presumed there. The covering
+        // force is sized to it (CoveringForce.Prepare) and the [EnemyPicture] row reports it.
+        internal static float EnemyCapitalEstimate(Inputs c)
+        {
+            var p = c.Picture;
+            if (p == null || !p.HasEnemyCapital) return 0f;
             float range = c.S.RelocationRange;
-            float believed = LandThreatNear(c, p.EnemyCapitalX, p.EnemyCapitalZ, range);
-            p.EnemyCapitalEstProp = believed + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe);
+            return LandThreatNear(c, p.EnemyCapitalX, p.EnemyCapitalZ, range) + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe);
         }
 
         internal static float HoldRatioNow(CampaignSnapshot s)
@@ -1131,11 +1148,16 @@ namespace WhiskeyRealism.Strategic.Planner
             float total = 0f;
             Theater targetTheater = targetSector >= 0 ? c.Sectors.TheaterOf(targetSector) : Theater.Unknown;
             string locked = LockedReinforcement(c);
+            bool towardEnemyCapital = s.HasEnemyCapital && SamePoint(tx, tz, s.EnemyCapitalX, s.EnemyCapitalZ);
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
                 if (!MassEligible(f, s.MinMoraleForMovement) || c.Claims[i].Claimant == Claimant.Capital || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
-                int holds = ClaimTable.IsReserveBody(c.Claims[i], f, s.MinMoraleForMovement) ? c.Claims[i].SectorId : -1;
+                // A covering member (D11 requirement-covering-hold) is no push's capacity, except a push on the enemy capital, which may take the
+                // force that covers that road whatever sector the member holds and whatever army that sector faces.
+                bool member = CoveringForce.IsMember(c.Claims[i]);
+                if (member && !towardEnemyCapital) continue;
+                int holds = !member && ClaimTable.IsReserveBody(c.Claims[i], f, s.MinMoraleForMovement) ? c.Claims[i].SectorId : -1;
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
                 // The main effort draws from its own department: the target's theater. A formation of another department is a
                 // candidate for the one reinforcement; so is the decision's reinforcement once its transfer has changed its department.
@@ -1436,8 +1458,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // (HoldThreatAtTarget).
         private static void Reserve(Inputs c)
         {
-            c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, null,
+            c.Covering = CoveringForce.Prepare(c, out c.CoveringReason);
+            c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, c.Covering,
                                         ClaimTable.RowSources, c.Facts, out c.SectorHeld);
+            CoveringForce.Settle(c);
             Garrisons(c);
         }
 

@@ -3,11 +3,59 @@ using System.Collections.Generic;
 
 namespace WhiskeyRealism.Strategic.Planner
 {
-    // The covering force's input to the hold pass (D11 requirement-covering-members): the post the members are ordered by, the axis sectors and
-    // their shares, the incumbents. F6b-2 fills it; until then the hold pass is called with null, and the slot is here so that pass has one
-    // signature for the harness and the planner alike.
+    // The covering force's input to the hold pass and its output (D11 requirement-covering-members, foresight F6b-2). CoveringForce.Prepare fills
+    // the input from the review's snapshot, sectors and state: the post the members are ordered by (the stored verdict's), the forward post the
+    // raw verdict is counted at, the axis sectors and their shares, the strength the force is sized to, the incumbents (by snapshot index: the
+    // sector their recorded area maps to today) and the department of every formation. ReserveRules.Hold takes the members and writes them
+    // here, CoveringForce.Settle publishes the verdict. A fresh object per pass: the terrain-filling review plans twice and keeps the second.
     internal sealed class CoveringInput
     {
+        // A formation that stands at the post and cannot be massed (the busy, the unready, the map-group player): it counts toward the need
+        // and no sector's cap. Strength is HoldStrength, X and Z the hold point.
+        internal struct Standing
+        {
+            public float Strength, X, Z;
+            public bool MapGroupPlayer;
+        }
+
+        // ---- the input ----
+        public float OrderX, OrderZ;        // the stored verdict's post (the forward post while none is stored): members are ordered by distance to it
+        public float ForwardX, ForwardZ;    // the forward post (the only post when there is one): the raw verdict counts there
+        public float Radius;                // the relocation range
+        public float Need;                  // CoveringNeed
+        public float[] AxisShare = new float[0];
+        public int[] IncumbentSector = new int[0];   // per own formation: the sector its recorded area maps to today, -1 for no incumbent
+        public int[] IncumbentArea = new int[0];     // per own formation: the area it was recorded in, -1 none
+        public Theater[] Department = new Theater[0];
+        public Theater PostTheater = Theater.Unknown;
+        public IReadOnlyList<GaveUpMove> GaveUp;
+        public bool OnePost;
+        public string PostKey = "none|none";
+        public int ForwardPlace = -1, RearPlace = -1;   // indexes into CampaignSnapshot.Places, -1 none
+
+        // ---- the output of the hold pass ----
+        public readonly List<int> Members = new List<int>();      // snapshot indexes, in the order they were taken
+        public readonly List<int> Retained = new List<int>();     // incumbents only briefly unavailable: they keep their entry this review
+        public readonly List<Standing> NonMassable = new List<Standing>();
+        public float[] Seeded = new float[0];   // per sector: the strength the incumbents gave it before its own reserve was chosen
+        public float[] Given = new float[0];    // per sector: the strength its members gave the force
+
+        // ---- the output of Settle ----
+        public bool PublishedForward;
+        public CoveringForce.VerdictStep Step;
+        public int PostTown = -1;               // the published post, an index into CampaignSnapshot.Places
+        public float PostX, PostZ;
+        public float MemberStrength, Held;
+
+        // The strength of the non-massable formations whose hold point lies within `radius` of (x, z).
+        public float StandingNear(float x, float z, float radius)
+        {
+            float sum = 0f;
+            float reachSq = radius * radius;
+            for (int k = 0; k < NonMassable.Count; k++)
+                if (ReserveRules.DistanceSq(NonMassable[k].X, NonMassable[k].Z, x, z) <= reachSq) sum += NonMassable[k].Strength;
+            return sum;
+        }
     }
 
     // What a per-row producer of the ownership table reads, built once by ClaimTable.Build: the review's snapshot, sectors and sector facts
@@ -181,7 +229,9 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int k = 0; k < massInstanceIds.Count; k++)
             {
                 int i = s.IndexOfOwn(massInstanceIds[k]);
-                if (i >= 0 && Takes(RowMass, claims[i].Claimant)) claims[i].Claimant = Claimant.Mass;
+                if (i < 0 || !Takes(RowMass, claims[i].Claimant)) continue;
+                claims[i].Claimant = Claimant.Mass;
+                claims[i].Reason = null;   // a covering member the push on the enemy capital takes is the mass's, not the force's
             }
         }
 

@@ -453,8 +453,15 @@ namespace WhiskeyRealism.Strategic
                 RecordChallengerZ = float.IsNaN(s.RecordChallengerZ) ? (float?)null : s.RecordChallengerZ,
                 RecordChallengerDays = s.RecordChallengerDays,
                 UnreliableDays = p.UnreliableDays,
-                UnreliableLastDay = p.UnreliableLastDay
+                UnreliableLastDay = p.UnreliableLastDay,
+                CoveringForward = s.CoveringForward,
+                CoveringVerdictDays = s.CoveringVerdictDays,
+                CoveringVerdictKnown = s.CoveringVerdictKnown,
+                CoveringPostKey = s.CoveringPostKey
             };
+            foreach (var pair in s.CoveringKeys)
+                dto.CoveringKeys.Add(new CoveringKeyDto { UnitKey = pair.Key, AreaIndex = pair.Value });
+            dto.CoveringKeys.Sort((a, b) => string.CompareOrdinal(a.UnitKey, b.UnitKey));   // a stable file for the same state
             foreach (var pair in s.Departments)
                 dto.Departments.Add(new DepartmentDto { UnitKey = pair.Key, Department = pair.Value.ToString() });
             dto.Departments.Sort((a, b) => string.CompareOrdinal(a.UnitKey, b.UnitKey));   // a stable file for the same state
@@ -519,6 +526,11 @@ namespace WhiskeyRealism.Strategic
                 }
                 p.State.RestoreDepartments(departments);
             }
+            var covering = new List<KeyValuePair<string, int>>();
+            if (dto.CoveringKeys != null)
+                foreach (var k in dto.CoveringKeys)
+                    if (k != null && !string.IsNullOrEmpty(k.UnitKey) && k.AreaIndex >= 0) covering.Add(new KeyValuePair<string, int>(k.UnitKey, k.AreaIndex));
+            p.State.RestoreCovering(covering, dto.CoveringForward, dto.CoveringVerdictDays, dto.CoveringVerdictKnown, dto.CoveringPostKey);
             if (dto.Beliefs != null)
                 foreach (var b in dto.Beliefs)
                 {

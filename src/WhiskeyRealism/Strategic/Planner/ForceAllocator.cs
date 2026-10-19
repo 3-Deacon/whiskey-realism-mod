@@ -367,12 +367,21 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int k = 0; k < a.Assignments.Count; k++)
             {
                 var x = a.Assignments[k];
-                if ((x.Role != FormationRole.Hold && x.Role != FormationRole.CapitalGuard) || x.SectorId != sector) continue;
+                bool covering = IsCoveringMember(x);
+                if ((!covering && x.Role != FormationRole.Hold && x.Role != FormationRole.CapitalGuard) || x.SectorId != sector) continue;
                 int i = OwnIndexOf(s, a, k);
-                if (i < 0 || ReserveRules.HoldSectorOf(sectors, s.Own[i]) != sector || !WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) continue;
+                // A covering member counts in its role sector wherever it stands, at the post or on the march to it (D11 requirement-covering-hold).
+                if (i < 0 || (!covering && ReserveRules.HoldSectorOf(sectors, s.Own[i]) != sector) || !WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) continue;
                 sum += ReserveRules.HoldStrength(s.Own[i]);
             }
             return sum;
+        }
+
+        // A covering-force member of either role (D11 requirement-covering-hold): a Hold within arrival range of the post, or a Redeploy marching
+        // to it. Its Assignment.SectorId is the sector that reserved it, where it is counted whatever sector it stands in.
+        internal static bool IsCoveringMember(in Assignment a)
+        {
+            return (a.Role == FormationRole.Hold || a.Role == FormationRole.Redeploy) && string.Equals(a.Reason, ReasonCoveringForce, StringComparison.Ordinal);
         }
 
         // The snapshot index of assignment k's formation. The pass writes one assignment per own formation in snapshot order, so the
@@ -797,8 +806,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 float sum = 0f;
                 for (int j = 0; j < _n; j++)
                 {
-                    if (_sector[j] != sector || _inMass[j]) continue;
-                    if (_done[j] && !((_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector)) continue;
+                    bool covering = _done[j] && CoveringAt(j);
+                    if ((covering ? _roleSector[j] : _sector[j]) != sector || _inMass[j]) continue;
+                    if (_done[j] && !(covering || ((_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector))) continue;
                     sum += Counts(j);
                 }
                 return sum;
@@ -964,7 +974,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int j = 0; j < _n; j++)
                 {
                     if (_claim[j].SectorId != sector || !_done[j]) continue;
-                    bool holds = _role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard;   // both keep the formation's own sector, the one it was counted in
+                    // Hold and CapitalGuard keep the formation's own sector, the one it was counted in; so does a covering member on the march to its post
+                    bool holds = _role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard || CoveringAt(j);
                     if (!holds) leaving += _claim[j].Share;
                 }
                 return leaving;
@@ -1161,6 +1172,12 @@ namespace WhiskeyRealism.Strategic.Planner
                 return Math.Max(_need[sector], _plan.MinGarrisonStrength);
             }
 
+            // Whether formation i has been given a covering-force role (Hold at the post, Redeploy on the way to it).
+            private bool CoveringAt(int i)
+            {
+                return (_role[i] == FormationRole.Hold || _role[i] == FormationRole.Redeploy) && string.Equals(_reason[i], ReasonCoveringForce, StringComparison.Ordinal);
+            }
+
             // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardCoverage (the player's own
             // command and a CIC side hold nothing), else ReserveRules.HoldStrength.
             private float Counts(int i)
@@ -1205,6 +1222,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     float sum = 0f;
                     for (int i = 0; i < _n; i++)
                     {
+                        // A covering member is withheld already and counts in its role sector wherever it stands, as CountedHold counts it.
+                        if (CoveringAt(i) && _roleSector[i] == k)
+                        {
+                            sum += Counts(i);
+                            continue;
+                        }
                         if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k
                             || !WlChainRules.CountsTowardCoverage(_s.Own[i].Chain)) continue;
                         if (IsImmobileReason(_reason[i]) || WlChainRules.OrderOnly(_s.Own[i].Chain)) sum += Counts(i);
@@ -1244,7 +1267,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     var holds = new List<int>();
                     for (int i = 0; i < _n; i++)
-                        if (_role[i] == FormationRole.Hold && _sector[i] == k && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
+                        if (_role[i] == FormationRole.Hold && (_sector[i] == k || CoveringAt(i)) && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
                             && !IsImmobileReason(_reason[i])) holds.Add(i);
                     float target = Target(k);
                     float counted = CountedHold(_s, _sectors, allocation, k);

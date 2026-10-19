@@ -17,7 +17,11 @@ namespace WhiskeyRealism.Strategic
     {
         // The allocation's formations grouped by sector: every assignment with a sector except the ones tasked
         // singly (Recover, Recon, DepotBuilder, Redeploy: it marches elsewhere), a group of at least minimumUnitsPerGroup, in sector order.
-        public static List<ArmyGroupPlan> PlanGroups(Allocation allocation, int minimumUnitsPerGroup = 2)
+        // A Hold covering-force member (D11 requirement-redeploy-role, foresight F6b-2) is grouped by the sector it stands in, not by the
+        // sector that reserved it (its Assignment.SectorId, where it is counted): it holds its post, within arrival range of the point
+        // its assignment targets, so that point's sector (sectors.SectorAt) is the one it stands in. Without a sector model it keeps the
+        // assignment's sector.
+        public static List<ArmyGroupPlan> PlanGroups(Allocation allocation, int minimumUnitsPerGroup = 2, SectorModel sectors = null)
         {
             var result = new List<ArmyGroupPlan>();
             if (allocation == null || minimumUnitsPerGroup < 2) return result;
@@ -28,10 +32,16 @@ namespace WhiskeyRealism.Strategic
                 if (assignment.SectorId < 0) continue;
                 if (assignment.Role == FormationRole.Recover || assignment.Role == FormationRole.Recon || assignment.Role == FormationRole.DepotBuilder
                     || assignment.Role == FormationRole.Redeploy) continue;
-                if (!bySector.TryGetValue(assignment.SectorId, out var plan))
+                int sector = assignment.SectorId;
+                if (sectors != null && ForceAllocator.IsCoveringMember(in assignment))
                 {
-                    plan = new ArmyGroupPlan { SectorId = assignment.SectorId };
-                    bySector[assignment.SectorId] = plan;
+                    int standing = sectors.SectorAt(assignment.TargetX, assignment.TargetZ);
+                    if (standing >= 0) sector = standing;
+                }
+                if (!bySector.TryGetValue(sector, out var plan))
+                {
+                    plan = new ArmyGroupPlan { SectorId = sector };
+                    bySector[sector] = plan;
                 }
                 plan.InstanceIds.Add(assignment.InstanceId);
             }

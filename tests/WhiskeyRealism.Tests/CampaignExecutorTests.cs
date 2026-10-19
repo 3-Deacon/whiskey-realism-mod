@@ -608,7 +608,7 @@ internal static class CampaignExecutorTests
         ExecutorFixtures.Release(0);
         AssertTrue(CampaignWithholdView.TrySteering(0, out plan, out sectors) && plan != null && sectors != null, "once released it steers");
         string view = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignWithholdView.cs"), "internal static bool TrySteering(");
-        AssertTrue(HasLine(view, "if (!Read(alliance, out _, out var model, out var ctx) || !ctx.Released) return false;"), "the one release predicate");
+        AssertTrue(HasLine(view, "if (!Read(alliance, out _, out var model, out var ctx, out _) || !ctx.Released) return false;"), "the one release predicate");
         CampaignScope.ResetAll();
     }
 
@@ -1399,7 +1399,7 @@ internal static class CampaignExecutorTests
         AssertTrue(files > 100, "the scan covered the Patches folder: " + files);
     }
 
-    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "Claim", "SectorPlan", "SectorModel", "ExecutorContext" };
+    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "Claim", "CoveringPlan", "SectorPlan", "SectorModel", "ExecutorContext" };
 
     // Verify G7 probe P13: a patch that writes the published plan must fail the pin.
     private static void PlannerPatchWriteProbeIsCaught()
