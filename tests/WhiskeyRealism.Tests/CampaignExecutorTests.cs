@@ -348,12 +348,9 @@ internal static class CampaignExecutorTests
     private static void GaveUpCapitalGuardBecomesAnUnwithheldHold()
     {
         var s = ExecutorFixtures.Wide();
-        // Re-pinned for the capital-floor pump hotfix (2026-10-19): a guard within the relocation range now stays where it stands unless it is on
-        // its way to the capital, and only a guard sent there can give up on it. This one is marching (its waypoint is the capital).
-        var marching = ExecutorFixtures.Corps(30, 50f, 8000f);
-        marching.WaypointX = s.CapitalX;
-        marching.WaypointZ = s.CapitalZ;
-        s.Own.Add(marching);
+        // Re-pinned for the capital-floor pump hotfix (2026-10-19): a guard within the relocation range is held where it stands, never marched into
+        // the city, so the move it can give up on is the one to its own place (it was the march to the capital): the tracker's record is a march from x 150 to the guard's place, x 50.
+        s.Own.Add(ExecutorFixtures.Corps(30, 50f, 8000f));
         var busy = ExecutorFixtures.Corps(31, 60f, 9000f);   // busy: it holds the sector's garrison alone, so the garrison prefix withholds no Hold formation
         busy.Flags |= FormationFlags.InBattle;
         s.Own.Add(busy);
@@ -364,7 +361,7 @@ internal static class CampaignExecutorTests
         var first = TestClaims.Allocate(plan, s, sectors, null, null, null, null);
         AssertTrue(first.TryGet(30, out var guard) && guard.Role == FormationRole.CapitalGuard && guard.Withheld, "the capital guard is withheld from vanilla");
 
-        var gaveUp = GaveUpOf(TrackerThatGaveUp(30, 50f, s.CapitalX, s.CapitalZ));
+        var gaveUp = GaveUpOf(TrackerThatGaveUp(30, 150f, 50f, 0f));
         var next = TestClaims.Allocate(plan, s, sectors, null, null, null, gaveUp);
         AssertTrue(next.TryGet(30, out var hold), "still assigned");
         AssertEqual(FormationRole.Hold, hold.Role, "the guard that gave up on the capital is a Hold");

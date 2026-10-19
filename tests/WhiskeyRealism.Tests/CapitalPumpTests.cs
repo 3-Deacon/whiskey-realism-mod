@@ -20,7 +20,7 @@ internal static class CapitalPumpTests
             ("AnUnreadyGuardAtTheCapitalIsStillCountedAndNothingNewIsDrawn", AnUnreadyGuardAtTheCapitalIsStillCountedAndNothingNewIsDrawn),
             ("NothingBeyondTheRelocationRangeIsEverDrawn", NothingBeyondTheRelocationRangeIsEverDrawn),
             ("AnIncumbentKeepsItsClaimWhereItStands", AnIncumbentKeepsItsClaimWhereItStands),
-            ("AGuardMarchingToTheCapitalKeepsMarching", AGuardMarchingToTheCapitalKeepsMarching),
+            ("AGuardInsideTheRangeIsNeverMarchedIntoTheCity", AGuardInsideTheRangeIsNeverMarchedIntoTheCity),
             ("OnlyTheFormationsThatCountAreCounted", OnlyTheFormationsThatCountAreCounted),
             ("AShortfallIsNotFilledFromAfar", AShortfallIsNotFilledFromAfar),
             ("TheCoveringForceAndTheCapitalNoLongerAlternateOutsideTheRange", TheCoveringForceAndTheCapitalNoLongerAlternateOutsideTheRange),
@@ -85,7 +85,7 @@ internal static class CapitalPumpTests
         AssertEqual(Claimant.None, claims[1].Claimant, "one just past the range is not (the range is " + s.RelocationRange + ")");
         AssertEqual(Claimant.None, claims[2].Claimant, "nor one far away, whatever the floor");
         AssertEqual(Claimant.Capital, claims[3].Claimant, "a committed formation within the range is drawn (home defence first, as shipped)");
-        AssertNear(s.CapitalX, claims[3].TargetX, 0.01f, "marching to the capital");
+        AssertNear(120f, claims[3].TargetX, 0.01f, "held where it stands: nothing is marched into the city");
         AssertEqual(Claimant.DepartmentMove, claims[4].Claimant, "one on a department move beyond the range is left to its move");
     }
 
@@ -103,9 +103,10 @@ internal static class CapitalPumpTests
         AssertNear(60f, claims[1].TargetX, 0.01f, "where it stands (the unready one)");
     }
 
-    // A guard on its march (its last waypoint at the capital) still has the capital for its post; an incumbent whose waypoint is its own place has
-    // that place. A guard that has not arrived is no less a guard for being inside the range.
-    private static void AGuardMarchingToTheCapitalKeepsMarching()
+    // A guard within the range is never marched into the city (user direction 2026-10-19: Richmond is defended by holding the front, not by
+    // gathering at the capital): its claim target is where it stands, even when its last waypoint is the capital. The mover, which sends a
+    // CapitalGuard to its target, therefore halts a guard that was sent in by an earlier build.
+    private static void AGuardInsideTheRangeIsNeverMarchedIntoTheCity()
     {
         var marching = ExecutorFixtures.Corps(1, 90f, 6000f);
         marching.WaypointX = 0f;
@@ -113,8 +114,8 @@ internal static class CapitalPumpTests
         var s = World(marching);
         var claims = Reserve(s, 6000f);
         AssertEqual(Claimant.Capital, claims[0].Claimant, "still a guard");
-        AssertNear(s.CapitalX, claims[0].TargetX, 0.01f, "and still marching to the capital, not halted where it is");
-        AssertNear(s.CapitalZ, claims[0].TargetZ, 0.01f, "z too");
+        AssertNear(90f, claims[0].TargetX, 0.01f, "held where it stands, not marched on to the capital");
+        AssertNear(0f, claims[0].TargetZ, 0.01f, "z too");
     }
 
     // What does not count: a formation leaving for supply, one that does not count toward coverage (the player's own command), one another owner
@@ -151,7 +152,7 @@ internal static class CapitalPumpTests
         ReserveRules.Capital(t, 12000f, held);
         AssertEqual(Claimant.Capital, held[0].Claimant, "the committed one is drawn, not counted");
         AssertEqual(Claimant.Capital, held[1].Claimant, "so is the department move");
-        AssertNear(t.CapitalX, held[0].TargetX, 0.01f, "marching to the capital");
+        AssertNear(10f, held[0].TargetX, 0.01f, "held where it stands: nothing is marched into the city");
     }
 
     // The rule reports a shortfall (the [Reserves] capital=held/floor is the guards' strength against the floor); it does not reach for it.
