@@ -79,3 +79,12 @@ The verify of F4, F4b and F5 (covered commit `ba13f602`) read the conditional of
 2. **At the year boundary the decode errs one day late, not early.** The "worst case one day early" above holds inside the month overlap (31 January after about 10:30 and 1 February before about 12:27 store the same value). At the year boundary, 31 December after about 10:30 stores at or above the next year and decodes as 1 January (capped at today): one day late. A mark a day off in either direction changes no belief that fades over days. The spec's *Mark day* paragraph (requirement-marks-player-side) and its phase 1 as-built note state the rule as built.
 
 The user may override this.
+
+## Integrator decisions, 2026-10-18 (phase 2 build, F6a and F6b-1)
+
+1. Phase 1 gap 18 / phase 2 gap 1: `HoldFacing` credits a Capital claim counted in the sector, because a capital guard standing in a sector holds it. A guard marching to a capital elsewhere is not credited, the same rule as F9's `StandingHold`. This supersedes D11 row 7's "counted-anyway" wording for a Capital claim and the test plan's `HoldFacingIgnoresCountedAnywayBodies` as written. Unready, busy and map-group bodies stay uncredited. F10b's as-built note amends the spec text.
+2. Phase 2 gap 14: F6b-1's edits to `SectorModel.cs` and `TheaterPlanner.cs` (the radius moved to `SectorModel.Radius`; three helpers made internal) are accepted. They show no behaviour change in the harness.
+3. Phase 2 gap 19: the covering-member-at-post clause of `PlanGroups` lands in F6b-2, which has the standing sector.
+4. Phase 2 gap 20: `F6aReproducesTheShippedRoles` scenario 1 pins the new output, with the Marching-builder cascade spelled out, because that cascade is F9's intended change.
+
+The user may override each of these.
