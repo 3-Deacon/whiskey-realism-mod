@@ -260,6 +260,17 @@ internal static partial class CommitmentTests
         AssertEqual("", string.Join(",", offenders.Distinct()), "StopRegiment( and DefensiveMovingOrder.RemoveOrder( are called under Strategic/ from the two named files alone");
         AssertTrue(PlannerReadCensusTests.CodeLines(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/VanillaMoveHost.cs")).Any(l => l.Contains("StopRegiment(")), "VanillaMoveHost.cs is one");
         AssertTrue(PlannerReadCensusTests.CodeLines(ReadRepoFile("src/WhiskeyRealism/Strategic/CoastalDefenseCustomOrderRunner.cs")).Any(l => l.Contains("StopRegiment(")), "CoastalDefenseCustomOrderRunner.cs is the other");
+
+        // The third caller of RemoveOrder sits outside Strategic/: #25's revert of a forbidden commit, which runs only while the planner does not
+        // (DefenseInterceptionGate.ModeFor). No patch calls StopRegiment, and no other patch removes an order.
+        var patchCallers = new List<string>();
+        foreach (string path in System.IO.Directory.GetFiles(FindRepoPath("src/WhiskeyRealism/Patches"), "*.cs", System.IO.SearchOption.AllDirectories))
+        {
+            string name = System.IO.Path.GetFileName(path);
+            foreach (string line in PlannerReadCensusTests.CodeLines(System.IO.File.ReadAllText(path)))
+                if (line.Contains("StopRegiment(") || line.Contains("DefensiveMovingOrder.RemoveOrder(")) patchCallers.Add(name);
+        }
+        AssertEqual("CheckForDefensiveOperationsCandidateFilterPatch.cs", string.Join(",", patchCallers.Distinct()), "under Patches/ only #25's revert calls DefensiveMovingOrder.RemoveOrder");
     }
 
     // ---- the readiness skip ----

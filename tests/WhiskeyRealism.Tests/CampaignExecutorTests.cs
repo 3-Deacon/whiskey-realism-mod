@@ -1324,8 +1324,39 @@ internal static class CampaignExecutorTests
             "CampaignPlanStore.Publish(alliance, plan, allocation, sectors);",
             "CampaignPlanStore.PublishExecutorContext(alliance, ExecutorContextOf(alliance));",
             "EmitPlan(plan, trace, day, month, year);",
+            "EmitCorridor(snapshot, sectors, plan, picture);",
             "EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);",
+            "EmitCovering(snapshot, plan, state);",
+            "EmitDepartmentMoves(plan);",
             "EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);");
+
+        // Foresight phase 2 (F10b): the order inside the planner, whole. The ownership table is built (Reserve: the covering input, the table,
+        // the covering settle, the garrison posts that read HoldFacing) before the candidate loop of Evaluate; the mass, the last-mass update, the
+        // covering force's left-behind rewrite, the garrison's outside pledge and row 10 follow Decide; the covering and department state are
+        // written once, last, and the postures after them. The table is copied into the plan after row 10 (a claim is a struct).
+        string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs");
+        AssertInOrder(BodyOf(planner, "internal static void Evaluate(Inputs c, List<Candidate> into)"), "TheaterPlanner.Evaluate",
+            "Reserve(c);",
+            "for (int i = 0; i < s.Objectives.Count; i++)",
+            "into.Sort(CompareCandidates);");
+        AssertInOrder(BodyOf(planner, "private static void Reserve(Inputs c)"), "TheaterPlanner.Reserve",
+            "c.Covering = CoveringForce.Prepare(c, out c.CoveringReason);",
+            "c.Claims = ClaimTable.Build(",
+            "CoveringForce.Settle(c);",
+            "Garrisons(c);");
+        AssertInOrder(BodyOf(planner, "IReadOnlyCollection<int> garrisonIncumbents = null, IReadOnlyCollection<int> reconIncumbents = null)\n        {\n            var plan = new TheaterPlan"), "TheaterPlanner.Plan",
+            "var candidates = new List<Candidate>();",
+            "int unknown = review.Unknown, probed = 0;",
+            "int main = Decide(inputs, candidates, state, battles, out string reason);",
+            "plan.MassStrength = SelectMass(",
+            "Commitment.UpdateLastMass(s, state, plan);",
+            "CoveringForce.LeaveBehind(inputs, enemyCapitalPush);",
+            "PostFromOutside(inputs, plan);",
+            "DepartmentReinforcement.Reinforce(inputs, plan, out int departmentPick, out Theater departmentTo);",
+            "plan.Claims.AddRange(inputs.Claims);",
+            "CoveringForce.WriteState(inputs, enemyCapitalPush, state);",
+            "DepartmentReinforcement.WriteState(inputs, plan, departmentPick, departmentTo);",
+            "AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);");
 
         AssertInOrder(BodyOf(runtime, "internal static void ReviewExecute("), "ReviewExecute",
             "if (!ExecutorsEnabled()) return;",
