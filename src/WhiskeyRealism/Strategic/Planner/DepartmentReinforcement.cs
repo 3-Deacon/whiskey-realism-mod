@@ -241,7 +241,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // ---- the state ----
 
-        // See the header. `picked` and `to` are the formation row 10 gave a department this review (-1 none). Appends the Arrived and GaveUp
+        // See the header. `picked` and `to` are the formation row 10 gave a department this review (-1 none). Appends the Arrived, GaveUp and Dropped
         // transitions to the plan. A review that saw no formation of ours (a degraded read, or the units not loaded yet after a load) leaves the
         // record alone, or the load would free the lock.
         internal static void WriteState(TheaterPlanner.Inputs c, TheaterPlan plan, int picked, Theater to)

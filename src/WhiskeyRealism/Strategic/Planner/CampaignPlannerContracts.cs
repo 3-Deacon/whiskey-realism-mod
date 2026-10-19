@@ -485,7 +485,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public Theater From, To;
         public float TargetX, TargetZ;
         public float Days;          // MarchTime.EstimateDays at the pick, -1 on the other steps
-        public string State;        // DepartmentReinforcement.StatePicked, StateArrived or StateGaveUp
+        public string State;        // DepartmentReinforcement.StatePicked, StateArrived, StateGaveUp or StateDropped
     }
 
     // Where the covering force stands (D11 requirement-covering-post-choice): the forward post, at the relocation range from the enemy

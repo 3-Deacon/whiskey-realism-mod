@@ -36,8 +36,9 @@ namespace WhiskeyRealism.Strategic.Planner
             return AICampaign.MoveUnitTo(unit, new Vector3(x, unit.GetPosition().y, z), movearoundenemyunits: true);
         }
 
-        // The planner's one caller of Regiment.StopRegiment and DefensiveMovingOrder.RemoveOrder (the shipped CoastalDefenseCustomOrderRunner is
-        // the other, for its own defensive-operation units, which the stop never reaches: InDefensiveOps is Busy). The pair is vanilla's own stop of
+        // The planner's one caller of Regiment.StopRegiment and DefensiveMovingOrder.RemoveOrder (RemoveOrder's other callers are the shipped
+        // CoastalDefenseCustomOrderRunner, for its own defensive-operation units, which the stop never reaches because InDefensiveOps is Busy,
+        // and #25's revert in CheckForDefensiveOperationsCandidateFilterPatch). The pair is vanilla's own stop of
         // a campaign unit, 13350-13351; StopRegiment 132316-132397 clears the paths (regimentpaths = 0), RemoveOrder 9949-9963 drops every queued
         // order of the regiment. No SetWaypoint runs, so vanilla's readiness refusal (91336-91350) is not met. Both run on Unity's main thread,
         // as does DefensiveMovingOrder.UpdateOrders, so the removal never interleaves with a served order.
