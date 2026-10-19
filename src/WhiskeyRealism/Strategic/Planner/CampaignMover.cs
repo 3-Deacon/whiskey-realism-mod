@@ -290,20 +290,20 @@ namespace WhiskeyRealism.Strategic.Planner
             return retargeted;
         }
 
-        // A marching formation that is on its way to the capital for a guard's role it no longer has: the tracker sent it as a CapitalGuard; or the
-        // record carries no role (a move restored from the sidecar, which keeps none; a save made before this rule had guards on the march) or
-        // there is none, and the record's target is the capital point or the formation's live waypoint is there. A record with another role is a
-        // march for that role (a Redeploy to the capital's town, say), and is left alone. The formation must still have a path or an order waiting.
+        // A marching formation that is on its way to the capital for a guard's role it no longer has: the tracker sent it as a CapitalGuard, or a
+        // planner move record with no role (one restored from the sidecar keeps none, so a save made before this rule has guards on the march)
+        // targets the capital point. It must still have a path or an order waiting. Never stopped: a march the planner has no record of (it is
+        // vanilla's own, AssignUnitToDefendCapital's, 11668-11869), a formation in vanilla's groupstodefendcapital (FormationFlags.CapitalDefense,
+        // read by the snapshot), or one whose record names another role (a Redeploy to the capital's town, say).
         private static bool IsMarchingExGuard(CampaignSnapshot s, Allocation allocation, MoveTracker tracker, in FormationRecord f, out Assignment a)
         {
             a = default;
-            if ((f.Flags & (FormationFlags.HasPath | FormationFlags.MoveQueued)) == 0 || !WlChainRules.MayMove(f.Chain) || !TheaterPlanner.Movable(f)) return false;
-            bool recorded = tracker.TryGetMove(f.InstanceId, out _, out _, out float targetX, out float targetZ, out _, out _, out _, out string sentFor);
-            bool sentAsGuard = recorded && string.Equals(sentFor, nameof(FormationRole.CapitalGuard), StringComparison.Ordinal);
-            bool unnamed = !recorded || sentFor == null;
-            bool towardCapital = sentAsGuard
-                || (unnamed && s.HasCapital && ((recorded && MoveTracker.SameTarget(targetX, targetZ, s.CapitalX, s.CapitalZ)) || ReserveRules.MarchingToCapital(s, in f)));
-            return towardCapital && allocation.TryGet(f.InstanceId, out a) && a.Role != FormationRole.CapitalGuard && a.Role != FormationRole.Recon;
+            if ((f.Flags & (FormationFlags.HasPath | FormationFlags.MoveQueued)) == 0 || (f.Flags & FormationFlags.CapitalDefense) != 0) return false;
+            if (!WlChainRules.MayMove(f.Chain) || !TheaterPlanner.Movable(f)) return false;
+            if (!tracker.TryGetMove(f.InstanceId, out _, out _, out float targetX, out float targetZ, out _, out _, out _, out string sentFor)) return false;
+            bool sentAsGuard = string.Equals(sentFor, nameof(FormationRole.CapitalGuard), StringComparison.Ordinal);
+            bool restoredToCapital = sentFor == null && s.HasCapital && MoveTracker.SameTarget(targetX, targetZ, s.CapitalX, s.CapitalZ);
+            return (sentAsGuard || restoredToCapital) && allocation.TryGet(f.InstanceId, out a) && a.Role != FormationRole.CapitalGuard && a.Role != FormationRole.Recon;
         }
 
         // The ex-guards whose new role sends them but whose dispatch ordered nothing this review (vanilla refused the target or it is restricted,

@@ -213,7 +213,7 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Whether the formation's last waypoint is the capital (within the mover's arrival radius): a guard drawn on an earlier review and still on
         // its way, which the reserve leaves on its march rather than halting it where it has got to.
-        internal static bool MarchingToCapital(CampaignSnapshot s, in FormationRecord f)
+        private static bool MarchingToCapital(CampaignSnapshot s, in FormationRecord f)
         {
             return IsFinite(f.WaypointX) && IsFinite(f.WaypointZ)
                 && DistanceSq(f.WaypointX, f.WaypointZ, s.CapitalX, s.CapitalZ) <= CampaignMover.ArrivalRadius * CampaignMover.ArrivalRadius;

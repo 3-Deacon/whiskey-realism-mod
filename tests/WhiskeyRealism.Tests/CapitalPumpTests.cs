@@ -33,7 +33,8 @@ internal static class CapitalPumpTests
             ("AnExGuardWhoseNewTargetIsRestrictedIsStillStopped", AnExGuardWhoseNewTargetIsRestrictedIsStillStopped),
             ("AnExGuardTheDayHoldsBackIsStopped", AnExGuardTheDayHoldsBackIsStopped),
             ("ARestoredRecordWithNoRoleStillStopsAMarchToTheCapital", ARestoredRecordWithNoRoleStillStopsAMarchToTheCapital),
-            ("AMarchWithNoRecordAtAllToTheCapitalIsStoppedByItsWaypoint", AMarchWithNoRecordAtAllToTheCapitalIsStoppedByItsWaypoint),
+            ("AMarchWithNoPlannerRecordIsVanillasAndIsNeverStopped", AMarchWithNoPlannerRecordIsVanillasAndIsNeverStopped),
+            ("AFormationInVanillasCapitalDefenceListIsNeverStopped", AFormationInVanillasCapitalDefenceListIsNeverStopped),
             ("AMarchForAnotherRoleOrAnotherPlaceIsLeftAlone", AMarchForAnotherRoleOrAnotherPlaceIsLeftAlone),
         });
     }
@@ -382,13 +383,25 @@ internal static class CapitalPumpTests
         AssertEqual("1", string.Join(",", host.Listed.Where(l => !l.listed).Select(l => l.id)), "and off vanilla's offensive list");
     }
 
-    // The same with no record at all (the move was vanilla's, or the record was pruned): the live waypoint at the capital is enough.
-    private static void AMarchWithNoRecordAtAllToTheCapitalIsStoppedByItsWaypoint()
+    // A march the planner never issued is vanilla's own (AssignUnitToDefendCapital sends groups to the capital, 11668-11869): with a waypoint at the
+    // capital and no planner record at all it is not an ex-guard's, and stopping it would make the AI worse than vanilla.
+    private static void AMarchWithNoPlannerRecordIsVanillasAndIsNeverStopped()
     {
         var s = World(Marching(1, 90f));   // Marching's waypoint is the capital
         var host = new FakeMoverHost();
         Review(s, Only(Holds(1, ForceAllocator.ReasonHoldReserve)), host, new MoveTracker());
-        AssertEqual("1", string.Join(",", host.Stops), "stopped by its waypoint");
+        AssertEqual(0, host.Stops.Count, "no planner record: not stopped, whatever the waypoint");
+    }
+
+    // A formation in vanilla's groupstodefendcapital (FormationFlags.CapitalDefense) is vanilla's to march, even with a guard's record: not stopped.
+    private static void AFormationInVanillasCapitalDefenceListIsNeverStopped()
+    {
+        var pledged = Marching(1, 90f);
+        pledged.Flags |= FormationFlags.CapitalDefense;
+        var s = World(pledged);
+        var host = new FakeMoverHost();
+        Review(s, Only(Holds(1, ForceAllocator.ReasonHoldReserve)), host, GuardOnItsWay(s, 1, 150f));
+        AssertEqual(0, host.Stops.Count, "in vanilla's capital-defence list: not stopped");
     }
 
     // Left alone: a restored record to some other place with the waypoint elsewhere, and a march a record names for another role even though
