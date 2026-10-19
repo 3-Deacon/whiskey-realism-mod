@@ -439,6 +439,19 @@ namespace WhiskeyRealism.Strategic.Planner
             return host.OnEnemySoil(tx, tz);
         }
 
+        // The verdict of vanilla's IsOnEnemySoil(false, point, returntrueifnotonstate: true, usestateoccupation: true) (139304-139336) on the facts the
+        // runtime reads from the game's tables (CampaignMoverRuntime.OnEnemySoil), kept here so the harness can test it: with the tables missing
+        // no march is refused (the mover then marches as before); a point on no state counts as enemy ground (returntrueifnotonstate, and no
+        // closest-state fallback); a state whose alliance is out of range is no enemy; otherwise the state's alliance is at war with this one and
+        // this one does not occupy it.
+        internal static bool EnemySoilVerdict(bool tablesKnown, bool onAState, bool allianceKnown, bool atWar, int occupiedBy, int ownAlliance)
+        {
+            if (!tablesKnown) return false;
+            if (!onAState) return true;
+            if (!allianceKnown || !atWar) return false;
+            return occupiedBy != ownAlliance;
+        }
+
         // Vanilla's campaign stop, sent only to a formation the snapshot shows still marching or with an order waiting (vanilla's
         // GetLastTransmittedPath() >= 0 and DefensiveMovingOrder.OrderRunning), so it cannot be sent twice: it clears both. It passes through
         // neither MoveIssue.Issue (there is no target to restrict, and its queued branch records a queued move and calls no host) nor

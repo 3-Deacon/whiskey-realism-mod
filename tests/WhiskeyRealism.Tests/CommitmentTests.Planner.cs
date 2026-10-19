@@ -17,6 +17,7 @@ internal static partial class CommitmentTests
         return new (string name, Action run)[]
         {
             ("ADispatchedMemberStaysMassedThroughAReadinessDip", ADispatchedMemberStaysMassedThroughAReadinessDip),
+            ("ALastMassOfAnotherObjectiveCommitsNothing", ALastMassOfAnotherObjectiveCommitsNothing),
             ("ThePushsOddsCountItsUnreadyCorps", ThePushsOddsCountItsUnreadyCorps),
             ("AnUndispatchedMemberIsNotCommitted", AnUndispatchedMemberIsNotCommitted),
             ("AnUncommittedFormationStillNeedsStepTwo", AnUncommittedFormationStillNeedsStepTwo),
@@ -142,6 +143,25 @@ internal static partial class CommitmentTests
         AssertEqual(Claimant.Mass, claim.Claimant, "a Mass claim");
         AssertEqual(ClaimTable.ReasonCommitted, claim.Reason, "committed to the objective it marches on");
         AssertEqual(8000f, plan.MainCapacityStrength, "and its men are in the capacity the odds were judged on");
+    }
+
+    // D11 requirement-commitment: row 4 commits a dispatched member of the last mass only "while the last mass's objective is the main effort",
+    // against CurrentMainObjective as Evaluate reads it. After a Plan the last mass is the main objective or nothing, so the guard is reached only
+    // from a state that disagrees with itself (a restored file whose main objective moved on): there the dispatched, unready corps is nobody's.
+    private static void ALastMassOfAnotherObjectiveCommitsNothing()
+    {
+        foreach (int main in new[] { -1, 97 })
+        {
+            var state = new PlannerState { CurrentMainObjective = main };
+            state.RestoreLastMass(98, new[] { "corps1:1", "corps2:2" });
+            var plan = Replan(PushWorld(readiness2: 1), state, Moves(98, 1, 2));
+            AssertEqual(Claimant.None, ClaimOf(plan, 2).Claimant, "main objective " + main + ", last mass 98: the unready corps is not committed: " + Describe(plan));
+            AssertFalse(plan.MassInstanceIds.Contains(2), "and not in the mass, under D5's readiness rule: " + string.Join(",", plan.MassInstanceIds));
+        }
+        var consistent = new PlannerState { CurrentMainObjective = 98 };
+        consistent.RestoreLastMass(98, new[] { "corps1:1", "corps2:2" });
+        var kept = Replan(PushWorld(readiness2: 1), consistent, Moves(98, 1, 2));
+        AssertTrue(kept.MassInstanceIds.Contains(2), "(control: with the main objective the last mass's, the same corps is committed and massed) " + Describe(kept));
     }
 
     // The odds are judged with the unready corps in them: the trace of the push's own candidate carries the whole 8000.

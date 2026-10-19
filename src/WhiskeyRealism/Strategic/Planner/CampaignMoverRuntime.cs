@@ -119,12 +119,12 @@ namespace WhiskeyRealism.Strategic.Planner
             public bool OnEnemySoil(float x, float z)
             {
                 int state = BattlefieldSetup.GetStateOfField(new Vector3(x, 0f, z));
-                if (GameVars.nation == null || GameVars.alliance == null) return false;
-                if (state < 0 || state >= GameVars.nation.Length) return true;
-                var nation = GameVars.nation[state];
-                if (nation.alliance < 0 || nation.alliance >= GameVars.alliance.Length) return false;
-                if (!GameVars.alliance[nation.alliance].IsAtWarWith(Alliance)) return false;
-                return nation.occupiedby != Alliance;
+                bool tables = GameVars.nation != null && GameVars.alliance != null;
+                bool onAState = tables && state >= 0 && state < GameVars.nation.Length;
+                int nationAlliance = onAState ? GameVars.nation[state].alliance : -1;
+                bool allianceKnown = tables && nationAlliance >= 0 && nationAlliance < GameVars.alliance.Length;
+                bool atWar = allianceKnown && GameVars.alliance[nationAlliance].IsAtWarWith(Alliance);
+                return CampaignMover.EnemySoilVerdict(tables, onAState, allianceKnown, atWar, onAState ? GameVars.nation[state].occupiedby : -1, Alliance);
             }
 
             public void ListOffensive(int instanceId, bool listed)

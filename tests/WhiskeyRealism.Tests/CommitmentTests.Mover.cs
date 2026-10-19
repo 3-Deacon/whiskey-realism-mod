@@ -34,6 +34,7 @@ internal static partial class CommitmentTests
             ("AFailedRecordIsNotWithheldFromDefence", AFailedRecordIsNotWithheldFromDefence),
             ("HeldReadinessCountedAfterTheArrivedCheck", HeldReadinessCountedAfterTheArrivedCheck),
             ("TheReadinessSkipAsksVanillasEnemySoilTest", TheReadinessSkipAsksVanillasEnemySoilTest),
+            ("APointOnNoStateCountsAsEnemyForTheSkip", APointOnNoStateCountsAsEnemyForTheSkip),
             ("AnEndedPushsCorpsIsTakenOffVanillasOffensiveList", AnEndedPushsCorpsIsTakenOffVanillasOffensiveList),
             ("ACapitalGuardIsTakenOffVanillasOffensiveList", ACapitalGuardIsTakenOffVanillasOffensiveList),
             ("FlagOffNeitherDelistsNorStops", FlagOffNeitherDelistsNorStops),
@@ -239,7 +240,8 @@ internal static partial class CommitmentTests
         AssertTrue(stopCall >= 0 && remove > stopCall, "StopRegiment(skipfinalrotation: true, manualstop: true, ...) then DefensiveMovingOrder.RemoveOrder, as 13350-13351");
         AssertFalse(stop.Contains("MoveUnitTo") || stop.Contains("SetWaypoint"), "no move and no waypoint: vanilla's readiness refusal is not met");
         string mover = string.Join("\n", PlannerReadCensusTests.CodeLines(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMover.cs")));
-        AssertFalse(mover.Contains("Host.Move(") && mover.Contains("Stop(f.InstanceId, "), "the mover sends the stop through IMoveHost.Stop alone");
+        AssertEqual(1, mover.Split(new[] { "host.Stop(" }, StringSplitOptions.None).Length - 1, "the mover sends the stop through IMoveHost.Stop, in one place");
+        AssertFalse(mover.Contains("StopRegiment(") || mover.Contains("RemoveOrder("), "and never calls vanilla's stop or its order removal itself");
     }
 
     // The planner's one caller of the campaign stop is VanillaMoveHost; the shipped coastal runner is the other, for its own defensive-operation
@@ -383,8 +385,28 @@ internal static partial class CommitmentTests
         string body = string.Join("\n", PlannerReadCensusTests.CodeLines(BodyOf(runtime, "public bool OnEnemySoil(float x, float z)")));
         AssertFalse(body.Contains("usecloseststate"), "a point on no state counts as enemy: there is no closest-state fallback");
         AssertTrue(body.Contains("GetStateOfField(") && body.Contains("occupiedby") && body.Contains("IsAtWarWith("), "the state's alliance at war with this one, less the state this side occupies");
+        AssertTrue(body.Contains("CampaignMover.EnemySoilVerdict("), "the facts it reads go to the one verdict the harness tests (APointOnNoStateCountsAsEnemyForTheSkip)");
         string mover = string.Join("\n", PlannerReadCensusTests.CodeLines(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/CampaignMover.cs")));
         AssertTrue(mover.Contains("host.OnEnemySoil("), "the skip asks it, and not the tempo gate's EnemyHeld");
+    }
+
+    // The verdict of IsOnEnemySoil(false, point, returntrueifnotonstate: true, usestateoccupation: true) (139304-139336) on the facts the runtime
+    // reads, branch by branch (the runtime file reads Unity's tables and is outside the harness; the verdict is the pure half).
+    private static void APointOnNoStateCountsAsEnemyForTheSkip()
+    {
+        const int us = 0, them = 1;
+        AssertTrue(CampaignMover.EnemySoilVerdict(true, onAState: false, allianceKnown: false, atWar: false, occupiedBy: -1, ownAlliance: us),
+            "a point on no state counts as enemy ground (returntrueifnotonstate, no closest-state fallback), whatever else is known");
+        AssertTrue(CampaignMover.EnemySoilVerdict(true, onAState: true, allianceKnown: true, atWar: true, occupiedBy: them, ownAlliance: us),
+            "a state of an alliance at war with us, held by its owner: enemy ground");
+        AssertFalse(CampaignMover.EnemySoilVerdict(true, onAState: true, allianceKnown: true, atWar: true, occupiedBy: us, ownAlliance: us),
+            "the same state once we occupy it (usestateoccupation): ours");
+        AssertFalse(CampaignMover.EnemySoilVerdict(true, onAState: true, allianceKnown: true, atWar: false, occupiedBy: them, ownAlliance: us),
+            "a state of an alliance not at war with us: no enemy");
+        AssertFalse(CampaignMover.EnemySoilVerdict(true, onAState: true, allianceKnown: false, atWar: false, occupiedBy: them, ownAlliance: us),
+            "a state whose alliance index is out of range: no enemy");
+        AssertFalse(CampaignMover.EnemySoilVerdict(false, onAState: false, allianceKnown: false, atWar: false, occupiedBy: -1, ownAlliance: us),
+            "the game's tables missing: no refusal, the mover marches as before (gap 44), even for a point on no state");
     }
 
     // ---- the offensive list ----
