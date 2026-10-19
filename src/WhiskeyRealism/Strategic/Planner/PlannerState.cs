@@ -108,6 +108,36 @@ namespace WhiskeyRealism.Strategic.Planner
             CoveringPostKey = postKey;
         }
 
+        // Foresight F7 (D11 requirement-commitment): the last mass, the main effort's objective and the members the last non-empty mass had, by unit
+        // key (the identity that survives a load; a commander change re-keys it with the formation). Written once per review by the plan, after
+        // SelectMass (Commitment.UpdateLastMass); read by the claim table's row 4, which commits the members the mover dispatched. Persisted
+        // (PlannerStateDto.lastMass). -1 and no keys: there is none.
+        public int LastMassObjective = -1;
+        private readonly HashSet<string> _lastMassKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        public IReadOnlyCollection<string> LastMassKeys => _lastMassKeys;
+
+        public bool InLastMass(string unitKey)
+        {
+            return unitKey != null && _lastMassKeys.Contains(unitKey);
+        }
+
+        // The last mass of this review: exactly these members toward this objective. No objective, or no member with a key, clears it.
+        public void SetLastMass(int objectiveId, IEnumerable<string> keys)
+        {
+            _lastMassKeys.Clear();
+            if (objectiveId >= 0 && keys != null)
+                foreach (string key in keys)
+                    if (!string.IsNullOrEmpty(key)) _lastMassKeys.Add(key);
+            LastMassObjective = _lastMassKeys.Count > 0 ? objectiveId : -1;
+        }
+
+        // Dedicated restore (never the positional Restore): a record with no key is skipped.
+        public void RestoreLastMass(int objectiveId, IEnumerable<string> keys)
+        {
+            SetLastMass(objectiveId, keys);
+        }
+
         // A review's observation pass: BeginObservation, one Observe per own formation, then PruneUnobserved.
         public void BeginObservation()
         {
@@ -149,7 +179,7 @@ namespace WhiskeyRealism.Strategic.Planner
             _keyOfInstance[instanceId] = newKey;
             if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
             if (string.Equals(ReinforcementKey, oldKey, StringComparison.Ordinal)) ReinforcementKey = newKey;
-            CarryCovering(oldKey, newKey);
+            CarryKeys(oldKey, newKey);
             if (_departments.TryGetValue(oldKey, out var carried))
             {
                 _departments.Remove(oldKey);
@@ -166,12 +196,15 @@ namespace WhiskeyRealism.Strategic.Planner
             foreach (var pair in live) RekeyInstance(pair.Key, pair.Value);
         }
 
-        // A commander change re-keys a formation (name:commander): its place in the covering force moves with it.
-        private void CarryCovering(string oldKey, string newKey)
+        // A commander change re-keys a formation (name:commander): its place in the covering force and in the last mass moves with it.
+        private void CarryKeys(string oldKey, string newKey)
         {
-            if (!_coveringKeys.TryGetValue(oldKey, out int area)) return;
-            _coveringKeys.Remove(oldKey);
-            _coveringKeys[newKey] = area;
+            if (_coveringKeys.TryGetValue(oldKey, out int area))
+            {
+                _coveringKeys.Remove(oldKey);
+                _coveringKeys[newKey] = area;
+            }
+            if (_lastMassKeys.Remove(oldKey)) _lastMassKeys.Add(newKey);
         }
 
         // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.
@@ -180,7 +213,7 @@ namespace WhiskeyRealism.Strategic.Planner
             if (string.IsNullOrEmpty(unitKey)) return standing;
             _observed.Add(unitKey);
             if (_keyOfInstance.TryGetValue(instanceId, out var carriedFrom) && !string.Equals(carriedFrom, unitKey, StringComparison.Ordinal))
-                CarryCovering(carriedFrom, unitKey);
+                CarryKeys(carriedFrom, unitKey);
             if (_departments.TryGetValue(unitKey, out var known))
             {
                 _keyOfInstance[instanceId] = unitKey;

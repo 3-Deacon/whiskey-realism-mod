@@ -1197,7 +1197,8 @@ internal static class ConstructionSteeringTests
         string planner = Src("Strategic/Planner/CampaignPlannerRuntime.cs");
         AssertTrue(HasLine(planner, "DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);"), "the review reads the ledger's held set once");
         AssertEqual(1, CountOccurrences(planner, "CollectHeldBuilders("), "from one source");
-        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);"), "and hands it to G3's plan");
+        // Foresight F7 re-pins this call: the plan also takes the dispatched set, as a named argument on the next line.
+        AssertTrue(HasLine(planner, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders,"), "and hands it to G3's plan");
         AssertTrue(HasLine(planner, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "and hands them to the allocator");
         string allocator = Src("Strategic/Planner/ForceAllocator.cs");
         string run = BodyOf(allocator, "internal void Run(Allocation allocation)");
@@ -1216,7 +1217,7 @@ internal static class ConstructionSteeringTests
         AssertTrue(HasLine(rule, "if (i < 0 || !WlChainRules.MayMove(s.Own[i].Chain)) continue;"), "and only a formation the planner may move");
         AssertTrue(HasLine(rule, "if (!held[k].Wished) continue;"), "only a Wished builder is pinned");
         string theater = Src("Strategic/Planner/TheaterPlanner.cs");
-        AssertTrue(HasLine(BodyOf(theater, "internal static float MassFor("), "if (!MassEligible(f, s.MinMoraleForMovement) || c.Claims[i].Claimant == Claimant.Capital || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;"), "G3 counts a held builder in no mass");
+        AssertTrue(HasLine(BodyOf(theater, "internal static float MassFor("), "if (!Massable(c, i, objectiveId) || c.Claims[i].Claimant == Claimant.Capital || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;"), "G3 counts a held builder in no mass (F7: Massable is MassEligible, or committed for the last mass's objective)");
         AssertTrue(HasLine(BodyOf(theater, "private static void Reserve("), "c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, c.Covering,"), "and the plan's table is the one ClaimTable.Build makes, which raises no capital guard from a Wished builder, as the allocator");
         var pinRole = RoleOfFor(Claimant.PinnedBuilder);
         AssertEqual(FormationRole.DepotBuilder, pinRole.Role, "a pinned claim is a DepotBuilder");

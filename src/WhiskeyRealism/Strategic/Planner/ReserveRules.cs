@@ -252,6 +252,15 @@ namespace WhiskeyRealism.Strategic.Planner
             claim.Share = share;
         }
 
+        // Whether the depot ledger holds the formation as a builder of either kind (Marching or Wished): the depot's, not a mass's.
+        internal static bool IsHeldBuilder(IReadOnlyList<HeldBuilder> held, int instanceId)
+        {
+            if (held == null) return false;
+            for (int k = 0; k < held.Count; k++)
+                if (held[k].InstanceId == instanceId) return true;
+            return false;
+        }
+
         // Whether the depot ledger holds the formation as a builder still on its way (Wished false): the hold counts it nowhere.
         internal static bool IsMarchingBuilder(IReadOnlyList<HeldBuilder> held, int instanceId)
         {

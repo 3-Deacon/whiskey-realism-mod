@@ -68,10 +68,13 @@ namespace WhiskeyRealism.Strategic.Planner
         public readonly PlannerState State;
         public readonly IReadOnlyList<GaveUpMove> GaveUp;
         public readonly IReadOnlyList<HeldBuilder> Held;
+        // The formations the mover has sent toward an objective (MoveTracker.CollectDispatched), null when the harness gives none: row 4 reads it.
+        public readonly IReadOnlyList<DispatchedMove> Dispatched;
 
         public ClaimContext(CampaignSnapshot snapshot, SectorModel sectors, TheaterPlanner.SectorFacts facts, PlannerState state,
-                            IReadOnlyList<GaveUpMove> gaveUp, IReadOnlyList<HeldBuilder> held)
+                            IReadOnlyList<GaveUpMove> gaveUp, IReadOnlyList<HeldBuilder> held, IReadOnlyList<DispatchedMove> dispatched = null)
         {
+            Dispatched = dispatched;
             Snapshot = snapshot;
             Sectors = sectors;
             Facts = facts;
@@ -105,8 +108,12 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         internal const int RowPinnedBuilder = 1, RowImmobile = 2, RowRecover = 3, RowCommitted = 4, RowDepartmentMove = 5, RowCapital = 6, RowHold = 7, RowMass = 8, RowDepartmentReinforcement = 10;
 
-        // The producers of rows 4 and 5. Empty in F6a: F7 adds the commitment's, F8 the department move's.
-        internal static readonly IReadOnlyList<IClaimSource> RowSources = new IClaimSource[0];
+        // The producers of rows 4 and 5: F7's commitment (row 4); F8 adds the department move's (row 5).
+        internal static readonly IReadOnlyList<IClaimSource> RowSources = new IClaimSource[] { Commitment.Source };
+
+        // The reason a Mass claim carries when it was taken from a formation committed to the objective the push is still on: the reserve split
+        // never splits one of those off (the excess comes from the others).
+        internal const string ReasonCommitted = "committed";
 
         // The claimants a row may take a formation from; every other claim stands. The one definition of the "Takes from" column.
         internal static bool Takes(int row, Claimant current)
@@ -145,14 +152,15 @@ namespace WhiskeyRealism.Strategic.Planner
         // facts is the review's SectorFacts, null when a harness builds the table for a hand-made plan.
         internal static Claim[] Build(CampaignSnapshot s, SectorModel sectors, float[] holdNeed, float[] nearX, float[] nearZ, float capitalFloor,
                                       IReadOnlyList<HeldBuilder> held, IReadOnlyList<GaveUpMove> gaveUp, PlannerState state, CoveringInput covering,
-                                      IReadOnlyList<IClaimSource> rowSources, TheaterPlanner.SectorFacts facts, out float[] sectorHeld)
+                                      IReadOnlyList<IClaimSource> rowSources, TheaterPlanner.SectorFacts facts, out float[] sectorHeld,
+                                      IReadOnlyList<DispatchedMove> dispatched = null)
         {
             var claims = Fresh(s);
             sectorHeld = new float[sectors.Count];
             ClaimPinned(s, claims, held);
             ClaimImmobile(s, claims);
             ClaimRecover(s, claims);
-            var ctx = new ClaimContext(s, sectors, facts, state, gaveUp, held);
+            var ctx = new ClaimContext(s, sectors, facts, state, gaveUp, held, dispatched);
             ApplySources(rowSources, RowCommitted, ctx, claims);
             ApplySources(rowSources, RowDepartmentMove, ctx, claims);
             ReserveRules.Capital(s, capitalFloor, claims);
@@ -224,15 +232,27 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Row 8: the plan's mass (TheaterPlan.MassInstanceIds) takes the formations it may; a member another owner holds (a guard, a pinned
         // builder, a formation that cannot move) stays that owner's. A Mass claim keeps the sector and share the hold pass counted it with.
-        internal static void TakeMass(Claim[] claims, CampaignSnapshot s, IReadOnlyList<int> massInstanceIds)
+        // commitmentContinues: the push is still on the objective the last mass was on, so a formation committed to it is taken as such (reason
+        // ReasonCommitted); when the commitment ended this review a formation it held that the new mass takes is an ordinary member.
+        internal static void TakeMass(Claim[] claims, CampaignSnapshot s, IReadOnlyList<int> massInstanceIds, bool commitmentContinues = false)
         {
             for (int k = 0; k < massInstanceIds.Count; k++)
             {
                 int i = s.IndexOfOwn(massInstanceIds[k]);
                 if (i < 0 || !Takes(RowMass, claims[i].Claimant)) continue;
+                bool committed = commitmentContinues && claims[i].Claimant == Claimant.Committed;
                 claims[i].Claimant = Claimant.Mass;
-                claims[i].Reason = null;   // a covering member the push on the enemy capital takes is the mass's, not the force's
+                claims[i].Reason = committed ? ReasonCommitted : null;   // a covering member the push on the enemy capital takes is the mass's, not the force's
             }
+        }
+
+        // Whether the tracker gave up on sending the formation toward the objective (P8): the one test the mass and row 4 share.
+        internal static bool GaveUpOn(IReadOnlyList<GaveUpMove> gaveUp, int instanceId, int objectiveId)
+        {
+            if (gaveUp == null) return false;
+            for (int k = 0; k < gaveUp.Count; k++)
+                if (gaveUp[k].InstanceId == instanceId && gaveUp[k].ObjectiveId == objectiveId) return true;
+            return false;
         }
 
         // A formation the hold pass chose as a sector's reserve body: a Hold claim, or a PinnedBuilder the mass could use, counted in a sector.

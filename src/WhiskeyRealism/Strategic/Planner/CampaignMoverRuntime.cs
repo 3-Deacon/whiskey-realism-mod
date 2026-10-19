@@ -112,6 +112,21 @@ namespace WhiskeyRealism.Strategic.Planner
                 return GameVars.alliance[Alliance].IsAtWarWith(otherAlliance);
             }
 
+            // IsOnEnemySoil(false, point, returntrueifnotonstate: true, usestateoccupation: true), 139304-139336, which SetWaypoint's readiness
+            // refusal asks (91336-91350): the state at the point (no closest-state fallback, so a point on no state is enemy ground) belongs to an
+            // alliance at war with this one, and this one does not occupy it. Regroupment range is not modelled, so it refuses a little more than
+            // vanilla does.
+            public bool OnEnemySoil(float x, float z)
+            {
+                int state = BattlefieldSetup.GetStateOfField(new Vector3(x, 0f, z));
+                if (GameVars.nation == null || GameVars.alliance == null) return false;
+                if (state < 0 || state >= GameVars.nation.Length) return true;
+                var nation = GameVars.nation[state];
+                if (nation.alliance < 0 || nation.alliance >= GameVars.alliance.Length) return false;
+                if (!GameVars.alliance[nation.alliance].IsAtWarWith(Alliance)) return false;
+                return nation.occupiedby != Alliance;
+            }
+
             public void ListOffensive(int instanceId, bool listed)
             {
                 var unit = UnitOf(instanceId);

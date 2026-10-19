@@ -20,7 +20,7 @@ internal static class OwnershipTableTests
             ("OwnershipRowsTakeOnlyFromTheirListedClaimants", OwnershipRowsTakeOnlyFromTheirListedClaimants),
             ("TheFixtureRegistryDrivesEveryRowCase", TheFixtureRegistryDrivesEveryRowCase),
             ("ASourceMayTakeOnlyItsListedClaimants", ASourceMayTakeOnlyItsListedClaimants),
-            ("RowSourcesAreEmptyInF6a", RowSourcesAreEmptyInF6a),
+            ("RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove", RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove),
             ("ClaimSourcesReadOneContext", ClaimSourcesReadOneContext),
             ("TheHoldNeverCountsOrReservesCommittedOrDepartmentMove", TheHoldNeverCountsOrReservesCommittedOrDepartmentMove),
             ("APinnedBuilderStaysAReserveBodyAsShipped", APinnedBuilderStaysAReserveBodyAsShipped),
@@ -36,6 +36,7 @@ internal static class OwnershipTableTests
             ("ThePlanTakesItsMassIntoTheTableBeforeAnyoneElseReadsIt", ThePlanTakesItsMassIntoTheTableBeforeAnyoneElseReadsIt),
             ("G3AndG4ReadOneOwnershipTable", G3AndG4ReadOneOwnershipTable),
             ("ADepartmentMoveFormationIsInNoMassAndNoReinforcementCandidate", ADepartmentMoveFormationIsInNoMassAndNoReinforcementCandidate),
+            ("TheLockedReinforcementStaysMassedWhateverTheNeed", TheLockedReinforcementStaysMassedWhateverTheNeed),
             ("RoleOfCoversEveryRow", RoleOfCoversEveryRow),
             ("RoleSectorPerRowAsShipped", RoleSectorPerRowAsShipped),
             ("G4LaterStepsRunOverNoneAndMass", G4LaterStepsRunOverNoneAndMass),
@@ -140,6 +141,14 @@ internal static class OwnershipTableTests
         var covering = new PlanInput { Name = "the covering force's world", Witnesses = Claimant.Hold, WitnessReason = ForceAllocator.ReasonCoveringForce };
         covering.Make = () => CoveringForceTests.PlanInputWorld(out covering.S, out covering.Sectors);
         list.Add(covering);
+        // F7's last-mass worlds: a push whose dispatched corps dipped to readiness step 1 and is kept (a Mass claim with the committed reason), and a
+        // push D4 ended (the corps the new mass cannot use waits as a Committed claim).
+        var pushing = new PlanInput { Name = "F7: a dispatched corps kept through a readiness dip", Witnesses = Claimant.Mass, WitnessReason = ClaimTable.ReasonCommitted };
+        pushing.Make = () => CommitmentTests.PlanInputWorld(false, out pushing.S, out pushing.Sectors);
+        list.Add(pushing);
+        var ended = new PlanInput { Name = "F7: an ended push's corps waits", Witnesses = Claimant.Committed };
+        ended.Make = () => CommitmentTests.PlanInputWorld(true, out ended.S, out ended.Sectors);
+        list.Add(ended);
         return list;
     }
 
@@ -238,6 +247,15 @@ internal static class OwnershipTableTests
             Apply = (s, c) => ClaimTable.ClaimRecover(s, c) },
         new RowCase { Row = 4, Produces = Claimant.Committed, World = () => OneCorps(350f, 5000f),
             Apply = (s, c) => ApplyThroughSource(s, c, 4, Claimant.Committed) },
+        // F7's fixture: the real commitment source over a last mass the mover dispatched (row 4 takes only unowned formations; the others stand).
+        new RowCase { Row = 4, Produces = Claimant.Committed, World = () => OneCorps(350f, 5000f),
+            Apply = (s, c) =>
+            {
+                var state = new PlannerState { CurrentMainObjective = 98 };
+                state.SetLastMass(98, new[] { "corps1:1" });
+                var ctx = new ClaimContext(s, ExecutorFixtures.Sectors(s), null, state, null, null, new[] { new DispatchedMove { InstanceId = 1, ObjectiveId = 98 } });
+                ClaimTable.ApplySource(Commitment.Source, in ctx, c);
+            } },
         new RowCase { Row = 5, Produces = Claimant.DepartmentMove, World = () => OneCorps(350f, 5000f),
             Apply = (s, c) => ApplyThroughSource(s, c, 5, Claimant.DepartmentMove) },
         new RowCase { Row = 6, Produces = Claimant.Capital, World = () => OneCorps(20f, 5000f),
@@ -306,9 +324,13 @@ internal static class OwnershipTableTests
         AssertEqual(Claimant.Committed, claims[0].Claimant, "an unclaimed formation is");
     }
 
-    private static void RowSourcesAreEmptyInF6a()
+    // Foresight F7 fills row 4 (re-pinned from RowSourcesAreEmptyInF6a, which pinned the empty list F6a shipped): the commitment's producer
+    // is the production list's one entry, and row 5 has none until F8 fills it.
+    private static void RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove()
     {
-        AssertEqual(0, ClaimTable.RowSources.Count, "rows 4 and 5 have no producer until F7 and F8 fill theirs");
+        AssertEqual(1, ClaimTable.RowSources.Count, "one producer in the production list");
+        AssertEqual(ClaimTable.RowCommitted, ClaimTable.RowSources[0].Row, "F7's, for row 4");
+        AssertTrue(ReferenceEquals(Commitment.Source, ClaimTable.RowSources[0]), "the commitment's own source");
     }
 
     private sealed class RecordingSource : IClaimSource
@@ -554,7 +576,7 @@ internal static class OwnershipTableTests
             AssertEqual(plan.MassInstanceIds.Count, plan.Claims.Count(c => c.Claimant == Claimant.Mass), label + "and a Mass claim is a mass member");
             AssertEqual(s.Own.Count, plan.Claims.Select(c => c.InstanceId).Distinct().Count(), label + "no formation is claimed twice");
         }
-        AssertTrue(PlanInputs.Count >= 6, "the registry holds the oracle worlds, the row worlds and the covering world");
+        AssertTrue(PlanInputs.Count >= 8, "the registry holds the oracle worlds, the row worlds, the covering world and F7's two last-mass worlds");
     }
 
     // D11 requirement-claims: rows 1 to 7 are built before the candidates (Evaluate), row 8 right after SelectMass, row 9 (D8's pledge) reads
@@ -565,7 +587,7 @@ internal static class OwnershipTableTests
         string plan = BodyOf(planner, "internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,\n                                         IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,\n                                         out EnemyPicture picture");
         int evaluate = plan.IndexOf("Evaluate(inputs, candidates);", StringComparison.Ordinal);
         int select = plan.IndexOf("SelectMass(inputs, inputs.Scratch", StringComparison.Ordinal);
-        int take = plan.IndexOf("ClaimTable.TakeMass(inputs.Claims, s, plan.MassInstanceIds);", StringComparison.Ordinal);
+        int take = plan.IndexOf("ClaimTable.TakeMass(inputs.Claims, s, plan.MassInstanceIds, commitmentContinues);", StringComparison.Ordinal);
         int post = plan.IndexOf("PostFromOutside(inputs, plan);", StringComparison.Ordinal);
         int publish = plan.IndexOf("plan.Claims.AddRange(inputs.Claims);", StringComparison.Ordinal);
         AssertTrue(evaluate >= 0 && evaluate < select && select < take && take < post && post < publish, "rows 1-7 in Evaluate, the mass right after it is selected, the garrison pledge, then the publish");
@@ -595,7 +617,9 @@ internal static class OwnershipTableTests
                 AssertTrue(x.Withheld == withheld || (role == FormationRole.Hold && x.Withheld), label + "and its withholding");
             }
             int hold = plan.Claims.ToList().FindIndex(c => c.Claimant == Claimant.Hold && c.Reason == null);
-            AssertTrue(hold >= 0, label + "the world has a hold reserve");
+            // Foresight F7 widens this for its last-mass worlds, which have no sector hold: a capital guard or a waiting corps is as good a claim to rewrite.
+            if (hold < 0) hold = plan.Claims.ToList().FindIndex(c => c.Claimant == Claimant.Capital || c.Claimant == Claimant.Committed);
+            AssertTrue(hold >= 0, label + "the world has a claim the allocator hands a role from (a hold reserve, a capital guard or a waiting corps)");
             var changed = plan.Claims[hold];
             changed.Claimant = Claimant.Recover;
             plan.Claims[hold] = changed;
@@ -626,6 +650,50 @@ internal static class OwnershipTableTests
         // The garrison's inside pledge skips it as it skips the mass (row 9): source pin, the secession fixtures not reaching a row-5 claim.
         string post = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs"), "private static void PostFromOutside(");
         AssertTrue(post.Contains("Claimant.Committed") && post.Contains("Claimant.DepartmentMove"), "PostFromOutside's inside pledge names the two claimants it skips");
+    }
+
+    // Foresight F7 (D11 requirement-commitment): a committed locked D6 reinforcement is taken into the mass whatever the need, and its ten-day test
+    // is for a new pick only. The control is the oracle world's reinforcement (formation 3, a West formation under an East target); the second
+    // review adds a native corps strong enough to meet the need alone, which on any other day leaves the reinforcement out of the mass.
+    private static void TheLockedReinforcementStaysMassedWhateverTheNeed()
+    {
+        var state = new PlannerState();
+        OracleWorld(0, out var probe, out _, out _);
+        string key3 = probe.Own[probe.IndexOfOwn(3)].UnitKey;
+        state.Transfer(key3, Theater.West);
+        var first = OracleWorld(0, out var s, out var sectors, out _, null, state);
+        AssertEqual(3, first.ReinforcementInstanceId, "the first review takes formation 3 as the decision's reinforcement");
+        AssertEqual(key3, state.ReinforcementKey, "and locks it");
+        // The reinforcement has marched far from where it was picked: more than the ten days a NEW pick may take, which the lock does not repeat.
+        int i3 = s.IndexOfOwn(3);
+        var far = s.Own[i3];
+        far.X += 2500f;
+        far.WaypointX = far.X;
+        s.Own[i3] = far;
+        var native = EnemyPictureTests.Corps(77, 1290f, -880f, 30000f);
+        native.UnitKey = "Native Corps:77";
+        native.Name = native.UnitKey;
+        s.Own.Add(native);
+        var dispatched = new[] { new DispatchedMove { InstanceId = 3, ObjectiveId = first.MainObjectiveId } };
+        TheaterPlan Second(bool commitment)
+        {
+            bool before = PlannerSettings.MainEffortCommitment;
+            PlannerSettings.MainEffortCommitment = commitment;
+            try
+            {
+                var copy = new PlannerState { CurrentMainObjective = state.CurrentMainObjective, DecisionSerial = state.DecisionSerial, CampaignSeed = state.CampaignSeed,
+                                              ReinforcementKey = state.ReinforcementKey, ReinforcementDecision = state.ReinforcementDecision };
+                copy.Transfer(key3, Theater.West);
+                copy.SetLastMass(state.LastMassObjective, state.LastMassKeys);
+                return TheaterPlanner.Plan(s, SectorModel.Build(s), null, copy, null, null, ExecutorFixtures.Speed(), out _, out EnemyPicture _, null, null, null, dispatched);
+            }
+            finally { PlannerSettings.MainEffortCommitment = before; }
+        }
+        var kept = Second(true);
+        AssertTrue(kept.MassInstanceIds.Contains(3), "committed, the reinforcement stays in the mass though the native corps meets the need: " + string.Join(",", kept.MassInstanceIds));
+        AssertEqual(3, kept.ReinforcementInstanceId, "and is still the decision's reinforcement, though it is beyond the ten days a new pick may take");
+        var dropped = Second(false);
+        AssertFalse(dropped.MassInstanceIds.Contains(3), "control: without the commitment the native corps alone is the mass: " + string.Join(",", dropped.MassInstanceIds));
     }
 
     private static void RoleOfCoversEveryRow()

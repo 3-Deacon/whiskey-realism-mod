@@ -32,6 +32,7 @@ internal static partial class CoveringForceTests
             ("NoAxisSectorNoCoveringForce", NoAxisSectorNoCoveringForce),
             ("CicSideHasNoCoveringForce", CicSideHasNoCoveringForce),
             ("MembersAreTheAxisHoldReservesNearestThePost", MembersAreTheAxisHoldReservesNearestThePost),
+            ("CoveringPoolTestsWithCommittedClaims", CoveringPoolTestsWithCommittedClaims),
             ("NoSectorGivesMoreThanItsAxisShare", NoSectorGivesMoreThanItsAxisShare),
             ("TheBodyCrossingTheCapIsTaken", TheBodyCrossingTheCapIsTaken),
             ("MembersOrderedByTheStoredVerdictsPost", MembersOrderedByTheStoredVerdictsPost),
@@ -255,6 +256,24 @@ internal static partial class CoveringForceTests
         w.Sectors = SectorModel.Build(s);
         if (plan) w.Plan = TheaterPlanner.Plan(s, w.Sectors, null, w.State, null, null, ExecutorFixtures.Speed(), out _, out w.Picture);
         return w;
+    }
+
+    // Foresight F7: a formation another owner holds is in no covering pool (the hold pass takes only unowned formations, row 7 from None). Row 4
+    // claims one of the world's corps Committed before the hold pass runs: it is not a member, keeps its claim, and the others still cover.
+    private static void CoveringPoolTestsWithCommittedClaims()
+    {
+        var plain = CoverWorld();
+        var members = MemberIds(plain.Plan);
+        AssertTrue(members.Count >= 1, "the world has a covering force: " + string.Join(",", members));
+        int committed = members[0];
+        var s = CoverWorld(plan: false).S;
+        var sectors = SectorModel.Build(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, out EnemyPicture _, null, null,
+            new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowCommitted, Claimant.Committed, committed) });
+        var claim = plan.Claims.First(c => c.InstanceId == committed);
+        AssertTrue(claim.Claimant == Claimant.Committed || claim.Claimant == Claimant.Mass, "the committed corps keeps the claim row 4 gave it (or the new mass takes it, row 8): " + claim.Claimant);
+        AssertFalse(MemberIds(plan).Contains(committed), "and is no member of the force");
+        AssertEqual(-1, claim.SectorId, "nor counted in any sector's hold");
     }
 
     // The covering force's world as a plan-input fixture for OwnershipTableTests' registry: the plan, its snapshot and sectors.

@@ -444,6 +444,12 @@ namespace WhiskeyRealism.Strategic.Planner
         // after Plan. Kind None carries the Reason it is unbound.
         public CoveringPlan Covering = new CoveringPlan();
 
+        // Foresight F7 (D11 requirement-commitment): the instance ids whose commitment to the last mass ended this review, in snapshot order: the
+        // members the last mass had that the review's mass did not keep (the committed-wait formations of a push that ended, and the members a
+        // continuing push dropped). The mover takes each that is still in vanilla's offensive list off it, unless it is a MainEffort or Support
+        // again; [Reserves] endedListed= and endedMarching= read the previous review's.
+        public List<int> CommitmentEnded = new List<int>();
+
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
         {

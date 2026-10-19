@@ -476,7 +476,7 @@ internal static class ForesightTelemetryTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReservesRow.cs");
         AssertContains(src, "ForceAllocator.RoleStrength(", "the row calls the allocator's capital sum");
         AssertContains(src, "ForceAllocator.CountedHold(", "and its hold sum");
-        AssertEqual(1, Regex.Matches(src, @"HoldStrength\(").Count, "the only strength it adds up itself is a department's, once");
+        AssertEqual(2, Regex.Matches(src, @"HoldStrength\(").Count, "the only strengths it adds up itself are a department's and (foresight F7, re-pinned) the committed corps' men, once each");
         AssertFalse(src.Contains(".Strength") || src.Contains("_roleSector") || src.Contains("SectorId == sector"), "no capital or hold sum of its own");
     }
 
@@ -487,7 +487,9 @@ internal static class ForesightTelemetryTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReservesRow.cs");
         var uses = Regex.Matches(src, @"previousPlan\.(\w+)");
         AssertTrue(uses.Count >= 1, "the row reads yesterday's plan");
-        foreach (Match use in uses) AssertEqual("MassInstanceIds", use.Groups[1].Value, "yesterday's plan is read for its mass list alone");
+        // Foresight F7 re-pins this: the row also reads yesterday's CommitmentEnded (endedListed=, endedMarching=). Both are id lists, telemetry
+        // only; no objective, role or decision is read back from an earlier plan.
+        foreach (Match use in uses) AssertTrue(use.Groups[1].Value == "MassInstanceIds" || use.Groups[1].Value == "CommitmentEnded", "yesterday's plan is read for its mass and ended-commitment id lists alone: " + use.Groups[1].Value);
     }
 
     // [Reserves] is written every review, from the Full path after [Allocation], with no signature compare.

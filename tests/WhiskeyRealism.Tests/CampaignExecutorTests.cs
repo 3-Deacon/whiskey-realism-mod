@@ -418,7 +418,9 @@ internal static class CampaignExecutorTests
         AssertTrue(collect > 0 && plan > collect && allocate > plan, "collect, plan, then allocate");
         AssertEqual(1, review.Split(new[] { "CollectGaveUp(" }, StringSplitOptions.None).Length - 1, "collected once per review");
         AssertFalse(review.Contains("previousPlan") || review.Contains("Resolve("), "no objective is read back from an earlier plan");
-        AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);"), "G3 reads the moves with their objectives (and G5c's held builders)");
+        // Foresight F7 re-pins this call: the plan also takes the tracker's dispatched set (named argument, on the line after the held builders).
+        AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders,"), "G3 reads the moves with their objectives (and G5c's held builders)");
+        AssertTrue(HasLine(review, "dispatched: dispatched);"), "and the formations the mover has dispatched (F7's commitment)");
         AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
     }
 
@@ -1280,7 +1282,7 @@ internal static class CampaignExecutorTests
     private static void ThePlanBuildsThePictureBeforeItsFirstEvaluate()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs");
-        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,\n                                         IReadOnlyList<IClaimSource> rowSources = null)\n        {");
+        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,\n                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null)\n        {");
         AssertInOrder(plan, "TheaterPlanner.Plan", "picture = inputs.Picture = EnemyPicture.Build(s, (x, z) => IsScouted(inputs, x, z));",
             "var candidates = new List<Candidate>();", "int unknown = review.Unknown, probed = 0;");
         // The two Evaluate passes of a terrain-filling review: both after the picture.
@@ -1694,11 +1696,19 @@ internal sealed class FakeMoverHost : IMoverHost
     public readonly List<(int id, float x, float z)> Moves = new List<(int id, float x, float z)>();
     public readonly List<(int id, bool listed)> Listed = new List<(int id, bool listed)>();
     public readonly List<int> Raised = new List<int>();
+    // Foresight F7: vanilla's campaign stop (IMoveHost.Stop) and the readiness refusal's enemy-ground test (IMoverHost.OnEnemySoil), recorded. Calls
+    // is every move and stop in the order the mover made them. The west (x <= 150) is enemy ground, as in State.
+    public Func<float, float, bool> EnemySoil = (x, z) => x <= 150f;
+    public bool StopResult = true;
+    public readonly List<int> Stops = new List<int>();
+    public readonly List<string> Calls = new List<string>();
 
     public bool TargetRestricted(float x, float z) { return Restricted(x, z); }
     public int StateAllianceAt(float x, float z) { return State(x, z); }
     public bool AtWar(int otherAlliance) { return otherAlliance != Own && otherAlliance >= 0 && otherAlliance <= 1; }
-    public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
+    public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); Calls.Add("move:" + instanceId); return MoveResult; }
+    public bool Stop(int instanceId) { Stops.Add(instanceId); Calls.Add("stop:" + instanceId); return StopResult; }
+    public bool OnEnemySoil(float x, float z) { return EnemySoil(x, z); }
     public void ListOffensive(int instanceId, bool listed) { Listed.Add((instanceId, listed)); }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
 }

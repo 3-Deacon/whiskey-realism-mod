@@ -459,6 +459,12 @@ namespace WhiskeyRealism.Strategic
                 CoveringVerdictKnown = s.CoveringVerdictKnown,
                 CoveringPostKey = s.CoveringPostKey
             };
+            if (s.LastMassObjective >= 0)
+            {
+                dto.LastMass = new LastMassDto { ObjectiveId = s.LastMassObjective };
+                dto.LastMass.UnitKeys.AddRange(s.LastMassKeys);
+                dto.LastMass.UnitKeys.Sort(string.CompareOrdinal);   // a stable file for the same state
+            }
             foreach (var pair in s.CoveringKeys)
                 dto.CoveringKeys.Add(new CoveringKeyDto { UnitKey = pair.Key, AreaIndex = pair.Value });
             dto.CoveringKeys.Sort((a, b) => string.CompareOrdinal(a.UnitKey, b.UnitKey));   // a stable file for the same state
@@ -531,6 +537,7 @@ namespace WhiskeyRealism.Strategic
                 foreach (var k in dto.CoveringKeys)
                     if (k != null && !string.IsNullOrEmpty(k.UnitKey) && k.AreaIndex >= 0) covering.Add(new KeyValuePair<string, int>(k.UnitKey, k.AreaIndex));
             p.State.RestoreCovering(covering, dto.CoveringForward, dto.CoveringVerdictDays, dto.CoveringVerdictKnown, dto.CoveringPostKey);
+            if (dto.LastMass != null) p.State.RestoreLastMass(dto.LastMass.ObjectiveId, dto.LastMass.UnitKeys);
             if (dto.Beliefs != null)
                 foreach (var b in dto.Beliefs)
                 {

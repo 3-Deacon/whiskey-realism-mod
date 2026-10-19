@@ -1108,6 +1108,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int k = 0; k < members.Count; k++)
                 {
                     int i = members[k];
+                    // A formation committed to the objective is not split off: the excess comes from the others, farthest first (D11 requirement-claims).
+                    if (string.Equals(_claim[i].Reason, ClaimTable.ReasonCommitted, StringComparison.Ordinal)) continue;
                     float strength = Math.Max(0f, _s.Own[i].Strength);
                     if (massStrength - strength < keep) break; // the reserve is a suffix by distance: never a nearer formation than one kept
                     massStrength -= strength;

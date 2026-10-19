@@ -120,6 +120,9 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("coveringVerdictDays")] public int CoveringVerdictDays;
         [JsonProperty("coveringVerdictKnown")] public bool CoveringVerdictKnown;
         [JsonProperty("coveringPostKey")] public string CoveringPostKey;
+        // Foresight F7: the last mass (the objective of the main effort and the unit keys of its members), which the commitment reads. Additive: an
+        // older file has none and the first push after the load starts its own.
+        [JsonProperty("lastMass")] public LastMassDto LastMass;
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;
         [JsonProperty("beliefs")] public List<EnemyBeliefDto> Beliefs = new List<EnemyBeliefDto>();
@@ -141,6 +144,12 @@ namespace WhiskeyRealism.Strategic
         [JsonProperty("unitKey")] public string UnitKey;
         [JsonProperty("unitKeys")] public List<string> UnitKeys = new List<string>();
         [JsonProperty("quietSinceDay")] public int QuietSinceDay = -1;
+    }
+
+    internal class LastMassDto
+    {
+        [JsonProperty("objectiveId")] public int ObjectiveId = -1;
+        [JsonProperty("unitKeys")] public List<string> UnitKeys = new List<string>();
     }
 
     internal class CoveringKeyDto

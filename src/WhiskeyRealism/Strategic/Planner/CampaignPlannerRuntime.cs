@@ -143,6 +143,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     // each move was issued for, G4 takes the role from a formation that gave up on the target it would send it to.
                     var gaveUp = new List<GaveUpMove>();
                     MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp, snapshot.DaySerial);
+                    // F7: the formations the mover has sent toward an objective (the tracker's planner moves in any state but GaveUp): G3's row 4
+                    // commits the members of the last mass among them.
+                    var dispatched = new List<DispatchedMove>();
+                    MoveTrackers.For(alliance)?.CollectDispatched(dispatched);
                     // G5c: the builders the depot ledger holds (it was written at the last review). G3 counts none of them in a mass, G4 pins
                     // a Wished one: one published set, read once.
                     var heldBuilders = new List<HeldBuilder>();
@@ -158,7 +162,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
-                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders,
+                            dispatched: dispatched);
                     }
                     // G8: the ordinary garrison posts join D8's secession posts in the plan, where the allocation seats both.
                     GarrisonRuntime.PlanPosts(snapshot, plan);

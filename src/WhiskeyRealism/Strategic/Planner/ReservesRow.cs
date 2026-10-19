@@ -17,6 +17,12 @@ namespace WhiskeyRealism.Strategic.Planner
     //                            assigned against max(HoldNeed, the garrison minimum), the allocator's own sums
     //   holdReserve=<unit+...>   the formations the allocation gave Hold hold-reserve, at most MaxHoldReserve names in snapshot order, quoted as one
     //                            value ("-" with none): the hold reserves the covering force's members are chosen from (F6b-2)
+    //   committed=<n>/<men>      the formations committed this review (a Mass claim with the committed reason, a Committed claim) and their
+    //                            HoldStrength (foresight F7): a push's corps kept through a readiness dip, and an ended push's corps waiting
+    //   endedListed=<n>          yesterday's CommitmentEnded formations that are neither a MainEffort nor a Support today and are in vanilla's
+    //                            offensive list again: reported, not bounded (vanilla's job 4 may list a corps again, a legitimate act)
+    //   endedMarching=<n>        yesterday's CommitmentEnded formations that yesterday's allocation held as committed-wait (the ones the stop was
+    //                            for), that are a Hold today and that still show a path or a waiting order: 0 when the stop works
     //   dept=<theater:have,...>  each department's HoldStrength over its formations that count toward coverage; "none" when none do
     //   enemyOnOwnSoil           live land beliefs (EnemyTraits.OnOwnSoil, not afloat) the side holds today
     //   vanillaDefActive         own formations in a vanilla defensive operation today
@@ -41,7 +47,11 @@ namespace WhiskeyRealism.Strategic.Planner
               .Append('/').Append(plan.CapitalFloorStrength.ToString("0", inv))
               .Append(" covering=").Append(plan.Covering.Held.ToString("0", inv)).Append('/').Append(plan.Covering.Need.ToString("0", inv))
               .Append(" hold=").Append(HoldShares(s, sectors, plan, a, inv))
-              .Append(" holdReserve=").Append(HoldReserve(s, a))
+              .Append(" holdReserve=").Append(HoldReserve(s, a));
+            CountCommitment(s, plan, a, previous, previousPlan, out int committed, out float men, out int endedListed, out int endedMarching);
+            sb.Append(" committed=").Append(committed).Append('/').Append(men.ToString("0", inv))
+              .Append(" endedListed=").Append(endedListed)
+              .Append(" endedMarching=").Append(endedMarching)
               .Append(" dept=").Append(DepartmentStrengths(s, sectors, state, inv))
               .Append(" enemyOnOwnSoil=").Append(EnemiesOnOwnSoil(s))
               .Append(" vanillaDefActive=").Append(InVanillaDefence(s));
@@ -50,6 +60,38 @@ namespace WhiskeyRealism.Strategic.Planner
               .Append(" vanillaDefHoldOrCovering=").Append(holdOrCovering)
               .Append(" massInVanillaDef=").Append(mass);
             return sb.ToString();
+        }
+
+        // The commitment counts of the row. committed is read from the published table: a continuing push's committed corps are Mass claims with
+        // the committed reason, an ended push's waiting corps Committed claims (a corps of an ended push that the new mass took is an ordinary member
+        // and is not counted). The two ended counts read YESTERDAY's CommitmentEnded, allocation and today's snapshot.
+        private static void CountCommitment(CampaignSnapshot s, TheaterPlan plan, Allocation a, Allocation previous, TheaterPlan previousPlan,
+                                            out int committed, out float men, out int endedListed, out int endedMarching)
+        {
+            committed = endedListed = endedMarching = 0;
+            men = 0f;
+            for (int k = 0; k < plan.Claims.Count; k++)
+            {
+                var claim = plan.Claims[k];
+                bool isCommitted = claim.Claimant == Claimant.Committed
+                    || (claim.Claimant == Claimant.Mass && string.Equals(claim.Reason, ClaimTable.ReasonCommitted, StringComparison.Ordinal));
+                int i = isCommitted ? s.IndexOfOwn(claim.InstanceId) : -1;
+                if (i < 0) continue;
+                committed++;
+                men += ReserveRules.HoldStrength(s.Own[i]);
+            }
+            if (previousPlan == null) return;
+            for (int k = 0; k < previousPlan.CommitmentEnded.Count; k++)
+            {
+                int id = previousPlan.CommitmentEnded[k];
+                int i = s.IndexOfOwn(id);
+                if (i < 0 || !a.TryGet(id, out var today)) continue;
+                var flags = s.Own[i].Flags;
+                if (today.Role != FormationRole.MainEffort && today.Role != FormationRole.Support && (flags & FormationFlags.InOffensiveOps) != 0) endedListed++;
+                bool waited = previous != null && previous.TryGet(id, out var was) && was.Role == FormationRole.Hold
+                    && string.Equals(was.Reason, ForceAllocator.ReasonCommittedWait, StringComparison.Ordinal);
+                if (waited && today.Role == FormationRole.Hold && (flags & (FormationFlags.HasPath | FormationFlags.MoveQueued)) != 0) endedMarching++;
+            }
         }
 
         // "sector:held/need,..." over the sectors with the largest need, the lower id first among equals. The need is the allocator's

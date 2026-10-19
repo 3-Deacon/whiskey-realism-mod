@@ -15,16 +15,17 @@ internal static class TestClaims
     private static readonly ConditionalWeakTable<TheaterPlan, object> Built = new ConditionalWeakTable<TheaterPlan, object>();
 
     // Gives a hand-built plan its table. held is the depot ledger's held builders (the list the planner's Plan receives), gaveUp and state the
-    // inputs of the rows F7 and F8 fill (unread by F6a's rows). Returns the plan.
+    // inputs of the rows F7 and F8 fill; dispatched is the formations the mover has sent toward an objective (F7's row 4 reads it with the state;
+    // with either missing the commitment claims nothing, which is what every hand-built plan wants). Returns the plan.
     internal static TheaterPlan For(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, IReadOnlyList<HeldBuilder> held = null,
-                                    IReadOnlyList<GaveUpMove> gaveUp = null, PlannerState state = null)
+                                    IReadOnlyList<GaveUpMove> gaveUp = null, PlannerState state = null, IReadOnlyList<DispatchedMove> dispatched = null)
     {
         var need = new float[sectors.Count];
         var believed = new float[sectors.Count];
         var nearX = new float[sectors.Count];
         var nearZ = new float[sectors.Count];
         ForceAllocator.SectorInputs(plan, s, sectors, need, believed, nearX, nearZ);
-        var claims = ClaimTable.Build(s, sectors, need, nearX, nearZ, plan.CapitalFloorStrength, held, gaveUp, state, null, ClaimTable.RowSources, null, out float[] sectorHeld);
+        var claims = ClaimTable.Build(s, sectors, need, nearX, nearZ, plan.CapitalFloorStrength, held, gaveUp, state, null, ClaimTable.RowSources, null, out float[] sectorHeld, dispatched);
         ClaimTable.TakeMass(claims, s, plan.MassInstanceIds);
         plan.Claims.Clear();
         plan.Claims.AddRange(claims);

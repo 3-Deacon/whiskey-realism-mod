@@ -31,6 +31,15 @@ namespace WhiskeyRealism.Strategic.Planner
         public int ObjectiveId;     // -1 when the move was not toward an objective (a depot, a recon hold point, a supply source)
     }
 
+    // A formation the mover sent toward an objective (foresight F7, D11 requirement-commitment): the planner's move record of it, in any state
+    // but GaveUp. The plan reads the set to tell a member of the last mass that the mover dispatched from one it did not (the tempo gate deferred
+    // it, or it has not been sent yet): only the first is committed.
+    public struct DispatchedMove
+    {
+        public int InstanceId;
+        public int ObjectiveId;
+    }
+
     // The move bookkeeping of one alliance (P8): at most MaxMovesPerDay MoveUnitTo calls per review day, a move judged at the
     // next review (confirmed when the formation's last waypoint moved toward the target or it covered ConfirmFraction of the
     // way, else failed), one retry, then given up for that target (a new target starts afresh). A move queued behind a running
@@ -40,6 +49,8 @@ namespace WhiskeyRealism.Strategic.Planner
     // A record's life: Issued (MoveUnitTo took it) or Queued (an order was running) -> judged: Confirmed, or Failed (one
     // retry allowed) -> reissued -> judged again: Confirmed or GaveUp. A refusal (vanilla refused the target, or it is
     // restricted ground) is a miss without the waiting: RecordRefused. A restored record is settled (RestoreState).
+    // The stop (foresight F7) is a record of its own kind: RecordStop writes it at the formation's own position when the mover stops an ended
+    // push's corps; it spends none of the budget, and Judge reads it by the stop's own test (see RecordStop).
     public sealed class MoveTracker
     {
         public const int MaxMovesPerDay = 6;
@@ -73,6 +84,7 @@ namespace WhiskeyRealism.Strategic.Planner
             public string Role;          // the role the move was sent for, for the miss row (not persisted)
             public MoveBudget Budget;
             public State State;
+            public bool Stop;            // a stop (RecordStop), judged by whether the formation still moves, never by distance (not persisted)
         }
 
         private readonly Dictionary<int, Entry> _entries = new Dictionary<int, Entry>();
@@ -139,6 +151,27 @@ namespace WhiskeyRealism.Strategic.Planner
             };
         }
 
+        // The mover stopped the formation where it stands (D11 requirement-commitment-mover): an Issued record at its own position with the stop
+        // flag, role Hold, toward no objective, written without Spend (the day's budget bounds MoveUnitTo calls, and a stop is not one). It
+        // replaces the push's record, which ends the formation's dispatch, and keeps it in transit (withheld from vanilla's pools) until the next
+        // review judges it: Judge confirms a stop when the formation no longer moves and fails it when it does, never by the distance rule
+        // (whose start distance is 0 for a record at the formation's own position).
+        public void RecordStop(int instanceId, float x, float z, int daySerial, string unitKey)
+        {
+            _entries.TryGetValue(instanceId, out var previous);
+            _entries[instanceId] = new Entry
+            {
+                InstanceId = instanceId, UnitKey = unitKey ?? (previous != null ? previous.UnitKey : null),
+                FromX = x, FromZ = z, TargetX = x, TargetZ = z,
+                IssuedDay = daySerial, Retries = 0, ObjectiveId = -1, Role = "Hold", Budget = MoveBudget.Planner, State = State.Issued, Stop = true
+            };
+        }
+
+        public bool IsStop(int instanceId)
+        {
+            return _entries.TryGetValue(instanceId, out var e) && e.Stop;
+        }
+
         // The move the tracker holds for the formation, for the miss row (a failed or given-up move names its target, start and tries).
         public bool TryGetMove(int instanceId, out float fromX, out float fromZ, out float targetX, out float targetZ, out int issuedDay, out int retries, out int objectiveId, out string role)
         {
@@ -161,11 +194,18 @@ namespace WhiskeyRealism.Strategic.Planner
             return true;
         }
 
-        public MoveOutcome Judge(int instanceId, float nowX, float nowZ, float waypointX, float waypointZ, int daySerial)
+        // moving (the snapshot's HasPath | MoveQueued) is read for a stop record only: a stop is Confirmed when the formation no longer moves and
+        // Failed when it does (judged once, never retried and never given up). Every other record is judged by the distance rule.
+        public MoveOutcome Judge(int instanceId, float nowX, float nowZ, float waypointX, float waypointZ, int daySerial, bool moving = false)
         {
             if (!_entries.TryGetValue(instanceId, out var e)) return MoveOutcome.None;
             if (e.State == State.Queued) return MoveOutcome.Queued;
             if (e.State != State.Issued || daySerial <= e.IssuedDay) return MoveOutcome.None;
+            if (e.Stop)
+            {
+                e.State = moving ? State.Failed : State.Confirmed;
+                return moving ? MoveOutcome.Failed : MoveOutcome.Confirmed;
+            }
             float start = Distance(e.FromX, e.FromZ, e.TargetX, e.TargetZ);
             bool towardTarget = Distance(waypointX, waypointZ, e.TargetX, e.TargetZ) < start - WaypointEpsilon;
             bool coveredShare = Distance(nowX, nowZ, e.TargetX, e.TargetZ) <= (1f - ConfirmFraction) * start;
@@ -238,6 +278,18 @@ namespace WhiskeyRealism.Strategic.Planner
             foreach (var pair in _entries)
                 if (pair.Value.State == State.GaveUp && pair.Value.Budget == MoveBudget.Planner && !Expired(pair.Value, daySerial))
                     into.Add(new GaveUpMove { InstanceId = pair.Key, TargetX = pair.Value.TargetX, TargetZ = pair.Value.TargetZ, ObjectiveId = pair.Value.ObjectiveId });
+            into.Sort((a, b) => a.InstanceId.CompareTo(b.InstanceId));
+        }
+
+        // The formations the mover has sent toward an objective (DispatchedMove), ordered by instance id: the planner's moves in any state but
+        // GaveUp, so a failed move still owes its retry and a restored record whose retry is unused is still a dispatch. A reconnaissance
+        // record is a scout's, a record toward no objective a depot's, a post's or a stop's.
+        public void CollectDispatched(List<DispatchedMove> into)
+        {
+            into.Clear();
+            foreach (var pair in _entries)
+                if (pair.Value.Budget == MoveBudget.Planner && pair.Value.ObjectiveId >= 0 && pair.Value.State != State.GaveUp)
+                    into.Add(new DispatchedMove { InstanceId = pair.Key, ObjectiveId = pair.Value.ObjectiveId });
             into.Sort((a, b) => a.InstanceId.CompareTo(b.InstanceId));
         }
 

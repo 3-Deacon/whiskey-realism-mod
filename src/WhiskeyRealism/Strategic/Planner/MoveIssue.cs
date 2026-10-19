@@ -11,6 +11,10 @@ namespace WhiskeyRealism.Strategic.Planner
         bool Move(int instanceId, float x, float z);
         // userails = userivers = true on the group: vanilla's AI default (112862-112867).
         void RaiseTransportModes(int instanceId);
+        // Vanilla's own campaign stop on the formation's regiment (foresight F7, D11 requirement-commitment-mover): StopRegiment, then the removal
+        // of every order waiting for it in AICampaign's queue, as the port operation of CheckFleetMovements does (13350-13351). No move is made.
+        // False when the formation is not one of the reviewing alliance's groups.
+        bool Stop(int instanceId);
     }
 
     // One move through the tracker (P8): a retry after a failed attempt at the same target is reported as Retried, a move queued

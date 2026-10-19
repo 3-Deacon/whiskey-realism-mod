@@ -1149,7 +1149,8 @@ internal static class ReconExecutorTests
         AssertTrue(HasLine(mover, "tracker.SettleExpiredQueued(s.DaySerial);"), "the mover applies the bound");
         AssertTrue(HasLine(mover, "tracker.SettleQueued(f.InstanceId, MoveBudget.Planner, RoleStillSends(allocation, f.InstanceId), orderRunning);"), "and the rule for its own records");
         AssertTrue(HasLine(mover, "tracker.SettleQueued(f.InstanceId, MoveBudget.Recon, wanted: true, orderRunning);"), "and the ended order for recon's, whose mission only the recon pass knows");
-        AssertTrue(HasLine(mover, "if (!tracker.InTransit(f.InstanceId) || orderRunning) continue;"), "judging only what is still in transit and has no order ahead");
+        // Foresight F7 re-pins this line: a stop record is judged by whether the formation still moves, so an order running is its answer.
+        AssertTrue(HasLine(mover, "if (!tracker.InTransit(f.InstanceId) || (orderRunning && !tracker.IsStop(f.InstanceId))) continue;"), "judging only what is still in transit and has no order ahead, a stop excepted");
         string recon = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReconExecutor.cs"), "private void SettleQueuedMoves(");
         AssertTrue(HasLine(recon, "tracker.SettleExpiredQueued(s.DaySerial);"), "recon applies the bound too");
         AssertTrue(HasLine(recon, "tracker.SettleQueued(id, MoveBudget.Recon, ledger.IsRecon(id) || ledger.IsRecalling(id), orderRunning);"), "recon settles its own records by its missions");
@@ -1371,6 +1372,7 @@ internal sealed class FakeReconHost : IReconHost
     public WlChainClass LiveChain(int instanceId) { return Chain.TryGetValue(instanceId, out var c) ? c : WlChainClass.None; }
     public bool TargetRestricted(float x, float z) { return Restricted(x, z); }
     public bool Move(int instanceId, float x, float z) { Moves.Add((instanceId, x, z)); return MoveResult; }
+    public bool Stop(int instanceId) { return true; }
     public void RaiseTransportModes(int instanceId) { Raised.Add(instanceId); }
     public CavalrySend SendCavalryOrder(int instanceId, int orderCode) { Orders.Add((instanceId, orderCode)); return OrderResult; }
 }
@@ -1393,6 +1395,8 @@ internal sealed class OneReviewHost : IMoverHost, IReconHost
         _running.Add(instanceId);
         return true;
     }
+    public bool Stop(int instanceId) { return true; }
+    public bool OnEnemySoil(float x, float z) { return x <= 150f; }
     public void RaiseTransportModes(int instanceId) { }
     public int StateAllianceAt(float x, float z) { return x <= 150f ? 1 : 0; }
     public bool AtWar(int otherAlliance) { return otherAlliance == 1; }
