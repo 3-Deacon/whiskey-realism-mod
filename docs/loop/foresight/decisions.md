@@ -97,3 +97,12 @@ The user may override each of these.
 4. Gap 41: `G3AndG4ReadOneOwnershipTable` falls back to a capital guard or a waiting corps when a world has no plain hold reserve, the same shape of change as F6b-2's gap 26. Accepted.
 
 The user may override each of these.
+
+## Integrator decisions, 2026-10-18 (phase 2 build, F8)
+
+1. Gap 45: `DepartmentMoves` is keyed by unit key, as gap 36 ruled for the last mass.
+2. Gaps 46-47: the logic lives in `DepartmentReinforcement.cs`, and the donor department comes from one shared `StandingDepartment` function. The parameter shape differs from the plan text; the behaviour is the plan's.
+3. Gap 53: D6's donor test asks where a candidate stands, not its home department. This follows the GAP-07 refinement (a home department changes only on arrival): a formation is counted where it really is. The three re-pinned shipped worlds are accepted.
+4. Gaps 49 and 54 are accepted as logged.
+
+The user may override each of these.
