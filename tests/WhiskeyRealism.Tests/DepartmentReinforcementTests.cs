@@ -292,8 +292,8 @@ internal static partial class DepartmentReinforcementTests
         AssertEqual(0, off.Claims.Count(c => c.Claimant == Claimant.DepartmentMove), "claims nobody");
         AssertEqual(0, off.DepartmentShort.Count, "publishes no shortfall");
         AssertEqual(0, off.DepartmentTransitions.Count, "and no transition");
-        AssertEqual(Claimant.Hold, ClaimOf(off, 3).Claimant == Claimant.Hold ? Claimant.Hold : ClaimOf(off, 3).Claimant == Claimant.None ? Claimant.Hold : ClaimOf(off, 3).Claimant,
-            "the formation falls to the holds (or nobody) where it stands: " + Describe(off));
+        var released = ClaimOf(off, 3).Claimant;
+        AssertTrue(released == Claimant.Hold || released == Claimant.None, "the formation falls to the holds (or to nobody) where it stands: " + Describe(off));
         var again = Replan(Standard(), state);
         AssertEqual(1, again.Claims.Count(c => c.Claimant == Claimant.DepartmentMove), "back on, the next review decides afresh");
     }

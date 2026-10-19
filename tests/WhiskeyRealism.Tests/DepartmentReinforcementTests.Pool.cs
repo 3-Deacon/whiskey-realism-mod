@@ -130,8 +130,9 @@ internal static partial class DepartmentReinforcementTests
     private static void NeverAReserveMassCoveringGarrisonOrBuilder()
     {
         var standard = Replan(Standard(), new PlannerState());
-        AssertTrue(standard.Claims.Where(c => c.Claimant == Claimant.Hold).All(c => c.Claimant != Claimant.DepartmentMove) && Picked(standard) == 3,
-            "the hold reserves stay where they are; only an unclaimed corps goes: " + Describe(standard));
+        int given = Picked(standard);
+        AssertEqual(3, given, "an unclaimed corps goes: " + Describe(standard));
+        AssertTrue(standard.Claims.Where(c => c.Claimant == Claimant.Hold).All(c => c.InstanceId != given), "and no hold reserve is the one given: " + Describe(standard));
         var held = new[]
         {
             new HeldBuilder { InstanceId = 3, SectorId = 1, TargetX = 820f, TargetZ = 0f, SiteX = 820f, SiteZ = 0f, Wished = false },
