@@ -450,7 +450,7 @@ namespace WhiskeyRealism.Strategic.Planner
             string row = CoveringForce.CorridorRow(snapshot, sectors, picture, plan, null);
             if (row == null || string.Equals(LastCorridorRow[a], row, StringComparison.Ordinal)) return;
             LastCorridorRow[a] = row;
-            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial), TelemetryLayer.Campaign);
         }
 
         // Foresight F6b-2: the covering force of the review (its post, kind or the reason there is none, need, held, members, the defence flag
@@ -463,7 +463,7 @@ namespace WhiskeyRealism.Strategic.Planner
             string row = CoveringForce.Row(plan.Covering, snapshot, state);
             if (string.Equals(LastCoveringRow[a], row, StringComparison.Ordinal)) return;
             LastCoveringRow[a] = row;
-            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial), TelemetryLayer.Campaign);
         }
 
         private static void EmitPicture(CampaignSnapshot snapshot, TheaterPlan plan, EnemyPicture picture)

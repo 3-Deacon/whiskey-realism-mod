@@ -83,6 +83,7 @@ internal static partial class CoveringForceTests
             ("CoveringClauseReadsBeliefsNotVanillasArgument", CoveringClauseReadsBeliefsNotVanillasArgument),
             ("TheCoveringRowNamesThePostTheMembersAndTheShort", TheCoveringRowNamesThePostTheMembersAndTheShort),
             ("TheCoveringRowIsRegisteredAndWrittenOnChange", TheCoveringRowIsRegisteredAndWrittenOnChange),
+            ("TheFlowRowsCarryTheDateRightAfterTheAlliance", TheFlowRowsCarryTheDateRightAfterTheAlliance),
             ("TheReservesRowCarriesTheCoveringForceAndTheHoldReserve", TheReservesRowCarriesTheCoveringForceAndTheHoldReserve),
             ("TheFlagIsBoundAndReadByTheCoordinator", TheFlagIsBoundAndReadByTheCoordinator),
         };
@@ -254,6 +255,15 @@ internal static partial class CoveringForceTests
         w.Sectors = SectorModel.Build(s);
         if (plan) w.Plan = TheaterPlanner.Plan(s, w.Sectors, null, w.State, null, null, ExecutorFixtures.Speed(), out _, out w.Picture);
         return w;
+    }
+
+    // The covering force's world as a plan-input fixture for OwnershipTableTests' registry: the plan, its snapshot and sectors.
+    internal static TheaterPlan PlanInputWorld(out CampaignSnapshot s, out SectorModel sectors)
+    {
+        var w = CoverWorld();
+        s = w.S;
+        sectors = w.Sectors;
+        return w.Plan;
     }
 
     private static List<int> MemberIds(TheaterPlan plan)
@@ -1264,12 +1274,28 @@ internal static partial class CoveringForceTests
         string runtime = FindSource("Strategic/Planner/CampaignPlannerRuntime.cs");
         string emit = BodyOf(runtime, "private static void EmitCovering(");
         AssertTrue(emit.Contains("CoveringForce.Row(") && emit.Contains("LastCoveringRow[a]"), "built from CoveringForce.Row and compared with the last one");
-        AssertTrue(emit.Contains("ReviewCadenceCatchUp.Dated(row, plan.DaySerial)"), "dated after the compare");
+        AssertTrue(emit.Contains("ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial)"), "dated after the compare, the date right after alliance=");
         string review = BodyOf(runtime, "internal static void ReviewPlan(");
         AssertTrue(review.IndexOf("EmitAllocation(", StringComparison.Ordinal) < review.IndexOf("EmitCovering(", StringComparison.Ordinal)
             && review.IndexOf("EmitCovering(", StringComparison.Ordinal) < review.IndexOf("EmitReserves(", StringComparison.Ordinal),
             "after the allocation row, before [Reserves]");
         AssertTrue(BodyOf(runtime, "private static void ResetPlanState(").Contains("LastCoveringRow[a] = null;"), "reset with the campaign");
+    }
+
+    // [Reserves] and [CampaignMoverIssue] read "alliance=<a> date=<d> ...": the covering rows are written the same way (the corridor row's date
+    // was last, F6b-1 verify minor).
+    private static void TheFlowRowsCarryTheDateRightAfterTheAlliance()
+    {
+        int serial = ExecutorFixtures.Day;
+        string dated = ReviewCadenceCatchUp.DatedAfterAlliance("[CoveringCorridor] alliance=1 candidates=- forward=none rear=none axis=none", serial);
+        AssertEqual("[CoveringCorridor] alliance=1 date=" + ReviewCadenceCatchUp.FormatDate(serial) + " candidates=- forward=none rear=none axis=none", dated, "right after the alliance");
+        AssertEqual("[X] alliance=0 date=" + ReviewCadenceCatchUp.FormatDate(serial), ReviewCadenceCatchUp.DatedAfterAlliance("[X] alliance=0", serial), "a row that ends at its alliance");
+        AssertEqual("[X] a=1 date=" + ReviewCadenceCatchUp.FormatDate(serial), ReviewCadenceCatchUp.DatedAfterAlliance("[X] a=1", serial), "a row with no alliance is dated at its end");
+        var w = CoverWorld();
+        string row = ReviewCadenceCatchUp.DatedAfterAlliance(CoveringForce.Row(w.Plan.Covering, w.S, w.State), serial);
+        AssertTrue(TelemetryLegacyParser.TryParse(row, TelemetryProfile.CampaignTuning, "s", out var ev), "the row parses");
+        AssertEqual(ReviewCadenceCatchUp.FormatDate(serial), ev.CampaignDate, "date= is lifted into the campaign date");
+        AssertTrue(row.StartsWith("[CoveringForce] alliance=1 date=", StringComparison.Ordinal), "and follows the alliance: " + row);
     }
 
     private static void TheReservesRowCarriesTheCoveringForceAndTheHoldReserve()

@@ -27,6 +27,7 @@ internal static class SecessionGarrisonTests
             ("AGarrisonIsNeverPartOfTheMass", AGarrisonIsNeverPartOfTheMass),
             ("AMassThatMarchesIntoTheStateIsNotPinnedThere", AMassThatMarchesIntoTheStateIsNotPinnedThere),
             ("AFreeFormationInsideIsPledgedAndTheMassMemberIsNot", AFreeFormationInsideIsPledgedAndTheMassMemberIsNot),
+            ("AFormationAnotherRowOwnsInsideIsNotPledged", AFormationAnotherRowOwnsInsideIsNotPledged),
             ("TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget", TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget),
             ("NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped", NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped),
             ("TheGarrisonIsReadEachReviewNotCached", TheGarrisonIsReadEachReviewNotCached),
@@ -315,6 +316,25 @@ internal static class SecessionGarrisonTests
         alloc.TryGet(3, out var mass);
         AssertTrue(mass.Role == FormationRole.MainEffort || mass.Role == FormationRole.Support, "the mass member marches with the push (" + mass.Role + ")");
         AssertTrue(mass.Reason != ForceAllocator.ReasonSecession, "and is not pinned");
+    }
+
+    // D11 row 9: the inside pledge skips a formation a department move or a push that ended owns, as it skips the mass. Corps 4 is the free
+    // formation of the test above; a row-4 or row-5 source owns it, and it is pledged to nothing (it still stands in the state: the Union is
+    // present there, so no replacement is posted from outside).
+    private static void AFormationAnotherRowOwnsInsideIsNotPledged()
+    {
+        foreach (var (row, claimant) in new[] { (ClaimTable.RowCommitted, Claimant.Committed), (ClaimTable.RowDepartmentMove, Claimant.DepartmentMove) })
+        {
+            var s = Side(0, 0, 0.6f);
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+            s.Beliefs.Add(Seen(600f, 3000f));
+            s.Own.Add(Corps(3, 330f, 9000f, KentuckyState));
+            s.Own.Add(Corps(4, 290f, 9000f, KentuckyState));
+            var plan = TheaterPlanner.Plan(s, ExecutorFixtures.Sectors(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, null, null,
+                new IClaimSource[] { new ClaimsOneFormation(row, claimant, 4) });
+            AssertEqual(claimant, plan.Claims[s.IndexOfOwn(4)].Claimant, "corps 4 is owned by row " + row);
+            AssertFalse(plan.Garrisons[0].InstanceIds.Contains(4), "and is not pledged to the garrison (" + claimant + ")");
+        }
     }
 
     // The sector's own withhold keeps the formations nearest its threat until its target is met; the garrison is withheld on its own account,

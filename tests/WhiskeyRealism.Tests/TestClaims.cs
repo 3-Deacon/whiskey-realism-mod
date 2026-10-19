@@ -45,3 +45,19 @@ internal static class TestClaims
         return ForceAllocator.Allocate(plan, s, sectors, homeDepartment, reconTasks, missions, gaveUp, heldBuilders);
     }
 }
+
+// A producer of one pre-candidate row (4 committed, 5 department move) that claims one formation by instance id, as F7's and F8's will claim
+// theirs: the plan-input registry (OwnershipTableTests) and the garrison tests witness the rows at plan level before either slice exists.
+// ClaimTable.Takes decides whether the formation's current claimant lets the row have it.
+internal sealed class ClaimsOneFormation : IClaimSource
+{
+    private readonly int _row, _instanceId;
+    private readonly Claimant _claimant;
+    public ClaimsOneFormation(int row, Claimant claimant, int instanceId) { _row = row; _claimant = claimant; _instanceId = instanceId; }
+    public int Row => _row;
+    public void Produce(in ClaimContext ctx, Claim[] claims)
+    {
+        for (int i = 0; i < claims.Length; i++)
+            if (claims[i].InstanceId == _instanceId && ClaimTable.Takes(_row, claims[i].Claimant)) claims[i].Claimant = _claimant;
+    }
+}

@@ -160,6 +160,9 @@ namespace WhiskeyRealism.Strategic.Planner
             // per own formation in snapshot order, and the hold the reserves were sized on per sector.
             internal Claim[] Claims;
             internal float[] SectorHeld;
+            // The producers of the table's pre-candidate rows 4 and 5 (committed, department move): the production list unless a harness hands
+            // Plan its own, so the rows can be witnessed at plan level before F7 and F8 fill them.
+            internal IReadOnlyList<IClaimSource> RowSources = ClaimTable.RowSources;
             // Foresight F6b-2: the covering force's input to the hold pass of this pass (null when there is none, with CoveringReason why).
             internal CoveringInput Covering;
             internal string CoveringReason;
@@ -210,15 +213,17 @@ namespace WhiskeyRealism.Strategic.Planner
 
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
-                                         IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)
+                                         IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,
+                                         IReadOnlyList<IClaimSource> rowSources = null)
         {
-            return Plan(s, sectors, sectorProfile, state, battles, terrain, in speed, out trace, out _, gaveUp, heldBuilders);
+            return Plan(s, sectors, sectorProfile, state, battles, terrain, in speed, out trace, out _, gaveUp, heldBuilders, rowSources);
         }
 
         // The same, and the enemy picture the review was planned on (null when the plan was not built), for the [EnemyPicture] row.
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
-                                         out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)
+                                         out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,
+                                         IReadOnlyList<IClaimSource> rowSources = null)
         {
             var plan = new TheaterPlan { Alliance = s != null ? s.Alliance : -1, DaySerial = s != null ? s.DaySerial : 0 };
             trace = "";
@@ -227,7 +232,8 @@ namespace WhiskeyRealism.Strategic.Planner
             if (state == null) state = new PlannerState();
 
             var review = new ReviewTerrain(terrain, s.Areas);
-            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders, State = state };
+            var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders, State = state,
+                                      RowSources = rowSources ?? ClaimTable.RowSources };
             plan.MinGarrisonStrength = inputs.MinStrength = PlanMinimum(s);
             AssignDepartments(inputs, state);
             // The picture is built once, before the first Evaluate: displacement is judged on straight distances and needs no terrain probe, so
@@ -958,7 +964,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int k = 0; k < work.Inside.Count; k++)
                 {
                     int i = work.Inside[k];
-                    if (plan.MassInstanceIds.Contains(s.Own[i].InstanceId))
+                    // The inside pledge skips a formation another owner holds as it skips the mass (D11 row 9): a push that ended, a department's
+                    // reinforcement on its way. It is neither pledged nor pinned; it is the Union's presence in the state while it stands there.
+                    Claimant owner = c.Claims[i].Claimant;
+                    if (plan.MassInstanceIds.Contains(s.Own[i].InstanceId) || owner == Claimant.Committed || owner == Claimant.DepartmentMove)
                     {
                         massInside = true;
                         continue;
@@ -1152,6 +1161,9 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
+                // A formation on its way to a short department is another owner's (row 8 takes no DepartmentMove): in no capacity, and so in no
+                // reinforcement candidate list either (the capital guard below is the same rule for row 6).
+                if (c.Claims[i].Claimant == Claimant.DepartmentMove) continue;
                 if (!MassEligible(f, s.MinMoraleForMovement) || c.Claims[i].Claimant == Claimant.Capital || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
                 // A covering member (D11 requirement-covering-hold) is no push's capacity, except a push on the enemy capital, which may take the
                 // force that covers that road whatever sector the member holds and whatever army that sector faces.
@@ -1460,7 +1472,7 @@ namespace WhiskeyRealism.Strategic.Planner
         {
             c.Covering = CoveringForce.Prepare(c, out c.CoveringReason);
             c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, c.Covering,
-                                        ClaimTable.RowSources, c.Facts, out c.SectorHeld);
+                                        c.RowSources, c.Facts, out c.SectorHeld);
             CoveringForce.Settle(c);
             Garrisons(c);
         }

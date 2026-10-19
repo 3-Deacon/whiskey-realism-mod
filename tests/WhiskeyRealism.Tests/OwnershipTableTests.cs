@@ -35,6 +35,7 @@ internal static class OwnershipTableTests
             ("OneOwnerAtTheEndOfPlan", OneOwnerAtTheEndOfPlan),
             ("ThePlanTakesItsMassIntoTheTableBeforeAnyoneElseReadsIt", ThePlanTakesItsMassIntoTheTableBeforeAnyoneElseReadsIt),
             ("G3AndG4ReadOneOwnershipTable", G3AndG4ReadOneOwnershipTable),
+            ("ADepartmentMoveFormationIsInNoMassAndNoReinforcementCandidate", ADepartmentMoveFormationIsInNoMassAndNoReinforcementCandidate),
             ("RoleOfCoversEveryRow", RoleOfCoversEveryRow),
             ("RoleSectorPerRowAsShipped", RoleSectorPerRowAsShipped),
             ("G4LaterStepsRunOverNoneAndMass", G4LaterStepsRunOverNoneAndMass),
@@ -92,7 +93,8 @@ internal static class OwnershipTableTests
     }
 
     // The oracle's world for one scenario: 0 no depot ledger, 1 the Army of Virginia a Marching held builder, 2 the Reserve Corps a Wished one.
-    private static TheaterPlan OracleWorld(int scenario, out CampaignSnapshot s, out SectorModel sectors, out HeldBuilder[] pins)
+    private static TheaterPlan OracleWorld(int scenario, out CampaignSnapshot s, out SectorModel sectors, out HeldBuilder[] pins,
+                                           IReadOnlyList<IClaimSource> rowSources = null, PlannerState state = null)
     {
         s = EnemyPictureTests.Csa(100000f);
         foreach (var f in Roster()) s.Own.Add(f);
@@ -101,7 +103,43 @@ internal static class OwnershipTableTests
         sectors = SectorModel.Build(s);
         int fred = sectors.SectorAt(EnemyPictureTests.FredericksburgX, EnemyPictureTests.FredericksburgZ);
         pins = scenario == 0 ? null : new[] { new HeldBuilder { InstanceId = scenario == 1 ? 2 : 7, SectorId = fred, TargetX = 1101.3f, TargetZ = -553.8f, SiteX = 1101.3f, SiteZ = -553.8f, Wished = scenario == 2 } };
-        return TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, null, pins);
+        return TheaterPlanner.Plan(s, sectors, null, state ?? new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, null, pins, rowSources);
+    }
+
+    // The registry of plan-input fixtures (D11 requirement-claims, the F6a/F6b-2 merge seam): a real TheaterPlanner.Plan over a world, with
+    // the snapshot and sectors it was made over. OneOwnerAtTheEndOfPlan and G3AndG4ReadOneOwnershipTable run over every entry; F6b-2 added the
+    // covering world, a row-4 world and a row-5 world witness the rows F7 and F8 fill. F7 and F8 add theirs here without changing a test body.
+    private sealed class PlanInput
+    {
+        public string Name;
+        public Func<TheaterPlan> Make;
+        public Claimant Witnesses;   // a claimant the world is built to have in its table (None: no claim is promised)
+        public CampaignSnapshot S;
+        public SectorModel Sectors;
+    }
+
+    private static readonly List<PlanInput> PlanInputs = BuildPlanInputs();
+
+    private static List<PlanInput> BuildPlanInputs()
+    {
+        var list = new List<PlanInput>();
+        for (int scenario = 0; scenario < 3; scenario++)
+        {
+            int sc = scenario;
+            var input = new PlanInput { Name = "oracle " + sc };
+            input.Make = () => OracleWorld(sc, out input.S, out input.Sectors, out _);
+            list.Add(input);
+        }
+        var committed = new PlanInput { Name = "a row-4 source claims the garrison corps (2)", Witnesses = Claimant.Committed };
+        committed.Make = () => OracleWorld(0, out committed.S, out committed.Sectors, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowCommitted, Claimant.Committed, 2) });
+        list.Add(committed);
+        var moving = new PlanInput { Name = "a row-5 source claims the Army of Northern Virginia (3)", Witnesses = Claimant.DepartmentMove };
+        moving.Make = () => OracleWorld(0, out moving.S, out moving.Sectors, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, 3) });
+        list.Add(moving);
+        var covering = new PlanInput { Name = "the covering force's world", Witnesses = Claimant.Hold };
+        covering.Make = () => CoveringForceTests.PlanInputWorld(out covering.S, out covering.Sectors);
+        list.Add(covering);
+        return list;
     }
 
     private static string RolesOf(int scenario)
@@ -493,17 +531,21 @@ internal static class OwnershipTableTests
 
     private static void OneOwnerAtTheEndOfPlan()
     {
-        for (int scenario = 0; scenario < 3; scenario++)
+        foreach (var input in PlanInputs)
         {
-            var plan = OracleWorld(scenario, out var s, out _, out _);
-            AssertEqual(s.Own.Count, plan.Claims.Count, "one claim per own formation");
+            var plan = input.Make();
+            var s = input.S;
+            string label = input.Name + ": ";
+            AssertTrue(input.Witnesses == Claimant.None || plan.Claims.Any(c => c.Claimant == input.Witnesses), label + "the world has the " + input.Witnesses + " claim it is built to witness");
+            AssertEqual(s.Own.Count, plan.Claims.Count, label + "one claim per own formation");
             for (int i = 0; i < s.Own.Count; i++)
-                AssertEqual(s.Own[i].InstanceId, plan.Claims[i].InstanceId, "in snapshot order, scenario " + scenario + " formation " + i);
+                AssertEqual(s.Own[i].InstanceId, plan.Claims[i].InstanceId, label + "in snapshot order, formation " + i);
             foreach (int id in plan.MassInstanceIds)
-                AssertEqual(Claimant.Mass, plan.Claims[s.IndexOfOwn(id)].Claimant, "a mass member is a Mass claim: " + id);
-            AssertEqual(plan.MassInstanceIds.Count, plan.Claims.Count(c => c.Claimant == Claimant.Mass), "and a Mass claim is a mass member");
-            AssertEqual(s.Own.Count, plan.Claims.Select(c => c.InstanceId).Distinct().Count(), "no formation is claimed twice");
+                AssertEqual(Claimant.Mass, plan.Claims[s.IndexOfOwn(id)].Claimant, label + "a mass member is a Mass claim: " + id);
+            AssertEqual(plan.MassInstanceIds.Count, plan.Claims.Count(c => c.Claimant == Claimant.Mass), label + "and a Mass claim is a mass member");
+            AssertEqual(s.Own.Count, plan.Claims.Select(c => c.InstanceId).Distinct().Count(), label + "no formation is claimed twice");
         }
+        AssertTrue(PlanInputs.Count >= 6, "the registry holds the oracle worlds, the row worlds and the covering world");
     }
 
     // D11 requirement-claims: rows 1 to 7 are built before the candidates (Evaluate), row 8 right after SelectMass, row 9 (D8's pledge) reads
@@ -524,28 +566,57 @@ internal static class OwnershipTableTests
     // RoleOf in the allocation, and changing a claim of the published table changes the role.
     private static void G3AndG4ReadOneOwnershipTable()
     {
-        var plan = OracleWorld(0, out var s, out var sectors, out _);
-        var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
-        for (int i = 0; i < s.Own.Count; i++)
+        foreach (var input in PlanInputs)
         {
-            var claim = plan.Claims[i];
-            if (claim.Claimant == Claimant.None || claim.Claimant == Claimant.Mass) continue;
-            ForceAllocator.RoleOf(in claim, s.Own[i], out var role, out var reason, out var withheld);
-            a.TryGet(claim.InstanceId, out var x);
-            AssertEqual(role, x.Role, "formation " + claim.InstanceId + " (" + claim.Claimant + ") has the role of its claim");
-            AssertEqual(reason, x.Reason, "and its reason");
-            // A Hold is also withheld by the sector's prefix (WithholdHoldPrefixes, a later step over the sector's holds), never un-withheld.
-            AssertTrue(x.Withheld == withheld || (role == FormationRole.Hold && x.Withheld), "and its withholding");
+            var plan = input.Make();
+            var s = input.S;
+            var sectors = input.Sectors;
+            string label = input.Name + ": ";
+            AssertTrue(input.Witnesses == Claimant.None || plan.Claims.Any(c => c.Claimant == input.Witnesses), label + "the world has the " + input.Witnesses + " claim it is built to witness");
+            var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+            for (int i = 0; i < s.Own.Count; i++)
+            {
+                var claim = plan.Claims[i];
+                if (claim.Claimant == Claimant.None || claim.Claimant == Claimant.Mass) continue;
+                ForceAllocator.RoleOf(in claim, s.Own[i], out var role, out var reason, out var withheld);
+                a.TryGet(claim.InstanceId, out var x);
+                AssertEqual(role, x.Role, label + "formation " + claim.InstanceId + " (" + claim.Claimant + ") has the role of its claim");
+                AssertEqual(reason, x.Reason, label + "and its reason");
+                // A Hold is also withheld by the sector's prefix (WithholdHoldPrefixes, a later step over the sector's holds), never un-withheld.
+                AssertTrue(x.Withheld == withheld || (role == FormationRole.Hold && x.Withheld), label + "and its withholding");
+            }
+            int hold = plan.Claims.ToList().FindIndex(c => c.Claimant == Claimant.Hold && c.Reason == null);
+            AssertTrue(hold >= 0, label + "the world has a hold reserve");
+            var changed = plan.Claims[hold];
+            changed.Claimant = Claimant.Recover;
+            plan.Claims[hold] = changed;
+            var again = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+            again.TryGet(changed.InstanceId, out var now);
+            AssertEqual(FormationRole.Recover, now.Role, label + "a claim rewritten in the published table is the role the allocator hands out: it recomputes no reserve");
         }
-        int hold = plan.Claims.ToList().FindIndex(c => c.Claimant == Claimant.Hold);
-        AssertTrue(hold >= 0, "the world has a hold reserve");
-        var changed = plan.Claims[hold];
-        changed.Claimant = Claimant.Recover;
-        plan.Claims[hold] = changed;
-        a.TryGet(changed.InstanceId, out _);
-        var again = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
-        again.TryGet(changed.InstanceId, out var now);
-        AssertEqual(FormationRole.Recover, now.Role, "a claim rewritten in the published table is the role the allocator hands out: it recomputes no reserve");
+    }
+
+    // D11 requirement-claims row 8: the mass takes only None, Hold and Committed, so a formation a department move owns is in no mass; and it
+    // is no candidate for D6's one reinforcement either (that pick runs over the same capacity). The control: with no row-5 source the
+    // formation, put in the West department, is the reinforcement the mass takes.
+    private static void ADepartmentMoveFormationIsInNoMassAndNoReinforcementCandidate()
+    {
+        var control = new PlannerState();
+        OracleWorld(0, out var probe, out _, out _);
+        control.Transfer(probe.Own[probe.IndexOfOwn(3)].UnitKey, Theater.West);
+        var free = OracleWorld(0, out _, out _, out _, null, control);
+        AssertEqual(3, free.ReinforcementInstanceId, "control: formation 3, a West formation under an East target, is the decision's reinforcement");
+        AssertTrue(free.MassInstanceIds.Contains(3), "and so in the mass");
+        var moved = new PlannerState();
+        moved.Transfer(probe.Own[probe.IndexOfOwn(3)].UnitKey, Theater.West);
+        var plan = OracleWorld(0, out var s, out _, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, 3) }, moved);
+        AssertEqual(Claimant.DepartmentMove, plan.Claims[s.IndexOfOwn(3)].Claimant, "the row-5 source owns formation 3");
+        AssertFalse(plan.MassInstanceIds.Contains(3), "it is in no mass: " + string.Join(",", plan.MassInstanceIds));
+        AssertTrue(plan.ReinforcementInstanceId != 3, "and is not the reinforcement");
+        AssertEqual(plan.MassInstanceIds.Count, plan.Claims.Count(c => c.Claimant == Claimant.Mass), "every mass member is a Mass claim");
+        // The garrison's inside pledge skips it as it skips the mass (row 9): source pin, the secession fixtures not reaching a row-5 claim.
+        string post = BodyOf(ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs"), "private static void PostFromOutside(");
+        AssertTrue(post.Contains("Claimant.Committed") && post.Contains("Claimant.DepartmentMove"), "PostFromOutside's inside pledge names the two claimants it skips");
     }
 
     private static void RoleOfCoversEveryRow()

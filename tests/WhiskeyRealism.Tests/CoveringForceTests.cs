@@ -17,7 +17,7 @@ using static TestFixtures;
 // FX-002A (the investigation's 002/A geometry, EnemyPictureTests): Richmond 1263.6,-1010.9; Washington 1349.9,-631.6; relocation range 200.
 // The places are the TOWNS (BattleUnits.towns, Town.Owner) of the save's IIPsTowns.dat (Campaigns/002/A/Save, the 2026-10-18 smoke copy), whose
 // first number after the name is the type: 7 a town, 0 a small town (IIP.id_smalltowns = 0, decompile 103719, which BattleUnits.smalltowns
-// holds apart from BattleUnits.towns, 78938). Towns (type 7): Richmond, Fredericksburg 1247.4,-802.6, Petersburg 1269.7,-1100.1 (CSA);
+// holds apart from BattleUnits.towns, 78940). Towns (type 7): Richmond, Fredericksburg 1247.4,-802.6, Petersburg 1269.7,-1100.1 (CSA);
 // Washington, Alexandria 1342.16,-664.53, Winchester 1106.93,-554.96 (Union). Small towns (type 0, never places): Manassas Junction
 // 1245.13,-680.76, Fairfax C.H. 1298.3,-660.6, King George C.H. 1326.2,-818.6, Gordonsville, Romney, Yorktown. The owners at 1861-06 are
 // ASSUMED (the save holds them on the live Town objects): the CSA holds Richmond, Fredericksburg and Petersburg, the Union the rest. Fort
@@ -435,7 +435,7 @@ internal static partial class CoveringForceTests
         string runtime = FindSource("Strategic/Planner/CampaignPlannerRuntime.cs");
         string emit = BodyOf(runtime, "private static void EmitCorridor(");
         AssertTrue(emit.Contains("CoveringForce.CorridorRow(") && emit.Contains("LastCorridorRow[a]"), "the row is built from CoveringForce and compared with the last one");
-        AssertTrue(emit.Contains("ReviewCadenceCatchUp.Dated(row, plan.DaySerial)"), "and written dated, after the compare");
+        AssertTrue(emit.Contains("ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial)"), "and written dated, after the compare, the date right after alliance=");
         string review = BodyOf(runtime, "internal static void ReviewPlan(");
         AssertTrue(review.IndexOf("EmitPicture(snapshot, plan, picture);", StringComparison.Ordinal) < review.IndexOf("EmitCorridor(", StringComparison.Ordinal)
             && review.IndexOf("EmitCorridor(", StringComparison.Ordinal) < review.IndexOf("EmitAllocation(", StringComparison.Ordinal),

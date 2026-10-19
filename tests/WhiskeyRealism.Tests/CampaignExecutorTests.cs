@@ -1280,7 +1280,7 @@ internal static class CampaignExecutorTests
     private static void ThePlanBuildsThePictureBeforeItsFirstEvaluate()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs");
-        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null)\n        {");
+        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,\n                                         IReadOnlyList<IClaimSource> rowSources = null)\n        {");
         AssertInOrder(plan, "TheaterPlanner.Plan", "picture = inputs.Picture = EnemyPicture.Build(s, (x, z) => IsScouted(inputs, x, z));",
             "var candidates = new List<Candidate>();", "int unknown = review.Unknown, probed = 0;");
         // The two Evaluate passes of a terrain-filling review: both after the picture.
