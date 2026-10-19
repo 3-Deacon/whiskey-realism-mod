@@ -319,7 +319,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // A formation sent to stand at a garrison post until it is there; once there it is Hold in place, withheld. One role for both
         // sorts of post: D8's secession garrison (a live objective 15/16 the CSA could win; reason secession-garrison) and G8's posts
         // beyond the capital (an objective town, rail hub, port, depot or fort; reason garrison-post).
-        Garrison = 8
+        Garrison = 8,
+        // A formation the mover sends to a hold point of its own side (foresight F6a, D11 requirement-redeploy-role): a covering post
+        // (reason covering-force) or a short department's sector (department-reinforcement). Within the bugle range of the point it is an
+        // ordinary Hold at the next review.
+        Redeploy = 9
     }
 
     public enum ReconKind
@@ -420,6 +424,12 @@ namespace WhiskeyRealism.Strategic.Planner
         // D8: the secession garrisons of this review (Union side: one post per live secession state it owns).
         public List<GarrisonPost> Garrisons = new List<GarrisonPost>();
 
+        // Foresight F6a (D11 requirement-claims): who owns each own formation at the end of the review, one Claim per formation in snapshot
+        // order (ClaimTable), and per sector the hold the reserve was sized on (SectorHeld: ReserveRules.Hold's sum, D9's measure). The
+        // allocator assigns roles from the table and never re-runs the capital or hold reserve.
+        public List<Claim> Claims = new List<Claim>();
+        public float[] SectorHeld = new float[0];
+
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
         {
@@ -475,6 +485,34 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public int UnitTyp;
         public int MinRank, MaxRank;
+    }
+
+    // Who owns an own formation at the end of a review, in the order the rows of ClaimTable take it (D11 requirement-claims). None is
+    // unclaimed: the later steps of the allocator place it.
+    public enum Claimant
+    {
+        None = 0,
+        PinnedBuilder = 1,   // the builder of a Wished depot task
+        Immobile = 2,        // busy, non-combat, or the player's own command
+        Recover = 3,         // leaving for supply
+        Committed = 4,       // a dispatched member of the main effort waiting out the end of its push
+        DepartmentMove = 5,  // on its way to a short department
+        Capital = 6,         // the capital reserve
+        Hold = 7,            // a sector's hold reserve, or a covering member
+        Mass = 8             // the main effort's selected mass
+    }
+
+    // One own formation's owner. SectorId and Share are where the hold pass counted the formation and what it added there (-1 and 0 when
+    // nowhere): the numbers HoldLeaving and the scout draw read. TargetX/Z is where the owner's role sends it; Reason names the owner's
+    // kind of hold (covering-force) where the role cannot tell.
+    public struct Claim
+    {
+        public int InstanceId;
+        public Claimant Claimant;
+        public int SectorId;
+        public float Share;
+        public float TargetX, TargetZ;
+        public string Reason;
     }
 
     public struct Assignment

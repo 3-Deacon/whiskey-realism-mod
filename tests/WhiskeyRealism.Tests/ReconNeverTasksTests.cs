@@ -96,12 +96,12 @@ internal static class ReconNeverTasksTests
         var sectors = ExecutorFixtures.Sectors(s);
         var day = new Day { Ledger = ledger, S = s };
         ledger.OnReview(s, null);
-        day.Plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        day.Plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, null, held);   // the table is the plan's: the held builders go to both
         amend?.Invoke(day.Plan);
         var all = new List<ReconTask>();
         ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, all);
         day.Tasks = narrow != null ? narrow(all) : all;
-        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, gaveUp, held);
+        day.Allocation = TestClaims.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, gaveUp, held);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
     }
@@ -243,7 +243,7 @@ internal static class ReconNeverTasksTests
             s.Own.Add(ExecutorFixtures.Corps(1, 350f, 6000f));
             s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
             var plan = ExecutorFixtures.HandPlan(s, mass);
-            var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
             return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, state);
         };
         AssertEqual(1, day(0, new[] { 1 }).Issued, "sent as the main effort");
@@ -295,7 +295,7 @@ internal static class ReconNeverTasksTests
             s.Own.Add(named);
             s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
             var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-            var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
             var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, state);
             if (offset == 0) continue;
             AssertEqual(1, tally.MissRows.Count, "a miss");
@@ -337,7 +337,7 @@ internal static class ReconNeverTasksTests
         var tasks = OneScreen(600f);
         tasks.Add(new ReconTask { Kind = ReconKind.Screen, SectorId = 0, FromX = 620f, FromZ = 0f, HoldX = 620f, HoldZ = 0f, Priority = 4f, Reason = "belief" });
         var ledger = new ReconMissionLedger();
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, tasks, ledger);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, tasks, ledger);
         ledger.Sync(s, tasks, alloc);
         var counts = ReconStep.CountsOf(s, ledger, tasks, alloc);
         AssertEqual(2, counts.Pool, "both are the pool: " + counts.Row(0));
@@ -366,7 +366,7 @@ internal static class ReconNeverTasksTests
         var main = new List<ReconTask>();
         foreach (var task in all) if (ReconPlanner.ScoutsMainObjective(task)) main.Add(task);
         AssertTrue(main.Count >= 1, "a task sees the main objective");
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, main, new ReconMissionLedger());
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, main, new ReconMissionLedger());
         AssertEqual(ForceAllocator.ReasonScoutAgainstThreat, alloc.ReconUnfilledWhy, "the refusal alone");
     }
 
@@ -379,7 +379,7 @@ internal static class ReconNeverTasksTests
         ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), tasks);
         var gaveUp = new List<GaveUpMove>();
         foreach (var task in tasks) gaveUp.Add(new GaveUpMove { InstanceId = 2, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
         AssertContains(alloc.ReconUnfilledWhy, ForceAllocator.ReasonUnfilledGaveUp, "the only formation that could go gave up on every post: " + alloc.ReconUnfilledWhy);
     }
 
@@ -417,7 +417,7 @@ internal static class ReconNeverTasksTests
             s.Own.Add(ExecutorFixtures.Corps(2, 360f, 5000f));
             s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
             var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
-            var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
             return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, state);
         };
         var first = day(0);
@@ -511,10 +511,10 @@ internal static class ReconNeverTasksTests
         var sectors = ExecutorFixtures.Sectors(s);
         var day = new Day { Ledger = ledger, Tasks = new List<ReconTask>(), S = s };
         ledger.OnReview(s, null);
-        day.Plan = TheaterPlanner.Plan(s, sectors, null, state ?? new PlannerState(), null, null, ExecutorFixtures.Speed(), out _);
+        day.Plan = TheaterPlanner.Plan(s, sectors, null, state ?? new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, null, pinned);
         amend?.Invoke(day.Plan);
         ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, day.Tasks);
-        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, null, pinned);
+        day.Allocation = TestClaims.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger, null, pinned);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
     }
@@ -575,7 +575,7 @@ internal static class ReconNeverTasksTests
         foreach (var t in tasks) if (t.Reason == ReconPlanner.ReasonMainAxis) mainAxis = true;
         AssertTrue(mainAxis, "the main axis is unwatched");
         AssertEqual(1, ReconPlanner.ScoutPool(s, null), "the pool counts the one ready formation that is not in a vanilla list");
-        var held = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var held = TestClaims.Allocate(plan, s, sectors, null, null, null);
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 2).Reason, "and the East hold reserve has it");
         AssertEqual(FormationRole.MainEffort, Of(held, 1).Role, "the body is the main effort");
     }
@@ -602,7 +602,7 @@ internal static class ReconNeverTasksTests
         var s = SmokeUnion(secondEastBusy: false, eastBusy: 100f);
         s.Own.Add(Corps(3, 770f, 400f));
         s.Own.Add(Corps(4, 780f, 400f));
-        var held = ForceAllocator.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
+        var held = TestClaims.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
         int reserveBefore = 0;
         foreach (var a in held.Assignments) if (a.Reason == ForceAllocator.ReasonHoldReserve) reserveBefore++;
         AssertEqual(3, reserveBefore, "the East keeps three ready formations");
@@ -679,7 +679,7 @@ internal static class ReconNeverTasksTests
         ReconStep.Plan(s, sectors, plan, new List<BattleHistoryRecord>(), 0, new ReconMissionLedger(), tasks);
         var gaveUp = new List<GaveUpMove>();
         foreach (var task in tasks) gaveUp.Add(new GaveUpMove { InstanceId = 2, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
         AssertEqual(0, Roles(alloc, FormationRole.Recon), "the formation that gave up on every post is not drawn for any of them");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "it keeps holding");
     }
@@ -703,7 +703,7 @@ internal static class ReconNeverTasksTests
         var gaveUp = new List<GaveUpMove>();
         foreach (var task in tasks) if (task.HoldX != last.HoldX || task.HoldZ != last.HoldZ)
             gaveUp.Add(new GaveUpMove { InstanceId = 30, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), gaveUp);
         AssertEqual(FormationRole.Recon, Of(alloc, 30).Role, "the free formation scouts for a later main task");
         AssertEqual(last.Reason, Of(alloc, 30).Reason, "the last main task");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(alloc, 2).Reason, "the East reserve was refused for the first");
@@ -713,7 +713,7 @@ internal static class ReconNeverTasksTests
         var other = new List<GaveUpMove>();
         foreach (var task in tasks) if (ReconPlanner.ScoutsMainObjective(task))
             other.Add(new GaveUpMove { InstanceId = 30, TargetX = task.HoldX, TargetZ = task.HoldZ, ObjectiveId = -1 });
-        var approach = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), other);
+        var approach = TestClaims.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger(), other);
         // The nearest formation with the scenario's minimum is now the mass, so the scout stands behind the body and its first free task is the
         // sector's screen posture (it was the capital approach): either way a task that does not see the main objective.
         AssertEqual(FormationRole.Recon, Of(approach, 30).Role, "30 watches a task");
@@ -740,7 +740,7 @@ internal static class ReconNeverTasksTests
             new ReconTask { Kind = ReconKind.Screen, SectorId = plan.MainSectorId, FromX = 100f, FromZ = 0f, HoldX = 210f, HoldZ = 0f, Priority = 2.5f, Reason = "belief" },
             new ReconTask { Kind = ReconKind.Probe, SectorId = plan.MainSectorId, FromX = 100f, FromZ = 0f, HoldX = 250f, HoldZ = 0f, Priority = 4.2f, Reason = "probe" },
         };
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger());
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger());
         AssertEqual(FormationRole.Recon, Of(alloc, 2).Role, "the reserve formation scouts");
         AssertEqual("probe", Of(alloc, 2).Reason, "for the probe, not for the posture or the belief that precede it");
     }
@@ -765,7 +765,7 @@ internal static class ReconNeverTasksTests
         AssertTrue(day.Plan.MainStaged, "staged");
         AssertEqual(1, day.Plan.Garrisons.Count, "one post: Kentucky");
         AssertTrue(day.Plan.Garrisons[0].InstanceIds.Contains(20), "the plan pledged the formation");
-        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(ForceAllocator.Allocate(day.Plan, s, ExecutorFixtures.Sectors(s), null, null, null), 20).Reason, "though the hold reserve claimed it first");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(TestClaims.Allocate(day.Plan, s, ExecutorFixtures.Sectors(s), null, null, null), 20).Reason, "though the hold reserve claimed it first");
         AssertEqual(0, Roles(day.Allocation, FormationRole.Recon), "and it is not the push's scout");
         AssertTrue(ReconPlanner.ScoutPool(s, null) >= 1, "though the pool counts it");
     }
@@ -1066,7 +1066,7 @@ internal static class ReconNeverTasksTests
         var s = SmokeUnion(secondEastBusy: false, eastBusy: 3000f);
         s.Own.Add(Corps(5, 800f, 1000f));
         s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 9000f));
-        var held = ForceAllocator.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
+        var held = TestClaims.Allocate(ExecutorFixtures.RealPlan(s, new PlannerState()), s, ExecutorFixtures.Sectors(s), null, null, null);
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 5).Reason, "5 is hold reserve");
         AssertEqual(ForceAllocator.ReasonHoldReserve, Of(held, 2).Reason, "so is 2");
         var day = Review(s);
@@ -1687,7 +1687,7 @@ internal static class ReconNeverTasksTests
     {
         private static Allocation AllocOf(CampaignSnapshot s, TheaterPlan plan)
         {
-            return ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            return TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         }
 
         private (CampaignSnapshot s, TheaterPlan plan) Fixture(bool staged, float startX)

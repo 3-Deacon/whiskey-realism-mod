@@ -110,7 +110,7 @@ internal static class ForesightTelemetryTests
         }
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = ExecutorFixtures.HandPlan(s, mass.ToArray());
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, state);
     }
 
@@ -174,7 +174,7 @@ internal static class ForesightTelemetryTests
         s.Own.Add(queued);
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), queuedHost, new MoveTracker(), state);
         AssertEqual(1, tally.Queued, "the move waits in vanilla's queue");
         AssertEqual(0, tally.IssueRows.Count, "and is no issue row");
@@ -217,7 +217,7 @@ internal static class ForesightTelemetryTests
         s.Own.Add(named);
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), new FakeMoverHost(), new MoveTracker(), ExecutorFixtures.State());
         AssertEqual(1, tally.IssueRows.Count, "one move");
         AssertContains(tally.IssueRows[0], " unit=\"10th Indiana:5\" role=MainEffort ", "the unit key is quoted");
@@ -283,7 +283,7 @@ internal static class ForesightTelemetryTests
         var plan = ExecutorFixtures.HandPlan(s, new int[0]);
         int sector = sectors.SectorAt(350f, 0f);
         var pin = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sector, TargetX = 250f, TargetZ = 0f } };
-        var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pin);
+        var a = TestClaims.Allocate(plan, s, sectors, null, null, null, null, pin);
         AssertTrue(a.TryGet(1, out var pinned) && pinned.Role == FormationRole.DepotBuilder, "the pinned formation builds");
         AssertEqual(ForceAllocator.ReasonPinnedBuilder, pinned.Reason, "with the pinned reason");
         AssertEqual("depot-task-pinned", ForceAllocator.ReasonPinnedBuilder, "the string the issue row's pick reads");

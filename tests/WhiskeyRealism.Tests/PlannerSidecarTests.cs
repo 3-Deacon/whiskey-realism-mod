@@ -630,7 +630,7 @@ internal static class PlannerSidecarTests
             AssertTrue(held[0].Wished && held[0].TargetX == 250f && held[0].TargetZ == 70f, label + "at its wish position");
 
             var plan = ExecutorFixtures.HandPlan(session, new[] { 2 }); // the plan lists no task: only the pin keeps the builder
-            var allocation = ForceAllocator.Allocate(plan, session, sectors, null, null, null, null, held);
+            var allocation = TestClaims.Allocate(plan, session, sectors, null, null, null, null, held);
             AssertTrue(allocation.TryGet(builderId, out var assigned), label + "the builder is allocated");
             AssertEqual(FormationRole.DepotBuilder, assigned.Role, label + "it is the DepotBuilder");
             AssertTrue(assigned.Withheld && assigned.TargetX == 250f && assigned.TargetZ == 70f, label + "withheld at the wish position");
@@ -651,7 +651,7 @@ internal static class PlannerSidecarTests
             var none = new List<HeldBuilder>();
             loose.CollectHeldBuilders(none);
             AssertEqual(0, none.Count, label + "control: unbound, nothing is held");
-            var free = ForceAllocator.Allocate(plan, session, sectors, null, null, null, null, none);
+            var free = TestClaims.Allocate(plan, session, sectors, null, null, null, null, none);
             AssertTrue(free.TryGet(builderId, out var freed) && freed.Role != FormationRole.DepotBuilder, label + "control: and the allocation re-tasks the builder (" + freed.Role + ")");
         }
     }

@@ -594,7 +594,7 @@ internal static class ReconExecutorTests
         var gaveUp = new List<GaveUpMove>();
         tracker.CollectGaveUp(gaveUp, Day);
         AssertEqual(0, gaveUp.Count, "a recon give-up is not in the set G3 and G4 read");
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, null, null, gaveUp);
         AssertTrue(alloc.TryGet(30, out var guard) && guard.Role == FormationRole.CapitalGuard && guard.Withheld, "the capital guard keeps its role");
         var planner = new MoveTracker();
         planner.RecordRefused(30, s.CapitalX, s.CapitalZ, Day - 2);
@@ -632,7 +632,7 @@ internal static class ReconExecutorTests
         s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
         var ledger = RecalledProbeLedger(s);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
         AssertTrue(alloc.TryGet(1, out var a1) && CampaignMover.MovesRole(a1.Role), "fixture: the allocator gives the recalled corps a role the mover sends (" + a1.Role + ")");
         ledger.Sync(s, new List<ReconTask>(), alloc);
         AssertEqual(ReconState.Cleared, ledger.Missions[0].State, "its mission ended");
@@ -660,7 +660,7 @@ internal static class ReconExecutorTests
         s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
         var ledger = RecalledProbeLedger(s);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
         var tracker = new MoveTracker();
         var host = new OneReviewHost { RefuseSecondMoveSameReview = true };
         CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
@@ -686,7 +686,7 @@ internal static class ReconExecutorTests
         ledger.OnReview(s, null);
         AssertEqual(ReconState.Recalled, ledger.Missions[0].State, "fixture: recalled for low supply");
         var plan = ExecutorFixtures.HandPlan(s, new[] { 2 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
         AssertTrue(alloc.TryGet(1, out var a1), "assigned");
         AssertEqual(FormationRole.Recover, a1.Role, "fixture: the tired corps is a Recover formation");
         ledger.Sync(s, new List<ReconTask>(), alloc);
@@ -717,7 +717,7 @@ internal static class ReconExecutorTests
         AssertTrue(ledger.Missions[0].StandDownDue, "and owed");
 
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), ledger, null);
         AssertTrue(alloc.TryGet(1, out var a1) && CampaignMover.MovesRole(a1.Role), "fixture: reassigned to a mover role");
         ledger.Sync(s, new List<ReconTask>(), alloc);
         var second = new OneReviewHost();
@@ -1006,7 +1006,7 @@ internal static class ReconExecutorTests
         pending.Flags |= FormationFlags.MoveQueued;
         s.Own.Add(pending);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), null, null);
         AssertTrue(alloc.TryGet(1, out var a1) && a1.Role == FormationRole.MainEffort, "fixture: a main effort");
         var tracker = new MoveTracker();
         var queuedHost = new FakeMoverHost();
@@ -1017,7 +1017,7 @@ internal static class ReconExecutorTests
         var s2 = ExecutorFixtures.Wide(1);
         s2.Own.Add(ExecutorFixtures.Corps(1, 350f, 15000f));         // the order ended
         var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 1 });
-        var alloc2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, new List<ReconTask>(), null, null);
+        var alloc2 = TestClaims.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, new List<ReconTask>(), null, null);
         var host = new FakeMoverHost();
         var second = CampaignMover.Review(ExecutorFixtures.Inputs(s2, plan2, alloc2, ExecutorFixtures.OpenTempo()), host, tracker, ExecutorFixtures.State());
         AssertEqual(1, host.Moves.Count, "the order ended and the role still sends it: the mover sends it now");
@@ -1058,7 +1058,7 @@ internal static class ReconExecutorTests
         s.Own.Add(pending);
         s.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, new List<ReconTask>(), null, null);
         AssertTrue(alloc.TryGet(1, out var a1) && CampaignMover.MovesRole(a1.Role), "fixture: a mover role on day 1 (" + a1.Role + ")");
         var tracker = new MoveTracker();
         CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), new FakeMoverHost(), tracker, ExecutorFixtures.State());
@@ -1070,7 +1070,7 @@ internal static class ReconExecutorTests
         s2.Own.Add(still);
         s2.Own.Add(ExecutorFixtures.Corps(2, 450f, 20000f));
         var plan2 = ExecutorFixtures.HandPlan(s2, new[] { 2 });
-        var alloc2 = ForceAllocator.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, new List<ReconTask>(), null, null);
+        var alloc2 = TestClaims.Allocate(plan2, s2, ExecutorFixtures.Sectors(s2), null, new List<ReconTask>(), null, null);
         AssertTrue(alloc2.TryGet(1, out var b1) && !CampaignMover.MovesRole(b1.Role), "fixture: a role the mover does not send on day 2 (" + b1.Role + ")");
         CampaignMover.Review(ExecutorFixtures.Inputs(s2, plan2, alloc2, ExecutorFixtures.OpenTempo()), new FakeMoverHost(), tracker, ExecutorFixtures.State());
         AssertFalse(tracker.InTransit(1), "the queued record settled: not in transit, not withheld from vanilla's pools");

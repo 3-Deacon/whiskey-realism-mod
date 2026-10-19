@@ -3,35 +3,13 @@ using System.Collections.Generic;
 namespace WhiskeyRealism.Strategic.Planner
 {
     // The two reserves G3 sets aside before it masses (the capital reserve and each threatened
-    // sector's hold reserve) and the belief readings they use. TheaterPlanner.MassFor subtracts
-    // them from the massable set; ForceAllocator (G4) assigns CapitalGuard and Hold from the very
-    // same picks, so the mass the odds were judged on and the roles the allocator hands out cannot
-    // diverge (G3 verify r1 F4/F9). Pure: snapshot in, flags out.
+    // sector's hold reserve) and the belief readings they use. They are rows 6 and 7 of the ownership
+    // table (ClaimTable): they write Capital and Hold claims, TheaterPlanner.MassFor subtracts them
+    // from the massable set, and ForceAllocator (G4) assigns CapitalGuard and Hold from those very
+    // claims without re-running them, so the mass the odds were judged on and the roles the
+    // allocator hands out cannot diverge (G3 verify r1 F4/F9). Pure: snapshot in, claims out.
     internal static class ReserveRules
     {
-        // What ReserveRules.Hold sized each sector's reserve on: Sector[k] is the sum for a sector with a need (0 otherwise), and each
-        // formation that went into a sum put its Share into sector ShareSector (-1 when into none).
-        internal sealed class HoldTally
-        {
-            internal readonly float[] Sector;
-            internal readonly float[] Share;
-            internal readonly int[] ShareSector;
-
-            internal HoldTally(int sectors, int formations)
-            {
-                Sector = new float[sectors];
-                Share = new float[formations];
-                ShareSector = new int[formations];
-                for (int i = 0; i < formations; i++) ShareSector[i] = -1;
-            }
-
-            internal void Add(int formation, int sector, float share)
-            {
-                Share[formation] = share;
-                ShareSector[formation] = sector;
-            }
-        }
-
         // A belief's live weight: strength x confidence, 0 once expired.
         internal static float Live(in EnemyBelief b)
         {
@@ -178,75 +156,96 @@ namespace WhiskeyRealism.Strategic.Planner
             return mask;
         }
 
-        // The capital reserve: the massable formations nearest the own capital until their
-        // strength reaches the capital floor (P7).
-        internal static void Capital(CampaignSnapshot s, float capitalFloor, bool[] reserved, bool[] excluded = null)
+        // The capital reserve (row 6 of the ownership table): the massable formations nearest the own capital until their strength reaches
+        // the capital floor (P7), taken from the formations nobody else owns and, home defence first, from a committed or department-moving one.
+        // A pinned builder is another owner's (row 1), so the reserve takes no guard from one.
+        internal static void Capital(CampaignSnapshot s, float capitalFloor, Claim[] claims)
         {
-            for (int i = 0; i < reserved.Length; i++) reserved[i] = false;
             if (!s.HasCapital || capitalFloor <= 0f) return;
             var order = new List<int>();
             for (int i = 0; i < s.Own.Count; i++)
-                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement) && (excluded == null || !excluded[i])) order.Add(i);
+                if (TheaterPlanner.MassEligible(s.Own[i], s.MinMoraleForMovement) && ClaimTable.Takes(ClaimTable.RowCapital, claims[i].Claimant)) order.Add(i);
             SortByDistance(s, order, s.CapitalX, s.CapitalZ);
             float held = 0f;
             for (int k = 0; k < order.Count && held < capitalFloor; k++)
             {
-                reserved[order[k]] = true;
+                claims[order[k]].Claimant = Claimant.Capital;
+                claims[order[k]].TargetX = s.CapitalX;
+                claims[order[k]].TargetZ = s.CapitalZ;
                 held += System.Math.Max(0f, s.Own[order[k]].Strength);
             }
         }
 
-        // Each threatened sector's hold reserve: what holds there anyway (formations that cannot
-        // be massed, and the capital reserve) counts first, then the massable formations nearest the
-        // sector's believed army until the hold need is met. What holds counts the way vanilla counts
-        // it (WlChainRules.CountsTowardCoverage, integrator decision 2026-10-15): a committed defender at
-        // its strength and the map-group player's group at strength x morale, in the sector where its
-        // last waypoint lies (HoldSectorOf), so a player standing in a sector releases the AI corps
-        // that would hold it and a player marching away stops covering it. The player's own command and
-        // a CIC side hold nothing. A formation that Recovers is leaving for supply and counts 0 (G4
-        // verify r2 N2). The player's group is never in the massable list (TheaterPlanner.MassEligible),
-        // so it is never reserved. holdReserved[i] is the sector whose hold
-        // keeps formation i, -1 none. need/nearX/nearZ are per sector. tally (optional) receives what the reserve was sized on: per sector
-        // with a need, the sum of what holds there anyway plus the reserved formations, and per formation the share it put into that sum
-        // (the measure ForceAllocator tests a scout draw against). The capital reserve counts in the capital's own sector only: a guard
-        // standing elsewhere marches to the capital and holds nothing where it stands.
-        internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ,
-                                  bool[] capitalReserved, int[] holdReserved, HoldTally tally = null)
+        // Each threatened sector's hold reserve (row 7 of the ownership table): what holds there anyway counts first, then the massable
+        // formations nearest the sector's believed army until the hold need is met. What holds counts the way vanilla counts it
+        // (WlChainRules.CountsTowardCoverage, integrator decision 2026-10-15): a committed defender at its strength and the map-group
+        // player's group at strength x morale, in the sector where its last waypoint lies (HoldSectorOf), so a player standing in a sector
+        // releases the AI corps that would hold it and a player marching away stops covering it. The player's own command and a CIC side hold
+        // nothing. A formation that Recovers is leaving for supply and counts 0 (G4 verify r2 N2). The player's group is never in the
+        // massable list (TheaterPlanner.MassEligible), so it is never reserved.
+        // Who counts, from the claims: a candidate is a massable formation nobody else owns (None) or a pinned builder; a formation that
+        // holds anyway is an unowned, immobile or pinned formation the mass cannot use (the unready, the busy, the map-group player), and a
+        // capital guard standing in the capital's own sector (a guard elsewhere marches to the capital and holds nothing where it stands).
+        // A committed formation, a department move and a formation leaving for supply are counted in no sector, and neither is a Marching
+        // depot builder (held): it is leaving for its site, and its claim stays None so the allocator's depot step finds it.
+        // A reserve body is a Hold claim (a pinned builder keeps its claim and is counted); every formation the pass counts has its sector and
+        // share written into its claim, the measure ForceAllocator tests a scout draw against. sectorHeld[k] receives, per sector with a need,
+        // the sum of what holds there anyway plus the reserved formations. covering is F6b-2's input, null until then.
+        internal static void Hold(CampaignSnapshot s, SectorModel sectors, float[] need, float[] nearX, float[] nearZ, Claim[] claims,
+                                  CoveringInput covering, IReadOnlyList<HeldBuilder> held, float[] sectorHeld)
         {
             int n = s.Own.Count;
-            for (int i = 0; i < holdReserved.Length; i++) holdReserved[i] = -1;
             var order = new List<int>();
             int capitalSector = s.HasCapital ? sectors.SectorAt(s.CapitalX, s.CapitalZ) : -1;
             for (int sector = 0; sector < sectors.Count; sector++)
             {
                 if (need[sector] <= 0f) continue;
-                float held = 0f;
+                float total = 0f;
                 order.Clear();
                 for (int i = 0; i < n; i++)
                 {
                     var f = s.Own[i];
-                    if (HoldSectorOf(sectors, f) != sector) continue;
-                    if (!TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) || capitalReserved[i])
+                    if (HoldSectorOf(sectors, f) != sector || IsMarchingBuilder(held, f.InstanceId)) continue;
+                    Claimant owner = claims[i].Claimant;
+                    if (TheaterPlanner.MassEligible(f, s.MinMoraleForMovement) && (owner == Claimant.None || owner == Claimant.PinnedBuilder))
                     {
-                        if (WlChainRules.CountsTowardCoverage(f.Chain) && !Recovers(f, s.MinMoraleForMovement) && (!capitalReserved[i] || sector == capitalSector))
-                        {
-                            float share = HoldStrength(f);
-                            held += share;
-                            tally?.Add(i, sector, share);
-                        }
+                        order.Add(i);
+                        continue;
                     }
-                    else order.Add(i);
+                    bool holdsAnyway = owner == Claimant.None || owner == Claimant.Immobile || owner == Claimant.PinnedBuilder
+                        || (owner == Claimant.Capital && sector == capitalSector);
+                    if (holdsAnyway && WlChainRules.CountsTowardCoverage(f.Chain) && !Recovers(f, s.MinMoraleForMovement))
+                    {
+                        float share = HoldStrength(f);
+                        total += share;
+                        Count(ref claims[i], sector, share);
+                    }
                 }
                 SortByDistance(s, order, nearX[sector], nearZ[sector]);
-                for (int k = 0; k < order.Count && held < need[sector]; k++)
+                for (int k = 0; k < order.Count && total < need[sector]; k++)
                 {
-                    holdReserved[order[k]] = sector;
                     float share = System.Math.Max(0f, s.Own[order[k]].Strength);
-                    held += share;
-                    tally?.Add(order[k], sector, share);
+                    total += share;
+                    if (claims[order[k]].Claimant == Claimant.None) claims[order[k]].Claimant = Claimant.Hold;
+                    Count(ref claims[order[k]], sector, share);
                 }
-                if (tally != null) tally.Sector[sector] = held;
+                sectorHeld[sector] = total;
             }
+        }
+
+        private static void Count(ref Claim claim, int sector, float share)
+        {
+            claim.SectorId = sector;
+            claim.Share = share;
+        }
+
+        // Whether the depot ledger holds the formation as a builder still on its way (Wished false): the hold counts it nowhere.
+        private static bool IsMarchingBuilder(IReadOnlyList<HeldBuilder> held, int instanceId)
+        {
+            if (held == null) return false;
+            for (int k = 0; k < held.Count; k++)
+                if (held[k].InstanceId == instanceId && !held[k].Wished) return true;
+            return false;
         }
 
         internal static float DistanceSq(float ax, float az, float bx, float bz)

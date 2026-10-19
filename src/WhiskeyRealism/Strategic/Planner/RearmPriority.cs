@@ -31,7 +31,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 case FormationRole.CapitalGuard: return CapitalGuardRank;
                 case FormationRole.DepotBuilder: return DepotBuilderRank;
                 case FormationRole.Recon: return ReconRank;
-                case FormationRole.Garrison: return GarrisonRank;
+                case FormationRole.Garrison:
+                case FormationRole.Redeploy: return GarrisonRank;   // a formation marching to a hold point ranks as a marching garrison
                 case FormationRole.Recover: return LastRank;
                 default: throw new ArgumentOutOfRangeException(nameof(role), role, "a role the re-arming order does not rank");
             }

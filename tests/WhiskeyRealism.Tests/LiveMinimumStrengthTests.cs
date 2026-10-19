@@ -141,7 +141,7 @@ internal static class LiveMinimumStrengthTests
             s.Own.Add(ExecutorFixtures.Corps(3, 580f, 3000f));
             var plan = new TheaterPlan { Alliance = s.Alliance, DaySerial = s.DaySerial };
             plan.MinGarrisonStrength = minimum;
-            allocation = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            allocation = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
             return plan;
         }
         Run(2000f, out var live);

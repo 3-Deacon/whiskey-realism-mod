@@ -366,7 +366,7 @@ internal static class ScoutFirstTests
         AssertTrue(plan.MassInstanceIds.Contains(1), "the East corps is the core of the mass");
         AssertTrue(plan.ReinforcementInstanceId >= 2, "and the West corps is named the reinforcement: " + plan.ReinforcementInstanceId);
         AssertTrue(plan.MassInstanceIds.Contains(plan.ReinforcementInstanceId), "in the mass");
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         alloc.TryGet(plan.ReinforcementInstanceId, out var support);
         AssertEqual(FormationRole.Support, support.Role, "as the push's Support");
         int mainEffort = 0;
@@ -534,7 +534,7 @@ internal static class ScoutFirstTests
         ledger.OnReview(s, null);
         day.Plan = TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);
         ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, day.Tasks);
-        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger);
+        day.Allocation = TestClaims.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
     }
@@ -687,7 +687,7 @@ internal static class ScoutFirstTests
         AssertTrue(plan.MainCapacityStrength > 60000f, "the capacity is what the old mass was: " + plan.MainCapacityStrength);
         AssertTrue(plan.MassInstanceIds.Count <= 3, "the mass is the force it needs, not ten of fifteen: " + plan.MassInstanceIds.Count);
         AssertTrue(plan.MassStrength >= plan.MainNeedStrength, "and covers the need");
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         int main = 0, hold = 0;
         foreach (var a in alloc.Assignments)
         {
@@ -714,7 +714,7 @@ internal static class ScoutFirstTests
         foreach (var sp in plan.Sectors) if (sp.SectorId == west) need = sp.HoldNeed;
         // D11 Floor: 5000 x (1 + 0.2, objective 30's importance, the anchor undisplaced), above the plain 5000 minimum.
         AssertNear(6000f, need, 0.5f, "the West sector faces objective 30: the floor is 6000");
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, null, null);
         alloc.TryGet(2, out var g);
         AssertEqual(FormationRole.Hold, g.Role, "the guard holds");
         AssertEqual(ForceAllocator.ReasonHoldReserve, g.Reason, "as the sector's hold reserve, though nothing is believed there");
@@ -773,7 +773,7 @@ internal static class ScoutFirstTests
     {
         var s = Union();
         var plan = Plan(s);
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         string row = ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0);
         AssertContains(row, " need=12375 ", "the need");
         AssertContains(row, " cap=", "the capacity");
@@ -803,7 +803,7 @@ internal static class ScoutFirstTests
         AssertTrue(day8.MainScoutLatched, "but the decision stays scouted");
         AssertFalse(day8.MainStaged, "so the released march is not re-staged");
         AssertContains(TheaterPlanner.Summary(day8), "scouted=latched staged=no", "the row says so");
-        var alloc = ForceAllocator.Allocate(day8, decayed, ExecutorFixtures.Sectors(decayed), null, null, null);
+        var alloc = TestClaims.Allocate(day8, decayed, ExecutorFixtures.Sectors(decayed), null, null, null);
         foreach (int id in day8.MassInstanceIds)
         {
             alloc.TryGet(id, out var a);
@@ -948,7 +948,7 @@ internal static class ScoutFirstTests
         TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);   // warm: JIT, the state's dictionaries
         long before = TestFixtures.BeginAllocationWindow();
         var plan = TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, null, null);
         long bytes = TestFixtures.AllocatedSince(before);
         AssertTrue(alloc.Assignments.Count == 15, "all fifteen are assigned");
         AssertTrue(bytes < AllocationBound, "Plan + Allocate for 15 formations allocated " + bytes + " bytes (bound " + AllocationBound + ")");

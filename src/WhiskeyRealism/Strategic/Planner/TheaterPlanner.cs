@@ -156,8 +156,10 @@ namespace WhiskeyRealism.Strategic.Planner
             internal float CapitalWeighted, CapitalReach, CapitalReliefDays, CapitalCorpsPerDay;
             internal ReviewTerrain Terrain;   // marks the questions' order; null once scoring runs without rivers
             internal SectorFacts Facts;
-            internal bool[] CapitalReserved;
-            internal int[] HoldReserved;      // sector whose hold keeps the formation, -1 none
+            // Foresight F6a: the ownership table (ClaimTable rows 1 to 7 as Reserve builds them, row 8 once Plan has chosen the mass), one claim
+            // per own formation in snapshot order, and the hold the reserves were sized on per sector.
+            internal Claim[] Claims;
+            internal float[] SectorHeld;
             internal float[] RoadPerDay;
             internal HashSet<int> OwnIips;
             internal readonly List<int> Scratch = new List<int>();
@@ -281,6 +283,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 plan.MainCapacityStrength = MassFor(inputs, m.X, m.Z, m.SectorId, m.ObjectiveId, inputs.Scratch);
                 plan.MainNeedStrength = m.Need;
                 plan.MassStrength = SelectMass(inputs, inputs.Scratch, m.X, m.Z, m.Need, plan);
+                ClaimTable.TakeMass(inputs.Claims, s, plan.MassInstanceIds);   // row 8
                 if (plan.MainStaged) SetStartLine(inputs, plan, m.X, m.Z);
                 NoteReinforcement(inputs, plan, state);
                 axisFromX = force.X;
@@ -300,6 +303,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
             }
             PostFromOutside(inputs, plan);   // after the mass: the garrison takes only what the mass does not
+            plan.Claims.AddRange(inputs.Claims);
+            plan.SectorHeld = inputs.SectorHeld;
             for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
@@ -898,15 +903,17 @@ namespace WhiskeyRealism.Strategic.Planner
         // at the post (a small force when nothing is believed near: the floor, or the presumption); the first of them always counts. When
         // nobody is present, the nearest ready formation not already kept for the capital or a hold is posted there; when the flag alone
         // blocks it, nobody is posted. Every member is kept out of the mass.
-        // The hold already kept against the army that threatens the town: the strength of the sector hold reserves whose reference belief (the
-        // army their sector faces) lies within the relocation range of the town. Counted once, not again as a garrison.
+        // The hold already kept against the army that threatens the town: the strength of the formations that hold a sector (the table's reserve
+        // bodies, and a capital guard standing in the sector it was counted in) whose reference belief (the army their sector faces) lies
+        // within the relocation range of the town. Counted once, not again as a garrison. A formation that holds a sector only because it is
+        // there (the unready, the busy, the map-group player) is not credited: it is not the reserve the sector chose.
         private static float HoldFacing(Inputs c, float x, float z)
         {
             float sum = 0f;
             for (int i = 0; i < c.S.Own.Count; i++)
             {
-                int sector = c.HoldReserved[i];
-                if (sector < 0 || !WlChainRules.CountsTowardCoverage(c.S.Own[i].Chain)) continue;
+                int sector = c.Claims[i].SectorId;
+                if (!ClaimTable.HoldsItsSector(c.Claims[i], c.S.Own[i], c.S.MinMoraleForMovement) || !WlChainRules.CountsTowardCoverage(c.S.Own[i].Chain)) continue;
                 if (RiverLines.Distance(c.Facts.NearX[sector], c.Facts.NearZ[sector], x, z) <= c.S.RelocationRange) sum += ReserveRules.HoldStrength(c.S.Own[i]);
             }
             return sum;
@@ -962,8 +969,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     for (int i = 0; i < s.Own.Count; i++)
                     {
                         var f = s.Own[i];
-                        if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || c.HoldReserved[i] >= 0 || c.GarrisonReserved[i] || IsHeldBuilder(c, f.InstanceId)) continue;
-                        if (f.UnitTyp <= 13 || plan.MassInstanceIds.Contains(f.InstanceId) || !WithinHorizon(c, i, post.X, post.Z)) continue;
+                        if (!MassEligible(f, s.MinMoraleForMovement) || c.Claims[i].Claimant != Claimant.None || c.GarrisonReserved[i] || IsHeldBuilder(c, f.InstanceId)) continue;
+                        if (f.UnitTyp <= 13 || !WithinHorizon(c, i, post.X, post.Z)) continue;
                         float d = DistanceSq(f.X, f.Z, post.X, post.Z);
                         if (d > bestDistance || (d == bestDistance && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
                         bestDistance = d;
@@ -1127,8 +1134,8 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int i = 0; i < s.Own.Count; i++)
             {
                 var f = s.Own[i];
-                if (!MassEligible(f, s.MinMoraleForMovement) || c.CapitalReserved[i] || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
-                int holds = c.HoldReserved[i];
+                if (!MassEligible(f, s.MinMoraleForMovement) || c.Claims[i].Claimant == Claimant.Capital || GaveUpOn(c, f.InstanceId, objectiveId) || IsHeldBuilder(c, f.InstanceId)) continue;
+                int holds = ClaimTable.IsReserveBody(c.Claims[i], f, s.MinMoraleForMovement) ? c.Claims[i].SectorId : -1;
                 if (holds >= 0 && holds != targetSector && !HoldThreatAtTarget(c, holds, tx, tz)) continue;
                 // The main effort draws from its own department: the target's theater. A formation of another department is a
                 // candidate for the one reinforcement; so is the decision's reinforcement once its transfer has changed its department.
@@ -1427,18 +1434,15 @@ namespace WhiskeyRealism.Strategic.Planner
             return LandThreatNear(c, cx, cz, sectorRadius + c.S.RelocationRange);
         }
 
-        // G4's own pick rules, applied before massing (ReserveRules, shared with ForceAllocator): the
-        // capital reserve (the massable formations nearest the capital until CapitalFloorStrength),
-        // then each threatened sector's hold reserve (what holds there anyway, busy, not massable or in
-        // the capital reserve, then its massable formations nearest the sector's believed army until
-        // HoldNeed). A sector's hold is released for a target its own threat sits at (HoldThreatAtTarget).
+        // The ownership table's rows 1 to 7, built before massing (ClaimTable, read by ForceAllocator as published): the pinned builders, the
+        // immobile and the recovering, the capital reserve (the massable formations nearest the capital until CapitalFloorStrength), then each
+        // threatened sector's hold reserve (what holds there anyway, busy, not massable or in the capital reserve, then its massable
+        // formations nearest the sector's believed army until HoldNeed). A sector's hold is released for a target its own threat sits at
+        // (HoldThreatAtTarget).
         private static void Reserve(Inputs c)
         {
-            int n = c.S.Own.Count;
-            c.CapitalReserved = new bool[n];
-            c.HoldReserved = new int[n];
-            ReserveRules.Capital(c.S, c.CapitalFloor, c.CapitalReserved, ReserveRules.WishedBuilders(c.S, c.Held));
-            ReserveRules.Hold(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalReserved, c.HoldReserved);
+            c.Claims = ClaimTable.Build(c.S, c.Sectors, c.Facts.Need, c.Facts.NearX, c.Facts.NearZ, c.CapitalFloor, c.Held, c.GaveUp, c.State, null,
+                                        ClaimTable.RowSources, c.Facts, out c.SectorHeld);
             Garrisons(c);
         }
 

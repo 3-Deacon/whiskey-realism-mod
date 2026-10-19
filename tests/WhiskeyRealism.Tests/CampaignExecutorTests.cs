@@ -244,7 +244,7 @@ internal static class CampaignExecutorTests
         s.Own.Add(player);
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
         int sector = ExecutorFixtures.Sectors(s).SectorAt(550f, 0f);
-        var a = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var a = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         AssertEqual(FormationRole.Hold, a.TryGet(2, out var x) ? x.Role : FormationRole.MainEffort, "the allocator leaves him in place");
 
         foreach (var role in new[] { FormationRole.MainEffort, FormationRole.Support, FormationRole.CapitalGuard, FormationRole.DepotBuilder, FormationRole.Recover })
@@ -289,14 +289,14 @@ internal static class CampaignExecutorTests
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2 });
         var sectors = ExecutorFixtures.Sectors(s);
 
-        var before = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null);
+        var before = TestClaims.Allocate(plan, s, sectors, null, null, null, null);
         AssertEqual(FormationRole.MainEffort, before.TryGet(1, out var b1) ? b1.Role : FormationRole.Hold, "without a gave-up set both march to the main target");
         AssertEqual(FormationRole.MainEffort, before.TryGet(2, out var b2) ? b2.Role : FormationRole.Hold, "the second too");
 
         var tracker = TrackerThatGaveUp(1, 350f, 100f, 0f);
         var gaveUp = GaveUpOf(tracker);
         AssertEqual(1, gaveUp.Count, "the tracker reports the one move it gave up on");
-        var after = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        var after = TestClaims.Allocate(plan, s, sectors, null, null, null, gaveUp);
         AssertTrue(after.TryGet(1, out var a1), "formation 1 still has an assignment");
         AssertEqual(FormationRole.Hold, a1.Role, "it lost the main effort role at the target it gave up on");
         AssertEqual("gave-up", a1.Reason, "named");
@@ -309,14 +309,14 @@ internal static class CampaignExecutorTests
         AssertTrue(host.Moves.Exists(m => m.id == 2), "it sends the other");
 
         // A new target starts afresh: the same formation gave up at (200, 0) keeps its role toward (100, 0).
-        var elsewhere = ForceAllocator.Allocate(plan, s, sectors, null, null, null, GaveUpOf(TrackerThatGaveUp(1, 350f, 200f, 0f)));
+        var elsewhere = TestClaims.Allocate(plan, s, sectors, null, null, null, GaveUpOf(TrackerThatGaveUp(1, 350f, 200f, 0f)));
         AssertEqual(FormationRole.MainEffort, elsewhere.TryGet(1, out var e1) ? e1.Role : FormationRole.Hold, "a give-up at another target does not cost the role");
         // Another formation's give-up at the same target is not formation 1's.
-        var other = ForceAllocator.Allocate(plan, s, sectors, null, null, null, GaveUpOf(TrackerThatGaveUp(7, 350f, 100f, 0f)));
+        var other = TestClaims.Allocate(plan, s, sectors, null, null, null, GaveUpOf(TrackerThatGaveUp(7, 350f, 100f, 0f)));
         AssertEqual(FormationRole.MainEffort, other.TryGet(1, out var o1) ? o1.Role : FormationRole.Hold, "keyed by instance id");
 
         // Deterministic and pure: the same inputs, the same allocation.
-        var again = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        var again = TestClaims.Allocate(plan, s, sectors, null, null, null, gaveUp);
         AssertEqual(after.Assignments.Count, again.Assignments.Count, "same count");
         for (int i = 0; i < after.Assignments.Count; i++)
             AssertTrue(after.Assignments[i].InstanceId == again.Assignments[i].InstanceId && after.Assignments[i].Role == again.Assignments[i].Role
@@ -333,11 +333,11 @@ internal static class CampaignExecutorTests
         var sectors = ExecutorFixtures.Sectors(s);
         plan.DepotTasks.Add(new DepotTask { X = 300f, Z = 0f, SectorId = sectors.SectorAt(350f, 0f), Priority = 1f });
 
-        var first = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null);
+        var first = TestClaims.Allocate(plan, s, sectors, null, null, null, null);
         AssertEqual(FormationRole.DepotBuilder, first.TryGet(11, out var f11) ? f11.Role : FormationRole.Hold, "the smallest builds the depot");
 
         var gaveUp = GaveUpOf(TrackerThatGaveUp(11, 380f, 300f, 0f));
-        var next = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        var next = TestClaims.Allocate(plan, s, sectors, null, null, null, gaveUp);
         AssertEqual(FormationRole.DepotBuilder, next.TryGet(12, out var n12) ? n12.Role : FormationRole.Hold, "the next smallest is tried");
         AssertTrue(next.TryGet(11, out var n11) && n11.Role != FormationRole.DepotBuilder, "the one that gave up is not the builder");
         AssertEqual("depot-task", n12.Reason, "with the depot reason");
@@ -356,11 +356,11 @@ internal static class CampaignExecutorTests
         plan.CapitalFloorStrength = 5000f;
         var sectors = ExecutorFixtures.Sectors(s);
 
-        var first = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null);
+        var first = TestClaims.Allocate(plan, s, sectors, null, null, null, null);
         AssertTrue(first.TryGet(30, out var guard) && guard.Role == FormationRole.CapitalGuard && guard.Withheld, "the capital guard is withheld from vanilla");
 
         var gaveUp = GaveUpOf(TrackerThatGaveUp(30, 50f, s.CapitalX, s.CapitalZ));
-        var next = ForceAllocator.Allocate(plan, s, sectors, null, null, null, gaveUp);
+        var next = TestClaims.Allocate(plan, s, sectors, null, null, null, gaveUp);
         AssertTrue(next.TryGet(30, out var hold), "still assigned");
         AssertEqual(FormationRole.Hold, hold.Role, "the guard that gave up on the capital is a Hold");
         AssertEqual("gave-up", hold.Reason, "named");
@@ -380,13 +380,13 @@ internal static class CampaignExecutorTests
         var sectors = ExecutorFixtures.Sectors(s);
         var tasks = new List<ReconTask> { new ReconTask { Kind = ReconKind.Screen, SectorId = plan.MainSectorId, FromX = 150f, FromZ = 0f, HoldX = 130f, HoldZ = 0f, Priority = 1f, Reason = "t" } };
 
-        var first = ForceAllocator.Allocate(plan, s, sectors, null, tasks, null, null);
+        var first = TestClaims.Allocate(plan, s, sectors, null, tasks, null, null);
         int picked = first.Assignments.Find(x => x.Role == FormationRole.Recon).InstanceId;
         AssertTrue(picked == 20 || picked == 21, "a cavalry formation screens");
         int other = picked == 20 ? 21 : 20;
 
         var gaveUp = GaveUpOf(TrackerThatGaveUp(picked, picked == 20 ? 140f : 160f, 130f, 0f));
-        var next = ForceAllocator.Allocate(plan, s, sectors, null, tasks, null, gaveUp);
+        var next = TestClaims.Allocate(plan, s, sectors, null, tasks, null, gaveUp);
         AssertEqual(FormationRole.Recon, next.TryGet(other, out var o) ? o.Role : FormationRole.Hold, "the other cavalry formation screens instead");
         AssertTrue(next.TryGet(picked, out var p) && p.Role != FormationRole.Recon, "the one that gave up does not");
     }
@@ -445,7 +445,7 @@ internal static class CampaignExecutorTests
                 AssertTrue(p.MassInstanceIds.Count >= 2, "with several corps in the mass: " + string.Join(",", p.MassInstanceIds));
                 massIds.AddRange(p.MassInstanceIds);
             }
-            var a = ForceAllocator.Allocate(p, snap, ExecutorFixtures.Sectors(snap), null, null, null, today);
+            var a = TestClaims.Allocate(p, snap, ExecutorFixtures.Sectors(snap), null, null, null, today);
             CampaignMover.Review(ExecutorFixtures.Inputs(snap, p, a, ExecutorFixtures.OpenTempo()), missHost, tracker, state);
         }
         var moves = GaveUpOf(tracker, ExecutorFixtures.Day + 3);
@@ -486,7 +486,7 @@ internal static class CampaignExecutorTests
         AssertFalse(plan2.MainObjectiveId == 98 && plan2.MassInstanceIds.Count > 0, "never kept with a mass of formations that gave up on it");
 
         // The real allocation and the real mover over that plan: nothing stalls, nothing withheld waits on a decision that cannot go.
-        var allocation = ForceAllocator.Allocate(plan2, day2, ExecutorFixtures.Sectors(day2), null, null, null, moves);
+        var allocation = TestClaims.Allocate(plan2, day2, ExecutorFixtures.Sectors(day2), null, null, null, moves);
         var host = new FakeMoverHost();
         var tally = CampaignMover.Review(ExecutorFixtures.Inputs(day2, plan2, allocation, ExecutorFixtures.OpenTempo()), host, tracker, state2);
         AssertFalse(tally.MainUndispatchableRow, "no kept main effort without a formation the mover can send");
@@ -521,7 +521,7 @@ internal static class CampaignExecutorTests
 
         AssertEqual(1, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays - 1).Count, "the day before it lapses it is still collected");
         AssertEqual(0, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays).Count, "GaveUpExpiryDays after the retry it lapses");
-        var lapsed = ForceAllocator.Allocate(plan, s, sectors, null, null, null, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays));
+        var lapsed = TestClaims.Allocate(plan, s, sectors, null, null, null, GaveUpOf(tracker, 101 + MoveTracker.GaveUpExpiryDays));
         AssertEqual(FormationRole.MainEffort, lapsed.TryGet(1, out var a1) ? a1.Role : FormationRole.Hold, "the formation may try the same target again");
 
         // The mover sends it again as a first issue, not a retry, and the tracker is a fresh attempt.
@@ -1399,7 +1399,7 @@ internal static class CampaignExecutorTests
         AssertTrue(files > 100, "the scan covered the Patches folder: " + files);
     }
 
-    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "SectorPlan", "SectorModel", "ExecutorContext" };
+    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "Claim", "SectorPlan", "SectorModel", "ExecutorContext" };
 
     // Verify G7 probe P13: a patch that writes the published plan must fail the pin.
     private static void PlannerPatchWriteProbeIsCaught()

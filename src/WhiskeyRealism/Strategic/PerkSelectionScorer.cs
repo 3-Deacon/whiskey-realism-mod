@@ -80,6 +80,7 @@ namespace WhiskeyRealism.Strategic
                 case FormationRole.Garrison:
                 case FormationRole.Hold:
                 case FormationRole.Reserve:
+                case FormationRole.Redeploy:
                     return ArmyPerkRole.CapitalDefense;
                 case FormationRole.MainEffort:
                     return allianceId == 1 ? ArmyPerkRole.Raid : ArmyPerkRole.Siege;

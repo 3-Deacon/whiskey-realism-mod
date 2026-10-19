@@ -121,7 +121,7 @@ internal static class GarrisonPlannerTests
     private static Allocation Allocate(CampaignSnapshot s, TheaterPlan plan, IReadOnlyList<GarrisonPostRecord> retained = null, IReadOnlyList<GaveUpMove> gaveUp = null)
     {
         plan.Garrisons.AddRange(Posts(s, plan, retained));
-        return ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null, gaveUp);
+        return TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null, gaveUp);
     }
 
     private static FormationRecord Corps(int id, float x, float strength)
@@ -353,7 +353,7 @@ internal static class GarrisonPlannerTests
         s.Own.Add(heldBuilder);
         var pinned = new List<HeldBuilder> { new HeldBuilder { InstanceId = 4, Wished = true, SectorId = 0, TargetX = 95f, TargetZ = 0f, SiteX = 95f, SiteZ = 0f } };
         plan.Garrisons.AddRange(Posts(s, plan));
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null, null, pinned);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null, null, pinned);
         alloc.TryGet(1, out var guard);
         alloc.TryGet(2, out var recover);
         AssertEqual(FormationRole.CapitalGuard, guard.Role, "corps 1 guards the capital");
@@ -551,7 +551,7 @@ internal static class GarrisonPlannerTests
         var task = new ReconTask { Kind = ReconKind.Screen, SectorId = sectors.SectorAt(503f, 0f), FromX = 560f, FromZ = 0f, HoldX = 520f, HoldZ = 0f, Priority = 1f, Reason = "t" };
         var tasks = new List<ReconTask> { task };
         plan.Garrisons.AddRange(Posts(s, plan, new[] { Record(GarrisonPostKind.ObjectiveTown, 500f, "corps1:1") }));
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger());
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, tasks, new ReconMissionLedger());
         alloc.TryGet(1, out var garrison);
         AssertEqual(ForceAllocator.ReasonGarrisonPost, garrison.Reason, "the incumbent stays the garrison");
         AssertTrue(garrison.Role != FormationRole.Recon, "and is not made a scout");
@@ -564,7 +564,7 @@ internal static class GarrisonPlannerTests
         noPost.Own.Add(cavalry);
         noPost.Own.Add(Corps(3, 450f, 9000f));
         var noPostPlan = HandPlan(noPost);
-        var scout = ForceAllocator.Allocate(noPostPlan, noPost, ExecutorFixtures.Sectors(noPost), null, tasks, new ReconMissionLedger());
+        var scout = TestClaims.Allocate(noPostPlan, noPost, ExecutorFixtures.Sectors(noPost), null, tasks, new ReconMissionLedger());
         scout.TryGet(1, out var cav);
         AssertEqual(FormationRole.Recon, cav.Role, "control: with no post the cavalry corps is the one recon prefers");
     }
@@ -610,7 +610,7 @@ internal static class GarrisonPlannerTests
         var ledger = new GarrisonLedger();
         var plan = HandPlan(s);
         plan.Garrisons.AddRange(Posts(s, plan, retained));
-        ledger.Sync(plan.Garrisons, ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null), s);
+        ledger.Sync(plan.Garrisons, TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null), s);
         AssertEqual("corps1:1,corps2:2", string.Join(",", ledger.Posts[0].AssignedUnitKeys), "and the ledger records both");
     }
 
@@ -1279,7 +1279,7 @@ internal static class GarrisonPlannerTests
         var alloc2 = Allocate(s, HandPlan(s), ledger.Posts);
         var plan2 = HandPlan(s);
         plan2.Garrisons.AddRange(Posts(s, plan2, ledger.Posts));
-        var alloc3 = ForceAllocator.Allocate(plan2, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc3 = TestClaims.Allocate(plan2, s, ExecutorFixtures.Sectors(s), null, null, null);
         ledger.Sync(plan2.Garrisons, alloc3, s);
         AssertEqual(GarrisonPostState.Holding, ledger.Transitions.First(t => t.Unit == "corps1").State, "arrived: holding");
         AssertTrue(alloc2.Seats.Count >= 1, "seated");
@@ -1348,8 +1348,8 @@ internal static class GarrisonPlannerTests
         plan.Garrisons.AddRange(Posts(s, plan));
         string before = string.Join("|", plan.Garrisons.Select(g => g.Kind + ":" + string.Join(",", g.InstanceIds) + ":" + g.Need));
         var sectors = ExecutorFixtures.Sectors(s);
-        var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
-        var b = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var a = TestClaims.Allocate(plan, s, sectors, null, null, null);
+        var b = TestClaims.Allocate(plan, s, sectors, null, null, null);
         AssertEqual(AllocationSignature(a), AllocationSignature(b), "the same plan gives the same allocation twice");
         AssertEqual(a.Seats.Count, b.Seats.Count, "and the same seats");
         AssertEqual(before, string.Join("|", plan.Garrisons.Select(g => g.Kind + ":" + string.Join(",", g.InstanceIds) + ":" + g.Need)), "the allocation does not write into the plan");

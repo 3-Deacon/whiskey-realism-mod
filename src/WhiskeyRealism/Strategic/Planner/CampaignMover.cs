@@ -98,7 +98,7 @@ namespace WhiskeyRealism.Strategic.Planner
     }
 
     // The mover (plan G5a, spec C6): the daily review's movement step for one alliance, pure over the host. For each
-    // MainEffort / Support / CapitalGuard / Recover / DepotBuilder assignment whose formation is not where its role needs it
+    // MainEffort / Support / CapitalGuard / Garrison / Redeploy / Recover / DepotBuilder assignment whose formation is not where its role needs it
     // it issues one MoveUnitTo (at most MoveTracker.MaxMovesPerDay a day), judges last review's moves first, removes a
     // Recover formation from vanilla's offensive list, and applies the chapter tempo gate:
     //   - the first MainEffort dispatch of a decision waits for vanilla's tempo roll (CampaignTempoGate), once per decision;
@@ -118,15 +118,42 @@ namespace WhiskeyRealism.Strategic.Planner
         // Within this of the target, or a final waypoint this close to it, the formation is there or already underway.
         public const float ArrivalRadius = 10f;
 
-        // The order the roles are served in under the daily cap.
-        private static readonly FormationRole[] Priority =
-            { FormationRole.CapitalGuard, FormationRole.MainEffort, FormationRole.Garrison, FormationRole.Recover, FormationRole.DepotBuilder, FormationRole.Support };
+        // One step of the order the roles are served in under the daily cap: a role, and the reason it must carry (null: any). Home defence
+        // goes first; a covering member before the main effort, a department's reinforcement after the garrisons (D11 requirement-redeploy-role).
+        // A Redeploy formation is sent with no tempo release: it marches over own or neutral ground, like a capital guard.
+        private readonly struct PriorityStep
+        {
+            public readonly FormationRole Role;
+            public readonly string Reason;
+            public PriorityStep(FormationRole role, string reason) { Role = role; Reason = reason; }
+        }
+
+        private static readonly PriorityStep[] Priority =
+        {
+            new PriorityStep(FormationRole.CapitalGuard, null),
+            new PriorityStep(FormationRole.Redeploy, ForceAllocator.ReasonCoveringForce),
+            new PriorityStep(FormationRole.MainEffort, null),
+            new PriorityStep(FormationRole.Garrison, null),
+            new PriorityStep(FormationRole.Redeploy, ForceAllocator.ReasonDepartmentReinforcement),
+            new PriorityStep(FormationRole.Recover, null),
+            new PriorityStep(FormationRole.DepotBuilder, null),
+            new PriorityStep(FormationRole.Support, null),
+        };
+
+        // A published reason is compared ordinally, here and wherever else it is tested.
+        private static bool Serves(in PriorityStep step, in Assignment a)
+        {
+            return a.Role == step.Role && (step.Reason == null || string.Equals(a.Reason, step.Reason, StringComparison.Ordinal));
+        }
 
         // Does the mover send a formation of this role? (The roles G4 can give a formation that G5d's recon executor must then leave
-        // to the mover: one owner per formation per review.)
+        // to the mover: one owner per formation per review.) A Hold is never one, a committed-wait Hold included: a push that ended is
+        // stopped, not sent.
         internal static bool MovesRole(FormationRole role)
         {
-            return Array.IndexOf(Priority, role) >= 0;
+            for (int k = 0; k < Priority.Length; k++)
+                if (Priority[k].Role == role) return true;
+            return false;
         }
 
         public static MoverTally Review(MoverInputs inputs, IMoverHost host, MoveTracker tracker, PlannerState state)
@@ -140,16 +167,16 @@ namespace WhiskeyRealism.Strategic.Planner
             tally.DaySerial = s.DaySerial;
 
             JudgeLastReview(s, allocation, tracker, tally);
-            ReleaseRecoverFromOffense(s, allocation, host);
+            ReleaseFromOffense(s, allocation, host);
             bool released = state.TempoReleasedDecision == state.DecisionSerial;
             bool dispatchable = plan.MainObjectiveId >= 0 && HasDispatchableMainEffort(s, allocation, host);
             NoteUndispatchable(inputs, state, tally, dispatchable);
             // D1: a staged (unscouted) main effort is only gathering at its start line; the tempo roll is the march's, so it waits
             // until the picture is scouted and the target is the objective.
             if (!released && dispatchable && !plan.MainStaged) released = EvaluateLaunch(inputs, host, state, tally);
-            foreach (var role in Priority)
+            foreach (var step in Priority)
                 for (int k = 0; k < allocation.Assignments.Count; k++)
-                    if (allocation.Assignments[k].Role == role)
+                    if (Serves(in step, allocation.Assignments[k]))
                         Dispatch(inputs, host, tracker, released, allocation.Assignments[k], tally);
             state.LastFullReviewDay = s.DaySerial;
             return tally;
@@ -205,13 +232,14 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // Vanilla never checks supply before or during an offensive (14080-14158 has no supply term, job 6's gate is dead,
         // 14009-14019): a Recover formation leaves unitsinoffensiveoperations as RelieveUnitsInOperations does for a retreating
-        // or low-morale one (14068-14078), and is then moved toward supply. Only a formation the planner may move.
-        private static void ReleaseRecoverFromOffense(CampaignSnapshot s, Allocation allocation, IMoverHost host)
+        // or low-morale one (14068-14078), and is then moved toward supply. A Redeploy formation leaves it too: it is marching to a hold
+        // point, and vanilla's offensive must not gather it on the way (D11 requirement-redeploy-role). Only a formation the planner may move.
+        private static void ReleaseFromOffense(CampaignSnapshot s, Allocation allocation, IMoverHost host)
         {
             for (int k = 0; k < allocation.Assignments.Count; k++)
             {
                 var a = allocation.Assignments[k];
-                if (a.Role != FormationRole.Recover) continue;
+                if (a.Role != FormationRole.Recover && a.Role != FormationRole.Redeploy) continue;
                 int i = s.IndexOfOwn(a.InstanceId);
                 if (i < 0 || !WlChainRules.MayMove(s.Own[i].Chain)) continue;
                 if ((s.Own[i].Flags & FormationFlags.InOffensiveOps) != 0) host.ListOffensive(a.InstanceId, false);

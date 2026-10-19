@@ -72,7 +72,7 @@ internal static class DepotBuilderRuleTests
     private static Allocation Run(TheaterPlan plan, CampaignSnapshot s, IReadOnlyList<HeldBuilder> held = null, IReadOnlyList<GaveUpMove> gaveUp = null,
                                   IReadOnlyList<ReconTask> recon = null)
     {
-        return ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, recon, null, gaveUp, held);
+        return TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, recon, null, gaveUp, held);
     }
 
     private static Assignment Of(Allocation a, int id)
@@ -266,8 +266,10 @@ internal static class DepotBuilderRuleTests
         AssertEqual("", Builders(far), "a held site beyond the match radius of the plan task is not this task's incumbent (and the lone formation is no surplus)");
     }
 
-    // The hold reserve claimed the incumbent first (the sector faces a believed army and it stands nearest it): it keeps that role, and the
-    // task is served by another formation as a new pick.
+    // F6a re-pin (D11 requirement-claims row 7, "a Marching held builder is never a candidate here and is counted nowhere"). Before the
+    // ownership table the hold reserve could claim the incumbent first, because it stands nearest the believed army the sector faces; the
+    // incumbent kept that role and the task was served by a new pick. The table's hold pass now leaves a Marching builder alone, so the
+    // reserve is made of the other formations and the incumbent keeps its task. (The case keeps the name the test plan gave it.)
     private static void AReserveThatTookTheIncumbentWins()
     {
         var s = ExecutorFixtures.Wide();
@@ -279,10 +281,11 @@ internal static class DepotBuilderRuleTests
         var plan = QuietPlan(s);
         plan.Sectors.Add(new SectorPlan { SectorId = TaskSector(s), Posture = TheaterPosture.Hold, HoldNeed = 5000f });
         var a = Run(plan, s, new[] { Marching(23, SiteX, TaskSector(s)) });
-        AssertEqual(FormationRole.Hold, Of(a, 23).Role, "the reserve keeps it");
-        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(a, 23).Reason, "as the hold reserve");
-        AssertEqual("20", Builders(a), "another formation is the new pick");
-        AssertEqual("new", ForceAllocator.PickOf(Of(a, 20)), "a new pick, not a kept one");
+        AssertEqual(FormationRole.DepotBuilder, Of(a, 23).Role, "the hold pass does not take a Marching builder: the incumbent keeps its task");
+        AssertEqual(ForceAllocator.ReasonPinnedBuilder, Of(a, 23).Reason, "as the kept pick");
+        AssertEqual("23", Builders(a), "and it is the task's only builder");
+        AssertEqual("pinned", ForceAllocator.PickOf(Of(a, 23)), "a kept pick, not a new one");
+        AssertEqual(ForceAllocator.ReasonHoldReserve, Of(a, 22).Reason, "the reserve is made of the formations nearest the army, the incumbent left out");
     }
 
     // A sector with one formation has no surplus (3000 held, none left), yet the task's own builder stays: it was picked when it was.

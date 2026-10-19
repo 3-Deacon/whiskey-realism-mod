@@ -16,7 +16,7 @@ namespace WhiskeyRealism.Strategic
     public static class ArmyGroupDoctrine
     {
         // The allocation's formations grouped by sector: every assignment with a sector except the ones tasked
-        // singly (Recover, Recon, DepotBuilder), a group of at least minimumUnitsPerGroup, in sector order.
+        // singly (Recover, Recon, DepotBuilder, Redeploy: it marches elsewhere), a group of at least minimumUnitsPerGroup, in sector order.
         public static List<ArmyGroupPlan> PlanGroups(Allocation allocation, int minimumUnitsPerGroup = 2)
         {
             var result = new List<ArmyGroupPlan>();
@@ -26,7 +26,8 @@ namespace WhiskeyRealism.Strategic
             foreach (var assignment in allocation.Assignments)
             {
                 if (assignment.SectorId < 0) continue;
-                if (assignment.Role == FormationRole.Recover || assignment.Role == FormationRole.Recon || assignment.Role == FormationRole.DepotBuilder) continue;
+                if (assignment.Role == FormationRole.Recover || assignment.Role == FormationRole.Recon || assignment.Role == FormationRole.DepotBuilder
+                    || assignment.Role == FormationRole.Redeploy) continue;
                 if (!bySector.TryGetValue(assignment.SectorId, out var plan))
                 {
                     plan = new ArmyGroupPlan { SectorId = assignment.SectorId };
