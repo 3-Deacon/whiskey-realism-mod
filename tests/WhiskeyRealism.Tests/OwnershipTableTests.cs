@@ -114,6 +114,7 @@ internal static class OwnershipTableTests
         public string Name;
         public Func<TheaterPlan> Make;
         public Claimant Witnesses;   // a claimant the world is built to have in its table (None: no claim is promised)
+        public string WitnessReason;  // the reason that claim must carry (null: any): the covering world's Hold claim is a covering-force one
         public CampaignSnapshot S;
         public SectorModel Sectors;
     }
@@ -136,10 +137,18 @@ internal static class OwnershipTableTests
         var moving = new PlanInput { Name = "a row-5 source claims the Army of Northern Virginia (3)", Witnesses = Claimant.DepartmentMove };
         moving.Make = () => OracleWorld(0, out moving.S, out moving.Sectors, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, 3) });
         list.Add(moving);
-        var covering = new PlanInput { Name = "the covering force's world", Witnesses = Claimant.Hold };
+        var covering = new PlanInput { Name = "the covering force's world", Witnesses = Claimant.Hold, WitnessReason = ForceAllocator.ReasonCoveringForce };
         covering.Make = () => CoveringForceTests.PlanInputWorld(out covering.S, out covering.Sectors);
         list.Add(covering);
         return list;
+    }
+
+    // Whether the plan's table has the claim the world is built to witness: its claimant and, when the world names one, its reason (every world
+    // has a Hold claim, so the covering world is witnessed by a covering-force one).
+    private static bool WitnessesItsClaim(PlanInput input, TheaterPlan plan)
+    {
+        return input.Witnesses == Claimant.None
+            || plan.Claims.Any(c => c.Claimant == input.Witnesses && (input.WitnessReason == null || string.Equals(c.Reason, input.WitnessReason, StringComparison.Ordinal)));
     }
 
     private static string RolesOf(int scenario)
@@ -536,7 +545,7 @@ internal static class OwnershipTableTests
             var plan = input.Make();
             var s = input.S;
             string label = input.Name + ": ";
-            AssertTrue(input.Witnesses == Claimant.None || plan.Claims.Any(c => c.Claimant == input.Witnesses), label + "the world has the " + input.Witnesses + " claim it is built to witness");
+            AssertTrue(WitnessesItsClaim(input, plan), label + "the world has the " + input.Witnesses + " claim it is built to witness" + (input.WitnessReason != null ? " (reason " + input.WitnessReason + ")" : ""));
             AssertEqual(s.Own.Count, plan.Claims.Count, label + "one claim per own formation");
             for (int i = 0; i < s.Own.Count; i++)
                 AssertEqual(s.Own[i].InstanceId, plan.Claims[i].InstanceId, label + "in snapshot order, formation " + i);
@@ -572,7 +581,7 @@ internal static class OwnershipTableTests
             var s = input.S;
             var sectors = input.Sectors;
             string label = input.Name + ": ";
-            AssertTrue(input.Witnesses == Claimant.None || plan.Claims.Any(c => c.Claimant == input.Witnesses), label + "the world has the " + input.Witnesses + " claim it is built to witness");
+            AssertTrue(WitnessesItsClaim(input, plan), label + "the world has the " + input.Witnesses + " claim it is built to witness" + (input.WitnessReason != null ? " (reason " + input.WitnessReason + ")" : ""));
             var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
             for (int i = 0; i < s.Own.Count; i++)
             {

@@ -47,6 +47,7 @@ internal static class ReconNeverTasksTests
             ("TheDrawNeverOpensAShortfallAgainstABelievedArmy", TheDrawNeverOpensAShortfallAgainstABelievedArmy),
             ("ABelievedSectorThatStillCoversItsNeedGivesAScout", ABelievedSectorThatStillCoversItsNeedGivesAScout),
             ("ADrawThatLeavesExactlyTheNeedIsAllowed", ADrawThatLeavesExactlyTheNeedIsAllowed),
+            ("AMarchingCoveringMemberStillHoldsItsSectorForTheDraw", AMarchingCoveringMemberStillHoldsItsSectorForTheDraw),
             ("APresumptionOnlySectorGivesAScoutAndNamesItsCarrier", APresumptionOnlySectorGivesAScoutAndNamesItsCarrier),
             ("OneStandingScoutPerMainEffortAcrossReviews", OneStandingScoutPerMainEffortAcrossReviews),
             ("AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw", AScoutAlreadyOutForTheMainObjectiveBlocksAFurtherDraw),
@@ -1089,6 +1090,35 @@ internal static class ReconNeverTasksTests
         AssertNear(6000f, need, 0.5f, "the East need");
         AssertEqual(FormationRole.Recon, Of(day.Allocation, 5).Role, "the 1000 scouts: 6000 remain against 6000");
         AssertFalse(Refused(day.Allocation), "nothing refused");
+    }
+
+    // Foresight F6b-2 gap 32 (plant P25): a covering member still on the march to its post (Redeploy, reason covering-force) holds its recorded
+    // sector, so the scout draw does not read it as leaving. The world is the one above, with the 3000-man hold reserve 2 turned into a covering
+    // member of the East that is far from its post: the East still holds 7000 against 5400 (a believed army of 9000), so the 1000-man reserve 5 may
+    // scout. If HoldLeaving counted the marching member as leaving, 7000 - 3000 - 1000 = 3000 < 5400 would refuse the draw.
+    private static void AMarchingCoveringMemberStillHoldsItsSectorForTheDraw()
+    {
+        var s = SmokeUnion(secondEastBusy: false, eastBusy: 3000f);
+        s.Own.Add(Corps(5, 800f, 1000f));
+        s.Beliefs.Add(ExecutorFixtures.Belief(1000f, 0f, 9000f));
+        var day = Review(s, null, null, plan =>
+        {
+            for (int k = 0; k < plan.Claims.Count; k++)
+            {
+                if (plan.Claims[k].InstanceId != 2) continue;
+                var c = plan.Claims[k];
+                AssertEqual(Claimant.Hold, c.Claimant, "2 is a hold reserve before it is made a covering member");
+                c.Reason = ForceAllocator.ReasonCoveringForce;
+                c.TargetX = 300f;          // the post, far west of the formation at 760
+                c.TargetZ = 0f;
+                plan.Claims[k] = c;
+            }
+        });
+        var member = Of(day.Allocation, 2);
+        AssertEqual(FormationRole.Redeploy, member.Role, "2 marches to its post: " + Describe(day.Allocation));
+        AssertEqual(ForceAllocator.ReasonCoveringForce, member.Reason, "as a covering member");
+        AssertEqual(FormationRole.Recon, Of(day.Allocation, 5).Role, "the marching member still holds the East, so 5 scouts: " + Describe(day.Allocation));
+        AssertFalse(Refused(day.Allocation), "and nothing was refused");
     }
 
     // The presumption alone sets the East need (nothing believed): the scout may go, and the sector's loss is a listed shortfall whose carrier is
