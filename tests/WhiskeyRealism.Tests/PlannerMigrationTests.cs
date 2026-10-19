@@ -294,7 +294,7 @@ internal static class PlannerMigrationTests
     {
         string src = Code(ReadRepoFile("src/WhiskeyRealism/Patches/ArmyGroupManagementPatch.cs"));
         AssertContains(src, "if (!CampaignPlannerRuntime.ExecutorsEnabled()) return;", "the planner's executors write the grouping");
-        AssertContains(src, "var plans = ArmyGroupDoctrine.PlanGroups(allocation);", "grouped by the allocation's sector");
+        AssertContains(src, "var plans = ArmyGroupDoctrine.PlanGroups(allocation, 2, sectors);", "grouped by the allocation's sector (a covering member by the sector it stands in)");
         AssertContains(src, "CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)", "the published allocation");
         AssertFalse(src.Contains("AppointCommander") || src.Contains("AppointPreferredCommander") || src.Contains("ResolveCommanderPreference"),
             "commanders are the appointment executor's: no second authority seats a name inside the protection window");

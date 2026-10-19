@@ -946,7 +946,7 @@ internal static class CapitalAndReplacementTests
 
     private static Allocation Alloc(TheaterPlan plan, CampaignSnapshot s)
     {
-        return ForceAllocator.Allocate(plan, s, Sectors(s), null, null, null);
+        return TestClaims.Allocate(plan, s, Sectors(s), null, null, null);
     }
 
     private static Assignment Of(Allocation a, int instanceId)

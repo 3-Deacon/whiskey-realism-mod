@@ -43,6 +43,10 @@ namespace WhiskeyRealism.Strategic.Planner
         // Foresight F3: the [EnemyPicture] and [CapitalThreat] rows' last signatures (rows on change). Per campaign.
         private static readonly string[] LastPictureRow = new string[2];
         private static readonly string[] LastCapitalThreatRow = new string[2];
+        // Foresight F6b-1: the [CoveringCorridor] row's last signature (rows on the first review and on change). Per campaign.
+        private static readonly string[] LastCorridorRow = new string[2];
+        // Foresight F6b-2: the [CoveringForce] row's last signature (rows on change). Per campaign.
+        private static readonly string[] LastCoveringRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
         // G1b: each alliance's recon missions and this review's tasks (pooled), the last [Recon] row's counts
@@ -78,6 +82,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 LastAllocationRow[a] = null;
                 LastPictureRow[a] = null;
                 LastCapitalThreatRow[a] = null;
+                LastCorridorRow[a] = null;
+                LastCoveringRow[a] = null;
                 NonCompliance[a].Reset();
                 Recon[a] = new ReconMissionLedger();
                 ReconTasks[a].Clear();
@@ -137,10 +143,22 @@ namespace WhiskeyRealism.Strategic.Planner
                     // each move was issued for, G4 takes the role from a formation that gave up on the target it would send it to.
                     var gaveUp = new List<GaveUpMove>();
                     MoveTrackers.For(alliance)?.CollectGaveUp(gaveUp, snapshot.DaySerial);
+                    // F7: the formations the mover has sent toward an objective (the tracker's planner moves in any state but GaveUp): G3's row 4
+                    // commits the members of the last mass among them.
+                    var dispatched = new List<DispatchedMove>();
+                    MoveTrackers.For(alliance)?.CollectDispatched(dispatched);
                     // G5c: the builders the depot ledger holds (it was written at the last review). G3 counts none of them in a mass, G4 pins
                     // a Wished one: one published set, read once.
                     var heldBuilders = new List<HeldBuilder>();
                     DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);
+                    // F8: the formations a department pick must leave alone because another owner holds them: the ordinary garrison posts' retained
+                    // incumbents (the posts are planned after the plan, from the ledger as the last review left it) and the scouts on an active
+                    // recon mission.
+                    var garrisonIncumbents = new List<int>();
+                    var posts = GarrisonLedgers.For(alliance);
+                    if (posts != null) GarrisonPlanner.RetainedIncumbents(snapshot, posts.Posts, FlagOn(Plugin.EnableGarrisonManning), garrisonIncumbents);
+                    var reconIncumbents = new List<int>();
+                    Recon[alliance].CollectActiveInstances(reconIncumbents);
                     // The planner's minimum strength is the scenario's aiminimumstrengthformovement; a read that is not positive or not finite
                     // falls back to 5000 (TheaterPlanner.PlanMinimum), and the pure planner has no logger, so the review says so, once, whatever the
                     // picture flag is.
@@ -152,7 +170,8 @@ namespace WhiskeyRealism.Strategic.Planner
                     using (TelemetryPerf.Scope("campaign.planner.plan", TelemetryLayer.Campaign, TelemetryCategory.Performance, 2.0))
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
-                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders);
+                            TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders,
+                            dispatched: dispatched, garrisonIncumbents: garrisonIncumbents, reconIncumbents: reconIncumbents);
                     }
                     // G8: the ordinary garrison posts join D8's secession posts in the plan, where the allocation seats both.
                     GarrisonRuntime.PlanPosts(snapshot, plan);
@@ -178,7 +197,10 @@ namespace WhiskeyRealism.Strategic.Planner
                     LogFirstReview(snapshot, sectors, plan);
                     EmitPlan(plan, trace, day, month, year);
                     EmitPicture(snapshot, plan, picture);
+                    EmitCorridor(snapshot, sectors, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
+                    EmitCovering(snapshot, plan, state);
+                    EmitDepartmentMoves(plan);
                     EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
                 catch (Exception ex)
@@ -432,6 +454,40 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // [EnemyPicture] and [CapitalThreat] on change of their text (one row per alliance per change), dated after the compare. The picture
         // is built and its row written with the picture flag off too, as telemetry.
+        // Foresight F6b-1: where a covering force would stand, reported on the first review and on change (the posts are read on a save before
+        // F6b-2 moves anyone). Built from the review's snapshot, sectors and picture and the plan's hold needs, with no terrain probe (the share
+        // sets an axis sector by whether an element lies on the axis, which no river weight changes).
+        private static void EmitCorridor(CampaignSnapshot snapshot, SectorModel sectors, TheaterPlan plan, EnemyPicture picture)
+        {
+            int a = plan.Alliance;
+            if (picture == null || a < 0 || a >= LastCorridorRow.Length) return;
+            string row = CoveringForce.CorridorRow(snapshot, sectors, picture, plan, null);
+            if (row == null || string.Equals(LastCorridorRow[a], row, StringComparison.Ordinal)) return;
+            LastCorridorRow[a] = row;
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
+        // Foresight F6b-2: the covering force of the review (its post, kind or the reason there is none, need, held, members, the defence flag
+        // and the verdict's count), on the first review and on change of its text, dated after the compare. Written after the plan has written
+        // the covering state, so verdictDays is the count the review stored.
+        private static void EmitCovering(CampaignSnapshot snapshot, TheaterPlan plan, PlannerState state)
+        {
+            int a = plan.Alliance;
+            if (a < 0 || a >= LastCoveringRow.Length) return;
+            string row = CoveringForce.Row(plan.Covering, snapshot, state);
+            if (string.Equals(LastCoveringRow[a], row, StringComparison.Ordinal)) return;
+            LastCoveringRow[a] = row;
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
+        // Foresight F8: one [DepartmentReinforcement] row per step of a department move this review (picked, arrived, gave up), dated after the
+        // alliance. The plan lists only the steps of the review, so there is no signature to compare.
+        private static void EmitDepartmentMoves(TheaterPlan plan)
+        {
+            for (int k = 0; k < plan.DepartmentTransitions.Count; k++)
+                TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(DepartmentReinforcement.Row(plan.DepartmentTransitions[k], plan.Alliance), plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
         private static void EmitPicture(CampaignSnapshot snapshot, TheaterPlan plan, EnemyPicture picture)
         {
             int a = plan.Alliance;

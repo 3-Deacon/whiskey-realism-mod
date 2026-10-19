@@ -197,12 +197,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (RiverLines.Distance(retained[r].X, retained[r].Z, site.X, site.Z) > SiteRadius) continue;
                     quietSince = retained[r].QuietSinceDay;
-                    var keys = retained[r].AssignedUnitKeys;
-                    for (int k = 0; keys != null && k < keys.Length && incumbents.Count < MaxFormationsPerPost; k++)
-                    {
-                        int at = s.IndexOfKeyOrName(keys[k]);
-                        if (at >= 0 && WlChainRules.MayMove(s.Own[at].Chain) && !incumbents.Contains(at)) incumbents.Add(at);
-                    }
+                    RecordMembers(s, retained[r], incumbents);
                     break;
                 }
             }
@@ -218,8 +213,8 @@ namespace WhiskeyRealism.Strategic.Planner
             }
             float need = Math.Max(0f, ThreatShare * threat - existing);
 
-            int since = threatened ? -1 : (quietSince >= 0 && quietSince <= s.DaySerial ? quietSince : s.DaySerial);
-            bool held = incumbents.Count > 0 && (since < 0 || s.DaySerial - since < ReleaseQuietDays);
+            int since = QuietSince(s, threatened, quietSince);
+            bool held = incumbents.Count > 0 && IsHeld(s, since);
             if (need <= 0f && !held) return null;
 
             var post = new GarrisonPost
@@ -228,6 +223,51 @@ namespace WhiskeyRealism.Strategic.Planner
             };
             for (int k = 0; k < incumbents.Count; k++) post.InstanceIds.Add(s.Own[incumbents[k]].InstanceId);
             return post;
+        }
+
+        // The record's members that are still on the map and the planner may move (at most MaxFormationsPerPost, in seat order), as indexes into
+        // s.Own. The one reading of a ledger record, shared by the post's planning and by RetainedIncumbents.
+        private static void RecordMembers(CampaignSnapshot s, in GarrisonPostRecord record, List<int> into)
+        {
+            var keys = record.AssignedUnitKeys;
+            for (int k = 0; keys != null && k < keys.Length && into.Count < MaxFormationsPerPost; k++)
+            {
+                int at = s.IndexOfKeyOrName(keys[k]);
+                if (at >= 0 && WlChainRules.MayMove(s.Own[at].Chain) && !into.Contains(at)) into.Add(at);
+            }
+        }
+
+        // The day a post has been quiet since: -1 while a belief threatens it, else the recorded day (today when none is recorded or it lies ahead).
+        private static int QuietSince(CampaignSnapshot s, bool threatened, int recorded)
+        {
+            return threatened ? -1 : (recorded >= 0 && recorded <= s.DaySerial ? recorded : s.DaySerial);
+        }
+
+        // A manned post is kept until it has been quiet ReleaseQuietDays.
+        private static bool IsHeld(CampaignSnapshot s, int quietSince)
+        {
+            return quietSince < 0 || s.DaySerial - quietSince < ReleaseQuietDays;
+        }
+
+        // The instance ids of the formations the ledger's ordinary posts still hold as of this review (foresight F8, D11 requirement-claims): the
+        // members of a record that is threatened or has not been quiet ReleaseQuietDays, which PlanPosts will name as the post's incumbents. PlanOne's
+        // retention without the mass term, so the plan's department pick can leave them where they stand before the posts are planned (the posts
+        // are planned after the plan). A D8 secession record is not read: its members are the plan's own pledges. flagOn is Enable Garrison
+        // Manning: with it off no ordinary post enters the plan and the ledger releases its posts, so nothing is retained.
+        public static void RetainedIncumbents(CampaignSnapshot s, IReadOnlyList<GarrisonPostRecord> retained, bool flagOn, List<int> into)
+        {
+            if (!flagOn || s == null || retained == null || into == null || s.Alliance < 0 || s.Alliance > 1) return;
+            var members = new List<int>();
+            for (int r = 0; r < retained.Count; r++)
+            {
+                if (retained[r].Kind == GarrisonPostKind.Secession) continue;
+                members.Clear();
+                RecordMembers(s, retained[r], members);
+                if (members.Count == 0) continue;
+                bool threatened = ReserveRules.VanillaThreat(s, retained[r].X, retained[r].Z, s.RelocationRange, null) > 0f;
+                if (!IsHeld(s, QuietSince(s, threatened, retained[r].QuietSinceDay))) continue;
+                for (int k = 0; k < members.Count; k++) into.Add(s.Own[members[k]].InstanceId);
+            }
         }
 
         // Manned posts first, then the larger need, then the more specific kind, then the place: a total order, so the cap is deterministic.

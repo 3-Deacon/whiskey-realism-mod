@@ -366,7 +366,7 @@ internal static class ScoutFirstTests
         AssertTrue(plan.MassInstanceIds.Contains(1), "the East corps is the core of the mass");
         AssertTrue(plan.ReinforcementInstanceId >= 2, "and the West corps is named the reinforcement: " + plan.ReinforcementInstanceId);
         AssertTrue(plan.MassInstanceIds.Contains(plan.ReinforcementInstanceId), "in the mass");
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         alloc.TryGet(plan.ReinforcementInstanceId, out var support);
         AssertEqual(FormationRole.Support, support.Role, "as the push's Support");
         int mainEffort = 0;
@@ -389,27 +389,31 @@ internal static class ScoutFirstTests
         AssertEqual(-1, plan.ReinforcementInstanceId, "not even as the one reinforcement (ReinforcementMaxDays " + TheaterPlanner.ReinforcementMaxDays + ")");
     }
 
-    // The West department holds objective 30's front (a 5000 floor). Corps 5 is West but stands in the East sector: it could be pulled in,
-    // unless the West then falls below its hold.
+    // Foresight F8 re-pins this test (the donor department is the one a reinforcement STANDS in, D11 requirement-department-reinforcement, not its
+    // home). Corps 5 is a West formation by home but stands in the East sector, whose hold is a 5000 floor. A West guard (6000) meets the capital's
+    // floor, so the capital reserve does not take the stray. The East's other men: the push's own corps 1 (3000) and a busy holder (not massable,
+    // but it holds): the stray may be drawn only if the East keeps its floor without it.
     private static void TheLosingDepartmentsHoldBlocksAMove()
     {
-        foreach (float westHold in new[] { 4000f, 6000f })
+        foreach (float eastHolder in new[] { 1000f, 3000f })
         {
-            var guard = Corps(2, 300f, westHold);
+            var guard = Corps(2, 300f, 6000f);
+            var holder = Corps(3, 860f, eastHolder);
+            holder.Flags |= FormationFlags.InBattle;
             var strayer = Corps(5, 800f, 20000f);
-            var s = Fronts(Corps(1, 850f, 8000f), guard, strayer);
+            var s = Fronts(Corps(1, 850f, 3000f), guard, holder, strayer);
             var state = new PlannerState();
             state.RestoreDepartments(new[] { new KeyValuePair<string, Theater>(strayer.UnitKey, Theater.West), new KeyValuePair<string, Theater>(guard.UnitKey, Theater.West) });
             var plan = Plan(s, state);
-            // Drawing the stray 20000 would leave the West its guard alone: allowed only when that still meets the 5000 floor.
-            if (westHold < 5000f)
+            // Drawing the stray 20000 would leave the East its own 3000 and the holder: allowed only when that still meets the 5000 floor.
+            if (eastHolder < 2000f)
             {
-                AssertFalse(plan.MassInstanceIds.Contains(5), "the West is left 4000 against a 5000 hold: corps 5 stays");
+                AssertFalse(plan.MassInstanceIds.Contains(5), "the East is left 4000 against a 5000 hold: corps 5 stays (" + string.Join(",", plan.MassInstanceIds) + ")");
                 AssertTrue(plan.ReinforcementInstanceId != 5, "and is not the reinforcement");
             }
             else
             {
-                AssertTrue(plan.MassInstanceIds.Contains(5), "the West keeps 6000 against 5000: corps 5 may be drawn");
+                AssertTrue(plan.MassInstanceIds.Contains(5), "the East keeps 6000 against 5000: corps 5 may be drawn (" + string.Join(",", plan.MassInstanceIds) + ")");
                 AssertEqual(5, plan.ReinforcementInstanceId, "as the reinforcement");
             }
         }
@@ -534,7 +538,7 @@ internal static class ScoutFirstTests
         ledger.OnReview(s, null);
         day.Plan = TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);
         ReconStep.Plan(s, sectors, day.Plan, new List<BattleHistoryRecord>(), 0, ledger, day.Tasks);
-        day.Allocation = ForceAllocator.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger);
+        day.Allocation = TestClaims.Allocate(day.Plan, s, sectors, null, day.Tasks, ledger);
         ledger.Sync(s, day.Tasks, day.Allocation);
         return day;
     }
@@ -687,7 +691,7 @@ internal static class ScoutFirstTests
         AssertTrue(plan.MainCapacityStrength > 60000f, "the capacity is what the old mass was: " + plan.MainCapacityStrength);
         AssertTrue(plan.MassInstanceIds.Count <= 3, "the mass is the force it needs, not ten of fifteen: " + plan.MassInstanceIds.Count);
         AssertTrue(plan.MassStrength >= plan.MainNeedStrength, "and covers the need");
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         int main = 0, hold = 0;
         foreach (var a in alloc.Assignments)
         {
@@ -714,7 +718,7 @@ internal static class ScoutFirstTests
         foreach (var sp in plan.Sectors) if (sp.SectorId == west) need = sp.HoldNeed;
         // D11 Floor: 5000 x (1 + 0.2, objective 30's importance, the anchor undisplaced), above the plain 5000 minimum.
         AssertNear(6000f, need, 0.5f, "the West sector faces objective 30: the floor is 6000");
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, null, null);
         alloc.TryGet(2, out var g);
         AssertEqual(FormationRole.Hold, g.Role, "the guard holds");
         AssertEqual(ForceAllocator.ReasonHoldReserve, g.Reason, "as the sector's hold reserve, though nothing is believed there");
@@ -773,7 +777,7 @@ internal static class ScoutFirstTests
     {
         var s = Union();
         var plan = Plan(s);
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         string row = ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0);
         AssertContains(row, " need=12375 ", "the need");
         AssertContains(row, " cap=", "the capacity");
@@ -803,7 +807,7 @@ internal static class ScoutFirstTests
         AssertTrue(day8.MainScoutLatched, "but the decision stays scouted");
         AssertFalse(day8.MainStaged, "so the released march is not re-staged");
         AssertContains(TheaterPlanner.Summary(day8), "scouted=latched staged=no", "the row says so");
-        var alloc = ForceAllocator.Allocate(day8, decayed, ExecutorFixtures.Sectors(decayed), null, null, null);
+        var alloc = TestClaims.Allocate(day8, decayed, ExecutorFixtures.Sectors(decayed), null, null, null);
         foreach (int id in day8.MassInstanceIds)
         {
             alloc.TryGet(id, out var a);
@@ -948,7 +952,7 @@ internal static class ScoutFirstTests
         TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);   // warm: JIT, the state's dictionaries
         long before = TestFixtures.BeginAllocationWindow();
         var plan = TheaterPlanner.Plan(s, sectors, null, state, null, null, ExecutorFixtures.Speed(), out _);
-        var alloc = ForceAllocator.Allocate(plan, s, sectors, null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, sectors, null, null, null);
         long bytes = TestFixtures.AllocatedSince(before);
         AssertTrue(alloc.Assignments.Count == 15, "all fifteen are assigned");
         AssertTrue(bytes < AllocationBound, "Plan + Allocate for 15 formations allocated " + bytes + " bytes (bound " + AllocationBound + ")");

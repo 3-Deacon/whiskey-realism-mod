@@ -79,3 +79,30 @@ The verify of F4, F4b and F5 (covered commit `ba13f602`) read the conditional of
 2. **At the year boundary the decode errs one day late, not early.** The "worst case one day early" above holds inside the month overlap (31 January after about 10:30 and 1 February before about 12:27 store the same value). At the year boundary, 31 December after about 10:30 stores at or above the next year and decodes as 1 January (capped at today): one day late. A mark a day off in either direction changes no belief that fades over days. The spec's *Mark day* paragraph (requirement-marks-player-side) and its phase 1 as-built note state the rule as built.
 
 The user may override this.
+
+## Integrator decisions, 2026-10-18 (phase 2 build, F6a and F6b-1)
+
+1. Phase 1 gap 18 / phase 2 gap 1: `HoldFacing` credits a Capital claim counted in the sector, because a capital guard standing in a sector holds it. A guard marching to a capital elsewhere is not credited, the same rule as F9's `StandingHold`. This supersedes D11 row 7's "counted-anyway" wording for a Capital claim and the test plan's `HoldFacingIgnoresCountedAnywayBodies` as written. Unready, busy and map-group bodies stay uncredited. F10b's as-built note amends the spec text.
+2. Phase 2 gap 14: F6b-1's edits to `SectorModel.cs` and `TheaterPlanner.cs` (the radius moved to `SectorModel.Radius`; three helpers made internal) are accepted. They show no behaviour change in the harness.
+3. Phase 2 gap 19: the covering-member-at-post clause of `PlanGroups` lands in F6b-2, which has the standing sector.
+4. Phase 2 gap 20: `F6aReproducesTheShippedRoles` scenario 1 pins the new output, with the Marching-builder cascade spelled out, because that cascade is F9's intended change.
+
+The user may override each of these.
+
+## Integrator decisions, 2026-10-18 (phase 2 build, F7)
+
+1. Gap 36: the last mass is kept by unit key, as the covering force keeps its members, not by session instance id. The behaviour is the same and the key survives a load.
+2. Gap 37: the F7 flag gates what F7 adds (the stop, the de-list of an ended push, the `CapitalGuard` de-list, the readiness skip). The `Redeploy` and covering de-lists F6 shipped stay under their own flags.
+3. Gap 38: `committed=` counts the committed corps of a continuing push and the corps waiting out an ended push. A corps of an ended push that the new mass took counts as mass, not committed. That reads truer than D11's "after rows 1-7"; F10b's as-built note records it.
+4. Gap 41: `G3AndG4ReadOneOwnershipTable` falls back to a capital guard or a waiting corps when a world has no plain hold reserve, the same shape of change as F6b-2's gap 26. Accepted.
+
+The user may override each of these.
+
+## Integrator decisions, 2026-10-18 (phase 2 build, F8)
+
+1. Gap 45: `DepartmentMoves` is keyed by unit key, as gap 36 ruled for the last mass.
+2. Gaps 46-47: the logic lives in `DepartmentReinforcement.cs`, and the donor department comes from one shared `StandingDepartment` function. The parameter shape differs from the plan text; the behaviour is the plan's.
+3. Gap 53: D6's donor test asks where a candidate stands, not its home department. This follows the GAP-07 refinement (a home department changes only on arrival): a formation is counted where it really is. The three re-pinned shipped worlds are accepted.
+4. Gaps 49 and 54 are accepted as logged.
+
+The user may override each of these.

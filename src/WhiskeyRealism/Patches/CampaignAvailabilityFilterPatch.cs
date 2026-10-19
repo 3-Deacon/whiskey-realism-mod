@@ -25,7 +25,8 @@ namespace WhiskeyRealism.Patches
     //     deferred Support (vanilla's defence may still take them, and the next snapshot sees them in a defensive operation:
     //     TheaterPlanner.Busy), and a Hold formation withheld at its sector's need stays available against an enemy standing in
     //     that sector (vanilla passes enemyunits[j]'s position, its unsorted-list bug BUG-AI-002; the Postfix judges whatever
-    //     position vanilla passed).
+    //     position vanilla passed). A covering-force member (foresight F6b-2) is decided before that exception by the published plan's
+    //     ThreatNear alone (an enemy on the side's own soil near the covering post), never by the position vanilla passed.
     //
     // The W&L player's units (foresight F2, integrator decision 2026-10-18 under decision 1): while the planner runs, both Postfixes also
     // answer false for every formation Whiskey may not move (WlChainRules.MayMove false: the player's own command, a unit in his operation

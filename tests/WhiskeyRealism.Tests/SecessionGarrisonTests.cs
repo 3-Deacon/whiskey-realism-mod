@@ -27,6 +27,7 @@ internal static class SecessionGarrisonTests
             ("AGarrisonIsNeverPartOfTheMass", AGarrisonIsNeverPartOfTheMass),
             ("AMassThatMarchesIntoTheStateIsNotPinnedThere", AMassThatMarchesIntoTheStateIsNotPinnedThere),
             ("AFreeFormationInsideIsPledgedAndTheMassMemberIsNot", AFreeFormationInsideIsPledgedAndTheMassMemberIsNot),
+            ("AFormationAnotherRowOwnsInsideIsNotPledged", AFormationAnotherRowOwnsInsideIsNotPledged),
             ("TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget", TheInStateGarrisonStaysWithheldWhenAnotherHoldMeetsTheSectorsTarget),
             ("NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped", NoGarrisonBelowTheSupportFloorOrOnceTheStateHasFlipped),
             ("TheGarrisonIsReadEachReviewNotCached", TheGarrisonIsReadEachReviewNotCached),
@@ -89,7 +90,7 @@ internal static class SecessionGarrisonTests
 
     private static Allocation Allocate(CampaignSnapshot s, TheaterPlan plan)
     {
-        return ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        return TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
     }
 
     private static TheaterPlanner.Candidate CandidateOf(CampaignSnapshot s, int objectiveId)
@@ -315,6 +316,25 @@ internal static class SecessionGarrisonTests
         alloc.TryGet(3, out var mass);
         AssertTrue(mass.Role == FormationRole.MainEffort || mass.Role == FormationRole.Support, "the mass member marches with the push (" + mass.Role + ")");
         AssertTrue(mass.Reason != ForceAllocator.ReasonSecession, "and is not pinned");
+    }
+
+    // D11 row 9: the inside pledge skips a formation a department move or a push that ended owns, as it skips the mass. Corps 4 is the free
+    // formation of the test above; a row-4 or row-5 source owns it, and it is pledged to nothing (it still stands in the state: the Union is
+    // present there, so no replacement is posted from outside).
+    private static void AFormationAnotherRowOwnsInsideIsNotPledged()
+    {
+        foreach (var (row, claimant) in new[] { (ClaimTable.RowCommitted, Claimant.Committed), (ClaimTable.RowDepartmentMove, Claimant.DepartmentMove) })
+        {
+            var s = Side(0, 0, 0.6f);
+            s.Objectives.Add(new ObjectiveRecord { ObjectiveId = 31, X = 600f, Z = 0f, HolderAlliance = 1, Available = true, Importance01 = 0.8f });
+            s.Beliefs.Add(Seen(600f, 3000f));
+            s.Own.Add(Corps(3, 330f, 9000f, KentuckyState));
+            s.Own.Add(Corps(4, 290f, 9000f, KentuckyState));
+            var plan = TheaterPlanner.Plan(s, ExecutorFixtures.Sectors(s), null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, null, null,
+                new IClaimSource[] { new ClaimsOneFormation(row, claimant, 4) });
+            AssertEqual(claimant, plan.Claims[s.IndexOfOwn(4)].Claimant, "corps 4 is owned by row " + row);
+            AssertFalse(plan.Garrisons[0].InstanceIds.Contains(4), "and is not pledged to the garrison (" + claimant + ")");
+        }
     }
 
     // The sector's own withhold keeps the formations nearest its threat until its target is met; the garrison is withheld on its own account,
@@ -594,12 +614,14 @@ internal static class SecessionGarrisonTests
     // the hold already kept against that army and the garrison's own strength.
     private static void ADistrictHeldOnlyByTheFlagStillGetsTheBelievedThreatsHold()
     {
-        // One West corps holds the town's sector (9000 of the 18000), the garrison is 4000: 5000 is still needed; the nearest free corps goes.
-        var threatened = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
+        // Foresight F6a (integrator decision on phase 1 gap 18): what holds the town's sector is credited once, the capital guard standing in it
+        // included (it is the table's Capital claim counted in that sector), so the world is sized for it. The town's sector holds the army with
+        // one West corps (9000) and the capital guard (9000) of 27000; the garrison is 4000: 5000 is still needed; the nearest free corps goes.
+        var threatened = FlagAlone(4000f, 45000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
         var plan = Plan(threatened);
         var post = plan.Garrisons[0];
         AssertTrue(post.InState, "the Union is present by the flag");
-        AssertNear(5000f, post.Need, 1f, "18000 - 9000 held against the same army - 4000 garrison: " + post.Need);
+        AssertNear(5000f, post.Need, 1f, "27000 - 18000 held against the same army (the corps and the capital guard) - 4000 garrison: " + post.Need);
         AssertEqual(1, post.InstanceIds.Count, "one corps of 9000 meets 5000: " + string.Join(",", post.InstanceIds));
         AssertEqual(2, post.InstanceIds[0], "the nearest free formation");
         AssertTrue(post.Marching, "it marches to the town");
@@ -609,19 +631,20 @@ internal static class SecessionGarrisonTests
         AssertNear(300f, first.TargetX, 0.01f, "to Louisville");
         AssertContains(ForceAllocator.Summary(alloc, plan, PlayerCommandClass.BelowMapLevel, 1f, 0), " garrison=corps2@Kentucky:in+moving/5000 ", "the row says so");
 
-        // A need that takes two: an army of 50000 (30000), one West corps holding (9000), the garrison's 4000: 17000 -> two corps of 9000.
-        var big = FlagAlone(4000f, 50000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
+        // A need that takes two: an army of 70000 (42000), one West corps (9000) and the capital guard (14000) holding the town's sector, the
+        // garrison's 4000: 15000 -> two corps of 9000.
+        var big = FlagAlone(4000f, 70000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
         big.Own[big.IndexOfOwn(GuardId)] = Corps(GuardId, 0f, 14000f);   // the capital's floor (the minimum plus this army's weight) is met by its guard, so corps 1 stays the town's hold
         var bigPlan = Plan(big);
-        AssertNear(17000f, bigPlan.Garrisons[0].Need, 1f, "30000 - 9000 - 4000: " + bigPlan.Garrisons[0].Need);
+        AssertNear(15000f, bigPlan.Garrisons[0].Need, 1f, "42000 - 23000 - 4000: " + bigPlan.Garrisons[0].Need);
         AssertEqual(2, bigPlan.Garrisons[0].InstanceIds.Count, "two corps are needed: " + string.Join(",", bigPlan.Garrisons[0].InstanceIds));
         AssertEqual(2, bigPlan.Garrisons[0].InstanceIds[0], "the nearest first");
         AssertEqual(3, bigPlan.Garrisons[0].InstanceIds[1], "then the next");
         AssertTrue(bigPlan.Garrisons[0].Shortfall <= 0f, "and nothing is short");
 
         // A hold kept against a different army is not subtracted: an East army of 30000 (18000) keeps corps 2 and 3 in the East; the town's
-        // hold is still only corps 1, so 5000 is needed and the free corps 4 goes.
-        var other = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 760f, 9000f));
+        // hold is still only corps 1 and the capital guard (27000 against the town's army of 45000), so 5000 is needed and the free corps 4 goes.
+        var other = FlagAlone(4000f, 45000f, Corps(1, 240f, 9000f), Corps(2, 700f, 9000f), Corps(3, 720f, 9000f), Corps(4, 760f, 9000f));
         other.Beliefs.Add(Seen(900f, 30000f));
         var otherPlan = Plan(other);
         AssertNear(5000f, otherPlan.Garrisons[0].Need, 1f, "the East hold faces another army and is not counted against this one: " + otherPlan.Garrisons[0].Need);
@@ -651,7 +674,7 @@ internal static class SecessionGarrisonTests
         // A player's group is never one of the posted.
         var map = Corps(2, 700f, 9000f);
         map.Chain = WlChainClass.PlayerMapGroup;
-        var player = FlagAlone(4000f, 30000f, Corps(1, 240f, 9000f), map, Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));
+        var player = FlagAlone(4000f, 45000f, Corps(1, 240f, 9000f), map, Corps(3, 720f, 9000f), Corps(4, 740f, 9000f));   // sized as the first case: the guard and corps 1 hold 18000 of 27000
         var playerPlan = Plan(player);
         AssertFalse(playerPlan.Garrisons[0].InstanceIds.Contains(2), "the map-group player is not posted");
         AssertEqual(3, playerPlan.Garrisons[0].InstanceIds[0], "the next free formation is");

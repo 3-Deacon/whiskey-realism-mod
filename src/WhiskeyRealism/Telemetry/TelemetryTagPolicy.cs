@@ -182,6 +182,9 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("Reserves", TelemetryCategory.State);
             AddCampaign("EnemyPicture", TelemetryCategory.State);
             AddCampaign("CapitalThreat", TelemetryCategory.State);
+            AddCampaign("CoveringCorridor", TelemetryCategory.State);
+            AddCampaign("CoveringForce", TelemetryCategory.State);
+            AddCampaign("DepartmentReinforcement", TelemetryCategory.Write);
             AddCampaign("CampaignSteer", TelemetryCategory.Write);
             AddCampaign("CampaignTempo", TelemetryCategory.Decision);
             AddCampaign("DepotTask", TelemetryCategory.Write);

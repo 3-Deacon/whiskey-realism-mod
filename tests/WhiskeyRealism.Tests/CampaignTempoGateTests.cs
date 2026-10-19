@@ -329,7 +329,7 @@ internal static class CampaignTempoGateTests
         if (believedEnemy) s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = g.Plan = ExecutorFixtures.HandPlan(s, new[] { 1, 2, 3 });
         plan.ReinforcementInstanceId = 3;
-        g.Alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        g.Alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         return g;
     }
 
@@ -475,7 +475,7 @@ internal static class CampaignTempoGateTests
         g.Plan.MainStaged = true;
         g.Plan.StartLineX = 300f;           // own ground in the fake host (the west, x <= 150, is alliance 1's)
         g.Plan.StartLineZ = 0f;
-        g.Alloc = ForceAllocator.Allocate(g.Plan, g.S, ExecutorFixtures.Sectors(g.S), null, null, null);
+        g.Alloc = TestClaims.Allocate(g.Plan, g.S, ExecutorFixtures.Sectors(g.S), null, null, null);
         var tally = Run(g, ExecutorFixtures.ClosedTempo());
         AssertEqual("1,2,3", string.Join(",", g.Host.Moves.ConvertAll(m => m.id)), "all three go to the start line");
         foreach (var m in g.Host.Moves) AssertNear(300f, m.x, 0.01f, "the start line, not the objective");
@@ -487,7 +487,7 @@ internal static class CampaignTempoGateTests
         var enemyGround = GateWith(believedEnemy: true);
         enemyGround.Plan.MainStaged = true;
         enemyGround.Plan.StartLineX = 120f;
-        enemyGround.Alloc = ForceAllocator.Allocate(enemyGround.Plan, enemyGround.S, ExecutorFixtures.Sectors(enemyGround.S), null, null, null);
+        enemyGround.Alloc = TestClaims.Allocate(enemyGround.Plan, enemyGround.S, ExecutorFixtures.Sectors(enemyGround.S), null, null, null);
         var held = Run(enemyGround, ExecutorFixtures.ClosedTempo());
         AssertEqual(0, enemyGround.Host.Moves.Count, "a start line inside enemy ground waits like any march");
         AssertEqual(3, held.Deferred, "counted as deferred");
@@ -522,7 +522,7 @@ internal static class CampaignTempoGateTests
         AssertEqual(0, plan2.MassInstanceIds.Count, "no mass");
         foreach (var sp in plan2.Sectors)
             AssertTrue(sp.Posture != TheaterPosture.MainEffort && sp.Posture != TheaterPosture.Support && sp.TargetObjectiveId < 0, "no sector follows a main target: nothing is held back for it");
-        var alloc2 = ForceAllocator.Allocate(plan2, day2, ExecutorFixtures.Sectors(day2), null, null, null);
+        var alloc2 = TestClaims.Allocate(plan2, day2, ExecutorFixtures.Sectors(day2), null, null, null);
         foreach (var a in alloc2.Assignments)
             AssertTrue(a.Role == FormationRole.Hold && a.Reason == ForceAllocator.ReasonBusy, "every formation holds, busy");
         AssertEqual(decision, state.DecisionSerial, "(the decision serial moves on only at the next decision)");
@@ -559,7 +559,7 @@ internal static class CampaignTempoGateTests
         var plan = ExecutorFixtures.RealPlan(next, state);
         AssertFalse(plan.MassInstanceIds.Contains(1), "a defending member leaves the mass");
         AssertTrue(plan.MassInstanceIds.Contains(2) && plan.MassInstanceIds.Contains(3), "a member in the mover's own offensive list stays in it");
-        var alloc = ForceAllocator.Allocate(plan, next, ExecutorFixtures.Sectors(next), null, null, null);
+        var alloc = TestClaims.Allocate(plan, next, ExecutorFixtures.Sectors(next), null, null, null);
         alloc.TryGet(1, out var d);
         AssertEqual(FormationRole.Hold, d.Role, "the defending member holds");
         AssertEqual(ForceAllocator.ReasonBusy, d.Reason, "with reason busy, until vanilla ends the defence (13782-13848)");

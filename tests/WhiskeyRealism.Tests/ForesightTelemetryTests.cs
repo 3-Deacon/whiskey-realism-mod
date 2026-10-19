@@ -110,7 +110,7 @@ internal static class ForesightTelemetryTests
         }
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = ExecutorFixtures.HandPlan(s, mass.ToArray());
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         return CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), host, tracker, state);
     }
 
@@ -174,7 +174,7 @@ internal static class ForesightTelemetryTests
         s.Own.Add(queued);
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), queuedHost, new MoveTracker(), state);
         AssertEqual(1, tally.Queued, "the move waits in vanilla's queue");
         AssertEqual(0, tally.IssueRows.Count, "and is no issue row");
@@ -217,7 +217,7 @@ internal static class ForesightTelemetryTests
         s.Own.Add(named);
         s.Beliefs.Add(ExecutorFixtures.Belief(100f, 0f, 5000f));
         var plan = ExecutorFixtures.HandPlan(s, new[] { 1 });
-        var alloc = ForceAllocator.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+        var alloc = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
         var tally = CampaignMover.Review(ExecutorFixtures.Inputs(s, plan, alloc, ExecutorFixtures.OpenTempo()), new FakeMoverHost(), new MoveTracker(), ExecutorFixtures.State());
         AssertEqual(1, tally.IssueRows.Count, "one move");
         AssertContains(tally.IssueRows[0], " unit=\"10th Indiana:5\" role=MainEffort ", "the unit key is quoted");
@@ -283,7 +283,7 @@ internal static class ForesightTelemetryTests
         var plan = ExecutorFixtures.HandPlan(s, new int[0]);
         int sector = sectors.SectorAt(350f, 0f);
         var pin = new[] { new HeldBuilder { Wished = true, InstanceId = 1, SectorId = sector, TargetX = 250f, TargetZ = 0f } };
-        var a = ForceAllocator.Allocate(plan, s, sectors, null, null, null, null, pin);
+        var a = TestClaims.Allocate(plan, s, sectors, null, null, null, null, pin);
         AssertTrue(a.TryGet(1, out var pinned) && pinned.Role == FormationRole.DepotBuilder, "the pinned formation builds");
         AssertEqual(ForceAllocator.ReasonPinnedBuilder, pinned.Reason, "with the pinned reason");
         AssertEqual("depot-task-pinned", ForceAllocator.ReasonPinnedBuilder, "the string the issue row's pick reads");
@@ -363,7 +363,7 @@ internal static class ForesightTelemetryTests
     {
         var d = Day();
         string row = Row(d);
-        AssertTrue(row.StartsWith("[Reserves] alliance=0 date=1861-06-15 capital=9000/12000 hold=", StringComparison.Ordinal), "the capital's held and floor, after the alliance and date: " + row);
+        AssertTrue(row.StartsWith("[Reserves] alliance=0 date=1861-06-15 capital=9000/12000 covering=0/0 hold=", StringComparison.Ordinal), "the capital's held and floor, then the covering force's (none), after the alliance and date: " + row);
         var parts = Field(row, "hold").Split(',');
         AssertEqual(d.East + ":7000/9000", parts[0], "the sector with the largest need first: its held against max(HoldNeed, the garrison minimum)");
         string capital = d.Capital + ":9000/" + ((int)TheaterPlanner.MinStrengthFallback);
@@ -476,7 +476,7 @@ internal static class ForesightTelemetryTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReservesRow.cs");
         AssertContains(src, "ForceAllocator.RoleStrength(", "the row calls the allocator's capital sum");
         AssertContains(src, "ForceAllocator.CountedHold(", "and its hold sum");
-        AssertEqual(1, Regex.Matches(src, @"HoldStrength\(").Count, "the only strength it adds up itself is a department's, once");
+        AssertEqual(2, Regex.Matches(src, @"HoldStrength\(").Count, "the only strengths it adds up itself are a department's and (foresight F7, re-pinned) the committed corps' men, once each");
         AssertFalse(src.Contains(".Strength") || src.Contains("_roleSector") || src.Contains("SectorId == sector"), "no capital or hold sum of its own");
     }
 
@@ -487,7 +487,9 @@ internal static class ForesightTelemetryTests
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ReservesRow.cs");
         var uses = Regex.Matches(src, @"previousPlan\.(\w+)");
         AssertTrue(uses.Count >= 1, "the row reads yesterday's plan");
-        foreach (Match use in uses) AssertEqual("MassInstanceIds", use.Groups[1].Value, "yesterday's plan is read for its mass list alone");
+        // Foresight F7 re-pins this: the row also reads yesterday's CommitmentEnded (endedListed=, endedMarching=). Both are id lists, telemetry
+        // only; no objective, role or decision is read back from an earlier plan.
+        foreach (Match use in uses) AssertTrue(use.Groups[1].Value == "MassInstanceIds" || use.Groups[1].Value == "CommitmentEnded", "yesterday's plan is read for its mass and ended-commitment id lists alone: " + use.Groups[1].Value);
     }
 
     // [Reserves] is written every review, from the Full path after [Allocation], with no signature compare.

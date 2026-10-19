@@ -929,16 +929,15 @@ internal static class ForceAllocatorTests
         var nearZ = new float[sectors.Count];
         need[k] = 15000f;
         nearX[k] = 600f;
-        var reserved = new bool[s.Own.Count];
-        var holdReserved = new int[s.Own.Count];
-        ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
-        AssertEqual(k, holdReserved[0], "the starved corps' 20000 does not count: the healthy corps is reserved");
+        var claims = ClaimTable.Fresh(s);
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, claims, null, null, new float[sectors.Count]);
+        AssertEqual(Claimant.Hold, claims[0].Claimant, "the starved corps' 20000 does not count: the healthy corps is reserved");
+        AssertEqual(k, claims[0].SectorId, "in the sector it holds");
 
         s.Own.Add(busy);
-        reserved = new bool[s.Own.Count];
-        holdReserved = new int[s.Own.Count];
-        ReserveRules.Hold(s, sectors, need, nearX, nearZ, reserved, holdReserved);
-        AssertEqual(-1, holdReserved[0], "a busy formation stays, starved or not, and does count: nothing more is reserved");
+        claims = ClaimTable.Fresh(s);
+        ReserveRules.Hold(s, sectors, need, nearX, nearZ, claims, null, null, new float[sectors.Count]);
+        AssertEqual(Claimant.None, claims[0].Claimant, "a busy formation stays, starved or not, and does count: nothing more is reserved");
     }
 
     // G4 verify r3 F1, through the real ReconPlanner.PlanTasks: an own town at x 400 in a sector the map-group
@@ -964,7 +963,7 @@ internal static class ForceAllocatorTests
                 var missions = new ReconMissionLedger();
                 var tasks = new List<ReconTask>();
                 ReconPlanner.PlanTasks(s, sectors, plan, missions, tasks);
-                var a = ForceAllocator.Allocate(plan, s, sectors, null, tasks, missions);
+                var a = TestClaims.Allocate(plan, s, sectors, null, tasks, missions);
                 var x = Of(a, 9);
                 string label = "bx " + bx + " strength " + strength + ": ";
                 AssertTrue(x.Role != FormationRole.Recon, label + "the player is never a picket or any recon post");
@@ -1344,10 +1343,11 @@ internal static class ForceAllocatorTests
             var nearZ = new float[sectors.Count];
             need[sector] = 7000f;
             nearX[sector] = 600f;
-            var capital = new bool[s.Own.Count];
-            capital[4] = capitalReservedCorps;
+            var claims = ClaimTable.Fresh(s);
+            if (capitalReservedCorps) claims[4].Claimant = Claimant.Capital;
+            ReserveRules.Hold(s, sectors, need, nearX, nearZ, claims, null, null, new float[sectors.Count]);
             var held = new int[s.Own.Count];
-            ReserveRules.Hold(s, sectors, need, nearX, nearZ, capital, held);
+            for (int i = 0; i < held.Length; i++) held[i] = claims[i].Claimant == Claimant.Hold ? claims[i].SectorId : -1;
             return held;
         }
         var half = Run(0.5f, 520f, false, out int k);
@@ -1410,10 +1410,10 @@ internal static class ForceAllocatorTests
             return s;
         }
         var own = Side(0, WlChainClass.CicSide);
-        AssertEqual(0, ForceAllocator.Allocate(new TheaterPlan { Alliance = 0 }, own, Sectors(own), null, null, null).Assignments.Count, "the CIC player's own side stands down");
+        AssertEqual(0, TestClaims.Allocate(new TheaterPlan { Alliance = 0 }, own, Sectors(own), null, null, null).Assignments.Count, "the CIC player's own side stands down");
         var enemy = Side(1, WlChainClass.None);
         enemy.Objectives.Add(new ObjectiveRecord { ObjectiveId = 1, X = 100f, Z = 0f, HolderAlliance = 0, Available = true, Importance01 = 1f });
-        AssertEqual(1, ForceAllocator.Allocate(new TheaterPlan { Alliance = 1 }, enemy, Sectors(enemy), null, null, null).Assignments.Count,
+        AssertEqual(1, TestClaims.Allocate(new TheaterPlan { Alliance = 1 }, enemy, Sectors(enemy), null, null, null).Assignments.Count,
             "the enemy side of a CIC career keeps its allocation although the snapshot's Player class is global");
     }
 
@@ -1707,15 +1707,15 @@ internal static class ForceAllocatorTests
         s.Own.Add(Corps(1, 200f, 20000f));
         var sectors = Sectors(s);
         var plan = ManualPlan(s);
-        AssertEqual(0, ForceAllocator.Allocate(null, s, sectors, null, null, null).Assignments.Count, "no plan");
-        AssertEqual(0, ForceAllocator.Allocate(plan, null, sectors, null, null, null).Assignments.Count, "no snapshot");
-        AssertEqual(0, ForceAllocator.Allocate(plan, s, null, null, null, null).Assignments.Count, "no sectors");
+        AssertEqual(0, TestClaims.Allocate(null, s, sectors, null, null, null).Assignments.Count, "no plan");
+        AssertEqual(0, TestClaims.Allocate(plan, null, sectors, null, null, null).Assignments.Count, "no snapshot");
+        AssertEqual(0, TestClaims.Allocate(plan, s, null, null, null, null).Assignments.Count, "no sectors");
         var two = new CampaignSnapshot();
         two.Reset(2, 2, Day, PlayerCommandClass.NotCareer, -1, null);
         two.Own.Add(Corps(1, 200f, 20000f));
-        AssertEqual(0, ForceAllocator.Allocate(plan, two, sectors, null, null, null).Assignments.Count, "alliance 2");
+        AssertEqual(0, TestClaims.Allocate(plan, two, sectors, null, null, null).Assignments.Count, "alliance 2");
         var none = Wide();
-        AssertEqual(0, ForceAllocator.Allocate(plan, none, Sectors(none), null, null, null).Assignments.Count, "no formations");
+        AssertEqual(0, TestClaims.Allocate(plan, none, Sectors(none), null, null, null).Assignments.Count, "no formations");
     }
 
     private static void AllocationSummaryNamesTheRoles()
@@ -1730,7 +1730,7 @@ internal static class ForceAllocatorTests
         plan.MassStrength = 24000f;
         var a = Alloc(plan, s);
         string row = ForceAllocator.Summary(a, plan, PlayerCommandClass.MapGroup, 0.756f, 3);
-        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 need=0 cap=0 staged=no garrison=none short=0 surplus=1", row,
+        AssertEqual("[Allocation] alliance=0 main=2 support=0 hold=0 reserve=1 capital=0 depot=0 recover=0 recon=0 busy=1 redeploy=0 covering=0 player=MapGroup reliability=0.76 unreliableDays=3 mass=24000 need=0 cap=0 staged=no garrison=none short=0 surplus=1", row,
             "the [Allocation] row");
     }
 
@@ -1755,16 +1755,22 @@ internal static class ForceAllocatorTests
 
     // ---- source pins ----
 
-    // G3 verify r1 F4/F9: the planner subtracts the same capital and hold reserves the allocator hands out.
+    // G3 verify r1 F4/F9, re-pinned by foresight F6a (D11 requirement-claims): the planner subtracts the same capital and hold reserves the
+    // allocator hands out because both read one ownership table. The planner builds it (ClaimTable runs both reserves); the allocator reads
+    // TheaterPlan.Claims and calls neither reserve.
     private static void ReserveRulesAreSharedWithThePlanner()
     {
         string planner = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs");
         string allocator = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ForceAllocator.cs");
+        string table = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/ClaimTable.cs");
+        AssertContains(planner, "ClaimTable.Build(", "the planner builds the table");
         foreach (string call in new[] { "ReserveRules.Capital(", "ReserveRules.Hold(" })
         {
-            AssertContains(planner, call, "the planner's reserve uses " + call);
-            AssertContains(allocator, call, "the allocator's roles use " + call);
+            AssertContains(table, call, "the table's rows use " + call);
+            AssertFalse(allocator.Contains(call), "the allocator does not re-run " + call);
+            AssertFalse(planner.Contains(call), "nor does the planner outside the table: " + call);
         }
+        AssertContains(allocator, "plan.Claims", "the allocator reads the plan's claims");
         AssertContains(allocator, "TheaterPlanner.Movable(", "one movable predicate");
     }
 
@@ -1970,7 +1976,7 @@ internal static class ForceAllocatorTests
     private static Allocation Alloc(TheaterPlan plan, CampaignSnapshot s,
                                     Func<string, Theater> home = null, IReadOnlyList<ReconTask> recon = null, ReconMissionLedger missions = null)
     {
-        return ForceAllocator.Allocate(plan, s, Sectors(s), home, recon, missions);
+        return TestClaims.Allocate(plan, s, Sectors(s), home, recon, missions);
     }
 
     private static Assignment Of(Allocation a, int instanceId)

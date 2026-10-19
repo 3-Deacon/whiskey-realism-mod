@@ -75,6 +75,108 @@ namespace WhiskeyRealism.Strategic.Planner
 
         public IReadOnlyDictionary<string, Theater> Departments => _departments;
 
+        // Foresight F6b-2 (D11 requirement-covering-members, -post-choice): the covering force's memory. CoveringKeys is the unit key of each
+        // member (and of an incumbent briefly unavailable) -> the aiarea index it stood in when first claimed; the sector it belongs to today is
+        // SectorModel.SectorOfArea of it, because sector ids renumber when an objective is accomplished. CoveringForward is the stored verdict
+        // (the forward post is the verdict until one is known), CoveringVerdictDays the reviews the other verdict has led, CoveringVerdictKnown
+        // whether a verdict was ever stored for CoveringPostKey (the forward and rear town names with their rounded positions, "none" for a missing
+        // post; "none|none" while the force is unbound). Written once in TheaterPlanner.Plan after Decide; persisted (PlannerStateDto.coveringKeys).
+        private readonly Dictionary<string, int> _coveringKeys = new Dictionary<string, int>(StringComparer.Ordinal);
+        public bool CoveringForward;
+        public int CoveringVerdictDays;
+        public bool CoveringVerdictKnown;
+        public string CoveringPostKey;
+
+        public IReadOnlyDictionary<string, int> CoveringKeys => _coveringKeys;
+
+        // The covering force of this review: exactly these members, each with the area it stands in.
+        public void SetCoveringKeys(IEnumerable<KeyValuePair<string, int>> keys)
+        {
+            _coveringKeys.Clear();
+            if (keys == null) return;
+            foreach (var pair in keys)
+                if (!string.IsNullOrEmpty(pair.Key) && pair.Value >= 0) _coveringKeys[pair.Key] = pair.Value;
+        }
+
+        // Dedicated restore (never the positional Restore): a record with no key or no area is skipped.
+        public void RestoreCovering(IEnumerable<KeyValuePair<string, int>> keys, bool forward, int verdictDays, bool verdictKnown, string postKey)
+        {
+            SetCoveringKeys(keys);
+            CoveringForward = forward;
+            CoveringVerdictDays = verdictDays < 0 ? 0 : verdictDays;
+            CoveringVerdictKnown = verdictKnown;
+            CoveringPostKey = postKey;
+        }
+
+        // Foresight F7 (D11 requirement-commitment): the last mass, the main effort's objective and the members the last non-empty mass had, by unit
+        // key (the identity that survives a load; a commander change re-keys it with the formation). Written once per review by the plan, after
+        // SelectMass (Commitment.UpdateLastMass); read by the claim table's row 4, which commits the members the mover dispatched. Persisted
+        // (PlannerStateDto.lastMass). -1 and no keys: there is none.
+        public int LastMassObjective = -1;
+        private readonly HashSet<string> _lastMassKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        public IReadOnlyCollection<string> LastMassKeys => _lastMassKeys;
+
+        public bool InLastMass(string unitKey)
+        {
+            return unitKey != null && _lastMassKeys.Contains(unitKey);
+        }
+
+        // The last mass of this review: exactly these members toward this objective. No objective, or no member with a key, clears it.
+        public void SetLastMass(int objectiveId, IEnumerable<string> keys)
+        {
+            _lastMassKeys.Clear();
+            if (objectiveId >= 0 && keys != null)
+                foreach (string key in keys)
+                    if (!string.IsNullOrEmpty(key)) _lastMassKeys.Add(key);
+            LastMassObjective = _lastMassKeys.Count > 0 ? objectiveId : -1;
+        }
+
+        // Dedicated restore (never the positional Restore): a record with no key is skipped.
+        public void RestoreLastMass(int objectiveId, IEnumerable<string> keys)
+        {
+            SetLastMass(objectiveId, keys);
+        }
+
+        // Foresight F8 (D11 requirement-department-reinforcement): the formations a department move is sending, by unit key (the identity that
+        // survives a load, as the covering force's and the last mass's keys are; integrator decision 2026-10-18 on gap 36), each with the
+        // department it is bound for. A department is locked while this record holds a formation toward it, so neither a battle on the march nor
+        // a load frees it. Written once per review by the plan, after Decide (DepartmentReinforcement.WriteState); read by the claim table's
+        // row 5. Persisted (PlannerStateDto.departmentMoves).
+        private readonly Dictionary<string, Theater> _departmentMoves = new Dictionary<string, Theater>(StringComparer.Ordinal);
+
+        public IReadOnlyDictionary<string, Theater> DepartmentMoves => _departmentMoves;
+
+        // The department a formation's move is bound for, Unknown for none.
+        public Theater DepartmentMoveOf(string unitKey)
+        {
+            return unitKey != null && _departmentMoves.TryGetValue(unitKey, out var receiver) ? receiver : Theater.Unknown;
+        }
+
+        // Whether a move under way is bound for the department.
+        public bool IsLockedToward(Theater department)
+        {
+            if (department == Theater.Unknown) return false;
+            foreach (var receiver in _departmentMoves.Values)
+                if (receiver == department) return true;
+            return false;
+        }
+
+        // The moves of this review: exactly these formations toward these departments. A record with no key or no department is skipped.
+        public void SetDepartmentMoves(IEnumerable<KeyValuePair<string, Theater>> moves)
+        {
+            _departmentMoves.Clear();
+            if (moves == null) return;
+            foreach (var pair in moves)
+                if (!string.IsNullOrEmpty(pair.Key) && pair.Value != Theater.Unknown) _departmentMoves[pair.Key] = pair.Value;
+        }
+
+        // Dedicated restore (never the positional Restore).
+        public void RestoreDepartmentMoves(IEnumerable<KeyValuePair<string, Theater>> moves)
+        {
+            SetDepartmentMoves(moves);
+        }
+
         // A review's observation pass: BeginObservation, one Observe per own formation, then PruneUnobserved.
         public void BeginObservation()
         {
@@ -116,6 +218,7 @@ namespace WhiskeyRealism.Strategic.Planner
             _keyOfInstance[instanceId] = newKey;
             if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) return;
             if (string.Equals(ReinforcementKey, oldKey, StringComparison.Ordinal)) ReinforcementKey = newKey;
+            CarryKeys(oldKey, newKey);
             if (_departments.TryGetValue(oldKey, out var carried))
             {
                 _departments.Remove(oldKey);
@@ -132,11 +235,30 @@ namespace WhiskeyRealism.Strategic.Planner
             foreach (var pair in live) RekeyInstance(pair.Key, pair.Value);
         }
 
+        // A commander change re-keys a formation (name:commander): its place in the covering force, in the last mass and in a department move
+        // moves with it.
+        private void CarryKeys(string oldKey, string newKey)
+        {
+            if (_coveringKeys.TryGetValue(oldKey, out int area))
+            {
+                _coveringKeys.Remove(oldKey);
+                _coveringKeys[newKey] = area;
+            }
+            if (_lastMassKeys.Remove(oldKey)) _lastMassKeys.Add(newKey);
+            if (_departmentMoves.TryGetValue(oldKey, out var receiver))
+            {
+                _departmentMoves.Remove(oldKey);
+                _departmentMoves[newKey] = receiver;
+            }
+        }
+
         // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.
         public Theater Observe(int instanceId, string unitKey, Theater standing)
         {
             if (string.IsNullOrEmpty(unitKey)) return standing;
             _observed.Add(unitKey);
+            if (_keyOfInstance.TryGetValue(instanceId, out var carriedFrom) && !string.Equals(carriedFrom, unitKey, StringComparison.Ordinal))
+                CarryKeys(carriedFrom, unitKey);
             if (_departments.TryGetValue(unitKey, out var known))
             {
                 _keyOfInstance[instanceId] = unitKey;

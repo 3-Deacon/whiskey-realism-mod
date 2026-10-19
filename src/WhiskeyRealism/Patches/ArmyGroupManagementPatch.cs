@@ -56,7 +56,7 @@ namespace WhiskeyRealism.Patches
                     if (!CampaignPlanStore.TryGetAllocation(allianceId, out var allocation)) return;
                     CampaignPlanStore.TryGetSectors(allianceId, out var sectors);
 
-                    var plans = ArmyGroupDoctrine.PlanGroups(allocation);
+                    var plans = ArmyGroupDoctrine.PlanGroups(allocation, 2, sectors);
                     if (plans.Count == 0) return;
 
                     var faction = AICampaignReflect.GetFaction(_aifaction);

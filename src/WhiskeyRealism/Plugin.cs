@@ -286,6 +286,9 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> EnableStrategicForesightPicture;
         internal static ConfigEntry<bool> EnableSpottingMarkBeliefs;
         internal static ConfigEntry<bool> FixSpottingMarkTiming;
+        internal static ConfigEntry<bool> EnableCoveringForce;
+        internal static ConfigEntry<bool> EnableMainEffortCommitment;
+        internal static ConfigEntry<bool> EnableDepartmentReinforcement;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1435,6 +1438,33 @@ namespace WhiskeyRealism
                 "vanilla's mark timer reads the time-factor pref (0.1 and 0.006 game years), so marks appear over days; the AI side's own marks " +
                 "follow the same rate. It changes the player's own map, whether or not the campaign planner runs. OFF = vanilla's timing on both " +
                 "sides. Needs fog of war.");
+            EnableCoveringForce = Config.Bind(
+                "Campaign Planner", "Enable Covering Force", true,
+                "Default ON. Each AI side keeps a covering force between the enemy capital and its own: the hold reserves of the sectors that face " +
+                "enemy armies on the road between the two capitals are posted, as one force, at the own-held town nearest the point one relocation " +
+                "range from the enemy capital (forward) or from its own capital (rear), forward when the force's strength there reaches the strength " +
+                "the enemy capital's neighbourhood calls for and rear otherwise, and are not drawn into a main effort unless it is aimed at the " +
+                "enemy capital itself. A member counts toward its own sector's hold wherever it stands, and vanilla's defence may use it while an " +
+                "enemy stands on the side's soil near the post. OFF = no covering force: the axis sectors hold where they stand, as the other sectors " +
+                "do. Needs Enable Campaign Planner.");
+            EnableMainEffortCommitment = Config.Bind(
+                "Campaign Planner", "Enable Main Effort Commitment", true,
+                "Default ON. A formation the mover has sent toward the main effort's objective stays in that push through a readiness dip, for as " +
+                "long as the planner keeps the objective (a long march lowers readiness, and the push would otherwise lose its corps and be dropped). " +
+                "Vanilla refuses a new march onto enemy ground at readiness step 0 or 1, so the mover issues none and retries none there. When the " +
+                "planner ends the push (the objective accomplished, unavailable, switched, or its odds below the required ratio for three reviews) its " +
+                "corps are stopped where they stand by vanilla's own campaign stop and taken off vanilla's offensive list, then placed by the holds, " +
+                "the capital reserve and department reinforcement. Capital guards are taken off the offensive list too. OFF = the readiness rule for " +
+                "every mass member, no exemption for the last mass, no stop, no de-list and no readiness skip (the last mass is still recorded). " +
+                "Needs Enable Campaign Planner.");
+            EnableDepartmentReinforcement = Config.Bind(
+                "Campaign Planner", "Enable Department Reinforcement", true,
+                "Default ON. When the planner has no main effort, the department whose hold is shortest (the strength standing in its sectors " +
+                "against what they need to hold) is given one formation from a department whose hold has surplus: the soonest one within ten " +
+                "march-days of the short department's neediest sector, taken only if the department it leaves still meets its own hold without " +
+                "it. One formation at a time per department; its home department changes only when it arrives. A formation whose push has ended " +
+                "is placed the same way. OFF = no department pick or move: the moves under way are dropped and their formations hold where they " +
+                "stand. Needs Enable Campaign Planner.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

@@ -13,7 +13,10 @@ namespace WhiskeyRealism.Strategic.Planner
     // mass, the capital floor) and snapshot beliefs. Vanilla's busy lists are read from the
     // snapshot's flags, never from vanilla.
     //
-    // Roles, in the order they are handed out:
+    // The reserves are not computed here. TheaterPlanner decides who owns each formation once, in the ownership table it publishes
+    // (TheaterPlan.Claims, ClaimTable); the pass maps each claim other than None and Mass to a role through RoleOf and runs its later steps
+    // (garrisons, depot builders, recon, the reserve split, the posts, the main effort, the remainder) over the formations claimed None
+    // or Mass. Roles, in the order the claims are read:
     //   pinned        the builder of a Wished depot task (DepotTaskLedger.CollectHeldBuilders, the Pinned input): DepotBuilder at the
     //                 wish position, withheld, until the task is Built or lost, whatever the plan does with the task (G5c verify r3 F7).
     //                 Handed out before everything else; never a formation the planner may not move.
@@ -26,7 +29,10 @@ namespace WhiskeyRealism.Strategic.Planner
     //                 Held at the capital, withheld from vanilla's pools.
     //   Hold          the hold reserve G3 set aside per threatened sector (ReserveRules.Hold over
     //                 each SectorPlan.HoldNeed, never recomputed: G3 verify F9), less what G3 released
-    //                 into the mass, plus the remainder (below).
+    //                 into the mass, plus the remainder (below). A covering member is a Hold at its post
+    //                 or a Redeploy marching to it (reason covering-force, F6b-2); a formation whose push
+    //                 ended is Hold committed-wait, counted in no sector (F7).
+    //   Redeploy      a formation sent to a hold point of its own side: a covering post or a short department's sector.
     //   Recover       a movable formation below RecoverSupplyBelow raw supply or the movement morale
     //                 minimum (spec C21: ReserveRules.Recovers), walked toward the nearest supply
     //                 source; withheld. It counts 0 toward its sector's hold (it is leaving).
@@ -132,6 +138,11 @@ namespace WhiskeyRealism.Strategic.Planner
         internal const string ReasonGarrisonPost = "garrison-post";
         internal const string ReasonPlayerMapGroup = "player-map-group";
         internal const string ReasonGaveUp = "gave-up";
+        // Foresight F6a (D11 requirement-claims, requirement-redeploy-role): a push that ended waits where it stands (F7); a covering member
+        // (F6b-2) and a department's reinforcement (F8) march as Redeploy.
+        internal const string ReasonCommittedWait = "committed-wait";
+        internal const string ReasonCoveringForce = "covering-force";
+        internal const string ReasonDepartmentReinforcement = "department-reinforcement";
 
         public static Allocation Allocate(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, Func<string, Theater> homeDepartment,
                                           IReadOnlyList<ReconTask> reconTasks, ReconMissionLedger missions, IReadOnlyList<GaveUpMove> gaveUp = null,
@@ -140,8 +151,84 @@ namespace WhiskeyRealism.Strategic.Planner
             var allocation = new Allocation { Alliance = s != null ? s.Alliance : -1 };
             if (s == null || plan == null || sectors == null || s.Alliance < 0 || s.Alliance > 1 || s.Own.Count == 0) return allocation;
             if (StandsDown(s)) return allocation;
+            RequireClaims(plan, s);
             new Pass(plan, s, sectors, homeDepartment, reconTasks, missions, gaveUp, heldBuilders).Run(allocation);
             return allocation;
+        }
+
+        // The allocator has no table of its own: a plan without one for this roster is a planner or a harness fault, and a role handed out
+        // from no table would only look like a decision.
+        private static void RequireClaims(TheaterPlan plan, CampaignSnapshot s)
+        {
+            if (plan.Claims.Count != s.Own.Count)
+                throw new InvalidOperationException("the plan carries " + plan.Claims.Count + " ownership claims for " + s.Own.Count + " formations");
+            for (int i = 0; i < s.Own.Count; i++)
+                if (plan.Claims[i].InstanceId != s.Own[i].InstanceId)
+                    throw new InvalidOperationException("the ownership claim " + i + " is for formation " + plan.Claims[i].InstanceId + ", not " + s.Own[i].InstanceId);
+        }
+
+        // The role a claim other than None and Mass hands its formation (D11 requirement-claims, the table's last column), with the reason it
+        // reads and whether vanilla's pools are denied it. The pass supplies the role sector and the claim the target.
+        //   a covering member within max(BugleRange, CampaignMover.ArrivalRadius) of its post holds it, any other marches to it: both
+        //   withheld from the offensive and defensive pools (CampaignWithholdView reads the covering exception).
+        internal static void RoleOf(in Claim c, in FormationRecord f, out FormationRole role, out string reason, out bool withheld)
+        {
+            switch (c.Claimant)
+            {
+                case Claimant.PinnedBuilder:
+                    role = FormationRole.DepotBuilder; reason = ReasonPinnedBuilder; withheld = true; return;
+                case Claimant.Immobile:
+                    role = FormationRole.Hold; reason = ImmobileReasonOf(f); withheld = false; return;
+                case Claimant.Recover:
+                    role = FormationRole.Recover; reason = ReasonRecover; withheld = true; return;
+                case Claimant.Committed:
+                    role = FormationRole.Hold; reason = ReasonCommittedWait; withheld = false; return;
+                case Claimant.DepartmentMove:
+                    role = FormationRole.Redeploy; reason = ReasonDepartmentReinforcement; withheld = false; return;
+                case Claimant.Capital:
+                    role = FormationRole.CapitalGuard; reason = ReasonCapitalFloor; withheld = true; return;
+                case Claimant.Hold:
+                    if (string.Equals(c.Reason, ReasonCoveringForce, StringComparison.Ordinal))
+                    {
+                        float dx = f.X - c.TargetX, dz = f.Z - c.TargetZ;
+                        float arrived = Math.Max(f.BugleRange, CampaignMover.ArrivalRadius);
+                        role = dx * dx + dz * dz <= arrived * arrived ? FormationRole.Hold : FormationRole.Redeploy;
+                        reason = ReasonCoveringForce;
+                        withheld = true;
+                        return;
+                    }
+                    role = FormationRole.Hold; reason = ReasonHoldReserve; withheld = false; return;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(c), c.Claimant, "RoleOf maps the claims that hand out a role; None and Mass are placed by the later steps");
+            }
+        }
+
+        private static string ImmobileReasonOf(in FormationRecord f)
+        {
+            return (f.Flags & TheaterPlanner.Busy) != 0 ? ReasonBusy
+                : (f.Flags & FormationFlags.FightingForce) == 0 ? ReasonNonCombat
+                : ReasonPlayerCommand;
+        }
+
+        // What each sector's hold need, its believed term and the army it faces are, as the plan publishes them: the numbers the pass reads
+        // and a harness builds the ownership table of a plan it made by hand from. need and believed hold the published values (0 for a
+        // sector the plan does not list), nearX and nearZ the nearest live land belief, else the sector's centroid.
+        internal static void SectorInputs(TheaterPlan plan, CampaignSnapshot s, SectorModel sectors, float[] need, float[] believed, float[] nearX, float[] nearZ)
+        {
+            for (int k = 0; k < plan.Sectors.Count; k++)
+            {
+                var sp = plan.Sectors[k];
+                if (sp == null || sp.SectorId < 0 || sp.SectorId >= sectors.Count) continue;
+                need[sp.SectorId] = sp.HoldNeed;
+                believed[sp.SectorId] = sp.BelievedHold;
+            }
+            for (int k = 0; k < sectors.Count; k++)
+            {
+                sectors.Centroid(k, out float cx, out float cz);
+                int near = ReserveRules.NearestLandBelief(s, cx, cz);
+                nearX[k] = near >= 0 ? s.Beliefs[near].X : cx;
+                nearZ[k] = near >= 0 ? s.Beliefs[near].Z : cz;
+            }
         }
 
         // The CIC player's own side: every formation is his (stage F's CicSide). The enemy side of a
@@ -190,10 +277,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // The [Allocation] row (plan G4 Steps), changing only when the allocation does.
         internal static string Summary(Allocation a, TheaterPlan plan, PlayerCommandClass player, float reliability01, int unreliableDays)
         {
-            int main = 0, support = 0, hold = 0, reserve = 0, capital = 0, depot = 0, recover = 0, recon = 0, busy = 0;
+            int main = 0, support = 0, hold = 0, reserve = 0, capital = 0, depot = 0, recover = 0, recon = 0, busy = 0, redeploy = 0, covering = 0;
             for (int i = 0; i < a.Assignments.Count; i++)
             {
                 var x = a.Assignments[i];
+                if (string.Equals(x.Reason, ReasonCoveringForce, StringComparison.Ordinal)) covering++;   // a member of either role; one at its post is also in hold=
                 switch (x.Role)
                 {
                     case FormationRole.MainEffort: main++; break;
@@ -203,6 +291,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     case FormationRole.DepotBuilder: depot++; break;
                     case FormationRole.Recover: recover++; break;
                     case FormationRole.Recon: recon++; break;
+                    case FormationRole.Redeploy: redeploy++; break;
                     default:
                         if (IsImmobileReason(x.Reason)) busy++;
                         else hold++;
@@ -212,6 +301,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return "[Allocation] alliance=" + a.Alliance
                 + " main=" + main + " support=" + support + " hold=" + hold + " reserve=" + reserve + " capital=" + capital
                 + " depot=" + depot + " recover=" + recover + " recon=" + recon + " busy=" + busy
+                + " redeploy=" + redeploy + " covering=" + covering
                 + " player=" + player
                 + " reliability=" + reliability01.ToString("0.00", CultureInfo.InvariantCulture)
                 + " unreliableDays=" + unreliableDays
@@ -277,12 +367,21 @@ namespace WhiskeyRealism.Strategic.Planner
             for (int k = 0; k < a.Assignments.Count; k++)
             {
                 var x = a.Assignments[k];
-                if ((x.Role != FormationRole.Hold && x.Role != FormationRole.CapitalGuard) || x.SectorId != sector) continue;
+                bool covering = IsCoveringMember(x);
+                if ((!covering && x.Role != FormationRole.Hold && x.Role != FormationRole.CapitalGuard) || x.SectorId != sector) continue;
                 int i = OwnIndexOf(s, a, k);
-                if (i < 0 || ReserveRules.HoldSectorOf(sectors, s.Own[i]) != sector || !WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) continue;
+                // A covering member counts in its role sector wherever it stands, at the post or on the march to it (D11 requirement-covering-hold).
+                if (i < 0 || (!covering && ReserveRules.HoldSectorOf(sectors, s.Own[i]) != sector) || !WlChainRules.CountsTowardCoverage(s.Own[i].Chain)) continue;
                 sum += ReserveRules.HoldStrength(s.Own[i]);
             }
             return sum;
+        }
+
+        // A covering-force member of either role (D11 requirement-covering-hold): a Hold within arrival range of the post, or a Redeploy marching
+        // to it. Its Assignment.SectorId is the sector that reserved it, where it is counted whatever sector it stands in.
+        internal static bool IsCoveringMember(in Assignment a)
+        {
+            return (a.Role == FormationRole.Hold || a.Role == FormationRole.Redeploy) && string.Equals(a.Reason, ReasonCoveringForce, StringComparison.Ordinal);
         }
 
         // The snapshot index of assignment k's formation. The pass writes one assignment per own formation in snapshot order, so the
@@ -312,7 +411,8 @@ namespace WhiskeyRealism.Strategic.Planner
             private readonly int _sectorCount;
             private readonly IReadOnlyList<GaveUpMove> _gaveUp;
             private readonly IReadOnlyList<HeldBuilder> _pinned;
-            private bool[] _pinnedMask;   // the formations AssignPinnedBuilders pinned
+            private readonly bool[] _pinnedMask;   // the formations ReserveRules.WishedBuilders names: the one rule for who is pinned
+            private readonly Claim[] _claim;       // the plan's ownership table, one claim per formation in snapshot order
 
             private readonly bool[] _done;
             private readonly bool[] _inMass;
@@ -328,7 +428,6 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private readonly float[] _need, _nearX, _nearZ;  // per sector: hold need, the army it faces
             private readonly float[] _believed;              // per sector: the believed term of the hold need (SectorPlan.BelievedHold)
-            private readonly ReserveRules.HoldTally _held;   // what ReserveRules.Hold sized each sector's reserve on (unready, busy, capital guard, reserve)
             private int _reconFree, _reconMass;
             private readonly List<string> _unfilledWhy = new List<string>();   // one entry per recon task with no scout, in task order
 
@@ -359,7 +458,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 _nearX = new float[_sectorCount];
                 _nearZ = new float[_sectorCount];
                 _believed = new float[_sectorCount];
-                _held = new ReserveRules.HoldTally(_sectorCount, _n);
+                _claim = plan.Claims.ToArray();
+                _pinnedMask = ReserveRules.WishedBuilders(s, pinned);
 
                 for (int i = 0; i < _n; i++)
                 {
@@ -370,18 +470,8 @@ namespace WhiskeyRealism.Strategic.Planner
             internal void Run(Allocation allocation)
             {
                 ReadSectorFacts();
-                var holdReserved = new int[_n];
-                var capitalReserved = new bool[_n];
-
-                var pinnedBuilder = AssignPinnedBuilders();
-                _pinnedMask = pinnedBuilder;
-                AssignImmobile();
-                ReserveRules.Capital(_s, _plan.CapitalFloorStrength, capitalReserved, pinnedBuilder);
-                ReserveRules.Hold(_s, _sectors, _need, _nearX, _nearZ, capitalReserved, holdReserved, _held);
+                AssignClaims();
                 MarkMass();
-                AssignCapitalGuards(capitalReserved);
-                AssignHoldReserve(holdReserved);
-                AssignRecover();
                 AssignGarrisons();
                 _seatedStrength = new float[_plan.Garrisons.Count];
                 _seatedCount = new int[_plan.Garrisons.Count];
@@ -419,29 +509,13 @@ namespace WhiskeyRealism.Strategic.Planner
 
             private void ReadSectorFacts()
             {
-                for (int k = 0; k < _plan.Sectors.Count; k++)
-                {
-                    var sp = _plan.Sectors[k];
-                    if (sp == null || sp.SectorId < 0 || sp.SectorId >= _sectorCount) continue;
-                    _need[sp.SectorId] = sp.HoldNeed;
-                    _believed[sp.SectorId] = sp.BelievedHold;
-                }
-                for (int k = 0; k < _sectorCount; k++)
-                {
-                    _sectors.Centroid(k, out float cx, out float cz);
-                    int near = ReserveRules.NearestLandBelief(_s, cx, cz);
-                    _nearX[k] = near >= 0 ? _s.Beliefs[near].X : cx;
-                    _nearZ[k] = near >= 0 ? _s.Beliefs[near].Z : cz;
-                }
+                SectorInputs(_plan, _s, _sectors, _need, _believed, _nearX, _nearZ);
             }
 
             private void MarkMass()
             {
-                for (int k = 0; k < _plan.MassInstanceIds.Count; k++)
-                {
-                    int i = _s.IndexOfOwn(_plan.MassInstanceIds[k]);
-                    if (i >= 0 && !_done[i]) _inMass[i] = true;
-                }
+                for (int i = 0; i < _n; i++)
+                    if (_claim[i].Claimant == Claimant.Mass && !_done[i]) _inMass[i] = true;
             }
 
             // ---- roles ----
@@ -459,7 +533,8 @@ namespace WhiskeyRealism.Strategic.Planner
             private static bool Marches(FormationRole role)
             {
                 return role == FormationRole.MainEffort || role == FormationRole.Support || role == FormationRole.CapitalGuard
-                    || role == FormationRole.Recover || role == FormationRole.DepotBuilder || role == FormationRole.Recon || role == FormationRole.Garrison;
+                    || role == FormationRole.Recover || role == FormationRole.DepotBuilder || role == FormationRole.Recon || role == FormationRole.Garrison
+                    || role == FormationRole.Redeploy;
             }
 
             private void Assign(int i, FormationRole role, int roleSector, float tx, float tz, string reason, bool withheld)
@@ -483,53 +558,48 @@ namespace WhiskeyRealism.Strategic.Planner
                 _withheld[i] = withheld;
             }
 
-            // The builder of a Wished depot task keeps its role whatever the plan does (verify r3 F7): the wish is paid and the depot
-            // rises only while the builder stays within its bugle range (96626-96648), so the formation is out of the free pool and
-            // stays DepotBuilder at the wish position (the site, for an Ahead wish whose builder is still marching to it) until the
-            // ledger stops listing it. Handed out first: nothing else, the mass and the reserves included, may take it. The one
-            // place this rule lives; the mover reads the assignment like any other. A formation the planner may not move (the W&L
-            // player's, a CIC side's) is never a builder, so a pin that names one is ignored. The returned mask keeps the capital
-            // reserve (ReserveRules.Capital, which picks the nearest massable formations until the floor) from counting a pinned builder
-            // as a guard it can raise; the hold reserve needs none, a pinned builder counts at its strength there either way.
-            private bool[] AssignPinnedBuilders()
-            {
-                var mask = ReserveRules.WishedBuilders(_s, _pinned);   // the one rule for who is pinned: G3's plan reads it too
-                if (mask == null) return null;
-                for (int k = 0; k < _pinned.Count; k++)
-                {
-                    int i = _s.IndexOfOwn(_pinned[k].InstanceId);
-                    if (i < 0 || !mask[i] || _done[i]) continue;
-                    Assign(i, FormationRole.DepotBuilder, _pinned[k].SectorId, _pinned[k].TargetX, _pinned[k].TargetZ, ReasonPinnedBuilder, true);
-                }
-                return mask;
-            }
-
-            private void AssignImmobile()
+            // Every claim that hands out a role (RoleOf), in the shipped order of the roles it replaces: the pinned builders, the immobile, the
+            // capital guards, the hold reserves, the formations leaving for supply, then the ones that march to a hold point. Claims are
+            // disjoint, so the order only matters to Assign's give-up rule, which looks at each formation alone.
+            //   The builder of a Wished depot task keeps its role whatever the plan does (verify r3 F7): the wish is paid and the depot rises
+            //   only while the builder stays within its bugle range (96626-96648), so the formation is out of the free pool and stays
+            //   DepotBuilder at the wish position (the site, for an Ahead wish whose builder is still marching to it) until the ledger stops
+            //   listing it. Nothing else, the mass and the reserves included, may take it (ClaimTable row 1: the one place the rule lives;
+            //   the mover reads the assignment like any other). A formation the planner may not move (the W&L player's, a CIC side's) is
+            //   never a builder, so a pin that names one is ignored.
+            private void AssignClaims()
             {
                 for (int i = 0; i < _n; i++)
                 {
-                    var f = _s.Own[i];
-                    if (TheaterPlanner.Movable(f)) continue;
-                    string reason = (f.Flags & TheaterPlanner.Busy) != 0 ? ReasonBusy
-                        : (f.Flags & FormationFlags.FightingForce) == 0 ? ReasonNonCombat
-                        : ReasonPlayerCommand;
-                    Assign(i, FormationRole.Hold, _sector[i], f.X, f.Z, reason, false);
+                    var claim = _claim[i];
+                    if (claim.Claimant == Claimant.None || claim.Claimant == Claimant.Mass) continue;
+                    RoleOf(in claim, _s.Own[i], out FormationRole role, out string reason, out bool withheld);
+                    Assign(i, role, RoleSectorOf(i, in claim), claim.TargetX, claim.TargetZ, reason, withheld);
                 }
             }
 
-            private void AssignCapitalGuards(bool[] capitalReserved)
+            // The sector a claim's role is for: the pin's for a depot builder, where the formation stands for the immobile and the recovering,
+            // none for a push that ended, the capital's for a guard, the sector the hold counted it in for a reserve or a covering member,
+            // and the one the department's reinforcement is bound for.
+            private int RoleSectorOf(int i, in Claim claim)
             {
-                int capitalSector = _s.HasCapital ? _sectors.SectorAt(_s.CapitalX, _s.CapitalZ) : -1;
-                for (int i = 0; i < _n; i++)
-                    if (capitalReserved[i] && !_done[i])
-                        Assign(i, FormationRole.CapitalGuard, capitalSector, _s.CapitalX, _s.CapitalZ, ReasonCapitalFloor, true);
-            }
-
-            private void AssignHoldReserve(int[] holdReserved)
-            {
-                for (int i = 0; i < _n; i++)
-                    if (holdReserved[i] >= 0 && !_done[i] && !_inMass[i])
-                        Assign(i, FormationRole.Hold, holdReserved[i], _s.Own[i].X, _s.Own[i].Z, ReasonHoldReserve, false);
+                switch (claim.Claimant)
+                {
+                    case Claimant.PinnedBuilder:
+                        for (int k = 0; _pinned != null && k < _pinned.Count; k++)
+                            if (_pinned[k].InstanceId == claim.InstanceId) return _pinned[k].SectorId;
+                        return _sector[i];
+                    case Claimant.Committed:
+                        return -1;
+                    case Claimant.DepartmentMove:
+                        return _sectors.SectorAt(claim.TargetX, claim.TargetZ);
+                    case Claimant.Capital:
+                        return _s.HasCapital ? _sectors.SectorAt(_s.CapitalX, _s.CapitalZ) : -1;
+                    case Claimant.Hold:
+                        return claim.SectorId;
+                    default:
+                        return _sector[i];
+                }
             }
 
             // D8: the secession garrison the plan names (TheaterPlan.Garrisons, picked by TheaterPlanner.Garrisons from the very same snapshot):
@@ -631,23 +701,6 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (_role[i] == FormationRole.Reserve) return true;
                 return _role[i] == FormationRole.Hold && ReferenceEquals(_reason[i], ReasonHoldReserve)
                     && post.InstanceIds.Contains(f.InstanceId) && _sector[i] == _sectors.SectorAt(post.X, post.Z);
-            }
-
-            // Spec C21: the supply threshold is the raw metric.
-            private void AssignRecover()
-            {
-                for (int i = 0; i < _n; i++)
-                {
-                    if (_done[i] || _inMass[i]) continue;
-                    var f = _s.Own[i];
-                    if (!ReserveRules.Recovers(f, _s.MinMoraleForMovement)) continue;
-                    if (!LogisticsGate.NearestSource(_s, f.X, f.Z, out float sx, out float sz))
-                    {
-                        sx = f.X;
-                        sz = f.Z;
-                    }
-                    Assign(i, FormationRole.Recover, _sector[i], sx, sz, ReasonRecover, true);
-                }
             }
 
             private bool Free(int i)
@@ -753,8 +806,9 @@ namespace WhiskeyRealism.Strategic.Planner
                 float sum = 0f;
                 for (int j = 0; j < _n; j++)
                 {
-                    if (_sector[j] != sector || _inMass[j]) continue;
-                    if (_done[j] && !((_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector)) continue;
+                    bool covering = _done[j] && CoveringAt(j);
+                    if ((covering ? _roleSector[j] : _sector[j]) != sector || _inMass[j]) continue;
+                    if (_done[j] && !(covering || ((_role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard) && _roleSector[j] == sector))) continue;
                     sum += Counts(j);
                 }
                 return sum;
@@ -908,7 +962,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 bool beliefDriven = PlannerSettings.ForesightPicture
                     ? _believed[k] > _plan.MinGarrisonStrength && _believed[k] >= _need[k] - _believed[k]
                     : _believed[k] > _plan.MinGarrisonStrength && _believed[k] >= _need[k] - 0.01f;
-                return !beliefDriven || _held.Sector[k] - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
+                return !beliefDriven || SectorHeld(k) - HoldLeaving(k) - Math.Max(0f, _s.Own[i].Strength) >= Target(k);
             }
 
             // The share of the sector's counted hold that no longer holds it: a counted formation already given a role other than holding
@@ -919,9 +973,10 @@ namespace WhiskeyRealism.Strategic.Planner
                 float leaving = 0f;
                 for (int j = 0; j < _n; j++)
                 {
-                    if (_held.ShareSector[j] != sector || !_done[j]) continue;
-                    bool holds = _role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard;   // both keep the formation's own sector, the one it was counted in
-                    if (!holds) leaving += _held.Share[j];
+                    if (_claim[j].SectorId != sector || !_done[j]) continue;
+                    // Hold and CapitalGuard keep the formation's own sector, the one it was counted in; so does a covering member on the march to its post
+                    bool holds = _role[j] == FormationRole.Hold || _role[j] == FormationRole.CapitalGuard || CoveringAt(j);
+                    if (!holds) leaving += _claim[j].Share;
                 }
                 return leaving;
             }
@@ -1053,6 +1108,8 @@ namespace WhiskeyRealism.Strategic.Planner
                 for (int k = 0; k < members.Count; k++)
                 {
                     int i = members[k];
+                    // A formation committed to the objective is not split off: the excess comes from the others, farthest first (D11 requirement-claims).
+                    if (string.Equals(_claim[i].Reason, ClaimTable.ReasonCommitted, StringComparison.Ordinal)) continue;
                     float strength = Math.Max(0f, _s.Own[i].Strength);
                     if (massStrength - strength < keep) break; // the reserve is a suffix by distance: never a nearer formation than one kept
                     massStrength -= strength;
@@ -1106,9 +1163,21 @@ namespace WhiskeyRealism.Strategic.Planner
 
             // ---- hold sums ----
 
+            // What ReserveRules.Hold sized the sector's reserve on (TheaterPlan.SectorHeld, 0 for a plan that carries none).
+            private float SectorHeld(int sector)
+            {
+                return _plan.SectorHeld != null && sector >= 0 && sector < _plan.SectorHeld.Length ? _plan.SectorHeld[sector] : 0f;
+            }
+
             private float Target(int sector)
             {
                 return Math.Max(_need[sector], _plan.MinGarrisonStrength);
+            }
+
+            // Whether formation i has been given a covering-force role (Hold at the post, Redeploy on the way to it).
+            private bool CoveringAt(int i)
+            {
+                return (_role[i] == FormationRole.Hold || _role[i] == FormationRole.Redeploy) && string.Equals(_reason[i], ReasonCoveringForce, StringComparison.Ordinal);
             }
 
             // What formation i adds to a hold sum: 0 unless WlChainRules.CountsTowardCoverage (the player's own
@@ -1155,6 +1224,12 @@ namespace WhiskeyRealism.Strategic.Planner
                     float sum = 0f;
                     for (int i = 0; i < _n; i++)
                     {
+                        // A covering member is withheld already and counts in its role sector wherever it stands, as CountedHold counts it.
+                        if (CoveringAt(i) && _roleSector[i] == k)
+                        {
+                            sum += Counts(i);
+                            continue;
+                        }
                         if (_role[i] != FormationRole.Hold || _sector[i] != k || _roleSector[i] != k
                             || !WlChainRules.CountsTowardCoverage(_s.Own[i].Chain)) continue;
                         if (IsImmobileReason(_reason[i]) || WlChainRules.OrderOnly(_s.Own[i].Chain)) sum += Counts(i);
@@ -1194,7 +1269,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     var holds = new List<int>();
                     for (int i = 0; i < _n; i++)
-                        if (_role[i] == FormationRole.Hold && _sector[i] == k && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
+                        if (_role[i] == FormationRole.Hold && (_sector[i] == k || CoveringAt(i)) && _roleSector[i] == k && WlChainRules.MayMove(_s.Own[i].Chain)
                             && !IsImmobileReason(_reason[i])) holds.Add(i);
                     float target = Target(k);
                     float counted = CountedHold(_s, _sectors, allocation, k);
@@ -1267,7 +1342,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 {
                     if (!WlChainRules.MayMove(_s.Own[i].Chain)) continue;
                     bool reserve = _role[i] == FormationRole.Reserve;
-                    bool released = _role[i] == FormationRole.Hold && !IsImmobileReason(_reason[i]) && !_withheld[i]
+                    bool released = _role[i] == FormationRole.Hold && !IsImmobileReason(_reason[i]) && !ReferenceEquals(_reason[i], ReasonCommittedWait) && !_withheld[i]
                         && _sector[i] >= 0 && _sector[i] < _sectorCount && _need[_sector[i]] <= 0f;
                     if (reserve || released) list.Add(i);
                 }

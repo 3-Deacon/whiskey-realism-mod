@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 
 namespace WhiskeyRealism.Strategic
@@ -71,6 +72,17 @@ namespace WhiskeyRealism.Strategic
         internal static string Dated(string row, int serial)
         {
             return row + " date=" + FormatDate(serial);
+        }
+
+        // The same with the date right after alliance=, where [Reserves] and [CampaignMoverIssue] write it: the foresight rows read alliance, then
+        // date. A row with no alliance= field is dated at its end.
+        internal static string DatedAfterAlliance(string row, int serial)
+        {
+            int at = row.IndexOf(" alliance=", StringComparison.Ordinal);
+            if (at < 0) return Dated(row, serial);
+            int end = row.IndexOf(' ', at + 1);
+            if (end < 0) end = row.Length;
+            return row.Substring(0, end) + " date=" + FormatDate(serial) + row.Substring(end);
         }
 
         // 1 March of year 0 -> 1 January of year 1.

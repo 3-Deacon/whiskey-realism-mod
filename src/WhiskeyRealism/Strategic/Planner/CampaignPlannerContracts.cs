@@ -132,6 +132,16 @@ namespace WhiskeyRealism.Strategic.Planner
         public int StateId { get => _state - 1; set => _state = value + 1; }
     }
 
+    // One town of the campaign map (BattleUnits.towns: a Town, never one of the small towns BattleUnits.smalltowns keeps apart): its name, position
+    // and owner alliance (Town.Owner, the public map fact the covering corridor's posts are chosen from, foresight F6b-1). Listed in
+    // BattleUnits.towns order; the place index is the index into CampaignSnapshot.Places.
+    public struct PlaceRecord
+    {
+        public string Name;
+        public float X, Z;
+        public int Owner;
+    }
+
     // A state the CSA can win by secession (Kentucky, Missouri: SecessionRules). Read live from vanilla each review, never cached.
     public struct SecessionRecord
     {
@@ -319,7 +329,11 @@ namespace WhiskeyRealism.Strategic.Planner
         // A formation sent to stand at a garrison post until it is there; once there it is Hold in place, withheld. One role for both
         // sorts of post: D8's secession garrison (a live objective 15/16 the CSA could win; reason secession-garrison) and G8's posts
         // beyond the capital (an objective town, rail hub, port, depot or fort; reason garrison-post).
-        Garrison = 8
+        Garrison = 8,
+        // A formation the mover sends to a hold point of its own side (foresight F6a, D11 requirement-redeploy-role): a covering post
+        // (reason covering-force) or a short department's sector (department-reinforcement). Within the bugle range of the point it is an
+        // ordinary Hold at the next review.
+        Redeploy = 9
     }
 
     public enum ReconKind
@@ -420,6 +434,28 @@ namespace WhiskeyRealism.Strategic.Planner
         // D8: the secession garrisons of this review (Union side: one post per live secession state it owns).
         public List<GarrisonPost> Garrisons = new List<GarrisonPost>();
 
+        // Foresight F6a (D11 requirement-claims): who owns each own formation at the end of the review, one Claim per formation in snapshot
+        // order (ClaimTable), and per sector the hold the reserve was sized on (SectorHeld: ReserveRules.Hold's sum, D9's measure). The
+        // allocator assigns roles from the table and never re-runs the capital or hold reserve.
+        public List<Claim> Claims = new List<Claim>();
+        public float[] SectorHeld = new float[0];
+
+        // Foresight F6b-2 (D11 requirement-covering-lifecycle): the covering force between the two capitals, rebuilt each review and never null
+        // after Plan. Kind None carries the Reason it is unbound.
+        public CoveringPlan Covering = new CoveringPlan();
+
+        // Foresight F7 (D11 requirement-commitment): the instance ids whose commitment to the last mass ended this review, in snapshot order: the
+        // members the last mass had that the review's mass did not keep (the committed-wait formations of a push that ended, and the members a
+        // continuing push dropped). The mover takes each that is still in vanilla's offensive list off it, unless it is a MainEffort or Support
+        // again; [Reserves] endedListed= and endedMarching= read the previous review's.
+        public List<int> CommitmentEnded = new List<int>();
+
+        // Foresight F8 (D11 requirement-department-reinforcement): the departments whose hold is short (HoldStrength standing in them under their
+        // need), the shortest first, each with the outcome of this review's pick (Status); and the moves of this review (picked, arrived, gave
+        // up), which the runtime writes as [DepartmentReinforcement] rows. Both empty with Enable Department Reinforcement off.
+        public List<DepartmentShortfall> DepartmentShort = new List<DepartmentShortfall>();
+        public List<DepartmentTransition> DepartmentTransitions = new List<DepartmentTransition>();
+
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
         {
@@ -428,6 +464,56 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
             return null;
         }
+    }
+
+    // A department whose hold is short (D11 requirement-department-reinforcement): the hold strength standing in it against what it needs,
+    // and what this review did about it: donor (it was given a formation), nodonor (the first ranked unlocked department, and no formation
+    // passed the pool), locked (a move is under way toward it), untried (ranked after the one tried) or push (the review has a main effort).
+    public struct DepartmentShortfall
+    {
+        public Theater Theater;
+        public float Need, Have;
+        public string Status;
+    }
+
+    // One step of a department move in a review: a formation picked for a short department (the target and the march days estimated at the
+    // pick), arrived in it (its home department changed) or gave up on it (the tracker gave up on the march).
+    public struct DepartmentTransition
+    {
+        public int InstanceId;
+        public string Name;
+        public Theater From, To;
+        public float TargetX, TargetZ;
+        public float Days;          // MarchTime.EstimateDays at the pick, -1 on the other steps
+        public string State;        // DepartmentReinforcement.StatePicked, StateArrived, StateGaveUp or StateDropped
+    }
+
+    // Where the covering force stands (D11 requirement-covering-post-choice): the forward post, at the relocation range from the enemy
+    // capital, or the rear post, at the relocation range from the own capital. With one post the kind is the raw verdict of the review.
+    public enum CoveringKind
+    {
+        None = 0,
+        Forward = 1,
+        Rear = 2
+    }
+
+    // The covering force of one review (foresight F6b-2): the post it stands at, the men the axis sectors' hold reserves give it against the
+    // men it needs, and the defence flag the withhold view reads. Published with the plan; the allocator reads the members from the ownership
+    // table (reason covering-force), the withhold view reads ThreatNear and the telemetry row everything.
+    public sealed class CoveringPlan
+    {
+        public string PostName;
+        public float PostX, PostZ;
+        public CoveringKind Kind;
+        // Radius is the relocation range the post and the threat test are measured in. Held is the counted strength (the members plus the
+        // formations that stand at the post and cannot be massed); Need the strength the force is sized to.
+        public float Need, Held, Radius;
+        // A live land belief of the side's own, of any source, lies on own soil within Radius of the post at plan time (the case vanilla's
+        // own defence answers): the covering members are then available to it.
+        public bool ThreatNear;
+        public List<int> InstanceIds = new List<int>();
+        // Why Kind is None: no-capital, no-corridor-place, no-axis-sector, flag-off, cic-side, main-effort-enemy-capital. Null when posted.
+        public string Reason;
     }
 
     // What a garrison post guards. Secession is D8's (a state the CSA could win); the others are G8's posts beyond the capital.
@@ -475,6 +561,34 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         public int UnitTyp;
         public int MinRank, MaxRank;
+    }
+
+    // Who owns an own formation at the end of a review, in the order the rows of ClaimTable take it (D11 requirement-claims). None is
+    // unclaimed: the later steps of the allocator place it.
+    public enum Claimant
+    {
+        None = 0,
+        PinnedBuilder = 1,   // the builder of a Wished depot task
+        Immobile = 2,        // busy, non-combat, or the player's own command
+        Recover = 3,         // leaving for supply
+        Committed = 4,       // a dispatched member of the main effort waiting out the end of its push
+        DepartmentMove = 5,  // on its way to a short department
+        Capital = 6,         // the capital reserve
+        Hold = 7,            // a sector's hold reserve, or a covering member
+        Mass = 8             // the main effort's selected mass
+    }
+
+    // One own formation's owner. SectorId and Share are where the hold pass counted the formation and what it added there (-1 and 0 when
+    // nowhere): the numbers HoldLeaving and the scout draw read. TargetX/Z is where the owner's role sends it; Reason names the owner's
+    // kind of hold (covering-force) where the role cannot tell.
+    public struct Claim
+    {
+        public int InstanceId;
+        public Claimant Claimant;
+        public int SectorId;
+        public float Share;
+        public float TargetX, TargetZ;
+        public string Reason;
     }
 
     public struct Assignment
