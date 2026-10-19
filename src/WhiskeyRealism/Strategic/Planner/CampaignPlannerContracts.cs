@@ -132,6 +132,16 @@ namespace WhiskeyRealism.Strategic.Planner
         public int StateId { get => _state - 1; set => _state = value + 1; }
     }
 
+    // One town of the campaign map (BattleUnits.towns: a Town, never one of the small towns BattleUnits.smalltowns keeps apart): its name, position
+    // and owner alliance (Town.Owner, the public map fact the covering corridor's posts are chosen from, foresight F6b-1). Listed in
+    // BattleUnits.towns order; the place index is the index into CampaignSnapshot.Places.
+    public struct PlaceRecord
+    {
+        public string Name;
+        public float X, Z;
+        public int Owner;
+    }
+
     // A state the CSA can win by secession (Kentucky, Missouri: SecessionRules). Read live from vanilla each review, never cached.
     public struct SecessionRecord
     {

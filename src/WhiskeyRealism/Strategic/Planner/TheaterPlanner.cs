@@ -626,7 +626,7 @@ namespace WhiskeyRealism.Strategic.Planner
             return -1;
         }
 
-        private static bool SamePoint(float ax, float az, float bx, float bz)
+        internal static bool SamePoint(float ax, float az, float bx, float bz)
         {
             return Math.Abs(ax - bx) <= SameTargetRadius && Math.Abs(az - bz) <= SameTargetRadius;
         }
@@ -890,7 +890,7 @@ namespace WhiskeyRealism.Strategic.Planner
             p.EnemyCapitalEstProp = believed + p.Presumed(c.S, p.EnemyCapitalX, p.EnemyCapitalZ, range, c.Probe);
         }
 
-        private static float HoldRatioNow(CampaignSnapshot s)
+        internal static float HoldRatioNow(CampaignSnapshot s)
         {
             return HoldRatio + (s.Tempo != null ? s.Tempo.MinimumHoldRatioModifier : 0f);
         }
@@ -1382,12 +1382,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 }
                 if (x.Strongest[sector] < 0 || f.Strength > s.Own[x.Strongest[sector]].Strength) x.Strongest[sector] = i;
             }
-            for (int i = 0; i < s.Areas.Count; i++)
-            {
-                int sector = c.Sectors.SectorOfArea(s.Areas[i].Index);
-                if (sector < 0 || sector >= n) continue;
-                x.Radius[sector] = Math.Max(x.Radius[sector], RiverLines.Distance(x.CX[sector], x.CZ[sector], s.Areas[i].X, s.Areas[i].Z));
-            }
+            for (int k = 0; k < n; k++) x.Radius[k] = c.Sectors.Radius(k);
             bool foresight = PlannerSettings.ForesightPicture;
             for (int k = 0; k < n; k++)
             {
@@ -1657,7 +1652,7 @@ namespace WhiskeyRealism.Strategic.Planner
             pz = az + vz * t;
         }
 
-        private static float SegmentDistance(float x, float z, float ax, float az, float bx, float bz)
+        internal static float SegmentDistance(float x, float z, float ax, float az, float bx, float bz)
         {
             ClosestOnSegment(x, z, ax, az, bx, bz, out float px, out float pz);
             return RiverLines.Distance(x, z, px, pz);

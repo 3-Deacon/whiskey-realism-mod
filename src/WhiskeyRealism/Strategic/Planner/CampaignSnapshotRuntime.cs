@@ -136,6 +136,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 ReadAreas(s, factionIndex);
                 ReadFormations(s, alliance, faction, in chain);
                 ReadForts(s, alliance);
+                ReadPlaces(s);
                 ReadObjectives(s, alliance, faction);
                 ReadSecessions(s);
                 ReadSupply(s, alliance);
@@ -315,6 +316,29 @@ namespace WhiskeyRealism.Strategic.Planner
                 catch (Exception ex)
                 {
                     OnceLog.Warning("campaign-planner:snapshot-fort-skipped", "[CampaignPlanner] a fort could not be read and was left out: " + ex.Message);
+                }
+            }
+        }
+
+        // The map's towns and their owners (public map facts; D11 requirement-covering-post): BattleUnits.towns, the Town objects, in list order.
+        // The small towns are IIPs and live in a list of their own (BattleUnits.smalltowns, IIP.id_smalltowns), which is not read: a small town
+        // is never a covering post. A town's position is static (PositionCache), its owner is read every review.
+        private static void ReadPlaces(CampaignSnapshot s)
+        {
+            var towns = BattleUnits.towns;
+            if (towns == null) return;
+            for (int i = 0; i < towns.Count; i++)
+            {
+                var town = towns[i];
+                try
+                {
+                    if ((UnityEngine.Object)town == null) continue;
+                    Vector3 p = PositionOf(town);
+                    s.Places.Add(new PlaceRecord { Name = town.CityName, X = p.x, Z = p.z, Owner = town.Owner });
+                }
+                catch (Exception ex)
+                {
+                    OnceLog.Warning("campaign-planner:snapshot-place-skipped", "[CampaignPlanner] a town could not be read and was left out: " + ex.Message);
                 }
             }
         }

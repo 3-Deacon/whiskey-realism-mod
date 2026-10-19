@@ -51,6 +51,7 @@ namespace WhiskeyRealism.Strategic.Planner
         public List<CrossingRecord> Crossings { get; } = new List<CrossingRecord>(); // fords and bridges (G3)
         public List<SecessionRecord> Secessions { get; } = new List<SecessionRecord>(); // D8: Kentucky and Missouri, read live each review
         public List<FortRecord> Forts { get; } = new List<FortRecord>();               // G8: the side's own forts (post sites and their garrison dummies)
+        public List<PlaceRecord> Places { get; } = new List<PlaceRecord>();            // F6b-1: the map's towns and their owners, in BattleUnits.towns order (the covering posts)
         public List<EnemyDetection> Detections { get; } = new List<EnemyDetection>(); // G1 EnemyDetectionRuntime
         public List<EnemyBelief> Beliefs { get; } = new List<EnemyBelief>();          // G1 EnemyArmyModel
         // Foresight F4: how many of the review's detections were sightings (everything but a mark) and how many marks the belief model applied;
@@ -90,6 +91,7 @@ namespace WhiskeyRealism.Strategic.Planner
             Crossings.Clear();
             Secessions.Clear();
             Forts.Clear();
+            Places.Clear();
             Detections.Clear();
             Beliefs.Clear();
             DetectionsSeen = 0;

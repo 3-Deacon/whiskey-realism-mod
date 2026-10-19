@@ -43,6 +43,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // Foresight F3: the [EnemyPicture] and [CapitalThreat] rows' last signatures (rows on change). Per campaign.
         private static readonly string[] LastPictureRow = new string[2];
         private static readonly string[] LastCapitalThreatRow = new string[2];
+        // Foresight F6b-1: the [CoveringCorridor] row's last signature (rows on the first review and on change). Per campaign.
+        private static readonly string[] LastCorridorRow = new string[2];
         private static readonly ForceAllocator.PlayerNonCompliance[] NonCompliance =
             { new ForceAllocator.PlayerNonCompliance(), new ForceAllocator.PlayerNonCompliance() };
         // G1b: each alliance's recon missions and this review's tasks (pooled), the last [Recon] row's counts
@@ -78,6 +80,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 LastAllocationRow[a] = null;
                 LastPictureRow[a] = null;
                 LastCapitalThreatRow[a] = null;
+                LastCorridorRow[a] = null;
                 NonCompliance[a].Reset();
                 Recon[a] = new ReconMissionLedger();
                 ReconTasks[a].Clear();
@@ -178,6 +181,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     LogFirstReview(snapshot, sectors, plan);
                     EmitPlan(plan, trace, day, month, year);
                     EmitPicture(snapshot, plan, picture);
+                    EmitCorridor(snapshot, sectors, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
                     EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
@@ -432,6 +436,19 @@ namespace WhiskeyRealism.Strategic.Planner
 
         // [EnemyPicture] and [CapitalThreat] on change of their text (one row per alliance per change), dated after the compare. The picture
         // is built and its row written with the picture flag off too, as telemetry.
+        // Foresight F6b-1: where a covering force would stand, reported on the first review and on change (the posts are read on a save before
+        // F6b-2 moves anyone). Built from the review's snapshot, sectors and picture and the plan's hold needs, with no terrain probe (the share
+        // sets an axis sector by whether an element lies on the axis, which no river weight changes).
+        private static void EmitCorridor(CampaignSnapshot snapshot, SectorModel sectors, TheaterPlan plan, EnemyPicture picture)
+        {
+            int a = plan.Alliance;
+            if (picture == null || a < 0 || a >= LastCorridorRow.Length) return;
+            string row = CoveringForce.CorridorRow(snapshot, sectors, picture, plan, null);
+            if (row == null || string.Equals(LastCorridorRow[a], row, StringComparison.Ordinal)) return;
+            LastCorridorRow[a] = row;
+            TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.Dated(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
         private static void EmitPicture(CampaignSnapshot snapshot, TheaterPlan plan, EnemyPicture picture)
         {
             int a = plan.Alliance;

@@ -30,6 +30,7 @@ namespace WhiskeyRealism.Strategic.Planner
         private float[] _centroidX = new float[0];
         private float[] _centroidZ = new float[0];
         private Theater[] _theater = new Theater[0];
+        private float[] _radius = new float[0];
 
         public int Count => _theater.Length;
 
@@ -86,6 +87,7 @@ namespace WhiskeyRealism.Strategic.Planner
             model._centroidX = new float[sectors];
             model._centroidZ = new float[sectors];
             model._theater = new Theater[sectors];
+            model._radius = new float[sectors];
             var members = new int[sectors];
             for (int i = 0; i < n; i++)
             {
@@ -101,6 +103,11 @@ namespace WhiskeyRealism.Strategic.Planner
                     model._centroidZ[sector] /= members[sector];
                 }
                 model._theater[sector] = TheaterClassifier.FromPosition(model._centroidX[sector], model._centroidZ[sector]);
+            }
+            for (int i = 0; i < n; i++)
+            {
+                int sector = owner[i];
+                model._radius[sector] = Math.Max(model._radius[sector], RiverLines.Distance(model._centroidX[sector], model._centroidZ[sector], model._areas[i].X, model._areas[i].Z));
             }
             return model;
         }
@@ -220,6 +227,13 @@ namespace WhiskeyRealism.Strategic.Planner
         public Theater TheaterOf(int sector)
         {
             return sector >= 0 && sector < _theater.Length ? _theater[sector] : Theater.Unknown;
+        }
+
+        // The farthest an area of the sector lies from its centroid: the sector's reach is this plus the relocation range. The one definition,
+        // read by the sector facts (TheaterPlanner.BuildSectorFacts) and the covering corridor's axis shares.
+        public float Radius(int sector)
+        {
+            return sector >= 0 && sector < _radius.Length ? _radius[sector] : 0f;
         }
 
         public void Centroid(int sector, out float x, out float z)
