@@ -37,6 +37,8 @@ internal static partial class DepartmentReinforcementTests
             ("AReviewThatSawNoFormationLeavesTheRecordAlone", AReviewThatSawNoFormationLeavesTheRecordAlone),
             ("ACommanderChangeCarriesTheMove", ACommanderChangeCarriesTheMove),
             ("DepartmentMoveClaimAgreesInG3AndG4", DepartmentMoveClaimAgreesInG3AndG4),
+            ("APickedCorpsThePlayerTakesOverLeavesTheRecord", APickedCorpsThePlayerTakesOverLeavesTheRecord),
+            ("ThePlayersCommandAddsNothingToADepartmentsHave", ThePlayersCommandAddsNothingToADepartmentsHave),
         };
     }
 
@@ -339,6 +341,48 @@ internal static partial class DepartmentReinforcementTests
         other.Observe(8, "2nd Corps:12", Theater.East);
         other.Observe(8, "2nd Corps:55", Theater.East);
         AssertEqual(Theater.East, other.DepartmentMoveOf("2nd Corps:55"), "an observation of the new key carries it by instance id");
+    }
+
+    // A corps picked for the West that the player then takes over (his own command, or his map group) is not ours to send: row 5 does not claim
+    // it, the allocator does not give it Redeploy, the record drops it with a Dropped row, and the West is free to pick again. (The map-group
+    // player's group counts in the hold of the sector he stands in, as D3 has it; the allocator never moves it.)
+    private static void APickedCorpsThePlayerTakesOverLeavesTheRecord()
+    {
+        foreach (var chain in new[] { WlChainClass.PlayerMapGroup, WlChainClass.PlayerCommand })
+        {
+            var state = new PlannerState();
+            Replan(Standard(), state);
+            AssertEqual(Theater.West, state.DepartmentMoveOf("corps3:3"), chain + ": (fixture: corps 3 was picked)");
+            var s = Standard();
+            var f = s.Own[s.IndexOfOwn(3)];
+            f.Chain = chain;
+            s.Own[s.IndexOfOwn(3)] = f;
+            var plan = Replan(s, state);
+            AssertTrue(ClaimOf(plan, 3).Claimant != Claimant.DepartmentMove, chain + ": row 5 does not claim it: " + Describe(plan));
+            var allocation = TestClaims.Allocate(plan, s, ExecutorFixtures.Sectors(s), null, null, null);
+            allocation.TryGet(3, out var a);
+            AssertTrue(a.Role != FormationRole.Redeploy, chain + ": and the allocator does not send it: " + a.Role + " " + a.Reason);
+            AssertEqual(0, state.DepartmentMoves.Count, chain + ": out of the record");
+            AssertTrue(plan.DepartmentTransitions.Any(t => t.InstanceId == 3 && t.State == "Dropped"), chain + ": a Dropped row is written");
+            AssertEqual(Theater.East, state.DepartmentOf("corps3:3"), chain + ": it stays the East's");
+            var next = Replan(s, state);
+            AssertTrue(next.DepartmentShort.Any(d => d.Theater == Theater.West && d.Status != "locked"), chain + ": the West is not locked on the next review: " + DepartmentReinforcement.ShortText(next));
+        }
+    }
+
+    // The have counts only what counts toward coverage: the player's own command holds nothing for a department (a CIC side's neither), while
+    // the map-group player's group does (D3).
+    private static void ThePlayersCommandAddsNothingToADepartmentsHave()
+    {
+        foreach (var (chain, counts) in new[] { (WlChainClass.PlayerCommand, false), (WlChainClass.CicSide, false), (WlChainClass.PlayerMapGroup, true) })
+        {
+            var s = Standard();
+            var f = s.Own[s.IndexOfOwn(2)];
+            f.Chain = chain;
+            s.Own[s.IndexOfOwn(2)] = f;
+            var c = InputsOf(s);
+            AssertNear(counts ? 8000f + ReserveRules.HoldStrength(f) : 8000f, DepartmentReinforcement.Have(s, c.Sectors, c.Claims, Theater.East), 0.01f, chain + ": corps 2 " + (counts ? "counts, at the strength the hold gives it (strength x morale)" : "does not count") + " in the East's have");
+        }
     }
 
     // The table the plan made is the table the allocator reads: the claim is a Redeploy of reason department-reinforcement in the receiver's

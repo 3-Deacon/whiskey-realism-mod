@@ -32,7 +32,7 @@ namespace WhiskeyRealism.Strategic.Planner
     internal static class DepartmentReinforcement
     {
         internal const string StatusDonor = "donor", StatusNoDonor = "nodonor", StatusLocked = "locked", StatusUntried = "untried", StatusPush = "push";
-        internal const string StatePicked = "Picked", StateArrived = "Arrived", StateGaveUp = "GaveUp";
+        internal const string StatePicked = "Picked", StateArrived = "Arrived", StateGaveUp = "GaveUp", StateDropped = "Dropped";
 
         // The producer of row 5.
         internal static readonly IClaimSource Source = new DepartmentMoveSource();
@@ -52,6 +52,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     var f = s.Own[i];
                     Theater receiver = state.DepartmentMoveOf(f.UnitKey);
                     if (receiver == Theater.Unknown || !ClaimTable.Takes(ClaimTable.RowDepartmentMove, claims[i].Claimant)) continue;
+                    if (!WlChainRules.MayMove(f.Chain)) continue;   // the planner never moves the player's command or map group (as row 4)
                     if (!NeediestFacingSector(s, ctx.Sectors, ctx.Facts, claims, receiver, out int sector)) continue;   // the receiver faces nothing now
                     if (StandsInFacingSector(s, ctx.Sectors, ctx.Facts, i, receiver) || GaveUpIn(ctx.GaveUp, f.InstanceId, ctx.Sectors, receiver)) continue;
                     claims[i].Claimant = Claimant.DepartmentMove;
@@ -260,6 +261,13 @@ namespace WhiskeyRealism.Strategic.Planner
                 var f = s.Own[i];
                 Theater receiver = i == picked ? to : state.DepartmentMoveOf(f.UnitKey);
                 if (receiver == Theater.Unknown) continue;
+                if (!WlChainRules.MayMove(f.Chain))
+                {
+                    // A picked corps the player took over (his own command, or his map group) is no longer ours to send: out of the record, or the
+                    // department would stay locked for ever.
+                    plan.DepartmentTransitions.Add(Transition(c, i, receiver, StateDropped));
+                    continue;
+                }
                 if (c.Claims[i].Claimant == Claimant.DepartmentMove || !TheaterPlanner.Movable(f))
                 {
                     next.Add(new KeyValuePair<string, Theater>(f.UnitKey, receiver));
