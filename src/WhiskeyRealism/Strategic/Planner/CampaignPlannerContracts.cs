@@ -450,6 +450,12 @@ namespace WhiskeyRealism.Strategic.Planner
         // again; [Reserves] endedListed= and endedMarching= read the previous review's.
         public List<int> CommitmentEnded = new List<int>();
 
+        // Foresight F8 (D11 requirement-department-reinforcement): the departments whose hold is short (HoldStrength standing in them under their
+        // need), the shortest first, each with the outcome of this review's pick (Status); and the moves of this review (picked, arrived, gave
+        // up), which the runtime writes as [DepartmentReinforcement] rows. Both empty with Enable Department Reinforcement off.
+        public List<DepartmentShortfall> DepartmentShort = new List<DepartmentShortfall>();
+        public List<DepartmentTransition> DepartmentTransitions = new List<DepartmentTransition>();
+
         // The plan's sector with this id, null for none (-1 included).
         public SectorPlan SectorById(int sectorId)
         {
@@ -458,6 +464,28 @@ namespace WhiskeyRealism.Strategic.Planner
                 if (Sectors[i] != null && Sectors[i].SectorId == sectorId) return Sectors[i];
             return null;
         }
+    }
+
+    // A department whose hold is short (D11 requirement-department-reinforcement): the hold strength standing in it against what it needs,
+    // and what this review did about it: donor (it was given a formation), nodonor (the first ranked unlocked department, and no formation
+    // passed the pool), locked (a move is under way toward it), untried (ranked after the one tried) or push (the review has a main effort).
+    public struct DepartmentShortfall
+    {
+        public Theater Theater;
+        public float Need, Have;
+        public string Status;
+    }
+
+    // One step of a department move in a review: a formation picked for a short department (the target and the march days estimated at the
+    // pick), arrived in it (its home department changed) or gave up on it (the tracker gave up on the march).
+    public struct DepartmentTransition
+    {
+        public int InstanceId;
+        public string Name;
+        public Theater From, To;
+        public float TargetX, TargetZ;
+        public float Days;          // MarchTime.EstimateDays at the pick, -1 on the other steps
+        public string State;        // DepartmentReinforcement.StatePicked, StateArrived or StateGaveUp
     }
 
     // Where the covering force stands (D11 requirement-covering-post-choice): the forward post, at the relocation range from the enemy

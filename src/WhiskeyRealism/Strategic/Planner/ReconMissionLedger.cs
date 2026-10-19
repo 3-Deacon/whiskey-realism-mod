@@ -244,6 +244,15 @@ namespace WhiskeyRealism.Strategic.Planner
             return state == ReconState.Assigned || state == ReconState.Moving || state == ReconState.Holding;
         }
 
+        // The instance ids of the formations on an active mission (foresight F8, D11 requirement-claims): a scout is never another department's
+        // donor. Read by the Plan job before the plan, from the missions as the last review left them.
+        public void CollectActiveInstances(List<int> into)
+        {
+            if (into == null) return;
+            for (int i = 0; i < _missions.Count; i++)
+                if (IsActive(_missions[i].State)) into.Add(_missions[i].InstanceId);
+        }
+
         private ReconMission Review(CampaignSnapshot s, Allocation a, ReconMission m, in FormationRecord f)
         {
             if (m.State == ReconState.Recalled)

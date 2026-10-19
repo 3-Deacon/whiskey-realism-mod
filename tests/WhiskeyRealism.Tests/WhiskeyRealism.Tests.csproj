@@ -93,6 +93,7 @@
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ClaimTable.cs" Link="Planner\ClaimTable.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\CoveringForce.cs" Link="Planner\CoveringForce.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\Commitment.cs" Link="Planner\Commitment.cs" />
+    <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\DepartmentReinforcement.cs" Link="Planner\DepartmentReinforcement.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\TheaterPlanner.cs" Link="Planner\TheaterPlanner.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\ForceAllocator.cs" Link="Planner\ForceAllocator.cs" />
     <Compile Include="..\..\src\WhiskeyRealism\Strategic\Planner\GarrisonPlanner.cs" Link="Planner\GarrisonPlanner.cs" />

@@ -33,6 +33,7 @@ internal static partial class CoveringForceTests
             ("CicSideHasNoCoveringForce", CicSideHasNoCoveringForce),
             ("MembersAreTheAxisHoldReservesNearestThePost", MembersAreTheAxisHoldReservesNearestThePost),
             ("CoveringPoolTestsWithCommittedClaims", CoveringPoolTestsWithCommittedClaims),
+            ("CoveringPoolTestsWithDepartmentClaims", CoveringPoolTestsWithDepartmentClaims),
             ("NoSectorGivesMoreThanItsAxisShare", NoSectorGivesMoreThanItsAxisShare),
             ("TheBodyCrossingTheCapIsTaken", TheBodyCrossingTheCapIsTaken),
             ("MembersOrderedByTheStoredVerdictsPost", MembersOrderedByTheStoredVerdictsPost),
@@ -273,6 +274,24 @@ internal static partial class CoveringForceTests
         var claim = plan.Claims.First(c => c.InstanceId == committed);
         AssertTrue(claim.Claimant == Claimant.Committed || claim.Claimant == Claimant.Mass, "the committed corps keeps the claim row 4 gave it (or the new mass takes it, row 8): " + claim.Claimant);
         AssertFalse(MemberIds(plan).Contains(committed), "and is no member of the force");
+        AssertEqual(-1, claim.SectorId, "nor counted in any sector's hold");
+    }
+
+    // Foresight F8: the same for row 5. A formation on its way to a short department is another owner's: the hold pass takes only unowned
+    // formations, so it is no member of the force, is counted in no sector's hold and keeps the claim.
+    private static void CoveringPoolTestsWithDepartmentClaims()
+    {
+        var plain = CoverWorld();
+        var members = MemberIds(plain.Plan);
+        AssertTrue(members.Count >= 1, "the world has a covering force: " + string.Join(",", members));
+        int moving = members[0];
+        var s = CoverWorld(plan: false).S;
+        var sectors = SectorModel.Build(s);
+        var plan = TheaterPlanner.Plan(s, sectors, null, new PlannerState(), null, null, ExecutorFixtures.Speed(), out _, out EnemyPicture _, null, null,
+            new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, moving) });
+        var claim = plan.Claims.First(c => c.InstanceId == moving);
+        AssertEqual(Claimant.DepartmentMove, claim.Claimant, "the department move keeps the claim row 5 gave it");
+        AssertFalse(MemberIds(plan).Contains(moving), "and is no member of the force");
         AssertEqual(-1, claim.SectorId, "nor counted in any sector's hold");
     }
 

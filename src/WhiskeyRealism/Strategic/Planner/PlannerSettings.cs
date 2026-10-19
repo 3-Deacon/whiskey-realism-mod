@@ -19,5 +19,8 @@ namespace WhiskeyRealism.Strategic.Planner
         // refuse, and an ended push's corps are stopped and taken off vanilla's offensive list. Off: D5's readiness rule for every mass member
         // and no stop, de-list or readiness skip (the last mass is still recorded).
         internal static bool MainEffortCommitment = true;
+        // Enable Department Reinforcement (foresight F8): with no push, the shortest department is given one formation from a department whose
+        // hold has surplus. Off: no pick and no move; the department-move record is cleared and its formations fall to the holds where they stand.
+        internal static bool DepartmentReinforcement = true;
     }
 }

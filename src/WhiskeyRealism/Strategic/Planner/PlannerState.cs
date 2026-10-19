@@ -138,6 +138,45 @@ namespace WhiskeyRealism.Strategic.Planner
             SetLastMass(objectiveId, keys);
         }
 
+        // Foresight F8 (D11 requirement-department-reinforcement): the formations a department move is sending, by unit key (the identity that
+        // survives a load, as the covering force's and the last mass's keys are; integrator decision 2026-10-18 on gap 36), each with the
+        // department it is bound for. A department is locked while this record holds a formation toward it, so neither a battle on the march nor
+        // a load frees it. Written once per review by the plan, after Decide (DepartmentReinforcement.WriteState); read by the claim table's
+        // row 5. Persisted (PlannerStateDto.departmentMoves).
+        private readonly Dictionary<string, Theater> _departmentMoves = new Dictionary<string, Theater>(StringComparer.Ordinal);
+
+        public IReadOnlyDictionary<string, Theater> DepartmentMoves => _departmentMoves;
+
+        // The department a formation's move is bound for, Unknown for none.
+        public Theater DepartmentMoveOf(string unitKey)
+        {
+            return unitKey != null && _departmentMoves.TryGetValue(unitKey, out var receiver) ? receiver : Theater.Unknown;
+        }
+
+        // Whether a move under way is bound for the department.
+        public bool IsLockedToward(Theater department)
+        {
+            if (department == Theater.Unknown) return false;
+            foreach (var receiver in _departmentMoves.Values)
+                if (receiver == department) return true;
+            return false;
+        }
+
+        // The moves of this review: exactly these formations toward these departments. A record with no key or no department is skipped.
+        public void SetDepartmentMoves(IEnumerable<KeyValuePair<string, Theater>> moves)
+        {
+            _departmentMoves.Clear();
+            if (moves == null) return;
+            foreach (var pair in moves)
+                if (!string.IsNullOrEmpty(pair.Key) && pair.Value != Theater.Unknown) _departmentMoves[pair.Key] = pair.Value;
+        }
+
+        // Dedicated restore (never the positional Restore).
+        public void RestoreDepartmentMoves(IEnumerable<KeyValuePair<string, Theater>> moves)
+        {
+            SetDepartmentMoves(moves);
+        }
+
         // A review's observation pass: BeginObservation, one Observe per own formation, then PruneUnobserved.
         public void BeginObservation()
         {
@@ -196,7 +235,8 @@ namespace WhiskeyRealism.Strategic.Planner
             foreach (var pair in live) RekeyInstance(pair.Key, pair.Value);
         }
 
-        // A commander change re-keys a formation (name:commander): its place in the covering force and in the last mass moves with it.
+        // A commander change re-keys a formation (name:commander): its place in the covering force, in the last mass and in a department move
+        // moves with it.
         private void CarryKeys(string oldKey, string newKey)
         {
             if (_coveringKeys.TryGetValue(oldKey, out int area))
@@ -205,6 +245,11 @@ namespace WhiskeyRealism.Strategic.Planner
                 _coveringKeys[newKey] = area;
             }
             if (_lastMassKeys.Remove(oldKey)) _lastMassKeys.Add(newKey);
+            if (_departmentMoves.TryGetValue(oldKey, out var receiver))
+            {
+                _departmentMoves.Remove(oldKey);
+                _departmentMoves[newKey] = receiver;
+            }
         }
 
         // The formation's department; `standing` (the theater of the sector it stands in) is its first one. Unknown `standing` records nothing.

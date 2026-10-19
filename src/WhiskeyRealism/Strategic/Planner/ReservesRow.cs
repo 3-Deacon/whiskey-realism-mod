@@ -24,6 +24,10 @@ namespace WhiskeyRealism.Strategic.Planner
     //   endedMarching=<n>        yesterday's CommitmentEnded formations that yesterday's allocation held as committed-wait (the ones the stop was
     //                            for), that are a Hold today and that still show a path or a waiting order: 0 when the stop works
     //   dept=<theater:have,...>  each department's HoldStrength over its formations that count toward coverage; "none" when none do
+    //   deptShort=<theater:need/have:status,...>  the departments whose hold standing in them is under their need, shortest first, each with
+    //                            what this review's department pick made of it: donor (given a formation), nodonor (tried, none passed the pool),
+    //                            locked (a move is under way toward it), untried (ranked after the one tried), push (the review has a main
+    //                            effort); "none" with none short (foresight F8)
     //   enemyOnOwnSoil           live land beliefs (EnemyTraits.OnOwnSoil, not afloat) the side holds today
     //   vanillaDefActive         own formations in a vanilla defensive operation today
     //   vanillaDefWithheld       formations now in a vanilla defensive operation that yesterday's allocation withheld as Reserve, CapitalGuard,
@@ -53,6 +57,7 @@ namespace WhiskeyRealism.Strategic.Planner
               .Append(" endedListed=").Append(endedListed)
               .Append(" endedMarching=").Append(endedMarching)
               .Append(" dept=").Append(DepartmentStrengths(s, sectors, state, inv))
+              .Append(" deptShort=").Append(DepartmentReinforcement.ShortText(plan))
               .Append(" enemyOnOwnSoil=").Append(EnemiesOnOwnSoil(s))
               .Append(" vanillaDefActive=").Append(InVanillaDefence(s));
             CountVanillaDefence(s, previous, previousPlan, out int withheld, out int holdOrCovering, out int mass);
@@ -136,8 +141,8 @@ namespace WhiskeyRealism.Strategic.Planner
         }
 
         // Each department's HoldStrength over its formations that count toward coverage (the player's own command and a CIC side count
-        // nothing): the shipped D6 "have" (TheaterPlanner.DepartmentHoldMet), by home department, read for question-capital-share's
-        // comparison against the covering need. A formation of no known department is where it stands.
+        // nothing), by HOME department, read for question-capital-share's comparison against the covering need. A formation of no known
+        // department is where it stands. This is not the donor test's have (DepartmentReinforcement.Have, by where a formation stands).
         private static string DepartmentStrengths(CampaignSnapshot s, SectorModel sectors, PlannerState state, CultureInfo inv)
         {
             var have = new float[6];

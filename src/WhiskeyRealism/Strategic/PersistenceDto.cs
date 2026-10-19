@@ -123,6 +123,9 @@ namespace WhiskeyRealism.Strategic
         // Foresight F7: the last mass (the objective of the main effort and the unit keys of its members), which the commitment reads. Additive: an
         // older file has none and the first push after the load starts its own.
         [JsonProperty("lastMass")] public LastMassDto LastMass;
+        // Foresight F8: the formations a department move is sending (unit key and the Theater name of the receiving department), which keep the
+        // receiving department locked across a load. Additive: an older file has none.
+        [JsonProperty("departmentMoves")] public List<DepartmentMoveDto> DepartmentMoves = new List<DepartmentMoveDto>();
         [JsonProperty("unreliableDays")] public int UnreliableDays;
         [JsonProperty("unreliableLastDay")] public int UnreliableLastDay = int.MinValue;
         [JsonProperty("beliefs")] public List<EnemyBeliefDto> Beliefs = new List<EnemyBeliefDto>();
@@ -150,6 +153,12 @@ namespace WhiskeyRealism.Strategic
     {
         [JsonProperty("objectiveId")] public int ObjectiveId = -1;
         [JsonProperty("unitKeys")] public List<string> UnitKeys = new List<string>();
+    }
+
+    internal class DepartmentMoveDto
+    {
+        [JsonProperty("unitKey")] public string UnitKey;
+        [JsonProperty("theater")] public string Theater;
     }
 
     internal class CoveringKeyDto

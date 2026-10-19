@@ -94,6 +94,8 @@ internal static partial class EnemyPictureTests
     }
 
     // 002/A: the East keeps its own presumed Washington army once, and a formation its holds do not need is a donor for a short West.
+    // Foresight F8 re-pins the donor test's have (DepartmentReinforcement.Have: what stands in the department, less the formations leaving it) by
+    // name; the outcomes are unchanged here, where every formation stands in and belongs to the East.
     private static void TheEastKeepsItsHoldWithoutADonorIn002A()
     {
         var s = Csa(60000f);

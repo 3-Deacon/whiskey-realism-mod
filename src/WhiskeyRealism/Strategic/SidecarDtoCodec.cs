@@ -465,6 +465,9 @@ namespace WhiskeyRealism.Strategic
                 dto.LastMass.UnitKeys.AddRange(s.LastMassKeys);
                 dto.LastMass.UnitKeys.Sort(string.CompareOrdinal);   // a stable file for the same state
             }
+            foreach (var pair in s.DepartmentMoves)
+                dto.DepartmentMoves.Add(new DepartmentMoveDto { UnitKey = pair.Key, Theater = pair.Value.ToString() });
+            dto.DepartmentMoves.Sort((a, b) => string.CompareOrdinal(a.UnitKey, b.UnitKey));   // a stable file for the same state
             foreach (var pair in s.CoveringKeys)
                 dto.CoveringKeys.Add(new CoveringKeyDto { UnitKey = pair.Key, AreaIndex = pair.Value });
             dto.CoveringKeys.Sort((a, b) => string.CompareOrdinal(a.UnitKey, b.UnitKey));   // a stable file for the same state
@@ -538,6 +541,11 @@ namespace WhiskeyRealism.Strategic
                     if (k != null && !string.IsNullOrEmpty(k.UnitKey) && k.AreaIndex >= 0) covering.Add(new KeyValuePair<string, int>(k.UnitKey, k.AreaIndex));
             p.State.RestoreCovering(covering, dto.CoveringForward, dto.CoveringVerdictDays, dto.CoveringVerdictKnown, dto.CoveringPostKey);
             if (dto.LastMass != null) p.State.RestoreLastMass(dto.LastMass.ObjectiveId, dto.LastMass.UnitKeys);
+            var moves = new List<KeyValuePair<string, Theater>>();
+            if (dto.DepartmentMoves != null)
+                foreach (var m in dto.DepartmentMoves)
+                    if (m != null && !string.IsNullOrEmpty(m.UnitKey) && Enum.TryParse<Theater>(m.Theater, out var receiver)) moves.Add(new KeyValuePair<string, Theater>(m.UnitKey, receiver));
+            p.State.RestoreDepartmentMoves(moves);   // a record with an unknown theater name is skipped (SetDepartmentMoves refuses Unknown too)
             if (dto.Beliefs != null)
                 foreach (var b in dto.Beliefs)
                 {

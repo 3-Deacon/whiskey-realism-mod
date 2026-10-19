@@ -389,27 +389,31 @@ internal static class ScoutFirstTests
         AssertEqual(-1, plan.ReinforcementInstanceId, "not even as the one reinforcement (ReinforcementMaxDays " + TheaterPlanner.ReinforcementMaxDays + ")");
     }
 
-    // The West department holds objective 30's front (a 5000 floor). Corps 5 is West but stands in the East sector: it could be pulled in,
-    // unless the West then falls below its hold.
+    // Foresight F8 re-pins this test (the donor department is the one a reinforcement STANDS in, D11 requirement-department-reinforcement, not its
+    // home). Corps 5 is a West formation by home but stands in the East sector, whose hold is a 5000 floor. A West guard (6000) meets the capital's
+    // floor, so the capital reserve does not take the stray. The East's other men: the push's own corps 1 (3000) and a busy holder (not massable,
+    // but it holds): the stray may be drawn only if the East keeps its floor without it.
     private static void TheLosingDepartmentsHoldBlocksAMove()
     {
-        foreach (float westHold in new[] { 4000f, 6000f })
+        foreach (float eastHolder in new[] { 1000f, 3000f })
         {
-            var guard = Corps(2, 300f, westHold);
+            var guard = Corps(2, 300f, 6000f);
+            var holder = Corps(3, 860f, eastHolder);
+            holder.Flags |= FormationFlags.InBattle;
             var strayer = Corps(5, 800f, 20000f);
-            var s = Fronts(Corps(1, 850f, 8000f), guard, strayer);
+            var s = Fronts(Corps(1, 850f, 3000f), guard, holder, strayer);
             var state = new PlannerState();
             state.RestoreDepartments(new[] { new KeyValuePair<string, Theater>(strayer.UnitKey, Theater.West), new KeyValuePair<string, Theater>(guard.UnitKey, Theater.West) });
             var plan = Plan(s, state);
-            // Drawing the stray 20000 would leave the West its guard alone: allowed only when that still meets the 5000 floor.
-            if (westHold < 5000f)
+            // Drawing the stray 20000 would leave the East its own 3000 and the holder: allowed only when that still meets the 5000 floor.
+            if (eastHolder < 2000f)
             {
-                AssertFalse(plan.MassInstanceIds.Contains(5), "the West is left 4000 against a 5000 hold: corps 5 stays");
+                AssertFalse(plan.MassInstanceIds.Contains(5), "the East is left 4000 against a 5000 hold: corps 5 stays (" + string.Join(",", plan.MassInstanceIds) + ")");
                 AssertTrue(plan.ReinforcementInstanceId != 5, "and is not the reinforcement");
             }
             else
             {
-                AssertTrue(plan.MassInstanceIds.Contains(5), "the West keeps 6000 against 5000: corps 5 may be drawn");
+                AssertTrue(plan.MassInstanceIds.Contains(5), "the East keeps 6000 against 5000: corps 5 may be drawn (" + string.Join(",", plan.MassInstanceIds) + ")");
                 AssertEqual(5, plan.ReinforcementInstanceId, "as the reinforcement");
             }
         }

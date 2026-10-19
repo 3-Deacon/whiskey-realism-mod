@@ -288,6 +288,7 @@ namespace WhiskeyRealism
         internal static ConfigEntry<bool> FixSpottingMarkTiming;
         internal static ConfigEntry<bool> EnableCoveringForce;
         internal static ConfigEntry<bool> EnableMainEffortCommitment;
+        internal static ConfigEntry<bool> EnableDepartmentReinforcement;
         internal static ConfigEntry<bool> EnableCampaignReconnaissance;
         internal static ConfigEntry<bool> EnableCampaignFogHonestBeliefs;
         internal static ConfigEntry<bool> EnableCommanderAppointmentPlanner;
@@ -1456,6 +1457,14 @@ namespace WhiskeyRealism
                 "the capital reserve and department reinforcement. Capital guards are taken off the offensive list too. OFF = the readiness rule for " +
                 "every mass member, no exemption for the last mass, no stop, no de-list and no readiness skip (the last mass is still recorded). " +
                 "Needs Enable Campaign Planner.");
+            EnableDepartmentReinforcement = Config.Bind(
+                "Campaign Planner", "Enable Department Reinforcement", true,
+                "Default ON. When the planner has no main effort, the department whose hold is shortest (the strength standing in its sectors " +
+                "against what they need to hold) is given one formation from a department whose hold has surplus: the soonest one within ten " +
+                "march-days of the short department's neediest sector, taken only if the department it leaves still meets its own hold without " +
+                "it. One formation at a time per department; its home department changes only when it arrives. A formation whose push has ended " +
+                "is placed the same way. OFF = no department pick or move: the moves under way are dropped and their formations hold where they " +
+                "stand. Needs Enable Campaign Planner.");
             EnableCampaignReconnaissance = Config.Bind(
                 "Campaign Planner", "Enable Campaign Reconnaissance", true,
                 "Default ON. Vanilla's campaign AI never scouts, so the planner plans reconnaissance itself in the daily review: cavalry-majority " +

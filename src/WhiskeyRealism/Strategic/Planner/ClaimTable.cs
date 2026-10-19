@@ -99,7 +99,7 @@ namespace WhiskeyRealism.Strategic.Planner
     //   2 Immobile       the busy, the non-combat, the player's own command           from None, PinnedBuilder
     //   3 Recover        the formations leaving for supply                             from None
     //   4 Committed      F7's source                                                   from None
-    //   5 DepartmentMove F8's source                                                   from None
+    //   5 DepartmentMove F8's source (DepartmentReinforcement.Source)                 from None
     //   6 Capital        ReserveRules.Capital                                          from None, Committed, DepartmentMove
     //   7 Hold           ReserveRules.Hold                                             from None
     //   8 Mass           TakeMass, after the plan has chosen its mass                  from None, Hold, Committed
@@ -108,8 +108,8 @@ namespace WhiskeyRealism.Strategic.Planner
     {
         internal const int RowPinnedBuilder = 1, RowImmobile = 2, RowRecover = 3, RowCommitted = 4, RowDepartmentMove = 5, RowCapital = 6, RowHold = 7, RowMass = 8, RowDepartmentReinforcement = 10;
 
-        // The producers of rows 4 and 5: F7's commitment (row 4); F8 adds the department move's (row 5).
-        internal static readonly IReadOnlyList<IClaimSource> RowSources = new IClaimSource[] { Commitment.Source };
+        // The producers of rows 4 and 5: F7's commitment (row 4) and F8's department move (row 5).
+        internal static readonly IReadOnlyList<IClaimSource> RowSources = new IClaimSource[] { Commitment.Source, DepartmentReinforcement.Source };
 
         // The reason a Mass claim carries when it was taken from a formation committed to the objective the push is still on: the reserve split
         // never splits one of those off (the excess comes from the others).

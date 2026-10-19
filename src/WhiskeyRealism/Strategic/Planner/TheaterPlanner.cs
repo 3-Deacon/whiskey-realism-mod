@@ -171,6 +171,9 @@ namespace WhiskeyRealism.Strategic.Planner
             // Foresight F7: the formations the mover has sent toward an objective (MoveTracker.CollectDispatched), which row 4 commits when they are
             // members of the last mass. Null: none (a bare Evaluate, a harness that dispatches nothing).
             internal IReadOnlyList<DispatchedMove> Dispatched;
+            // Foresight F8: the formations other owners hold that a department move must leave alone (D11 requirement-claims): the retained G8
+            // post incumbents (GarrisonPlanner.RetainedIncumbents) and the formations on an active recon mission, by instance id. Null: none.
+            internal IReadOnlyCollection<int> GarrisonIncumbents, ReconIncumbents;
             // Foresight F6b-2: the covering force's input to the hold pass of this pass (null when there is none, with CoveringReason why).
             internal CoveringInput Covering;
             internal string CoveringReason;
@@ -222,16 +225,19 @@ namespace WhiskeyRealism.Strategic.Planner
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
                                          IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,
-                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null)
+                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null,
+                                         IReadOnlyCollection<int> garrisonIncumbents = null, IReadOnlyCollection<int> reconIncumbents = null)
         {
-            return Plan(s, sectors, sectorProfile, state, battles, terrain, in speed, out trace, out _, gaveUp, heldBuilders, rowSources, dispatched);
+            return Plan(s, sectors, sectorProfile, state, battles, terrain, in speed, out trace, out _, gaveUp, heldBuilders, rowSources, dispatched,
+                garrisonIncumbents, reconIncumbents);
         }
 
         // The same, and the enemy picture the review was planned on (null when the plan was not built), for the [EnemyPicture] row.
         internal static TheaterPlan Plan(CampaignSnapshot s, SectorModel sectors, Func<int, CommanderProfile> sectorProfile, PlannerState state,
                                          IReadOnlyList<BattleHistoryRecord> battles, ITerrainLineSource terrain, in MarchSpeedInputs speed, out string trace,
                                          out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,
-                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null)
+                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null,
+                                         IReadOnlyCollection<int> garrisonIncumbents = null, IReadOnlyCollection<int> reconIncumbents = null)
         {
             var plan = new TheaterPlan { Alliance = s != null ? s.Alliance : -1, DaySerial = s != null ? s.DaySerial : 0 };
             trace = "";
@@ -241,7 +247,8 @@ namespace WhiskeyRealism.Strategic.Planner
 
             var review = new ReviewTerrain(terrain, s.Areas);
             var inputs = new Inputs { S = s, Sectors = sectors, Profile = sectorProfile, Probe = review, Terrain = review, Speed = speed, GaveUp = gaveUp, Held = heldBuilders, State = state,
-                                      RowSources = rowSources ?? ClaimTable.RowSources, Dispatched = dispatched };
+                                      RowSources = rowSources ?? ClaimTable.RowSources, Dispatched = dispatched,
+                                      GarrisonIncumbents = garrisonIncumbents, ReconIncumbents = reconIncumbents };
             // The objective the last mass was on as the review began: the trace carries its candidate, and the end of the commitment is judged on
             // it (Decide leaves PlannerState.LastMassObjective alone; only the update below writes it).
             int lastMassBefore = state.LastMassObjective;
@@ -329,11 +336,13 @@ namespace WhiskeyRealism.Strategic.Planner
             bool enemyCapitalPush = main >= 0 && s.HasEnemyCapital && SamePoint(candidates[main].X, candidates[main].Z, s.EnemyCapitalX, s.EnemyCapitalZ);
             CoveringForce.LeaveBehind(inputs, enemyCapitalPush);
             PostFromOutside(inputs, plan);   // after the mass: the garrison takes only what the mass does not
+            DepartmentReinforcement.Reinforce(inputs, plan, out int departmentPick, out Theater departmentTo);   // row 10: before the table is copied
             plan.Claims.AddRange(inputs.Claims);
             plan.SectorHeld = inputs.SectorHeld;
             for (int k = 0; k < inputs.Posts.Count; k++) plan.Garrisons.Add(inputs.Posts[k]);
             plan.Covering = CoveringForce.Publish(inputs, enemyCapitalPush);
             CoveringForce.WriteState(inputs, enemyCapitalPush, state);   // the covering state is written once, after Decide
+            DepartmentReinforcement.WriteState(inputs, plan, departmentPick, departmentTo);   // so are the department moves
             AssignPostures(inputs, plan, axisFromX, axisFromZ, mainX, mainZ);
             trace = Trace(inputs, candidates, plan, lastMassBefore) + (unknown > 0 ? " terrain=filling unknown=" + unknown + " probed=" + probed : " terrain=complete");
             return plan;
@@ -1112,19 +1121,11 @@ namespace WhiskeyRealism.Strategic.Planner
             return c.State != null && c.State.ReinforcementDecision == c.State.DecisionSerial ? c.State.ReinforcementKey : null;
         }
 
-        // D6 detail (d): the losing department's D2 hold is still met without the formation: the hold needs of the sectors of that
-        // theater (SectorFacts.Need, the one hold function) against what the department's other formations hold there.
+        // D6 detail (d): the losing department's D2 hold is still met without the formation: what stands in it less the formation
+        // (DepartmentReinforcement.Have, the one have) against what it needs (DepartmentNeed).
         internal static bool DepartmentHoldMet(Inputs c, Theater department, int excluded)
         {
-            float need = DepartmentNeed(c, department);
-            float have = 0f;
-            for (int j = 0; j < c.S.Own.Count; j++)
-            {
-                if (j == excluded || DepartmentOf(c, j) != department) continue;
-                var f = c.S.Own[j];
-                if (WlChainRules.CountsTowardCoverage(f.Chain)) have += ReserveRules.HoldStrength(f);
-            }
-            return have >= need;
+            return DepartmentReinforcement.Have(c.S, c.Sectors, c.Claims, department, excluded) >= DepartmentNeed(c, department);
         }
 
         // The hold a department needs. Foresight (D11 requirement-hold-need, amending D6 (d)): max(the sum of Floor over the department's facing
@@ -1196,7 +1197,7 @@ namespace WhiskeyRealism.Strategic.Planner
                 into.Add(i);
                 total += Math.Max(0f, f.Strength);
             }
-            int foreign = ReinforcementPick(c, tx, tz);
+            int foreign = ReinforcementPick(c, tx, tz, c.ForeignScratch, LockedReinforcement(c), out _);
             if (foreign >= 0)
             {
                 c.Foreign = foreign;
@@ -1215,31 +1216,33 @@ namespace WhiskeyRealism.Strategic.Planner
             return c.Claims[i].Claimant == Claimant.Committed && c.State != null && objectiveId == c.State.LastMassObjective;
         }
 
-        // D6: the one reinforcement. A decision that already has one keeps only that formation (by unit key, so it survives a load); a
-        // new decision picks the formation that can be at the target soonest (MarchTime.EstimateDays, rail leg included), within
-        // ReinforcementMaxDays, the lower instance id on a tie. Its own front's D2 hold is met without it by construction: a formation the
-        // hold reserve keeps is not in the foreign list.
-        private static int ReinforcementPick(Inputs c, float tx, float tz)
+        // D6: the one reinforcement, and the department pick's selection (foresight F8: one function for both). `candidates` are indexes into
+        // s.Own; `locked` is the decision's reinforcement by unit key (D6) or null (a new pick, as the department pick always is: its lock is
+        // the department's, checked before the pick). A locked decision keeps only that formation (by unit key, so it survives a load); a new
+        // pick takes the formation that can be at (tx, tz) soonest (MarchTime.EstimateDays, rail leg included), within ReinforcementMaxDays, the
+        // lower instance id on a tie, and only one whose donor department keeps its hold without it. The donor department is the one the
+        // formation STANDS in (DepartmentReinforcement.StandingDepartment), not its home. `days` is the estimate of the formation picked.
+        internal static int ReinforcementPick(Inputs c, float tx, float tz, IReadOnlyList<int> candidates, string locked, out float days)
         {
             var s = c.S;
-            string locked = LockedReinforcement(c);
             int best = -1;
             float bestDays = float.MaxValue;
-            for (int k = 0; k < c.ForeignScratch.Count; k++)
+            for (int k = 0; k < candidates.Count; k++)
             {
-                int i = c.ForeignScratch[k];
+                int i = candidates[k];
                 var f = s.Own[i];
                 if (locked != null && !string.Equals(f.UnitKey, locked, StringComparison.Ordinal)) continue;
-                // A new transfer leaves its department's hold met (a locked one already moved).
-                if (locked == null && !DepartmentHoldMet(c, DepartmentOf(c, i), i)) continue;
+                // A new transfer leaves the department it leaves with its hold met (a locked one already moved).
+                if (locked == null && !DepartmentHoldMet(c, DepartmentReinforcement.StandingDepartment(s, c.Sectors, i), i)) continue;
                 float distance = RiverLines.Distance(f.X, f.Z, tx, tz);
-                float days = MarchTime.EstimateDays(c.Speed, f, tx, tz, distance, s, null, c.OwnIips);
+                float estimate = MarchTime.EstimateDays(c.Speed, f, tx, tz, distance, s, null, c.OwnIips);
                 // The ten-day test is for a new pick: the locked reinforcement already marches, and a committed one stays whatever the days left.
-                if (days > ReinforcementMaxDays && !(locked != null && c.Claims[i].Claimant == Claimant.Committed)) continue;
-                if (days > bestDays || (days == bestDays && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
-                bestDays = days;
+                if (estimate > ReinforcementMaxDays && !(locked != null && c.Claims[i].Claimant == Claimant.Committed)) continue;
+                if (estimate > bestDays || (estimate == bestDays && best >= 0 && f.InstanceId > s.Own[best].InstanceId)) continue;
+                bestDays = estimate;
                 best = i;
             }
+            days = best >= 0 ? bestDays : -1f;
             return best;
         }
 

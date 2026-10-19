@@ -184,6 +184,7 @@ namespace WhiskeyRealism.Telemetry
             AddCampaign("CapitalThreat", TelemetryCategory.State);
             AddCampaign("CoveringCorridor", TelemetryCategory.State);
             AddCampaign("CoveringForce", TelemetryCategory.State);
+            AddCampaign("DepartmentReinforcement", TelemetryCategory.Write);
             AddCampaign("CampaignSteer", TelemetryCategory.Write);
             AddCampaign("CampaignTempo", TelemetryCategory.Decision);
             AddCampaign("DepotTask", TelemetryCategory.Write);

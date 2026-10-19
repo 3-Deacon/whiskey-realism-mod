@@ -420,7 +420,8 @@ internal static class CampaignExecutorTests
         AssertFalse(review.Contains("previousPlan") || review.Contains("Resolve("), "no objective is read back from an earlier plan");
         // Foresight F7 re-pins this call: the plan also takes the tracker's dispatched set (named argument, on the line after the held builders).
         AssertTrue(HasLine(review, "TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders,"), "G3 reads the moves with their objectives (and G5c's held builders)");
-        AssertTrue(HasLine(review, "dispatched: dispatched);"), "and the formations the mover has dispatched (F7's commitment)");
+        // Foresight F8 re-pins the same line: the named arguments go on, after the dispatched set, with the formations other owners hold.
+        AssertTrue(HasLine(review, "dispatched: dispatched, garrisonIncumbents: garrisonIncumbents, reconIncumbents: reconIncumbents);"), "and the formations the mover has dispatched (F7's commitment), the retained post incumbents and the scouts (F8's department pick)");
         AssertTrue(HasLine(review, "allocation = ForceAllocator.Allocate(plan, snapshot, sectors, DepartmentLookups[alliance], ReconTasks[alliance], Recon[alliance], gaveUp, heldBuilders);"), "G4 reads the same moves (and G5c's pinned builders)");
     }
 
@@ -1282,7 +1283,7 @@ internal static class CampaignExecutorTests
     private static void ThePlanBuildsThePictureBeforeItsFirstEvaluate()
     {
         string src = ReadRepoFile("src/WhiskeyRealism/Strategic/Planner/TheaterPlanner.cs");
-        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,\n                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null)\n        {");
+        string plan = BodyOf(src, "out EnemyPicture picture, IReadOnlyList<GaveUpMove> gaveUp = null, IReadOnlyList<HeldBuilder> heldBuilders = null,\n                                         IReadOnlyList<IClaimSource> rowSources = null, IReadOnlyList<DispatchedMove> dispatched = null,\n                                         IReadOnlyCollection<int> garrisonIncumbents = null, IReadOnlyCollection<int> reconIncumbents = null)\n        {");
         AssertInOrder(plan, "TheaterPlanner.Plan", "picture = inputs.Picture = EnemyPicture.Build(s, (x, z) => IsScouted(inputs, x, z));",
             "var candidates = new List<Candidate>();", "int unknown = review.Unknown, probed = 0;");
         // The two Evaluate passes of a terrain-filling review: both after the picture.
@@ -1401,7 +1402,7 @@ internal static class CampaignExecutorTests
         AssertTrue(files > 100, "the scan covered the Patches folder: " + files);
     }
 
-    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "Claim", "CoveringPlan", "SectorPlan", "SectorModel", "ExecutorContext" };
+    private static readonly string[] PublishedTypes = { "TheaterPlan", "Allocation", "Assignment", "Claim", "CoveringPlan", "DepartmentShortfall", "DepartmentTransition", "SectorPlan", "SectorModel", "ExecutorContext" };
 
     // Verify G7 probe P13: a patch that writes the published plan must fail the pin.
     private static void PlannerPatchWriteProbeIsCaught()

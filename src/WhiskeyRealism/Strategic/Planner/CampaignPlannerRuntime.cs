@@ -151,6 +151,14 @@ namespace WhiskeyRealism.Strategic.Planner
                     // a Wished one: one published set, read once.
                     var heldBuilders = new List<HeldBuilder>();
                     DepotTaskLedgers.For(alliance)?.CollectHeldBuilders(heldBuilders);
+                    // F8: the formations a department pick must leave alone because another owner holds them: the ordinary garrison posts' retained
+                    // incumbents (the posts are planned after the plan, from the ledger as the last review left it) and the scouts on an active
+                    // recon mission.
+                    var garrisonIncumbents = new List<int>();
+                    var posts = GarrisonLedgers.For(alliance);
+                    if (posts != null) GarrisonPlanner.RetainedIncumbents(snapshot, posts.Posts, FlagOn(Plugin.EnableGarrisonManning), garrisonIncumbents);
+                    var reconIncumbents = new List<int>();
+                    Recon[alliance].CollectActiveInstances(reconIncumbents);
                     // The planner's minimum strength is the scenario's aiminimumstrengthformovement; a read that is not positive or not finite
                     // falls back to 5000 (TheaterPlanner.PlanMinimum), and the pure planner has no logger, so the review says so, once, whatever the
                     // picture flag is.
@@ -163,7 +171,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     {
                         plan = TheaterPlanner.Plan(snapshot, sectors, id => CommanderProfiles.ForSector(snapshot.Commanders, id), state, PendingBattles,
                             TerrainLineRuntime.ForReview(), TerrainLineRuntime.ReadMarchSpeed(alliance), out trace, out picture, gaveUp, heldBuilders,
-                            dispatched: dispatched);
+                            dispatched: dispatched, garrisonIncumbents: garrisonIncumbents, reconIncumbents: reconIncumbents);
                     }
                     // G8: the ordinary garrison posts join D8's secession posts in the plan, where the allocation seats both.
                     GarrisonRuntime.PlanPosts(snapshot, plan);
@@ -192,6 +200,7 @@ namespace WhiskeyRealism.Strategic.Planner
                     EmitCorridor(snapshot, sectors, plan, picture);
                     EmitAllocation(allocation, plan, snapshot.Player, reliability, NonCompliance[alliance].Days);
                     EmitCovering(snapshot, plan, state);
+                    EmitDepartmentMoves(plan);
                     EmitReserves(snapshot, sectors, plan, allocation, state, yesterdaysAllocation, yesterdaysPlan);
                 }
                 catch (Exception ex)
@@ -469,6 +478,14 @@ namespace WhiskeyRealism.Strategic.Planner
             if (string.Equals(LastCoveringRow[a], row, StringComparison.Ordinal)) return;
             LastCoveringRow[a] = row;
             TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(row, plan.DaySerial), TelemetryLayer.Campaign);
+        }
+
+        // Foresight F8: one [DepartmentReinforcement] row per step of a department move this review (picked, arrived, gave up), dated after the
+        // alliance. The plan lists only the steps of the review, so there is no signature to compare.
+        private static void EmitDepartmentMoves(TheaterPlan plan)
+        {
+            for (int k = 0; k < plan.DepartmentTransitions.Count; k++)
+                TelemetryRouter.LegacyInfo(ReviewCadenceCatchUp.DatedAfterAlliance(DepartmentReinforcement.Row(plan.DepartmentTransitions[k], plan.Alliance), plan.DaySerial), TelemetryLayer.Campaign);
         }
 
         private static void EmitPicture(CampaignSnapshot snapshot, TheaterPlan plan, EnemyPicture picture)

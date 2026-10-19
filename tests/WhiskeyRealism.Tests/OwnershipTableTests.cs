@@ -20,7 +20,7 @@ internal static class OwnershipTableTests
             ("OwnershipRowsTakeOnlyFromTheirListedClaimants", OwnershipRowsTakeOnlyFromTheirListedClaimants),
             ("TheFixtureRegistryDrivesEveryRowCase", TheFixtureRegistryDrivesEveryRowCase),
             ("ASourceMayTakeOnlyItsListedClaimants", ASourceMayTakeOnlyItsListedClaimants),
-            ("RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove", RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove),
+            ("RowSourcesHoldTheCommitmentAndTheDepartmentMove", RowSourcesHoldTheCommitmentAndTheDepartmentMove),
             ("ClaimSourcesReadOneContext", ClaimSourcesReadOneContext),
             ("TheHoldNeverCountsOrReservesCommittedOrDepartmentMove", TheHoldNeverCountsOrReservesCommittedOrDepartmentMove),
             ("APinnedBuilderStaysAReserveBodyAsShipped", APinnedBuilderStaysAReserveBodyAsShipped),
@@ -95,10 +95,11 @@ internal static class OwnershipTableTests
 
     // The oracle's world for one scenario: 0 no depot ledger, 1 the Army of Virginia a Marching held builder, 2 the Reserve Corps a Wished one.
     private static TheaterPlan OracleWorld(int scenario, out CampaignSnapshot s, out SectorModel sectors, out HeldBuilder[] pins,
-                                           IReadOnlyList<IClaimSource> rowSources = null, PlannerState state = null)
+                                           IReadOnlyList<IClaimSource> rowSources = null, PlannerState state = null, Action<CampaignSnapshot> extra = null)
     {
         s = EnemyPictureTests.Csa(100000f);
         foreach (var f in Roster()) s.Own.Add(f);
+        extra?.Invoke(s);
         s.Beliefs.Add(EnemyPictureTests.Belief(EnemyPictureTests.WinchesterX, EnemyPictureTests.WinchesterZ, 6653f));
         s.Beliefs.Add(EnemyPictureTests.Belief(1380f, -1110f, 5214f));
         sectors = SectorModel.Build(s);
@@ -138,6 +139,10 @@ internal static class OwnershipTableTests
         var moving = new PlanInput { Name = "a row-5 source claims the Army of Northern Virginia (3)", Witnesses = Claimant.DepartmentMove };
         moving.Make = () => OracleWorld(0, out moving.S, out moving.Sectors, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, 3) });
         list.Add(moving);
+        // F8's world: a real quiet review that picked the East's corps 3 for the short West (row 10), whose table row 5 re-claims the next day.
+        var department = new PlanInput { Name = "F8: a short department is given one formation", Witnesses = Claimant.DepartmentMove };
+        department.Make = () => DepartmentReinforcementTests.PlanInputWorld(out department.S, out department.Sectors);
+        list.Add(department);
         var covering = new PlanInput { Name = "the covering force's world", Witnesses = Claimant.Hold, WitnessReason = ForceAllocator.ReasonCoveringForce };
         covering.Make = () => CoveringForceTests.PlanInputWorld(out covering.S, out covering.Sectors);
         list.Add(covering);
@@ -324,13 +329,16 @@ internal static class OwnershipTableTests
         AssertEqual(Claimant.Committed, claims[0].Claimant, "an unclaimed formation is");
     }
 
-    // Foresight F7 fills row 4 (re-pinned from RowSourcesAreEmptyInF6a, which pinned the empty list F6a shipped): the commitment's producer
-    // is the production list's one entry, and row 5 has none until F8 fills it.
-    private static void RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove()
+    // Foresight F7 fills row 4 (re-pinned from RowSourcesAreEmptyInF6a, which pinned the empty list F6a shipped) and F8 row 5 (re-pinned from
+    // RowSourcesHoldTheCommitmentAndNotYetTheDepartmentMove): the production list is the commitment's producer for row 4 and the department
+    // move's for row 5, each its own object.
+    private static void RowSourcesHoldTheCommitmentAndTheDepartmentMove()
     {
-        AssertEqual(1, ClaimTable.RowSources.Count, "one producer in the production list");
+        AssertEqual(2, ClaimTable.RowSources.Count, "two producers in the production list");
         AssertEqual(ClaimTable.RowCommitted, ClaimTable.RowSources[0].Row, "F7's, for row 4");
         AssertTrue(ReferenceEquals(Commitment.Source, ClaimTable.RowSources[0]), "the commitment's own source");
+        AssertEqual(ClaimTable.RowDepartmentMove, ClaimTable.RowSources[1].Row, "F8's, for row 5");
+        AssertTrue(ReferenceEquals(DepartmentReinforcement.Source, ClaimTable.RowSources[1]), "the department move's own source");
     }
 
     private sealed class RecordingSource : IClaimSource
@@ -629,20 +637,35 @@ internal static class OwnershipTableTests
         }
     }
 
+    // The oracle roster's formation 3 stood at Bowling Green, in the East whose hold it kept. F8's donor test asks the department a reinforcement
+    // stands in (D6 detail (d), amended), so the worlds of the two D6 reinforcement tests put it in an area of its own, 435 from Winchester: its
+    // sector is West (TheaterClassifier), faces nothing and needs no hold, and it is five march-days from the East target.
+    private static void FormationThreeStandsInTheWest(CampaignSnapshot w)
+    {
+        w.Areas.Add(new AreaRecord { Index = 99, X = 700f, Z = -400f, EdgeX = new[] { 700f }, EdgeZ = new[] { -400f }, Importance = 1f, SupplyCapacity = 100f });
+        int i3 = w.IndexOfOwn(3);
+        var moved3 = w.Own[i3];
+        moved3.X = moved3.WaypointX = 700f;
+        moved3.Z = moved3.WaypointZ = -400f;
+        w.Own[i3] = moved3;
+    }
+
     // D11 requirement-claims row 8: the mass takes only None, Hold and Committed, so a formation a department move owns is in no mass; and it
     // is no candidate for D6's one reinforcement either (that pick runs over the same capacity). The control: with no row-5 source the
-    // formation, put in the West department, is the reinforcement the mass takes.
+    // formation, put in the West department, is the reinforcement the mass takes. Foresight F8 re-pins the world, not the rule: D6's donor test
+    // now asks the department the formation STANDS in, whose hold has to be met without it, so formation 3 stands in a West area of its own (a
+    // department with nothing to hold: FormationThreeStandsInTheWest) instead of the East sector the oracle roster gives it.
     private static void ADepartmentMoveFormationIsInNoMassAndNoReinforcementCandidate()
     {
         var control = new PlannerState();
         OracleWorld(0, out var probe, out _, out _);
         control.Transfer(probe.Own[probe.IndexOfOwn(3)].UnitKey, Theater.West);
-        var free = OracleWorld(0, out _, out _, out _, null, control);
+        var free = OracleWorld(0, out _, out _, out _, null, control, FormationThreeStandsInTheWest);
         AssertEqual(3, free.ReinforcementInstanceId, "control: formation 3, a West formation under an East target, is the decision's reinforcement");
         AssertTrue(free.MassInstanceIds.Contains(3), "and so in the mass");
         var moved = new PlannerState();
         moved.Transfer(probe.Own[probe.IndexOfOwn(3)].UnitKey, Theater.West);
-        var plan = OracleWorld(0, out var s, out _, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, 3) }, moved);
+        var plan = OracleWorld(0, out var s, out _, out _, new IClaimSource[] { new ClaimsOneFormation(ClaimTable.RowDepartmentMove, Claimant.DepartmentMove, 3) }, moved, FormationThreeStandsInTheWest);
         AssertEqual(Claimant.DepartmentMove, plan.Claims[s.IndexOfOwn(3)].Claimant, "the row-5 source owns formation 3");
         AssertFalse(plan.MassInstanceIds.Contains(3), "it is in no mass: " + string.Join(",", plan.MassInstanceIds));
         AssertTrue(plan.ReinforcementInstanceId != 3, "and is not the reinforcement");
@@ -661,7 +684,7 @@ internal static class OwnershipTableTests
         OracleWorld(0, out var probe, out _, out _);
         string key3 = probe.Own[probe.IndexOfOwn(3)].UnitKey;
         state.Transfer(key3, Theater.West);
-        var first = OracleWorld(0, out var s, out var sectors, out _, null, state);
+        var first = OracleWorld(0, out var s, out var sectors, out _, null, state, FormationThreeStandsInTheWest);
         AssertEqual(3, first.ReinforcementInstanceId, "the first review takes formation 3 as the decision's reinforcement");
         AssertEqual(key3, state.ReinforcementKey, "and locks it");
         // The reinforcement has marched far from where it was picked: more than the ten days a NEW pick may take, which the lock does not repeat.
